@@ -97,6 +97,12 @@ $$;
 -- that entry is structurally outside this project's own migration
 -- authority, not merely a design choice deferred for convenience.
 --
--- STATUS: not yet applied to the linked production project - see
--- supabase/migrations/README.md and PHASE_3_MIGRATION_REPORT.md for the
--- application record once it is.
+-- STATUS: applied to the linked production project via `supabase db push`
+-- on 2026-08-19 - see PHASE_3_MIGRATION_REPORT.md. Confirmed
+-- post-migration: both existing functions (set_updated_at,
+-- rls_auto_enable) show clean ACLs ({postgres=X/postgres,
+-- service_role=X/postgres} - no anon, authenticated, or bare PUBLIC
+-- entry); all three postgres-owned default-ACL entries (tables,
+-- functions, sequences) are clean; the supabase_admin-owned entries are
+-- byte-identical to their pre-migration state, confirming no
+-- interference with that Supabase-managed configuration.

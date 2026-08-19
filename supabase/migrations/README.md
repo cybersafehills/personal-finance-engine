@@ -1,14 +1,21 @@
 # Migrations
 
 Chronological migration history for the Personal Finance Engine schema.
-The first four migrations (through `20260818130200`) are applied to the
-linked production project as of 2026-08-19 - see
-`PHASE_3_MIGRATION_REPORT.md` for the full completion report, including
-the one real incident hit and fixed along the way.
-`20260819000000_harden_function_and_sequence_default_privileges.sql` is
-local-only, validated, and awaiting approval before production
-application - see "supabase_admin default-privilege finding" below for
-why it exists.
+All five migrations below are applied to the linked production project as
+of 2026-08-19 - see `PHASE_3_MIGRATION_REPORT.md` for the full completion
+report, including the two real incidents hit and fixed along the way (the
+`net_effect_rwf` generated-column constraint bug, and the
+`postgres`-owned function/sequence default-privilege gap - see
+"supabase_admin default-privilege finding" below for the one item that
+was deliberately left unfixed and why).
+
+**Rule for all future migrations:** application-owned schema objects
+(tables, functions, sequences) must remain `postgres`-owned unless an
+explicit architectural decision changes that. Every migration in this
+repository runs as `postgres` via `supabase db push` - anything created
+under a different role's ownership falls outside what this project's own
+migrations can safely alter later (see the `supabase_admin` finding
+below for exactly what that costs).
 
 ## Production verification must be read-only
 
@@ -52,14 +59,17 @@ Why left untouched, not merely deferred:
    PRIVILEGES FOR ROLE supabase_admin` requires being that role (or
    superuser) - attempting it from a `postgres`-run migration would fail
    outright with a permission error, not merely be inadvisable.
-2. **Practically low-risk today.** Every existing object in `public`
-   (all 6 tables, both functions) is owned by `postgres`, confirmed via
-   `pg_class.relowner`/`pg_proc.proowner` - zero objects are owned by
-   `supabase_admin`. It is Supabase's own internal control-plane role
-   (extension installs, internal schema management, platform upgrades),
-   not a role exposed for interactive project-owner use in the standard
-   Supabase product; nothing in this codebase or workflow ever operates
-   as it.
+2. **Not currently exercised by any application object.** Every existing
+   object in `public` (all 6 tables, both functions) is owned by
+   `postgres`, confirmed via `pg_class.relowner`/`pg_proc.proowner` - zero
+   objects are owned by `supabase_admin`, and this remained true after the
+   2026-08-19 function/sequence hardening migration (re-verified: the
+   `supabase_admin`-owned default-ACL entries are byte-identical before
+   and after that migration - untouched, not just unused). It is
+   Supabase's own internal control-plane role (extension installs,
+   internal schema management, platform upgrades), not a role exposed for
+   interactive project-owner use in the standard Supabase product; nothing
+   in this codebase or workflow ever operates as it.
 3. **Uncertain whether the platform's own RLS-auto-enable safety net
    would even cover a hypothetical `supabase_admin`-owned table.** The
    `ensure_rls` event trigger's function (`rls_auto_enable`) is

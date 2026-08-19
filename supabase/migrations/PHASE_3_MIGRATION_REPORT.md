@@ -1,7 +1,8 @@
 # Phase 3 — Financial Ledger, Accounting Semantics & Reconciliation
 
-**Status: COMPLETE.** All four migrations are applied to the linked
-production project (`zttxsaiywkfrbdxgzbjd`, "Personal Finance Engine").
+**Status: COMPLETE, including security closeout.** All five migrations
+are applied to the linked production project (`zttxsaiywkfrbdxgzbjd`,
+"Personal Finance Engine").
 
 ## Migration history (final)
 
@@ -11,8 +12,9 @@ production project (`zttxsaiywkfrbdxgzbjd`, "Personal Finance Engine").
 | `20260818130000` | `accounting_foundation.sql` | Applied 2026-08-19 |
 | `20260818130100` | `balance_reconciliations.sql` | Applied 2026-08-19 |
 | `20260818130200` | `revoke_anon_authenticated_privileges.sql` | Applied 2026-08-19 |
+| `20260819000000` | `harden_function_and_sequence_default_privileges.sql` | Applied 2026-08-19 (security closeout) |
 
-Confirmed via `supabase migration list`: all four show matching `local`/`remote` versions.
+Confirmed via `supabase migration list`: all five show matching `local`/`remote` versions.
 
 ## What shipped
 
@@ -79,19 +81,84 @@ investigation-and-remediation trail.
 - Local quality gates: `deno fmt --check`, `deno lint`, `deno check`,
   `deno test` — 92/92 passing.
 
-## Known residual item (pre-existing, not introduced by Phase 3)
+## Security closeout (2026-08-19)
 
-`pg_default_acl` carries two default-privilege entries for `public`-schema
-tables: one owned by `postgres` (fixed by `20260818130200`) and one owned
-by `supabase_admin` (still auto-grants `anon`/`authenticated`). Migrations
-applied via `db push` run as `postgres`, so this doesn't affect anything
-Phase 3 created — but a table created out-of-band by a different path
-(e.g., the dashboard SQL editor) could still auto-inherit those grants.
-Not fixed here; flagged for a future decision.
+Following the initial four-migration application, `pg_default_acl` was
+found to carry default-privilege entries beyond just the `postgres`-owned
+**table** entry `20260818130200` fixed: the same `postgres`-owned role
+also still auto-granted `anon`/`authenticated` on **functions** (EXECUTE)
+and **sequences** (USAGE), confirmed live on the two existing functions
+(`set_updated_at`, `rls_auto_enable`). Investigating this also surfaced an
+empirically-verified PostgreSQL quirk: EXECUTE on new functions is granted
+to the `PUBLIC` pseudo-role unconditionally, and a schema-scoped
+`ALTER DEFAULT PRIVILEGES ... REVOKE ... FROM PUBLIC` does not suppress
+it — only a *global* (non-schema-scoped) revoke for the role does. Local
+testing caught this directly (a schema-scoped-only fix left `PUBLIC` in
+place, silently defeating the anon/authenticated-specific revoke through
+inheritance).
+
+`20260819000000_harden_function_and_sequence_default_privileges.sql`
+closes this for everything within this project's authority: the
+`postgres`-owned function/sequence defaults, and the two existing
+functions directly. Post-migration, all three `postgres`-owned default-ACL
+entries (tables, functions, sequences) are clean, and both existing
+functions show `{postgres=X/postgres, service_role=X/postgres}` with no
+`anon`, `authenticated`, or bare `PUBLIC` entry.
+
+**Deliberately not touched:** a separate `supabase_admin`-owned
+default-ACL entry (tables, functions, sequences) still auto-grants
+`anon`/`authenticated`. This is a **known, Supabase-managed residual
+item**, not a Phase 3 oversight left unfixed by choice — `postgres` (the
+role every migration in this repository runs as) is not a superuser and
+is not a member of `supabase_admin`, so altering that role's defaults is
+structurally outside this project's own migration authority (confirmed:
+`ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin` would fail outright
+with a permission error if attempted). It is **not currently exercised by
+any application object** — every table and function in `public` is
+`postgres`-owned, re-confirmed unchanged after this closeout migration.
+Full investigation, reasoning, and the recommended path if it's ever
+fully closed (Supabase support, not an application migration) are in
+`supabase/migrations/README.md` ("supabase\_admin default-privilege
+finding").
+
+**Standing rule adopted going forward:** application-owned schema objects
+must remain `postgres`-owned unless an explicit architectural decision
+changes that (see `supabase/migrations/README.md`).
+
+**Standing rule adopted for production verification:** read-only by
+default. Creating temporary/probe tables, functions, triggers, rows,
+policies, or any other database object solely to verify behavior against
+the linked production project is prohibited unless explicitly authorized
+beforehand — prove behavior in the disposable local PostgreSQL cluster
+instead. Adopted after an earlier verification step created and dropped a
+throwaway probe table directly against production; documented in
+`supabase/migrations/README.md`.
+
+### Security closeout post-migration verification
+
+- Migration recorded as applied (`supabase migration list`).
+- All 6 tables present, `postgres`-owned, RLS enabled.
+- Existing data (7/7/1/0/1/0 rows) byte-identical before and after.
+- Table grants for `anon`/`authenticated` unaffected (still zero — this
+  migration doesn't touch tables at the object level, only functions/
+  sequences).
+- Both existing functions: clean ACLs, no `anon`/`authenticated`/`PUBLIC`.
+- All three `postgres`-owned default-ACL entries clean (tables, functions,
+  sequences) — verified via catalog inspection only, no probe objects.
+- `supabase_admin`-owned entries byte-identical pre/post-migration —
+  confirmed untouched.
+- `ingest-momo` unmodified, still `ACTIVE`, zero new `processing_errors`.
+- Local quality gates: 92/92 Deno tests, 21/21 local migration-chain
+  assertions, all passing.
+- Recovery checkpoint established beforehand (`pg_dump`, version-matched
+  PG 17.11, verified non-zero/complete/checksummed) — see the backup
+  procedure notes from the earlier Phase 3 application for the mechanism;
+  no credentials were exposed in any command output during this closeout.
 
 ## Explicitly not done in Phase 3
 
 No Edge Function deployment or code change, no application code invoking
 the new accounting engine yet, no backfill of existing rows' accounting
 columns, no daily close / briefing / budgets / dashboards / AI-generated
-explanations, no merge to `main`.
+explanations, no merge to `main`, and no attempt to alter the
+`supabase_admin`-owned default-privilege configuration.
