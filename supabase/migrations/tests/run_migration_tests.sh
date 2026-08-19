@@ -114,8 +114,21 @@ SQL
 create schema if not exists extensions;
 create extension if not exists pgcrypto with schema extensions;
 alter database "$dbname" set search_path to public, extensions;
+-- Mirrors ALL THREE postgres-owned default-privilege entries confirmed
+-- live on the linked production project (pg_default_acl), not just
+-- tables - production's function/sequence defaults independently grant
+-- anon/authenticated too (this is what
+-- 20260819000000_harden_function_and_sequence_default_privileges.sql
+-- exists to fix). Without also seeding the function/sequence defaults
+-- here, this disposable database would start from a *better* baseline
+-- than production actually has, and the tests below would not be
+-- exercising the real problem.
 alter default privileges for role postgres in schema public
   grant all on tables to anon, authenticated, service_role;
+alter default privileges for role postgres in schema public
+  grant all on functions to anon, authenticated, service_role;
+alter default privileges for role postgres in schema public
+  grant all on sequences to anon, authenticated, service_role;
 SQL
 }
 
@@ -355,6 +368,66 @@ if [ "$FUTURE_GRANT_COUNT" = "0" ]; then
   pass "a table created after the full chain does not automatically regain anon/authenticated grants"
 else
   fail "a table created after the full chain regained $FUTURE_GRANT_COUNT anon/authenticated grant(s) - ALTER DEFAULT PRIVILEGES regression"
+fi
+
+# ===========================================================================
+# Function/sequence default-privilege regression checks
+# (20260819000000_harden_function_and_sequence_default_privileges.sql).
+# ===========================================================================
+echo "=== function/sequence privilege regression check ==="
+
+EXISTING_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname in ('anon','authenticated') where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
+if [ "$EXISTING_FN_EXEC_COUNT" = "0" ]; then
+  pass "anon/authenticated hold no EXECUTE on any existing public-schema function after the full chain"
+else
+  fail "anon/authenticated still hold EXECUTE on $EXISTING_FN_EXEC_COUNT existing function grant(s) after the full chain"
+fi
+
+SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
+if [ "$SERVICE_ROLE_FN_EXEC_COUNT" = "1" ]; then
+  pass "service_role retains EXECUTE on set_updated_at (unaffected by the anon/authenticated-only revoke)"
+else
+  fail "service_role lost EXECUTE on set_updated_at - unintended regression"
+fi
+
+# A future ordinary function created after the full chain must not
+# auto-grant EXECUTE to anon/authenticated.
+psql -d pfe_h -v ON_ERROR_STOP=1 -c "create function public.future_probe_function() returns int language sql as \$\$ select 1 \$\$;" >/dev/null
+FUTURE_FN_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname in ('anon','authenticated') where p.pronamespace='public'::regnamespace and p.proname='future_probe_function' and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
+psql -d pfe_h -v ON_ERROR_STOP=1 -c "drop function public.future_probe_function();" >/dev/null
+if [ "$FUTURE_FN_GRANT_COUNT" = "0" ]; then
+  pass "a function created after the full chain does not automatically grant anon/authenticated EXECUTE"
+else
+  fail "a function created after the full chain granted anon/authenticated EXECUTE - ALTER DEFAULT PRIVILEGES ON FUNCTIONS regression"
+fi
+
+# Explicit PUBLIC check, direct on pg_proc.proacl - this is the specific
+# gap this migration exists to close (PostgreSQL grants EXECUTE to PUBLIC
+# on every new function unconditionally; a schema-scoped-only
+# ALTER DEFAULT PRIVILEGES revoke does not suppress it, only the GLOBAL
+# one does - see the migration's comments).
+psql -d pfe_h -v ON_ERROR_STOP=1 -c "create function public.future_probe_function2() returns int language sql as \$\$ select 1 \$\$;" >/dev/null
+FUTURE_FN_PUBLIC_ACL="$(psql -d pfe_h -t -A -c "select coalesce(proacl::text, '') from pg_proc where pronamespace='public'::regnamespace and proname='future_probe_function2';")"
+psql -d pfe_h -v ON_ERROR_STOP=1 -c "drop function public.future_probe_function2();" >/dev/null
+# PUBLIC's aclitem is written with nothing before the "=" (e.g. "{=X/postgres,...}"),
+# unlike a named role's ("service_role=X/postgres") - match only a bare
+# leading grantee, not any "=X/" substring (which every entry contains).
+if [[ "$FUTURE_FN_PUBLIC_ACL" != "{=X/"* && "$FUTURE_FN_PUBLIC_ACL" != *",=X/"* ]]; then
+  pass "a function created after the full chain has no implicit PUBLIC EXECUTE entry in its ACL"
+else
+  fail "a function created after the full chain still carries an implicit PUBLIC EXECUTE entry: $FUTURE_FN_PUBLIC_ACL"
+fi
+
+# A future sequence created after the full chain must not auto-grant
+# USAGE to anon/authenticated (dormant today - no sequences exist - but
+# future-proofed by the same migration).
+psql -d pfe_h -v ON_ERROR_STOP=1 -c "create sequence public.future_probe_sequence;" >/dev/null
+FUTURE_SEQ_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from information_schema.role_usage_grants where object_schema='public' and object_name='future_probe_sequence' and object_type='SEQUENCE' and grantee in ('anon','authenticated');")"
+psql -d pfe_h -v ON_ERROR_STOP=1 -c "drop sequence public.future_probe_sequence;" >/dev/null
+if [ "$FUTURE_SEQ_GRANT_COUNT" = "0" ]; then
+  pass "a sequence created after the full chain does not automatically grant anon/authenticated USAGE"
+else
+  fail "a sequence created after the full chain granted anon/authenticated USAGE - ALTER DEFAULT PRIVILEGES ON SEQUENCES regression"
 fi
 
 echo ""
