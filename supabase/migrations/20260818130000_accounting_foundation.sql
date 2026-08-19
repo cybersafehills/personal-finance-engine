@@ -13,15 +13,13 @@
 --     supabase/functions/_shared/accounting.ts - never recomputed in SQL,
 --     so financial logic stays in one place.
 --
--- Not applied to the linked project by writing this file. Review and run
--- `supabase db push` separately, deliberately, when ready.
---
--- DEPLOY ORDER NOTE: this migration assumes 20260818000000_baseline_
--- existing_schema.sql's objects (public.transactions, public.
--- set_updated_at()) already exist. On the current linked project they do
--- (created out-of-band), but `supabase migration list` shows no migration
--- history recorded there yet - see that file's header for why it must be
--- reconciled via `supabase migration repair` before any `db push`.
+-- STATUS: applied to the linked production project via `supabase db push`
+-- on 2026-08-19, after the net_effect_rwf invariant correction below was
+-- committed and validated locally (see supabase/migrations/tests/
+-- run_migration_tests.sh and PHASE_3_MIGRATION_REPORT.md). Confirmed via
+-- `supabase migration list` and direct post-migration introspection:
+-- all six tables, the corrected constraints, and existing transaction
+-- rows all landed exactly as designed, with zero data modification.
 
 -- ===========================================================================
 -- accounts: minimal multi-account readiness.

@@ -1,9 +1,9 @@
 # Migrations
 
 Chronological migration history for the Personal Finance Engine schema.
-None of these have been applied to the linked production project via a
-normal `db push` - see `20260818000000_baseline_existing_schema.sql`'s
-header for the current reconciliation state and required repair step.
+All four migrations below are applied to the linked production project as
+of 2026-08-19 - see `PHASE_3_MIGRATION_REPORT.md` for the full completion
+report, including the one real incident hit and fixed along the way.
 
 ## Pre-migration checklist
 

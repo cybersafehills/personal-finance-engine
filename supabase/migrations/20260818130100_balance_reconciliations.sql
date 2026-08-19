@@ -2,8 +2,9 @@
 -- upserted by transaction_id so repeated processing is idempotent and
 -- never creates duplicate reconciliation records.
 --
--- Not applied to the linked project by writing this file. Review and run
--- `supabase db push` separately, deliberately, when ready.
+-- STATUS: applied to the linked production project via `supabase db push`
+-- on 2026-08-19 - see PHASE_3_MIGRATION_REPORT.md. The table exists in
+-- production and is empty; nothing populates it yet.
 
 create table public.balance_reconciliations (
   id uuid primary key default gen_random_uuid(),

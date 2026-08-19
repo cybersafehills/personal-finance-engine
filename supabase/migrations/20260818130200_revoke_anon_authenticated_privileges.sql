@@ -43,8 +43,15 @@
 -- continues to bypass RLS as before - the Edge Function's behavior is
 -- unchanged.
 --
--- Not applied to the linked project by writing this file. Review and run
--- `supabase db push` separately, deliberately, when ready.
+-- STATUS: applied to the linked production project via `supabase db push`
+-- on 2026-08-19 - see PHASE_3_MIGRATION_REPORT.md. Confirmed
+-- post-migration: zero anon/authenticated grants remain on any table in
+-- this schema, service_role access is unaffected, and a table created
+-- after this migration does not automatically regain anon/authenticated
+-- grants (the ALTER DEFAULT PRIVILEGES fix is effective for the
+-- postgres-owned default-privilege entry - a separate, pre-existing
+-- supabase_admin-owned entry still auto-grants those roles and was not in
+-- scope here; see the migration report for detail).
 
 revoke all on public.momo_messages from anon, authenticated;
 revoke all on public.transactions from anon, authenticated;
