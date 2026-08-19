@@ -17,34 +17,20 @@
 --      real scratch/local Postgres or a Supabase preview branch before
 --      trusting it.
 --
---   2. `supabase migration list` currently shows ZERO migrations recorded
---      against the linked project's `supabase_migrations.schema_migrations`
---      table, even though the tables below already exist there (they were
---      created directly, e.g. via the SQL editor/dashboard). This means:
+--   2. UPDATE: this migration has since been marked applied against the
+--      linked project via `supabase migration repair 20260818000000
+--      --status applied` (a metadata-only operation - its SQL below was
+--      NEVER executed against production; the objects it describes
+--      already existed there from out-of-band creation). DO NOT run a
+--      plain `supabase db push` that includes this file against the
+--      linked project - every `create table` statement below would still
+--      fail with "already exists", exactly as before the repair.
 --
---        DO NOT run a plain `supabase db push` that includes this file
---        against the current linked project - every `create table`
---        statement below will fail with "already exists", because the
---        objects it creates are already present.
---
---      Before this file (or anything after it) can ever be pushed to the
---      linked project, an operator must first reconcile migration history
---      out-of-band, e.g.:
---
---        supabase migration repair 20260818000000 --status applied
---
---      which marks this migration as already-applied in the tracking
---      table WITHOUT executing its SQL (a metadata-only operation) -
---      appropriate here because the objects it describes genuinely already
---      exist. This repair step is itself a production-affecting action and
---      was NOT performed as part of this review; it requires a deliberate,
---      separate decision by the project owner.
---
---      This file's practical purpose is for anyone spinning up a genuinely
---      fresh database (CI, local dev, disaster recovery) to reach the same
---      schema shape the linked project already has, and for the migration
---      chain to read as a complete, self-contained history rather than
---      silently assuming undocumented prior state.
+--      This file's practical purpose remains: anyone spinning up a
+--      genuinely fresh database (CI, local dev, disaster recovery) can run
+--      it to reach the same schema shape the linked project already has,
+--      and the migration chain reads as a complete, self-contained
+--      history rather than silently assuming undocumented prior state.
 --
 --   3. Two platform-managed objects this file deliberately does NOT
 --      recreate, because they are provisioned automatically by Supabase on
@@ -73,6 +59,19 @@
 --      separately in 20260818130200_revoke_anon_authenticated_privileges.sql,
 --      not silently folded in here, so the hardening change is its own
 --      reviewable step.
+--
+--   5. CORRECTED (Phase 3 remediation): the first version of this file
+--      declared transactions.net_effect_rwf as an ordinary nullable
+--      `bigint`. It is actually a `GENERATED ALWAYS AS (...) STORED`
+--      column on the live production schema - missed originally because
+--      the introspection queries used to reconstruct this file checked
+--      column type/nullability/default but never
+--      information_schema.columns.is_generated/generation_expression.
+--      This was discovered when 20260818130000_accounting_foundation.sql
+--      failed to apply against production (its original constraint
+--      incorrectly assumed net_effect_rwf could be NULL). See that file's
+--      comments for the full story. This file now declares the column
+--      exactly as production has it.
 -- ============================================================================
 
 -- ===========================================================================
@@ -222,7 +221,26 @@ create table public.transactions (
     check (amount_rwf >= 0),
   fee_rwf bigint not null default 0
     check (fee_rwf >= 0),
-  net_effect_rwf bigint,
+  -- CORRECTED (Phase 3 remediation): this is a GENERATED ALWAYS AS (...)
+  -- STORED column on the live production schema, not an ordinary nullable
+  -- bigint as an earlier draft of this file incorrectly reconstructed.
+  -- Confirmed via information_schema.columns.is_generated/
+  -- generation_expression against the linked project. It is computed by
+  -- Postgres from status/direction/amount_rwf/fee_rwf and can never be
+  -- NULL - Postgres also rejects any explicit INSERT/UPDATE of a
+  -- GENERATED ALWAYS column. See 20260818130000_accounting_foundation.sql
+  -- for why this matters to the Phase 3 accounting-effect columns added
+  -- there, and _shared/accounting.ts for the one currently-dormant case
+  -- (incoming money with a nonzero fee) where this expression and
+  -- computeAccountingEffect() are not proven equivalent.
+  net_effect_rwf bigint generated always as (
+    case
+      when status <> 'success' then 0::bigint
+      when direction = 'out' then -1 * (amount_rwf + fee_rwf)
+      when direction = 'in' then amount_rwf
+      else 0::bigint
+    end
+  ) stored,
   balance_after_rwf bigint
     check (balance_after_rwf is null or balance_after_rwf >= 0),
   counterparty_name text,

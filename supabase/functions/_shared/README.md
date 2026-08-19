@@ -58,19 +58,33 @@ layer is designed to eventually support them:
 
 ## NULL invariant on the `transactions` enrichment columns
 
-`principal_effect_rwf`, `fee_effect_rwf`, `net_effect_rwf`, `settlement_state`,
-and `affects_balance` are nullable and unpopulated for existing/new rows until a
-future processing step calls this engine. **NULL means "not yet processed" and
-must never be read or treated as zero.** A genuinely zero-effect settled
-transaction stores an explicit `0`/`false`/`'settled'`, not `NULL`. Never write
-`row.net_effect_rwf ?? 0` in future reporting code - use
-`hasComputedAccountingEffect()` (`accounting.ts`) or check
+`principal_effect_rwf`, `fee_effect_rwf`, `settlement_state`, and
+`affects_balance` (plus `effect_reason`) are nullable and unpopulated for
+existing/new rows until a future processing step calls this engine. **NULL means
+"not yet processed" and must never be read or treated as zero.** A genuinely
+zero-effect settled transaction stores an explicit `0`/`false`/`'settled'`, not
+`NULL`. Never write `row.principal_effect_rwf ?? 0` in future reporting code -
+use `hasComputedAccountingEffect()` (`accounting.ts`) or check
 `settlement_state IS NOT NULL` in SQL first. The database itself enforces this
-as an all-or-nothing invariant (see constraint
-`transactions_accounting_effect_all_or_nothing` in
-`20260818130000_accounting_foundation.sql`): either all five columns are NULL,
-or all five are populated and mutually consistent - a partially populated row is
+as an all-or-nothing invariant over those five columns (see constraint
+`transactions_new_accounting_fields_all_or_nothing` in
+`20260818130000_accounting_foundation.sql`): either all five are NULL, or all
+five are populated and mutually consistent - a partially populated row is
 impossible.
+
+**`net_effect_rwf` is intentionally NOT part of that group.** It is a
+pre-existing `GENERATED ALWAYS AS (...) STORED` column (see
+`20260818000000_baseline_existing_schema.sql`) that Postgres computes on every
+row from `status`/`direction`/`amount_rwf`/`fee_rwf` - it can never be NULL, and
+Postgres rejects writing it directly. A separate constraint,
+`transactions_net_effect_matches_new_accounting_fields`, cross-checks it against
+`principal_effect_rwf + fee_effect_rwf` only once those are populated. An
+earlier draft of this migration incorrectly grouped `net_effect_rwf` into the
+same nullable set as the other five - unsatisfiable by any row, ever, since it
+is never null - and that mistake is exactly what caused the first production
+`db push` attempt to fail. See `supabase/migrations/README.md`'s pre-migration
+checklist and `20260818130000_accounting_foundation.sql`'s comments for the full
+story.
 
 ## Defensive guards added under adversarial review
 
