@@ -13,22 +13,52 @@
 # pre-migration checklist.
 #
 # WHAT THIS NEVER DOES: touch the linked Supabase project. Every database
-# created here is a disposable, local, throwaway cluster torn down at the
-# end of the script (or on any failure, via the trap below).
+# created here is disposable. In the default (local) mode this script
+# spawns and tears down its own throwaway PostgreSQL cluster. In external
+# mode (see below) it targets a Postgres instance the CALLER already
+# started and owns the lifecycle of (e.g. a GitHub Actions service
+# container) - this script never starts, stops, or otherwise manages that
+# instance, it only creates/drops disposable databases within it.
+# assert_not_production_target() below is a hard, always-on safety gate in
+# BOTH modes refusing to run against anything that looks like the linked
+# Supabase project, regardless of which mode is active or who configured
+# the environment.
 #
-# PREREQUISITES: PostgreSQL 17.x client+server binaries on PATH (or set
-# PG_BIN_DIR to their directory - e.g. Homebrew's
-# /opt/homebrew/opt/postgresql@17/bin). Version 17 is required to match
-# the linked project's Postgres engine (see supabase/config.toml
-# major_version). If unavailable, this script exits with a clear message
-# rather than silently testing against a mismatched version - it does not
-# fall back to Docker (also not required/used here).
+# MODES (PFE_PG_MODE, default "spawn"):
+#   spawn     (default, unchanged local behavior) - this script runs
+#             initdb/pg_ctl itself to create a throwaway cluster, and
+#             tears it down on exit via the trap below. Requires
+#             PostgreSQL 17.x server+client binaries on PATH (or set
+#             PG_BIN_DIR to their directory - e.g. Homebrew's
+#             /opt/homebrew/opt/postgresql@17/bin).
+#   external  - connects to a Postgres instance the caller already started
+#               and left running (PGHOST/PGPORT/PGUSER/PGPASSWORD already
+#               exported, standard psql/libpq environment variables - no
+#               custom variable names). This script never spawns or stops
+#               that server; it only needs `psql`/`pg_dump` client
+#               binaries on PATH and requires the live server to report
+#               major version 17 (verified via `SHOW server_version_num`
+#               after connecting, not by inspecting a local binary, since
+#               there may be no local `postgres` server binary in this
+#               mode at all). Intended for CI (see
+#               .github/workflows/ci.yml), where a `postgres:17` service
+#               container is already running before this script starts.
+#
+# Version 17 is required in both modes to match the linked project's
+# Postgres engine (see supabase/config.toml major_version and
+# `supabase projects list` database.postgres_engine). If unavailable,
+# this script exits with a clear message rather than silently testing
+# against a mismatched version - it does not fall back to Docker in
+# "spawn" mode (not required/used there).
 #
 # USAGE:
-#   supabase/migrations/tests/run_migration_tests.sh
+#   supabase/migrations/tests/run_migration_tests.sh                # local, spawns its own cluster
+#   PFE_PG_MODE=external supabase/migrations/tests/run_migration_tests.sh   # CI, targets an already-running instance
 #
 # Exit code 0 = every lettered test (A-I) passed. Nonzero = see output for
-# which test failed; no cleanup is skipped either way.
+# which test failed; no cleanup is skipped either way (spawn mode) / no
+# production access is ever possible (either mode - see
+# assert_not_production_target).
 
 set -euo pipefail
 
@@ -36,34 +66,96 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MIGRATIONS_DIR="$(cd "$SCRIPT_DIR/../" && pwd)"
 REPO_ROOT="$(cd "$MIGRATIONS_DIR/../.." && pwd)"
 
-PG_BIN_DIR="${PG_BIN_DIR:-/opt/homebrew/opt/postgresql@17/bin}"
+PFE_PG_MODE="${PFE_PG_MODE:-spawn}"
 
-if [ ! -x "$PG_BIN_DIR/pg_ctl" ]; then
-  # Fall back to whatever is on PATH, but require it to report major
-  # version 17 - a mismatched pg_dump/pg_ctl against this schema is not a
-  # meaningful test of production compatibility.
-  if command -v pg_ctl >/dev/null 2>&1; then
-    PG_BIN_DIR="$(dirname "$(command -v pg_ctl)")"
-  else
-    echo "FAIL: no PostgreSQL 17 pg_ctl found. Set PG_BIN_DIR or install postgresql@17." >&2
+# ===========================================================================
+# Hard safety gate: refuse to run against anything that looks like the
+# linked Supabase production project, in EITHER mode, regardless of how
+# the calling environment was configured. This does not rely on a
+# developer/CI author remembering not to set a secret - it actively
+# inspects the environment this script is about to use and aborts before
+# issuing a single SQL statement if anything looks unsafe.
+# ===========================================================================
+assert_not_production_target() {
+  # 1. Known Supabase-CLI/production environment variable names must not
+  # be present at all in this process - their mere presence indicates
+  # something intends this shell to have production reach, which this
+  # script must never use even if PGHOST/PGPORT happen to look benign.
+  local unsafe_vars=(
+    SUPABASE_ACCESS_TOKEN SUPABASE_DB_PASSWORD SUPABASE_SERVICE_ROLE_KEY
+    SUPABASE_URL SUPABASE_ANON_KEY DATABASE_URL MOMO_INGEST_SECRET
+  )
+  local var
+  for var in "${unsafe_vars[@]}"; do
+    if [ -n "${!var:-}" ]; then
+      echo "FAIL: refusing to run - environment variable $var is set. This" >&2
+      echo "      suggests a production/remote Supabase credential is available" >&2
+      echo "      to this shell. This test suite must only ever target a" >&2
+      echo "      disposable local or CI-ephemeral Postgres instance." >&2
+      exit 1
+    fi
+  done
+
+  # 2. PGHOST must not resemble a Supabase-managed hostname or reference
+  # this specific project's ref, however it was set.
+  local host="${PGHOST:-}"
+  case "$host" in
+    *supabase.co* | *supabase.com* | *pooler.supabase.com* | *zttxsaiywkfrbdxgzbjd*)
+      echo "FAIL: refusing to run - PGHOST ('$host') looks like a Supabase-managed" >&2
+      echo "      or project-specific hostname. This test suite must only ever" >&2
+      echo "      target a disposable local or CI-ephemeral Postgres instance." >&2
+      exit 1
+      ;;
+  esac
+}
+
+assert_not_production_target
+
+if [ "$PFE_PG_MODE" = "spawn" ]; then
+  PG_BIN_DIR="${PG_BIN_DIR:-/opt/homebrew/opt/postgresql@17/bin}"
+
+  if [ ! -x "$PG_BIN_DIR/pg_ctl" ]; then
+    # Fall back to whatever is on PATH, but require it to report major
+    # version 17 - a mismatched pg_dump/pg_ctl against this schema is not
+    # a meaningful test of production compatibility.
+    if command -v pg_ctl >/dev/null 2>&1; then
+      PG_BIN_DIR="$(dirname "$(command -v pg_ctl)")"
+    else
+      echo "FAIL: no PostgreSQL 17 pg_ctl found. Set PG_BIN_DIR or install postgresql@17." >&2
+      exit 1
+    fi
+  fi
+
+  PG_VERSION_MAJOR="$("$PG_BIN_DIR/postgres" --version | grep -oE '[0-9]+' | head -1)"
+  if [ "$PG_VERSION_MAJOR" != "17" ]; then
+    echo "FAIL: found PostgreSQL major version $PG_VERSION_MAJOR at $PG_BIN_DIR, need 17 (matches the linked project)." >&2
     exit 1
   fi
-fi
 
-PG_VERSION_MAJOR="$("$PG_BIN_DIR/postgres" --version | grep -oE '[0-9]+' | head -1)"
-if [ "$PG_VERSION_MAJOR" != "17" ]; then
-  echo "FAIL: found PostgreSQL major version $PG_VERSION_MAJOR at $PG_BIN_DIR, need 17 (matches the linked project)." >&2
+  export PATH="$PG_BIN_DIR:$PATH"
+
+  WORKDIR="$(mktemp -d /tmp/pfe_migration_tests.XXXXXX)"
+  SOCK_DIR="$(mktemp -d /tmp/pfe_migration_tests_sock.XXXXXX)"
+  PGPORT_TEST=55555
+  export PGHOST="$SOCK_DIR"
+  export PGPORT="$PGPORT_TEST"
+  export PGUSER=postgres
+elif [ "$PFE_PG_MODE" = "external" ]; then
+  if ! command -v psql >/dev/null 2>&1; then
+    echo "FAIL: PFE_PG_MODE=external requires psql on PATH (client only - no server binary needed)." >&2
+    exit 1
+  fi
+  if ! command -v pg_dump >/dev/null 2>&1; then
+    echo "FAIL: PFE_PG_MODE=external requires pg_dump on PATH." >&2
+    exit 1
+  fi
+  : "${PGHOST:?PFE_PG_MODE=external requires PGHOST to already be exported by the caller}"
+  : "${PGPORT:?PFE_PG_MODE=external requires PGPORT to already be exported by the caller}"
+  : "${PGUSER:?PFE_PG_MODE=external requires PGUSER to already be exported by the caller}"
+else
+  echo "FAIL: unknown PFE_PG_MODE '$PFE_PG_MODE' - expected 'spawn' or 'external'." >&2
   exit 1
 fi
-
-export PATH="$PG_BIN_DIR:$PATH"
-
-WORKDIR="$(mktemp -d /tmp/pfe_migration_tests.XXXXXX)"
-SOCK_DIR="$(mktemp -d /tmp/pfe_migration_tests_sock.XXXXXX)"
-PGPORT_TEST=55555
-export PGHOST="$SOCK_DIR"
-export PGPORT="$PGPORT_TEST"
-export PGUSER=postgres
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -71,15 +163,43 @@ FAIL_COUNT=0
 pass() { echo "PASS: $1"; PASS_COUNT=$((PASS_COUNT + 1)); }
 fail() { echo "FAIL: $1" >&2; FAIL_COUNT=$((FAIL_COUNT + 1)); }
 
-cleanup() {
-  pg_ctl -D "$WORKDIR/pgdata" stop -m fast >/dev/null 2>&1 || true
-  rm -rf "$WORKDIR" "$SOCK_DIR"
-}
-trap cleanup EXIT
+# Scratch space for test artifacts (schema dumps used by test I) that is
+# needed in both modes - independent of $WORKDIR, which in "spawn" mode is
+# specifically the throwaway cluster's own data directory.
+ARTIFACT_DIR="$(mktemp -d /tmp/pfe_migration_test_artifacts.XXXXXX)"
 
-echo "=== bootstrapping disposable PostgreSQL 17 cluster ==="
-initdb -D "$WORKDIR/pgdata" -U postgres --auth=trust --locale=C -E UTF8 >/dev/null
-pg_ctl -D "$WORKDIR/pgdata" -o "-p $PGPORT_TEST -c listen_addresses='' -k $SOCK_DIR" -l "$WORKDIR/pg.log" start >/dev/null
+if [ "$PFE_PG_MODE" = "spawn" ]; then
+  cleanup() {
+    pg_ctl -D "$WORKDIR/pgdata" stop -m fast >/dev/null 2>&1 || true
+    rm -rf "$WORKDIR" "$SOCK_DIR" "$ARTIFACT_DIR"
+  }
+  trap cleanup EXIT
+
+  echo "=== bootstrapping disposable PostgreSQL 17 cluster ==="
+  initdb -D "$WORKDIR/pgdata" -U postgres --auth=trust --locale=C -E UTF8 >/dev/null
+  pg_ctl -D "$WORKDIR/pgdata" -o "-p $PGPORT_TEST -c listen_addresses='' -k $SOCK_DIR" -l "$WORKDIR/pg.log" start >/dev/null
+else
+  echo "=== connecting to external PostgreSQL instance (PGHOST=$PGHOST PGPORT=$PGPORT) ==="
+  SERVER_VERSION_NUM="$(psql -d postgres -t -A -c "show server_version_num;")"
+  SERVER_MAJOR="${SERVER_VERSION_NUM:0:2}"
+  if [ "$SERVER_MAJOR" != "17" ]; then
+    echo "FAIL: external Postgres reports server_version_num=$SERVER_VERSION_NUM (major $SERVER_MAJOR), need 17 (matches the linked project)." >&2
+    exit 1
+  fi
+
+  # Best-effort tidy-up of the disposable test databases this script
+  # creates within the external instance. Not required for correctness in
+  # CI (the whole service container is torn down by the runner regardless)
+  # but keeps behavior sane if this script is ever pointed at a
+  # longer-lived external instance.
+  cleanup() {
+    for db in pfe_h pfe_g pfe_ade pfe_i1 pfe_i2; do
+      psql -d postgres -c "drop database if exists \"$db\";" >/dev/null 2>&1 || true
+    done
+    rm -rf "$ARTIFACT_DIR"
+  }
+  trap cleanup EXIT
+fi
 
 apply_chain() {
   local dbname="$1"
@@ -327,12 +447,12 @@ fi
 echo "=== I: repeated fresh applications are deterministic ==="
 bootstrap_db "pfe_i1"
 apply_chain "pfe_i1"
-DUMP1="$WORKDIR/i1.sql"
+DUMP1="$ARTIFACT_DIR/i1.sql"
 pg_dump -d pfe_i1 --schema-only --no-owner -n public > "$DUMP1"
 
 bootstrap_db "pfe_i2"
 apply_chain "pfe_i2"
-DUMP2="$WORKDIR/i2.sql"
+DUMP2="$ARTIFACT_DIR/i2.sql"
 pg_dump -d pfe_i2 --schema-only --no-owner -n public > "$DUMP2"
 
 if diff -q <(grep -v restrict "$DUMP1") <(grep -v restrict "$DUMP2") >/dev/null; then
