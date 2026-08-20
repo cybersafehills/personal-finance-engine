@@ -1,4 +1,4 @@
-import { kigaliDateKey } from "../../supabase/functions/_shared/kigali-time.ts";
+import { kigaliDateKey } from "./kigali-time";
 
 const rwfFormatter = new Intl.NumberFormat("en-RW", {
   style: "decimal",
