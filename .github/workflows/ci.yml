@@ -1,0 +1,127 @@
+name: CI
+
+# Phase 4.0 quality gate. This workflow is read-only and non-deploying: it
+# never installs the Supabase CLI, never configures a Supabase access
+# token/service-role key/DATABASE_URL, and never targets the linked
+# production project (zttxsaiywkfrbdxgzbjd) in any way. The migration-tests
+# job talks only to a disposable postgres:17 service container created and
+# destroyed by this workflow run; supabase/migrations/tests/run_migration_tests.sh
+# additionally refuses to run at all (assert_not_production_target) if any
+# Supabase/production-shaped credential or hostname is present in its
+# environment, regardless of what this file does or doesn't set.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+# Least privilege: this workflow only reads the repository and runs tests.
+# It never comments on PRs, never uploads artifacts, never touches packages
+# or deployments, so it needs nothing beyond read access to contents.
+permissions:
+  contents: read
+
+jobs:
+  deno-quality:
+    name: Deno fmt / lint / check / test
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: "2.9.5"
+
+      - name: deno fmt --check
+        run: deno fmt --check supabase/functions supabase/migrations/tests
+
+      - name: deno lint
+        run: deno lint supabase/functions
+
+      - name: deno check (ingest-momo entry point)
+        run: deno check supabase/functions/ingest-momo/index.ts
+
+      - name: deno check (_shared entry points)
+        run: |
+          set -euo pipefail
+          for f in accounting kigali-time money reconciliation types; do
+            deno check "supabase/functions/_shared/$f.ts"
+          done
+
+      - name: deno test (ingest-momo)
+        run: deno test supabase/functions/ingest-momo/tests
+
+      - name: deno test (_shared)
+        run: deno test supabase/functions/_shared/tests
+
+  migration-tests:
+    name: Migration chain tests (disposable PostgreSQL 17)
+    runs-on: ubuntu-24.04
+
+    # Ephemeral, workflow-run-scoped PostgreSQL 17 server - torn down
+    # automatically when the job ends. Never reachable outside this job, no
+    # persistent volume, no relation whatsoever to the linked Supabase
+    # production project. Version pinned to 17 to match production
+    # (see supabase/config.toml major_version / `supabase projects list`).
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      # pg_dump cannot dump from a server newer than its own major version,
+      # so the client tools here must be version 17 to match the service
+      # container above - the runner image's default apt package is an
+      # older major version. This adds the official PGDG apt repository
+      # (apt.postgresql.org) purely to install matching client binaries; it
+      # has no relation to the Supabase-linked production project.
+      - name: Install PostgreSQL 17 client tools
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends curl ca-certificates gnupg lsb-release
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo gpg --dearmor -o /usr/share/keyrings/pgdg-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/pgdg-archive-keyring.gpg] http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client-17
+
+      # PFE_PG_MODE=external targets the already-running service container
+      # above instead of spawning/tearing down its own initdb/pg_ctl
+      # cluster (the default "spawn" mode used locally) - see the mode
+      # documentation at the top of run_migration_tests.sh. This exercises
+      # the exact same 21 test assertions (H, F, G, A-E, I, and the
+      # privilege/RLS regression checks) as local "spawn" mode; only the
+      # setup/teardown mechanics differ between modes. No Supabase secret
+      # of any kind is set in this job, and PGHOST/PGPORT/PGUSER below
+      # point only at the disposable service container declared in this
+      # same job - assert_not_production_target() in the script itself
+      # independently refuses to run against anything that looks
+      # otherwise, regardless of what this step sets.
+      - name: Run migration chain tests against ephemeral PostgreSQL
+        env:
+          PFE_PG_MODE: external
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGUSER: postgres
+          PGPASSWORD: postgres
+        run: supabase/migrations/tests/run_migration_tests.sh

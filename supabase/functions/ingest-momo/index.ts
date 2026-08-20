@@ -3,6 +3,7 @@ import { applyMerchantRule } from "./merchant-rules.ts";
 import { parseMomoMessage } from "./parser.ts";
 import { normalizeMessage, sha256 } from "./parser-utils.ts";
 import { jsonResponse } from "./responses.ts";
+import { computeAccountingEffect } from "../_shared/accounting.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
@@ -285,8 +286,73 @@ Deno.serve(async (req: Request) => {
     );
 
     // ========================================================
+    // ACCOUNTING EFFECT (Phase 4.2) - the same canonical engine that
+    // processed historical transactions in Phase 4.1, invoked inline here
+    // rather than as a separate Edge Function. computeAccountingEffect()
+    // never guesses: for the currently-parseable input shapes it always
+    // returns a definite result, but is called defensively in case a
+    // future parser change ever produces a status/direction it doesn't
+    // recognize.
+    // ========================================================
+
+    let accountingEffect;
+    try {
+      accountingEffect = computeAccountingEffect({
+        direction: parsed.direction,
+        status: parsed.status,
+        amount_rwf: parsed.amount_rwf,
+        fee_rwf: parsed.fee_rwf,
+      });
+    } catch (accountingError) {
+      console.error("Accounting computation error:", accountingError);
+
+      await supabase
+        .from("momo_messages")
+        .update({
+          processing_status: "failed",
+        })
+        .eq("id", momoMessageId);
+
+      await supabase
+        .from("processing_errors")
+        .insert({
+          momo_message_id: momoMessageId,
+          stage: "database",
+          error_code: "ACCOUNTING_COMPUTATION_FAILED",
+          error_message:
+            "The parsed transaction's accounting effect could not be computed.",
+          parser_version: PARSER_VERSION,
+          error_details: {
+            message: accountingError instanceof Error
+              ? accountingError.message
+              : String(accountingError),
+          },
+        });
+
+      return jsonResponse(
+        {
+          ok: false,
+          error: "accounting_computation_failed",
+        },
+        500,
+      );
+    }
+
+    // ========================================================
     // STRUCTURED FINANCIAL LEDGER INSERT
     // ========================================================
+    //
+    // Accounting fields are written in the SAME insert as every other
+    // transaction field - never a separate update - so a row can never
+    // exist mid-ingestion with source fields present but accounting
+    // fields missing. net_effect_rwf is never written here; it remains a
+    // database-generated column. If the computed effect ever disagreed
+    // with what Postgres generates (the documented dormant incoming-
+    // with-fee case - see accounting.ts), the database's own
+    // transactions_net_effect_matches_new_accounting_fields constraint
+    // rejects the insert outright, and that failure is handled by the
+    // exact same error path as any other insert failure below - no
+    // separate pre-check duplicates that invariant here.
 
     const { error: transactionInsertError } = await supabase
       .from("transactions")
@@ -315,6 +381,11 @@ Deno.serve(async (req: Request) => {
           original_counterparty_name: parsed.counterparty_name,
           merchant_rule_applied: classification.categorySource === "rule",
         },
+        principal_effect_rwf: accountingEffect.principal_effect_rwf,
+        fee_effect_rwf: accountingEffect.fee_effect_rwf,
+        settlement_state: accountingEffect.settlement_state,
+        affects_balance: accountingEffect.affects_balance,
+        effect_reason: accountingEffect.effect_reason,
       });
 
     if (transactionInsertError) {
