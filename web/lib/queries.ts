@@ -1,6 +1,6 @@
 import "server-only";
 import { supabaseServer } from "./supabase-server";
-import { kigaliDayBoundsUtc, kigaliDateKey } from "../../supabase/functions/_shared/kigali-time.ts";
+import { kigaliDayBoundsUtc, kigaliDateKey } from "./kigali-time";
 
 // Every function here reads from the existing `transactions` table only -
 // no second balance calculation, no accounting logic. Current balance uses
