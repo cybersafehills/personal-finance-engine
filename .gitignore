@@ -1,3 +1,7 @@
 
 # Supabase local CLI state
 supabase/.temp/
+
+# Phase 4.1 backfill plan/execute/rollback logs - contain real financial
+# data snapshots, never committed.
+scripts/backfill-runs/
