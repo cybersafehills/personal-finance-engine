@@ -1,0 +1,72 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens. Every color/radius/shadow used across the app should
+ * come from here rather than being hardcoded per-component - this is the
+ * whole "design system" for a three-screen personal app: small, but
+ * centralized so it stays consistent as it grows.
+ */
+:root {
+  --background: #f6f6f7;
+  --surface: #ffffff;
+  --border-subtle: #e8e8ea;
+  --border-strong: #d4d4d8;
+
+  --text-primary: #18181b;
+  --text-secondary: #52525b;
+  --text-muted: #6b6b73;
+
+  /* Financial semantics - restrained, not a rainbow. Outgoing money is
+     not red; it's just primary-colored text with a "-" sign, per product
+     direction ("do not make the entire interface red merely because
+     money was spent"). */
+  --money-positive: #067a4d;
+  --money-positive-bg: #e9f7f0;
+  --money-negative: var(--text-primary);
+  --attention: #92620a;
+  --attention-bg: #fdf3d9;
+
+  /* One restrained accent for navigation/focus/primary actions. */
+  --accent: #33509e;
+  --accent-foreground: #ffffff;
+
+  --radius-card: 1rem;
+  --radius-control: 0.625rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-border-subtle: var(--border-subtle);
+  --color-border-strong: var(--border-strong);
+
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+
+  --color-money-positive: var(--money-positive);
+  --color-money-positive-bg: var(--money-positive-bg);
+  --color-money-negative: var(--money-negative);
+  --color-attention: var(--attention);
+  --color-attention-bg: var(--attention-bg);
+
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+
+  --radius-card: var(--radius-card);
+  --radius-control: var(--radius-control);
+
+  --font-sans: var(--font-geist-sans);
+}
+
+body {
+  background: var(--background);
+  color: var(--text-primary);
+}
+
+/* Visible keyboard focus everywhere, using the one accent color. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
