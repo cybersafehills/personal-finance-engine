@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { supabaseServer } from "../../lib/supabase-server";
+import { supabaseSession } from "../../lib/supabase-session-server";
 
 export type CorrectCategoryResult = { ok: true } | { ok: false; error: string };
 
@@ -13,6 +13,13 @@ export type CorrectCategoryResult = { ok: true } | { ok: false; error: string };
  * merchant_rules row (priority 10, ahead of the default-100 seeded rules)
  * so future transactions from the same counterparty classify correctly -
  * this never rewrites past transactions beyond the one being corrected.
+ *
+ * Runs as the signed-in user via the session-authenticated client -
+ * RLS (transactions_update_categorize_member /
+ * merchant_rules_write_owner / merchant_rules_update_owner, see
+ * 20260821000000_phase_b_identity_and_tenancy.sql) is what actually
+ * prevents this from ever touching a transaction outside the caller's own
+ * workspace, independent of anything checked here.
  */
 export async function correctCategory(
   transactionId: string,
@@ -26,7 +33,7 @@ export async function correctCategory(
     return { ok: false, error: "Category cannot be empty." };
   }
 
-  const supabase = supabaseServer();
+  const supabase = await supabaseSession();
 
   const { data: transaction, error: fetchError } = await supabase
     .from("transactions")
@@ -74,7 +81,14 @@ export async function correctCategory(
         })
         .eq("id", existingRule.id);
     } else {
+      const { data: workspace } = await supabase
+        .from("transactions")
+        .select("workspace_id")
+        .eq("id", transactionId)
+        .maybeSingle();
+
       await supabase.from("merchant_rules").insert({
+        workspace_id: workspace?.workspace_id,
         match_type: "exact",
         merchant_pattern: pattern,
         normalized_merchant_name: pattern,

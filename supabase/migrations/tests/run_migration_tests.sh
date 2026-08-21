@@ -193,7 +193,7 @@ else
   # but keeps behavior sane if this script is ever pointed at a
   # longer-lived external instance.
   cleanup() {
-    for db in pfe_h pfe_g pfe_ade pfe_i1 pfe_i2; do
+    for db in pfe_h pfe_g pfe_ade pfe_i1 pfe_i2 pfe_j pfe_k pfe_rls; do
       psql -d postgres -c "drop database if exists \"$db\";" >/dev/null 2>&1 || true
     done
     rm -rf "$ARTIFACT_DIR"
@@ -203,7 +203,22 @@ fi
 
 apply_chain() {
   local dbname="$1"
-  for f in "$MIGRATIONS_DIR"/*.sql; do
+  local migrations=("$MIGRATIONS_DIR"/*.sql)
+  local last="${migrations[@]: -1:1}"
+  for f in "${migrations[@]}"; do
+    if [ "$f" = "$last" ]; then
+      # The final (Phase B ownership-backfill) migration is only ever
+      # safe to apply once a real owner exists - see that migration's own
+      # comments. A genuinely fresh database (this function's contract)
+      # has no owner yet, so simulate the real intended production
+      # sequencing here: apply every migration up through the one that
+      # creates handle_new_user(), have the one synthetic "owner" sign up
+      # (exactly what a real fresh deployment requires before the backfill
+      # migration can run), then apply the backfill migration. This is not
+      # a workaround for the test harness - it is the actual required
+      # operational order, modeled accurately.
+      psql -d "$dbname" -t -A -c "insert into auth.users (email) values ('test-owner@example.com');" >/dev/null
+    fi
     psql -d "$dbname" -v ON_ERROR_STOP=1 -f "$f" >/dev/null
   done
 }
@@ -249,6 +264,31 @@ alter default privileges for role postgres in schema public
   grant all on functions to anon, authenticated, service_role;
 alter default privileges for role postgres in schema public
   grant all on sequences to anon, authenticated, service_role;
+
+-- Minimal mock of the Supabase-platform-managed auth schema (Phase B).
+-- Real Supabase provisions the full GoTrue schema on every project; this
+-- disposable cluster only needs the two primitives the Phase B migrations
+-- and RLS policies actually depend on: an auth.users table shaped closely
+-- enough to support a foreign key and the new-user trigger, and
+-- auth.uid() itself, defined identically to Supabase's own (reads the
+-- current request's JWT "sub" claim from a session-local GUC) so tests can
+-- simulate "signed in as user X" with
+-- set_config('request.jwt.claim.sub', '<uuid>', true).
+create schema if not exists auth;
+create table if not exists auth.users (
+  id uuid primary key default extensions.gen_random_uuid(),
+  email text,
+  email_confirmed_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create or replace function auth.uid()
+returns uuid
+language sql
+stable
+as \$\$
+  select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
+\$\$;
 SQL
 }
 
@@ -467,17 +507,34 @@ fi
 echo "=== privilege/RLS regression check ==="
 RLS_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_class where relnamespace='public'::regnamespace and relkind='r' and relrowsecurity;")"
 TABLE_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_class where relnamespace='public'::regnamespace and relkind='r';")"
-if [ "$RLS_COUNT" = "$TABLE_COUNT" ] && [ "$TABLE_COUNT" = "6" ]; then
-  pass "RLS enabled on all 6 tables after the full chain"
+if [ "$RLS_COUNT" = "$TABLE_COUNT" ] && [ "$TABLE_COUNT" = "9" ]; then
+  pass "RLS enabled on all 9 tables after the full chain (6 Phase 3 + 3 Phase B: profiles, workspaces, workspace_memberships)"
 else
-  fail "RLS not enabled on all tables: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled (expected 6 of 6)"
+  fail "RLS not enabled on all tables: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled (expected 9 of 9)"
 fi
 
-ANON_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and grantee in ('anon','authenticated');")"
+# anon must remain fully revoked everywhere - Phase B never touches this.
+ANON_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and grantee = 'anon';")"
 if [ "$ANON_GRANT_COUNT" = "0" ]; then
-  pass "no anon/authenticated grants remain on any public table after the full chain"
+  pass "no anon grants remain on any public table after the full chain"
 else
-  fail "anon/authenticated still hold $ANON_GRANT_COUNT grant(s) after the full chain - hardening regression"
+  fail "anon still holds $ANON_GRANT_COUNT grant(s) after the full chain - hardening regression"
+fi
+
+# authenticated legitimately gains table-level grants in Phase B for the
+# first time - this project's first real browser-authenticated access
+# path - but only exactly the ones the RLS-scoped policies above expect:
+# profiles (select, update), workspaces (select, update),
+# workspace_memberships (select), accounts (select, insert, update),
+# transactions (select, update), merchant_rules (select, insert, update)
+# = 13 grants. Asserting the exact count (not just "some") forces this
+# test to be updated - a deliberate review point - if any future migration
+# ever widens authenticated's table-level access.
+AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and grantee = 'authenticated';")"
+if [ "$AUTHENTICATED_GRANT_COUNT" = "13" ]; then
+  pass "authenticated holds exactly the 13 Phase B table grants expected, no more"
+else
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 13 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -496,11 +553,23 @@ fi
 # ===========================================================================
 echo "=== function/sequence privilege regression check ==="
 
-EXISTING_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname in ('anon','authenticated') where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
-if [ "$EXISTING_FN_EXEC_COUNT" = "0" ]; then
-  pass "anon/authenticated hold no EXECUTE on any existing public-schema function after the full chain"
+ANON_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname = 'anon' where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
+if [ "$ANON_FN_EXEC_COUNT" = "0" ]; then
+  pass "anon holds no EXECUTE on any public-schema function after the full chain"
 else
-  fail "anon/authenticated still hold EXECUTE on $EXISTING_FN_EXEC_COUNT existing function grant(s) after the full chain"
+  fail "anon still holds EXECUTE on $ANON_FN_EXEC_COUNT function grant(s) after the full chain"
+fi
+
+# authenticated legitimately gains EXECUTE on exactly one function in
+# Phase B - is_workspace_member(), the RLS policies' own authorization
+# primitive (every policy above calls it, so authenticated must be able
+# to execute it). Every other existing function (set_updated_at,
+# handle_new_user) remains authenticated-inaccessible.
+AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname = 'authenticated' where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "1" ]; then
+  pass "authenticated holds EXECUTE on exactly one function (is_workspace_member) after the full chain"
+else
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 1 (is_workspace_member) - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -548,6 +617,218 @@ if [ "$FUTURE_SEQ_GRANT_COUNT" = "0" ]; then
   pass "a sequence created after the full chain does not automatically grant anon/authenticated USAGE"
 else
   fail "a sequence created after the full chain granted anon/authenticated USAGE - ALTER DEFAULT PRIVILEGES ON SEQUENCES regression"
+fi
+
+# ===========================================================================
+# J. New-user provisioning trigger (handle_new_user / on_auth_user_created).
+# ===========================================================================
+echo "=== J: new-user provisioning trigger ==="
+bootstrap_db "pfe_j"
+apply_chain "pfe_j"
+
+USER_J="$(psql -d pfe_j -t -A -c "insert into auth.users (email) values ('owner@example.com') returning id;" | head -1)"
+
+PROFILE_COUNT="$(psql -d pfe_j -t -A -c "select count(*) from public.profiles where id = '$USER_J';")"
+WORKSPACE_COUNT="$(psql -d pfe_j -t -A -c "select count(*) from public.workspaces w join public.workspace_memberships m on m.workspace_id = w.id where m.user_id = '$USER_J' and w.kind = 'personal' and m.role = 'owner' and m.status = 'active';")"
+
+if [ "$PROFILE_COUNT" = "1" ] && [ "$WORKSPACE_COUNT" = "1" ]; then
+  pass "J: inserting an auth.users row provisions exactly one profile and one owned, active personal workspace"
+else
+  fail "J: new-user provisioning did not produce the expected profile/workspace/membership rows (profile=$PROFILE_COUNT, workspace=$WORKSPACE_COUNT)"
+fi
+
+# A second insert for a different user must not reuse or collide with the
+# first. apply_chain() above already created one synthetic owner (to
+# satisfy the backfill migration's precondition - see apply_chain's own
+# comment), so the expected total here is 3: that synthetic owner, USER_J,
+# and USER_J2.
+USER_J2="$(psql -d pfe_j -t -A -c "insert into auth.users (email) values ('second@example.com') returning id;" | head -1)"
+WORKSPACE_COUNT_TOTAL="$(psql -d pfe_j -t -A -c "select count(*) from public.workspaces where kind = 'personal';")"
+if [ "$WORKSPACE_COUNT_TOTAL" = "3" ]; then
+  pass "J: a second new user gets their own separate personal workspace, not a shared one"
+else
+  fail "J: expected 3 personal workspaces after apply_chain's synthetic owner plus 2 explicit signups, found $WORKSPACE_COUNT_TOTAL"
+fi
+
+# ===========================================================================
+# K. Existing-data ownership backfill (20260821000100), including its
+# refuse-to-guess guard.
+# ===========================================================================
+echo "=== K: ownership backfill migration ==="
+bootstrap_db "pfe_k"
+# Apply every migration except the last (the backfill/tighten one), so this
+# database is in exactly the pre-backfill state a real production
+# application of Phase B would be in immediately after migration 1.
+ALL_MIGRATIONS=("$MIGRATIONS_DIR"/*.sql)
+LAST_MIGRATION="${ALL_MIGRATIONS[@]: -1:1}"
+for f in "${ALL_MIGRATIONS[@]}"; do
+  if [ "$f" != "$LAST_MIGRATION" ]; then
+    psql -d pfe_k -v ON_ERROR_STOP=1 -f "$f" >/dev/null
+  fi
+done
+
+# accounting_foundation.sql (part of "all but last" above) already seeds
+# the one real pre-Phase-B account ("MTN MoMo (Primary)") - reuse it
+# rather than inserting a second one, so this test reflects the real
+# shape production is actually in (exactly one unlinked account, seeded
+# by an earlier migration, not by this test).
+SEED_ACCOUNT_K="$(psql -d pfe_k -t -A -c "select id from public.accounts limit 1;" | head -1)"
+
+psql -d pfe_k -v ON_ERROR_STOP=1 -c "
+  insert into public.momo_messages (id, raw_message, processing_status)
+  values ('00000000-0000-0000-0000-0000000000a2', 'seed message', 'processed');
+
+  insert into public.transactions (id, momo_message_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version)
+  values ('00000000-0000-0000-0000-0000000000a3', '00000000-0000-0000-0000-0000000000a2', 'send_money', 'out', 'success', 1000, 0, now(), 'test');
+
+  insert into public.merchant_rules (id, merchant_pattern, category)
+  values ('00000000-0000-0000-0000-0000000000a4', 'Test Merchant', 'Shopping');
+" >/dev/null
+
+# The owner's auth.users row is created next - handle_new_user() provisions
+# their personal workspace at this point, exactly as it would at real
+# signup time.
+OWNER_K="$(psql -d pfe_k -t -A -c "insert into auth.users (email) values ('owner@example.com') returning id;" | head -1)"
+
+# Now apply the backfill/tighten migration.
+psql -d pfe_k -v ON_ERROR_STOP=1 -f "$LAST_MIGRATION" >/dev/null
+
+LINKED_ACCOUNT="$(psql -d pfe_k -t -A -c "select count(*) from public.accounts a join public.workspaces w on w.id = a.workspace_id join public.workspace_memberships m on m.workspace_id = w.id where a.id = '$SEED_ACCOUNT_K' and m.user_id = '$OWNER_K';")"
+LINKED_TRANSACTION="$(psql -d pfe_k -t -A -c "select count(*) from public.transactions t where t.id = '00000000-0000-0000-0000-0000000000a3' and t.account_id = '$SEED_ACCOUNT_K' and t.workspace_id is not null;")"
+LINKED_RULE="$(psql -d pfe_k -t -A -c "select count(*) from public.merchant_rules r where r.id = '00000000-0000-0000-0000-0000000000a4' and r.workspace_id is not null;")"
+
+if [ "$LINKED_ACCOUNT" = "1" ] && [ "$LINKED_TRANSACTION" = "1" ] && [ "$LINKED_RULE" = "1" ]; then
+  pass "K: the backfill migration deterministically links the pre-existing account, transaction, and merchant rule to the newly-provisioned owner's workspace"
+else
+  fail "K: backfill did not correctly link pre-existing data (account=$LINKED_ACCOUNT, transaction=$LINKED_TRANSACTION, rule=$LINKED_RULE)"
+fi
+
+NOT_NULL_CHECK="$(psql -d pfe_k -t -A -c "select count(*) from information_schema.columns where table_schema='public' and ((table_name='accounts' and column_name='workspace_id') or (table_name='transactions' and column_name in ('account_id','workspace_id')) or (table_name='merchant_rules' and column_name='workspace_id')) and is_nullable='NO';")"
+if [ "$NOT_NULL_CHECK" = "4" ]; then
+  pass "K: workspace_id/account_id columns are NOT NULL after the backfill migration"
+else
+  fail "K: expected 4 NOT NULL columns after backfill, found $NOT_NULL_CHECK"
+fi
+
+# Guard: an ambiguous pre-backfill state (two unlinked accounts) must make
+# the backfill migration refuse to guess, not silently pick one.
+bootstrap_db "pfe_k"
+for f in "${ALL_MIGRATIONS[@]}"; do
+  if [ "$f" != "$LAST_MIGRATION" ]; then
+    psql -d pfe_k -v ON_ERROR_STOP=1 -f "$f" >/dev/null
+  fi
+done
+psql -d pfe_k -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
+insert into public.accounts (id, name, provider, currency) values
+  ('00000000-0000-0000-0000-0000000000b1', 'Account One', 'mtn_momo', 'RWF'),
+  ('00000000-0000-0000-0000-0000000000b2', 'Account Two', 'mtn_momo', 'RWF');
+SQL
+psql -d pfe_k -t -A -c "insert into auth.users (email) values ('owner2@example.com');" >/dev/null
+
+if psql -d pfe_k -v ON_ERROR_STOP=1 -f "$LAST_MIGRATION" >/dev/null 2>$ARTIFACT_DIR/pfe_backfill_guard_stderr.log; then
+  fail "K: backfill migration should have refused to run against an ambiguous state (2 unlinked accounts) but succeeded"
+else
+  if grep -q "expects exactly one unlinked account" $ARTIFACT_DIR/pfe_backfill_guard_stderr.log; then
+    pass "K: backfill migration refuses to guess when more than one unlinked account exists, exactly as designed"
+  else
+    fail "K: backfill migration failed against an ambiguous state, but not for the expected reason - see $ARTIFACT_DIR/pfe_backfill_guard_stderr.log"
+  fi
+fi
+rm -f $ARTIFACT_DIR/pfe_backfill_guard_stderr.log
+
+# ===========================================================================
+# RLS. Tenant isolation between two independent users/workspaces, and
+# proof that service_role remains unaffected by every policy above.
+# ===========================================================================
+echo "=== RLS: tenant isolation ==="
+bootstrap_db "pfe_rls"
+apply_chain "pfe_rls"
+
+USER_A="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('a@example.com') returning id;" | head -1)"
+USER_B="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('b@example.com') returning id;" | head -1)"
+WORKSPACE_A="$(psql -d pfe_rls -t -A -c "select w.id from public.workspaces w join public.workspace_memberships m on m.workspace_id = w.id where m.user_id = '$USER_A';" | head -1)"
+WORKSPACE_B="$(psql -d pfe_rls -t -A -c "select w.id from public.workspaces w join public.workspace_memberships m on m.workspace_id = w.id where m.user_id = '$USER_B';" | head -1)"
+
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.accounts (id, workspace_id, name, provider, currency)
+  values ('00000000-0000-0000-0000-0000000000c1', '$WORKSPACE_B', 'B Account', 'mtn_momo', 'RWF');
+  insert into public.momo_messages (id, raw_message, processing_status)
+  values ('00000000-0000-0000-0000-0000000000c2', 'seed', 'processed');
+  insert into public.transactions (id, momo_message_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version)
+  values ('00000000-0000-0000-0000-0000000000c3', '00000000-0000-0000-0000-0000000000c2', '00000000-0000-0000-0000-0000000000c1', '$WORKSPACE_B', 'send_money', 'out', 'success', 500, 0, now(), 'test');
+" >/dev/null
+
+as_user() {
+  local user_id="$1"
+  local sql="$2"
+  # SET ROLE and the set_config() call each print their own output line
+  # even under -t/-A (a "SET" command tag and the config's return value) -
+  # only the final statement's result (the actual query this call cares
+  # about) is wanted, so take the last line.
+  psql -d pfe_rls -t -A -c "set role authenticated; select set_config('request.jwt.claim.sub', '$user_id', false); $sql" | tail -1
+}
+
+# A cannot read B's workspace, account, or transaction.
+READ_OTHER_WORKSPACE="$(as_user "$USER_A" "select count(*) from public.workspaces where id = '$WORKSPACE_B';")"
+READ_OTHER_ACCOUNT="$(as_user "$USER_A" "select count(*) from public.accounts where id = '00000000-0000-0000-0000-0000000000c1';")"
+READ_OTHER_TRANSACTION="$(as_user "$USER_A" "select count(*) from public.transactions where id = '00000000-0000-0000-0000-0000000000c3';")"
+if [ "$READ_OTHER_WORKSPACE" = "0" ] && [ "$READ_OTHER_ACCOUNT" = "0" ] && [ "$READ_OTHER_TRANSACTION" = "0" ]; then
+  pass "RLS: User A cannot read User B's workspace, account, or transaction"
+else
+  fail "RLS: User A read User B's data (workspace=$READ_OTHER_WORKSPACE account=$READ_OTHER_ACCOUNT transaction=$READ_OTHER_TRANSACTION) - isolation breach"
+fi
+
+# A cannot update B's transaction (category correction path).
+as_user "$USER_A" "update public.transactions set category = 'Hacked' where id = '00000000-0000-0000-0000-0000000000c3';" >/dev/null
+CATEGORY_UNCHANGED="$(psql -d pfe_rls -t -A -c "select count(*) from public.transactions where id = '00000000-0000-0000-0000-0000000000c3' and category is null;")"
+if [ "$CATEGORY_UNCHANGED" = "1" ]; then
+  pass "RLS: User A cannot update User B's transaction"
+else
+  fail "RLS: User A's update against User B's transaction was not blocked - isolation breach"
+fi
+
+# A cannot insert an account into B's workspace.
+if as_user "$USER_A" "insert into public.accounts (workspace_id, name, provider, currency) values ('$WORKSPACE_B', 'Forged', 'mtn_momo', 'RWF');" >/dev/null 2>$ARTIFACT_DIR/pfe_rls_insert_stderr.log; then
+  fail "RLS: User A was able to insert an account into User B's workspace - isolation breach"
+else
+  pass "RLS: User A cannot insert an account into User B's workspace"
+fi
+rm -f $ARTIFACT_DIR/pfe_rls_insert_stderr.log
+
+# A cannot delete B's account (no delete policy exists for authenticated at all).
+as_user "$USER_A" "delete from public.accounts where id = '00000000-0000-0000-0000-0000000000c1';" >/dev/null 2>&1 || true
+ACCOUNT_STILL_EXISTS="$(psql -d pfe_rls -t -A -c "select count(*) from public.accounts where id = '00000000-0000-0000-0000-0000000000c1';")"
+if [ "$ACCOUNT_STILL_EXISTS" = "1" ]; then
+  pass "RLS: User A cannot delete User B's account (no delete grant/policy for authenticated)"
+else
+  fail "RLS: User A deleted User B's account - isolation breach"
+fi
+
+# A CAN read and correct a category on their own workspace's data (positive
+# control - proves the policies are not simply denying everyone, only
+# non-members).
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.accounts (id, workspace_id, name, provider, currency)
+  values ('00000000-0000-0000-0000-0000000000d1', '$WORKSPACE_A', 'A Account', 'mtn_momo', 'RWF');
+  insert into public.momo_messages (id, raw_message, processing_status)
+  values ('00000000-0000-0000-0000-0000000000d2', 'seed', 'processed');
+  insert into public.transactions (id, momo_message_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version)
+  values ('00000000-0000-0000-0000-0000000000d3', '00000000-0000-0000-0000-0000000000d2', '00000000-0000-0000-0000-0000000000d1', '$WORKSPACE_A', 'send_money', 'out', 'success', 750, 0, now(), 'test');
+" >/dev/null
+as_user "$USER_A" "update public.transactions set category = 'Groceries' where id = '00000000-0000-0000-0000-0000000000d3';" >/dev/null
+OWN_CATEGORY_SET="$(psql -d pfe_rls -t -A -c "select count(*) from public.transactions where id = '00000000-0000-0000-0000-0000000000d3' and category = 'Groceries';")"
+if [ "$OWN_CATEGORY_SET" = "1" ]; then
+  pass "RLS: User A can read and categorize their own workspace's transaction (positive control)"
+else
+  fail "RLS: User A could not correct a category on their own workspace's transaction - policies are over-blocking"
+fi
+
+# service_role must remain completely unaffected by every policy above.
+SERVICE_ROLE_SEES_BOTH="$(psql -d pfe_rls -t -A -c "set role service_role; select count(*) from public.transactions where id in ('00000000-0000-0000-0000-0000000000c3', '00000000-0000-0000-0000-0000000000d3');" | tail -1)"
+if [ "$SERVICE_ROLE_SEES_BOTH" = "2" ]; then
+  pass "RLS: service_role still sees every workspace's data, unaffected by RLS (as required for ingest-momo to keep working)"
+else
+  fail "RLS: service_role's visibility changed ($SERVICE_ROLE_SEES_BOTH of 2 expected) - would break ingest-momo"
 fi
 
 echo ""

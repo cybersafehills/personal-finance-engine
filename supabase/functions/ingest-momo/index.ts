@@ -339,6 +339,59 @@ Deno.serve(async (req: Request) => {
     }
 
     // ========================================================
+    // ACCOUNT/WORKSPACE RESOLUTION (Phase B)
+    // ========================================================
+    //
+    // transactions.account_id/workspace_id are NOT NULL as of Phase B.
+    // ingest-momo does not gain multi-account ingestion here - it only
+    // resolves the single existing account (and the workspace it was
+    // backfilled into) so the insert below satisfies that constraint.
+    // Never guessed, never client-supplied: if this shape doesn't hold
+    // (no account yet, or more than one - multi-account ingestion is a
+    // later, explicit phase), the request fails closed rather than
+    // silently attributing a transaction to the wrong account.
+
+    const { data: resolvedAccounts, error: accountLookupError } = await supabase
+      .from("accounts")
+      .select("id, workspace_id")
+      .eq("is_active", true);
+
+    if (
+      accountLookupError || !resolvedAccounts || resolvedAccounts.length !== 1
+    ) {
+      console.error(
+        "Account resolution error:",
+        accountLookupError ??
+          `found ${
+            resolvedAccounts?.length ?? 0
+          } active accounts, expected exactly 1`,
+      );
+
+      await supabase
+        .from("momo_messages")
+        .update({ processing_status: "failed" })
+        .eq("id", momoMessageId);
+
+      await supabase
+        .from("processing_errors")
+        .insert({
+          momo_message_id: momoMessageId,
+          stage: "database",
+          error_code: "ACCOUNT_RESOLUTION_FAILED",
+          error_message:
+            "Could not resolve exactly one active account to attribute this transaction to.",
+          parser_version: PARSER_VERSION,
+        });
+
+      return jsonResponse(
+        { ok: false, error: "account_resolution_failed" },
+        500,
+      );
+    }
+
+    const resolvedAccount = resolvedAccounts[0];
+
+    // ========================================================
     // STRUCTURED FINANCIAL LEDGER INSERT
     // ========================================================
     //
@@ -358,6 +411,8 @@ Deno.serve(async (req: Request) => {
       .from("transactions")
       .insert({
         momo_message_id: momoMessageId,
+        account_id: resolvedAccount.id,
+        workspace_id: resolvedAccount.workspace_id,
         external_transaction_id: parsed.external_transaction_id,
         source: "mtn_momo",
         transaction_type: parsed.transaction_type,
