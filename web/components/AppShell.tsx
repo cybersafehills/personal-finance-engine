@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useTransition } from "react";
+import { signOut } from "../app/login/actions";
 import { HomeIcon, ListIcon, PieIcon } from "./icons";
 
 const NAV_ITEMS = [
@@ -15,11 +17,41 @@ function isActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+function SignOutButton() {
+  const [isPending, startTransition] = useTransition();
+  return (
+    <button
+      type="button"
+      onClick={() => startTransition(() => signOut())}
+      disabled={isPending}
+      className="rounded-full px-3 py-1 text-xs font-medium text-text-muted transition-colors hover:bg-background hover:text-text-primary disabled:opacity-50"
+    >
+      {isPending ? "Signing out…" : "Sign out"}
+    </button>
+  );
+}
+
+export function AppShell({
+  children,
+  userEmail,
+}: {
+  children: React.ReactNode;
+  userEmail: string | null;
+}) {
   const pathname = usePathname();
 
   return (
     <div className="flex min-h-full flex-col">
+      {/* Slim account bar - visible on every screen size, independent of
+          the desktop nav pills below it. Absent on auth pages (no user
+          yet) since there is nothing to sign out of. */}
+      {userEmail && (
+        <div className="flex items-center justify-between border-b border-border-subtle bg-surface px-4 py-1.5 text-xs sm:px-6">
+          <span className="truncate text-text-muted">{userEmail}</span>
+          <SignOutButton />
+        </div>
+      )}
+
       {/* Desktop / tablet: compact top header. Hidden on narrow phones in
           favor of the bottom bar, which is the primary mobile pattern for
           a 3-destination app. */}

@@ -1,12 +1,17 @@
 import "server-only";
-import { supabaseServer } from "./supabase-server";
+import { supabaseSession } from "./supabase-session-server";
 import { kigaliDayBoundsUtc, kigaliDateKey } from "./kigali-time";
 
-// Every function here reads from the existing `transactions` table only -
-// no second balance calculation, no accounting logic. Current balance uses
-// MTN's own reported balance_after_rwf. Today's totals and category totals
-// use the accounting-effect columns Phase 4.2 already populates
-// (principal_effect_rwf / fee_effect_rwf), never recomputed here.
+// Every function here queries through the session-authenticated Supabase
+// client (lib/supabase-session-server.ts), never the service-role one -
+// Phase B's actual security boundary is RLS, enforced by Postgres for
+// whichever workspace(s) the signed-in user is a member of. There is
+// deliberately no manual `.eq("workspace_id", ...)` filtering here: adding
+// one would either duplicate what RLS already guarantees, or - if it were
+// ever wrong - silently mask an RLS bug instead of surfacing it. If a
+// caller isn't signed in, these queries simply return nothing (RLS denies
+// unauthenticated access to every table here), never an error that could
+// leak whether data exists.
 
 export type TransactionRow = {
   id: string;
@@ -31,7 +36,7 @@ const TRANSACTION_COLUMNS =
   "id, transaction_type, direction, status, amount_rwf, fee_rwf, net_effect_rwf, balance_after_rwf, counterparty_name, counterparty_reference, occurred_at, category, subcategory, category_source, settlement_state, affects_balance";
 
 export async function getCurrentBalance(): Promise<number | null> {
-  const supabase = supabaseServer();
+  const supabase = await supabaseSession();
   const { data, error } = await supabase
     .from("transactions")
     .select("balance_after_rwf")
@@ -55,7 +60,7 @@ export type TodayTotals = {
 };
 
 export async function getTodayTotals(): Promise<TodayTotals> {
-  const supabase = supabaseServer();
+  const supabase = await supabaseSession();
   const todayKey = kigaliDateKey(new Date().toISOString());
   const { startUtc, endUtc } = kigaliDayBoundsUtc(todayKey);
 
@@ -89,7 +94,7 @@ export async function getTodayTotals(): Promise<TodayTotals> {
 export async function getRecentTransactions(
   limit = 8,
 ): Promise<TransactionRow[]> {
-  const supabase = supabaseServer();
+  const supabase = await supabaseSession();
   const { data, error } = await supabase
     .from("transactions")
     .select(TRANSACTION_COLUMNS)
@@ -111,7 +116,7 @@ export async function getTransactions(
     category,
   }: { limit?: number; offset?: number; category?: string } = {},
 ): Promise<TransactionRow[]> {
-  const supabase = supabaseServer();
+  const supabase = await supabaseSession();
   let query = supabase
     .from("transactions")
     .select(TRANSACTION_COLUMNS)
@@ -137,7 +142,7 @@ export async function getTransactions(
 export async function getTransactionById(
   id: string,
 ): Promise<TransactionRow | null> {
-  const supabase = supabaseServer();
+  const supabase = await supabaseSession();
   const { data, error } = await supabase
     .from("transactions")
     .select(TRANSACTION_COLUMNS)
@@ -159,7 +164,7 @@ export type CategoryTotal = {
 };
 
 export async function getCategoryTotals(): Promise<CategoryTotal[]> {
-  const supabase = supabaseServer();
+  const supabase = await supabaseSession();
   const { data, error } = await supabase
     .from("transactions")
     .select("category, principal_effect_rwf, fee_effect_rwf")

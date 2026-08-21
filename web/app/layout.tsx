@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist } from "next/font/google";
 import { AppShell } from "../components/AppShell";
+import { supabaseSession } from "../lib/supabase-session-server";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -20,11 +21,16 @@ export const viewport: Viewport = {
   themeColor: "#f6f6f7",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  const supabase = await supabaseSession();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
   return (
     <html lang="en" className={`${geistSans.variable} h-full antialiased`}>
       <body className="min-h-full bg-background font-sans text-text-primary">
-        <AppShell>{children}</AppShell>
+        <AppShell userEmail={user?.email ?? null}>{children}</AppShell>
       </body>
     </html>
   );
