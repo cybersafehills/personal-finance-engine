@@ -156,11 +156,19 @@ max_indexes = 5
 enabled = true
 # The base URL of your website. Used as an allow-list for redirects and for constructing URLs used
 # in emails.
-site_url = "http://127.0.0.1:3000"
+site_url = "https://web-tawny-omega-76.vercel.app"
 # The public URL that Auth serves on. Defaults to the API external URL with `/auth/v1` appended.
 # external_url = ""
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
-additional_redirect_urls = ["https://127.0.0.1:3000"]
+# Includes the production callback and local dev (both the loopback IP
+# and "localhost" - browsers treat these as distinct origins), on the
+# actual local dev port this project runs on (3417, not the Supabase
+# CLI's own default of 3000).
+additional_redirect_urls = [
+  "https://web-tawny-omega-76.vercel.app/auth/callback",
+  "http://127.0.0.1:3417/auth/callback",
+  "http://localhost:3417/auth/callback",
+]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
 jwt_expiry = 3600
 # JWT issuer URL. If not set, defaults to auth.external_url.
@@ -231,9 +239,15 @@ enable_confirmations = true
 # If enabled, users will need to reauthenticate or have logged in recently to change their password.
 secure_password_change = false
 # Controls the minimum amount of time that must pass before sending another signup confirmation or password reset email.
-max_frequency = "1s"
+# Matches the value already live on the linked production project - this
+# repository's config.toml had drifted from it (CLI scaffold default is
+# 1s); restored rather than silently weakened by a config push that was
+# only meant to fix the Site URL/redirect allow-list.
+max_frequency = "1m0s"
 # Number of characters used in the email OTP.
-otp_length = 6
+# Matches the value already live on production (8), not this repo's
+# stale scaffold default (6) - restored for the same reason as above.
+otp_length = 8
 # Number of seconds before the email OTP expires (defaults to 1 hour).
 otp_expiry = 3600
 
@@ -303,9 +317,12 @@ auth_token = "env(SUPABASE_AUTH_SMS_TWILIO_AUTH_TOKEN)"
 max_enrolled_factors = 10
 
 # Control MFA via App Authenticator (TOTP)
+# Matches production's actual live setting (enabled) - restored after
+# discovering `supabase config push` would otherwise have silently
+# disabled it as a side effect of this repo's stale scaffold default.
 [auth.mfa.totp]
-enroll_enabled = false
-verify_enabled = false
+enroll_enabled = true
+verify_enabled = true
 
 # Configure MFA via Phone Messaging
 [auth.mfa.phone]
