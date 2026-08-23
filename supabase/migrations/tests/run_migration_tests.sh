@@ -204,22 +204,25 @@ fi
 apply_chain() {
   local dbname="$1"
   local migrations=("$MIGRATIONS_DIR"/*.sql)
-  local last="${migrations[@]: -1:1}"
+  # The ownership-backfill migration is only ever safe to apply once a
+  # real owner exists - see that migration's own comments. A genuinely
+  # fresh database (this function's contract) has no owner yet, so
+  # simulate the real intended production sequencing here: apply every
+  # migration up through the one that creates handle_new_user(), have one
+  # synthetic "owner" sign up (exactly what a real fresh deployment
+  # requires before the backfill migration can run), then continue
+  # applying the rest of the chain. This is not a workaround for the test
+  # harness - it is the actual required operational order, modeled
+  # accurately. Triggered off the specific migration filename that
+  # creates the trigger, not "the last file" - later migrations (e.g.
+  # Phase C) legitimately come after the backfill migration in the
+  # directory listing.
+  local owner_trigger_migration="20260821000000_phase_b_identity_and_tenancy.sql"
   for f in "${migrations[@]}"; do
-    if [ "$f" = "$last" ]; then
-      # The final (Phase B ownership-backfill) migration is only ever
-      # safe to apply once a real owner exists - see that migration's own
-      # comments. A genuinely fresh database (this function's contract)
-      # has no owner yet, so simulate the real intended production
-      # sequencing here: apply every migration up through the one that
-      # creates handle_new_user(), have the one synthetic "owner" sign up
-      # (exactly what a real fresh deployment requires before the backfill
-      # migration can run), then apply the backfill migration. This is not
-      # a workaround for the test harness - it is the actual required
-      # operational order, modeled accurately.
+    psql -d "$dbname" -v ON_ERROR_STOP=1 -f "$f" >/dev/null
+    if [[ "$f" == *"$owner_trigger_migration" ]]; then
       psql -d "$dbname" -t -A -c "insert into auth.users (email) values ('test-owner@example.com');" >/dev/null
     fi
-    psql -d "$dbname" -v ON_ERROR_STOP=1 -f "$f" >/dev/null
   done
 }
 
@@ -507,10 +510,10 @@ fi
 echo "=== privilege/RLS regression check ==="
 RLS_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_class where relnamespace='public'::regnamespace and relkind='r' and relrowsecurity;")"
 TABLE_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_class where relnamespace='public'::regnamespace and relkind='r';")"
-if [ "$RLS_COUNT" = "$TABLE_COUNT" ] && [ "$TABLE_COUNT" = "9" ]; then
-  pass "RLS enabled on all 9 tables after the full chain (6 Phase 3 + 3 Phase B: profiles, workspaces, workspace_memberships)"
+if [ "$RLS_COUNT" = "$TABLE_COUNT" ] && [ "$TABLE_COUNT" = "10" ]; then
+  pass "RLS enabled on all 10 tables after the full chain (6 Phase 3 + 3 Phase B: profiles, workspaces, workspace_memberships + 1 Phase C: ingestion_connections)"
 else
-  fail "RLS not enabled on all tables: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled (expected 9 of 9)"
+  fail "RLS not enabled on all tables: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled (expected 10 of 10)"
 fi
 
 # anon must remain fully revoked everywhere - Phase B never touches this.
@@ -527,14 +530,15 @@ fi
 # profiles (select, update), workspaces (select, update),
 # workspace_memberships (select), accounts (select, insert, update),
 # transactions (select, update), merchant_rules (select, insert, update)
-# = 13 grants. Asserting the exact count (not just "some") forces this
-# test to be updated - a deliberate review point - if any future migration
-# ever widens authenticated's table-level access.
+# = 13 Phase B grants, plus Phase C's ingestion_connections (select,
+# insert, update) = 3 more, for 16 total. Asserting the exact count (not
+# just "some") forces this test to be updated - a deliberate review point
+# - if any future migration ever widens authenticated's table-level access.
 AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and grantee = 'authenticated';")"
-if [ "$AUTHENTICATED_GRANT_COUNT" = "13" ]; then
-  pass "authenticated holds exactly the 13 Phase B table grants expected, no more"
+if [ "$AUTHENTICATED_GRANT_COUNT" = "16" ]; then
+  pass "authenticated holds exactly the 16 Phase B + Phase C table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 13 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 16 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -656,15 +660,22 @@ fi
 # ===========================================================================
 echo "=== K: ownership backfill migration ==="
 bootstrap_db "pfe_k"
-# Apply every migration except the last (the backfill/tighten one), so this
-# database is in exactly the pre-backfill state a real production
-# application of Phase B would be in immediately after migration 1.
+# Apply every migration up to (but not including) the backfill/tighten
+# one, so this database is in exactly the pre-backfill state a real
+# production application of Phase B would be in immediately after
+# migration 1. Identified by filename, not "all but the last file in the
+# directory" - migrations after the backfill one (e.g. Phase C) exist now
+# and must NOT be applied yet at this point in the test; this test is
+# specifically isolating the backfill migration's own behavior.
 ALL_MIGRATIONS=("$MIGRATIONS_DIR"/*.sql)
-LAST_MIGRATION="${ALL_MIGRATIONS[@]: -1:1}"
+BACKFILL_MIGRATION_NAME="20260821000100_phase_b_ownership_backfill_and_constraints.sql"
+LAST_MIGRATION=""
 for f in "${ALL_MIGRATIONS[@]}"; do
-  if [ "$f" != "$LAST_MIGRATION" ]; then
-    psql -d pfe_k -v ON_ERROR_STOP=1 -f "$f" >/dev/null
+  if [[ "$f" == *"$BACKFILL_MIGRATION_NAME" ]]; then
+    LAST_MIGRATION="$f"
+    break
   fi
+  psql -d pfe_k -v ON_ERROR_STOP=1 -f "$f" >/dev/null
 done
 
 # accounting_foundation.sql (part of "all but last" above) already seeds
@@ -711,12 +722,16 @@ else
 fi
 
 # Guard: an ambiguous pre-backfill state (two unlinked accounts) must make
-# the backfill migration refuse to guess, not silently pick one.
+# the backfill migration refuse to guess, not silently pick one. Reapplies
+# the same "up to but not including the backfill migration" boundary as
+# above, by filename rather than position, so later migrations (e.g. Phase
+# C) are correctly excluded here too.
 bootstrap_db "pfe_k"
 for f in "${ALL_MIGRATIONS[@]}"; do
-  if [ "$f" != "$LAST_MIGRATION" ]; then
-    psql -d pfe_k -v ON_ERROR_STOP=1 -f "$f" >/dev/null
+  if [[ "$f" == *"$BACKFILL_MIGRATION_NAME" ]]; then
+    break
   fi
+  psql -d pfe_k -v ON_ERROR_STOP=1 -f "$f" >/dev/null
 done
 psql -d pfe_k -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
 insert into public.accounts (id, name, provider, currency) values
@@ -762,10 +777,15 @@ as_user() {
   local user_id="$1"
   local sql="$2"
   # SET ROLE and the set_config() call each print their own output line
-  # even under -t/-A (a "SET" command tag and the config's return value) -
-  # only the final statement's result (the actual query this call cares
-  # about) is wanted, so take the last line.
-  psql -d pfe_rls -t -A -c "set role authenticated; select set_config('request.jwt.claim.sub', '$user_id', false); $sql" | tail -1
+  # even under -t/-A (a "SET" command tag and the config's return value),
+  # and a final DML statement without RETURNING prints its own completion
+  # tag (e.g. "INSERT 0 1") the same way - only the final statement's
+  # actual result (a SELECT's row, or a RETURNING clause's row) is wanted,
+  # so drop every line that is just a bare command tag and take whatever
+  # remains last.
+  psql -d pfe_rls -t -A -c "set role authenticated; select set_config('request.jwt.claim.sub', '$user_id', false); $sql" \
+    | grep -Ev '^(SET|INSERT [0-9]+ [0-9]+|UPDATE [0-9]+|DELETE [0-9]+)$' \
+    | tail -1
 }
 
 # A cannot read B's workspace, account, or transaction.
@@ -829,6 +849,150 @@ if [ "$SERVICE_ROLE_SEES_BOTH" = "2" ]; then
   pass "RLS: service_role still sees every workspace's data, unaffected by RLS (as required for ingest-momo to keep working)"
 else
   fail "RLS: service_role's visibility changed ($SERVICE_ROLE_SEES_BOTH of 2 expected) - would break ingest-momo"
+fi
+
+# ===========================================================================
+# Phase C: account lifecycle (is_primary uniqueness, archived/active
+# consistency) and ingestion_connections (RLS CRUD, credential-hash
+# uniqueness, bound-account routing, and adversarial cross-workspace
+# isolation - the two-user isolation suite the master prompt requires,
+# extended to the new Phase C tables). Reuses pfe_rls (already bootstrapped
+# above with USER_A/WORKSPACE_A/account d1 and USER_B/WORKSPACE_B/account
+# c1) rather than standing up a fresh database.
+# ===========================================================================
+echo "=== Phase C: accounts and ingestion_connections ==="
+
+# --- account lifecycle -----------------------------------------------------
+
+# At most one primary account per workspace.
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.accounts (id, workspace_id, name, provider, currency)
+  values ('00000000-0000-0000-0000-0000000000e1', '$WORKSPACE_A', 'A Second Account', 'mtn_momo', 'RWF');
+  update public.accounts set is_primary = true where id = '00000000-0000-0000-0000-0000000000d1';
+" >/dev/null
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "update public.accounts set is_primary = true where id = '00000000-0000-0000-0000-0000000000e1';" >/dev/null 2>$ARTIFACT_DIR/pfe_primary_stderr.log; then
+  fail "Phase C: a workspace was allowed two primary accounts - idx_accounts_one_primary_per_workspace not enforced"
+else
+  pass "Phase C: at most one primary account per workspace is enforced"
+fi
+rm -f $ARTIFACT_DIR/pfe_primary_stderr.log
+
+# archived_at must be null iff is_active = true.
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "update public.accounts set is_active = false where id = '00000000-0000-0000-0000-0000000000e1';" >/dev/null 2>$ARTIFACT_DIR/pfe_archive_stderr.log; then
+  fail "Phase C: an account was set inactive without archived_at - accounts_archived_consistent_with_active not enforced"
+else
+  pass "Phase C: archiving an account requires archived_at to be set consistently with is_active"
+fi
+rm -f $ARTIFACT_DIR/pfe_archive_stderr.log
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "update public.accounts set is_active = false, archived_at = now() where id = '00000000-0000-0000-0000-0000000000e1';" >/dev/null
+ARCHIVED_OK="$(psql -d pfe_rls -t -A -c "select count(*) from public.accounts where id = '00000000-0000-0000-0000-0000000000e1' and is_active = false and archived_at is not null;")"
+if [ "$ARCHIVED_OK" = "1" ]; then
+  pass "Phase C: archiving an account with both fields set consistently succeeds"
+else
+  fail "Phase C: archiving an account with both fields set consistently was unexpectedly rejected"
+fi
+
+# --- ingestion_connections: ownership, RLS CRUD -----------------------------
+
+# A third user, added as a non-owner member of workspace A, to exercise the
+# select-yes/write-no boundary the owner-only write policies are meant to
+# enforce (Phase B only ever creates role=owner rows via signup, so this
+# membership is seeded directly, exactly as is_workspace_member's own
+# comments anticipate for Phase C).
+USER_C="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('c@example.com') returning id;" | head -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.workspace_memberships (workspace_id, user_id, role, status, joined_at)
+  values ('$WORKSPACE_A', '$USER_C', 'member', 'active', now());
+" >/dev/null
+
+CONN_A="$(as_user "$USER_A" "insert into public.ingestion_connections (workspace_id, account_id, label, credential_hash, credential_prefix, created_by) values ('$WORKSPACE_A', '00000000-0000-0000-0000-0000000000d1', 'A''s Phone', 'hash-a-conn-1', 'pfe_aaaa', '$USER_A') returning id;" | tail -1)"
+if [ -n "$CONN_A" ]; then
+  pass "Phase C: workspace owner can create an ingestion connection bound to their own account"
+else
+  fail "Phase C: workspace owner was unable to create an ingestion connection"
+fi
+
+# Non-owner member: can read, cannot write.
+MEMBER_SEES_CONN="$(as_user "$USER_C" "select count(*) from public.ingestion_connections where id = '$CONN_A';")"
+if [ "$MEMBER_SEES_CONN" = "1" ]; then
+  pass "Phase C: a non-owner workspace member can see the workspace's ingestion connections"
+else
+  fail "Phase C: a non-owner workspace member could not see their own workspace's ingestion connection"
+fi
+if as_user "$USER_C" "insert into public.ingestion_connections (workspace_id, account_id, label, credential_hash, credential_prefix, created_by) values ('$WORKSPACE_A', '00000000-0000-0000-0000-0000000000d1', 'C''s Phone', 'hash-c-conn-1', 'pfe_cccc', '$USER_C');" >/dev/null 2>$ARTIFACT_DIR/pfe_member_insert_stderr.log; then
+  fail "Phase C: a non-owner workspace member was able to create an ingestion connection - owner-only write policy not enforced"
+else
+  pass "Phase C: a non-owner workspace member cannot create an ingestion connection (owner-only)"
+fi
+rm -f $ARTIFACT_DIR/pfe_member_insert_stderr.log
+if as_user "$USER_C" "update public.ingestion_connections set status = 'revoked', revoked_at = now() where id = '$CONN_A';" >/dev/null 2>$ARTIFACT_DIR/pfe_member_update_stderr.log; then
+  :
+fi
+CONN_STILL_ACTIVE="$(psql -d pfe_rls -t -A -c "select count(*) from public.ingestion_connections where id = '$CONN_A' and status = 'active';")"
+if [ "$CONN_STILL_ACTIVE" = "1" ]; then
+  pass "Phase C: a non-owner workspace member cannot revoke another member's ingestion connection"
+else
+  fail "Phase C: a non-owner workspace member was able to revoke an ingestion connection - isolation breach"
+fi
+rm -f $ARTIFACT_DIR/pfe_member_update_stderr.log
+
+# --- ingestion_connections: adversarial cross-workspace isolation ----------
+
+# User B (unrelated workspace) cannot see User A's connection at all.
+B_SEES_A_CONN="$(as_user "$USER_B" "select count(*) from public.ingestion_connections where id = '$CONN_A';")"
+if [ "$B_SEES_A_CONN" = "0" ]; then
+  pass "Phase C: User B cannot see User A's ingestion connection"
+else
+  fail "Phase C: User B was able to read User A's ingestion connection - isolation breach"
+fi
+
+# User B cannot revoke User A's connection by spoofing its id.
+as_user "$USER_B" "update public.ingestion_connections set status = 'revoked', revoked_at = now() where id = '$CONN_A';" >/dev/null 2>&1 || true
+CONN_STILL_ACTIVE_2="$(psql -d pfe_rls -t -A -c "select count(*) from public.ingestion_connections where id = '$CONN_A' and status = 'active';")"
+if [ "$CONN_STILL_ACTIVE_2" = "1" ]; then
+  pass "Phase C: User B cannot revoke User A's ingestion connection by spoofing its id"
+else
+  fail "Phase C: User B was able to revoke User A's ingestion connection - isolation breach"
+fi
+
+# User A cannot create a connection in User B's workspace (owner-only write
+# policy also blocks cross-workspace forgery, independent of the FK check
+# below).
+if as_user "$USER_A" "insert into public.ingestion_connections (workspace_id, account_id, label, credential_hash, credential_prefix, created_by) values ('$WORKSPACE_B', '00000000-0000-0000-0000-0000000000c1', 'Forged', 'hash-forged-1', 'pfe_ffff', '$USER_A');" >/dev/null 2>$ARTIFACT_DIR/pfe_forge_stderr.log; then
+  fail "Phase C: User A was able to create an ingestion connection in User B's workspace - isolation breach"
+else
+  pass "Phase C: User A cannot create an ingestion connection in User B's workspace"
+fi
+rm -f $ARTIFACT_DIR/pfe_forge_stderr.log
+
+# Even service_role (bypassing RLS entirely) cannot bind a connection to an
+# account that belongs to a different workspace than the connection itself
+# - ingestion_connections_account_same_workspace is a database-level
+# guarantee, not just an RLS/application check, so a bug in future
+# application code can never route a connection cross-workspace.
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "insert into public.ingestion_connections (workspace_id, account_id, label, credential_hash, credential_prefix) values ('$WORKSPACE_A', '00000000-0000-0000-0000-0000000000c1', 'Mismatched', 'hash-mismatch-1', 'pfe_mmmm');" >/dev/null 2>$ARTIFACT_DIR/pfe_mismatch_stderr.log; then
+  fail "Phase C: a connection was created with account_id/workspace_id from different workspaces - ingestion_connections_account_same_workspace not enforced"
+else
+  pass "Phase C: a connection's account_id must belong to the same workspace_id, enforced at the database level even for service_role"
+fi
+rm -f $ARTIFACT_DIR/pfe_mismatch_stderr.log
+
+# credential_hash must be globally unique (the sole lookup path ingest-momo
+# will use to authenticate a request).
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "insert into public.ingestion_connections (workspace_id, account_id, label, credential_hash, credential_prefix) values ('$WORKSPACE_B', '00000000-0000-0000-0000-0000000000c1', 'Dup Hash', 'hash-a-conn-1', 'pfe_dddd');" >/dev/null 2>$ARTIFACT_DIR/pfe_duphash_stderr.log; then
+  fail "Phase C: two ingestion connections were created with the same credential_hash - unique constraint not enforced"
+else
+  pass "Phase C: credential_hash is globally unique across all workspaces"
+fi
+rm -f $ARTIFACT_DIR/pfe_duphash_stderr.log
+
+# Owner can revoke their own connection (positive control).
+as_user "$USER_A" "update public.ingestion_connections set status = 'revoked', revoked_at = now() where id = '$CONN_A';" >/dev/null
+CONN_REVOKED="$(psql -d pfe_rls -t -A -c "select count(*) from public.ingestion_connections where id = '$CONN_A' and status = 'revoked';")"
+if [ "$CONN_REVOKED" = "1" ]; then
+  pass "Phase C: workspace owner can revoke their own ingestion connection"
+else
+  fail "Phase C: workspace owner was unable to revoke their own ingestion connection"
 fi
 
 echo ""

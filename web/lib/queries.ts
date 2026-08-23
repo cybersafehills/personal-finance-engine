@@ -195,3 +195,105 @@ export async function getCategoryTotals(): Promise<CategoryTotal[]> {
     }))
     .sort((a, b) => b.totalRwf - a.totalRwf);
 }
+
+/**
+ * The signed-in user's own workspace_id, resolved from
+ * workspace_memberships (RLS-scoped to rows the caller is actually a
+ * member of - see is_workspace_member() and workspace_memberships_select_
+ * member). Phase C has no team/multi-membership functionality yet, so a
+ * user has exactly one active membership in practice; the owner role is
+ * required for account/connection creation, so that role is what this
+ * resolves.
+ */
+export async function getOwnedWorkspaceId(): Promise<string | null> {
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("workspace_memberships")
+    .select("workspace_id")
+    .eq("role", "owner")
+    .eq("status", "active")
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.error("getOwnedWorkspaceId failed:", error.message);
+    return null;
+  }
+
+  return data?.workspace_id ?? null;
+}
+
+export type AccountRow = {
+  id: string;
+  name: string;
+  provider: string;
+  currency: string;
+  is_active: boolean;
+  is_primary: boolean;
+  archived_at: string | null;
+};
+
+export async function getAccounts(): Promise<AccountRow[]> {
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("accounts")
+    .select("id, name, provider, currency, is_active, is_primary, archived_at")
+    .order("is_primary", { ascending: false })
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    console.error("getAccounts failed:", error.message);
+    return [];
+  }
+
+  return data ?? [];
+}
+
+export type IngestionConnectionRow = {
+  id: string;
+  label: string;
+  provider: string;
+  status: "active" | "revoked";
+  credential_prefix: string;
+  last_used_at: string | null;
+  created_at: string;
+  account_id: string;
+  account_name: string;
+};
+
+export async function getIngestionConnections(): Promise<
+  IngestionConnectionRow[]
+> {
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("ingestion_connections")
+    .select(
+      // Two FKs link ingestion_connections to accounts (the plain account_id
+      // one, and the composite ingestion_connections_account_same_workspace
+      // one used only to guarantee same-workspace routing at the database
+      // level) - the embed must name the single-column FK explicitly or
+      // PostgREST cannot pick one automatically.
+      "id, label, provider, status, credential_prefix, last_used_at, created_at, account_id, accounts!ingestion_connections_account_id_fkey(name)",
+    )
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    console.error("getIngestionConnections failed:", error.message);
+    return [];
+  }
+
+  return (data ?? []).map((row) => {
+    const account = row.accounts as unknown as { name: string } | null;
+    return {
+      id: row.id,
+      label: row.label,
+      provider: row.provider,
+      status: row.status,
+      credential_prefix: row.credential_prefix,
+      last_used_at: row.last_used_at,
+      created_at: row.created_at,
+      account_id: row.account_id,
+      account_name: account?.name ?? "Unknown account",
+    };
+  });
+}
