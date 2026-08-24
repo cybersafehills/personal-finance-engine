@@ -204,7 +204,10 @@ password_requirements = ""
 
 [auth.rate_limit]
 # Number of emails that can be sent per hour. Requires auth.email.smtp to be enabled.
-email_sent = 2
+# This limit only actually applies once custom SMTP is turned on below -
+# the default value of 2 was fine while it was dormant, but would throttle
+# real signups/resets project-wide the moment Resend SMTP goes live.
+email_sent = 30
 # Number of SMS messages that can be sent per hour. Requires auth.sms to be enabled.
 sms_sent = 30
 # Number of anonymous sign-ins that can be made per hour per IP address. Requires enable_anonymous_sign_ins = true.
@@ -251,15 +254,21 @@ otp_length = 8
 # Number of seconds before the email OTP expires (defaults to 1 hour).
 otp_expiry = 3600
 
-# Use a production-ready SMTP server
-# [auth.email.smtp]
-# enabled = true
-# host = "smtp.sendgrid.net"
-# port = 587
-# user = "apikey"
-# pass = "env(SENDGRID_API_KEY)"
-# admin_email = "admin@email.com"
-# sender_name = "Admin"
+# Production SMTP: Resend's relay, same account/domain as the app's own
+# transactional emails (web/lib/resend.ts, web/lib/emails.ts) - one
+# provider for both Supabase Auth's own emails (confirmation, password
+# reset) and the app's own (invites, sign-in notifications). admin_email
+# must be an address on a domain verified in Resend, same constraint as
+# RESEND_FROM_EMAIL in web/.env.local.example - reusing that same env
+# var here rather than a second one.
+[auth.email.smtp]
+enabled = true
+host = "smtp.resend.com"
+port = 587
+user = "resend"
+pass = "env(RESEND_API_KEY)"
+admin_email = "env(RESEND_FROM_EMAIL)"
+sender_name = "OneLedger"
 
 # Uncomment to customize email template
 # [auth.email.template.invite]
