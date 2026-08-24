@@ -31,6 +31,12 @@ export default async function TransactionsPage({
               </Link>
             )}
             <Link
+              href="/transactions/transfers"
+              className="text-sm font-medium text-accent hover:underline"
+            >
+              Transfers
+            </Link>
+            <Link
               href="/transactions/new"
               className="min-h-11 rounded-control bg-accent px-4 py-2.5 text-sm font-medium text-accent-foreground"
             >
