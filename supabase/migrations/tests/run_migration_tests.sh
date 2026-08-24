@@ -204,22 +204,25 @@ fi
 apply_chain() {
   local dbname="$1"
   local migrations=("$MIGRATIONS_DIR"/*.sql)
-  local last="${migrations[@]: -1:1}"
+  # The ownership-backfill migration is only ever safe to apply once a
+  # real owner exists - see that migration's own comments. A genuinely
+  # fresh database (this function's contract) has no owner yet, so
+  # simulate the real intended production sequencing here: apply every
+  # migration up through the one that creates handle_new_user(), have one
+  # synthetic "owner" sign up (exactly what a real fresh deployment
+  # requires before the backfill migration can run), then continue
+  # applying the rest of the chain. This is not a workaround for the test
+  # harness - it is the actual required operational order, modeled
+  # accurately. Triggered off the specific migration filename that
+  # creates the trigger, not "the last file" - later migrations (e.g.
+  # Phase C) legitimately come after the backfill migration in the
+  # directory listing.
+  local owner_trigger_migration="20260821000000_phase_b_identity_and_tenancy.sql"
   for f in "${migrations[@]}"; do
-    if [ "$f" = "$last" ]; then
-      # The final (Phase B ownership-backfill) migration is only ever
-      # safe to apply once a real owner exists - see that migration's own
-      # comments. A genuinely fresh database (this function's contract)
-      # has no owner yet, so simulate the real intended production
-      # sequencing here: apply every migration up through the one that
-      # creates handle_new_user(), have the one synthetic "owner" sign up
-      # (exactly what a real fresh deployment requires before the backfill
-      # migration can run), then apply the backfill migration. This is not
-      # a workaround for the test harness - it is the actual required
-      # operational order, modeled accurately.
+    psql -d "$dbname" -v ON_ERROR_STOP=1 -f "$f" >/dev/null
+    if [[ "$f" == *"$owner_trigger_migration" ]]; then
       psql -d "$dbname" -t -A -c "insert into auth.users (email) values ('test-owner@example.com');" >/dev/null
     fi
-    psql -d "$dbname" -v ON_ERROR_STOP=1 -f "$f" >/dev/null
   done
 }
 
@@ -507,10 +510,10 @@ fi
 echo "=== privilege/RLS regression check ==="
 RLS_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_class where relnamespace='public'::regnamespace and relkind='r' and relrowsecurity;")"
 TABLE_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_class where relnamespace='public'::regnamespace and relkind='r';")"
-if [ "$RLS_COUNT" = "$TABLE_COUNT" ] && [ "$TABLE_COUNT" = "9" ]; then
-  pass "RLS enabled on all 9 tables after the full chain (6 Phase 3 + 3 Phase B: profiles, workspaces, workspace_memberships)"
+if [ "$RLS_COUNT" = "$TABLE_COUNT" ] && [ "$TABLE_COUNT" = "19" ]; then
+  pass "RLS enabled on all 19 tables after the full chain (6 Phase 3 + 3 Phase B + 1 Phase C + 7 Phase D + 2 Phase E: transaction_splits, transfer_links)"
 else
-  fail "RLS not enabled on all tables: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled (expected 9 of 9)"
+  fail "RLS not enabled on all tables: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled (expected 19 of 19)"
 fi
 
 # anon must remain fully revoked everywhere - Phase B never touches this.
@@ -527,14 +530,22 @@ fi
 # profiles (select, update), workspaces (select, update),
 # workspace_memberships (select), accounts (select, insert, update),
 # transactions (select, update), merchant_rules (select, insert, update)
-# = 13 grants. Asserting the exact count (not just "some") forces this
-# test to be updated - a deliberate review point - if any future migration
-# ever widens authenticated's table-level access.
+# = 13 Phase B grants, plus Phase C's ingestion_connections (select,
+# insert, update) = 3 more = 16, plus Phase D's budget_templates (select),
+# budget_template_allocations (select), budgets (select, insert, update),
+# budget_allocations (select, insert, update, delete),
+# budget_category_mappings (select, insert, update), financial_goals
+# (select, insert, update), goal_contributions (select, insert, delete)
+# = 18 more = 34, plus Phase E's transaction_splits (select, insert,
+# update, delete) and transfer_links (select, insert, delete) = 7 more,
+# for 41 total. Asserting the exact count (not just "some") forces this
+# test to be updated - a deliberate review point - if any future
+# migration ever widens authenticated's table-level access.
 AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and grantee = 'authenticated';")"
-if [ "$AUTHENTICATED_GRANT_COUNT" = "13" ]; then
-  pass "authenticated holds exactly the 13 Phase B table grants expected, no more"
+if [ "$AUTHENTICATED_GRANT_COUNT" = "41" ]; then
+  pass "authenticated holds exactly the 41 Phase B + Phase C + Phase D + Phase E table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 13 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 41 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -656,15 +667,22 @@ fi
 # ===========================================================================
 echo "=== K: ownership backfill migration ==="
 bootstrap_db "pfe_k"
-# Apply every migration except the last (the backfill/tighten one), so this
-# database is in exactly the pre-backfill state a real production
-# application of Phase B would be in immediately after migration 1.
+# Apply every migration up to (but not including) the backfill/tighten
+# one, so this database is in exactly the pre-backfill state a real
+# production application of Phase B would be in immediately after
+# migration 1. Identified by filename, not "all but the last file in the
+# directory" - migrations after the backfill one (e.g. Phase C) exist now
+# and must NOT be applied yet at this point in the test; this test is
+# specifically isolating the backfill migration's own behavior.
 ALL_MIGRATIONS=("$MIGRATIONS_DIR"/*.sql)
-LAST_MIGRATION="${ALL_MIGRATIONS[@]: -1:1}"
+BACKFILL_MIGRATION_NAME="20260821000100_phase_b_ownership_backfill_and_constraints.sql"
+LAST_MIGRATION=""
 for f in "${ALL_MIGRATIONS[@]}"; do
-  if [ "$f" != "$LAST_MIGRATION" ]; then
-    psql -d pfe_k -v ON_ERROR_STOP=1 -f "$f" >/dev/null
+  if [[ "$f" == *"$BACKFILL_MIGRATION_NAME" ]]; then
+    LAST_MIGRATION="$f"
+    break
   fi
+  psql -d pfe_k -v ON_ERROR_STOP=1 -f "$f" >/dev/null
 done
 
 # accounting_foundation.sql (part of "all but last" above) already seeds
@@ -711,12 +729,16 @@ else
 fi
 
 # Guard: an ambiguous pre-backfill state (two unlinked accounts) must make
-# the backfill migration refuse to guess, not silently pick one.
+# the backfill migration refuse to guess, not silently pick one. Reapplies
+# the same "up to but not including the backfill migration" boundary as
+# above, by filename rather than position, so later migrations (e.g. Phase
+# C) are correctly excluded here too.
 bootstrap_db "pfe_k"
 for f in "${ALL_MIGRATIONS[@]}"; do
-  if [ "$f" != "$LAST_MIGRATION" ]; then
-    psql -d pfe_k -v ON_ERROR_STOP=1 -f "$f" >/dev/null
+  if [[ "$f" == *"$BACKFILL_MIGRATION_NAME" ]]; then
+    break
   fi
+  psql -d pfe_k -v ON_ERROR_STOP=1 -f "$f" >/dev/null
 done
 psql -d pfe_k -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
 insert into public.accounts (id, name, provider, currency) values
@@ -762,10 +784,15 @@ as_user() {
   local user_id="$1"
   local sql="$2"
   # SET ROLE and the set_config() call each print their own output line
-  # even under -t/-A (a "SET" command tag and the config's return value) -
-  # only the final statement's result (the actual query this call cares
-  # about) is wanted, so take the last line.
-  psql -d pfe_rls -t -A -c "set role authenticated; select set_config('request.jwt.claim.sub', '$user_id', false); $sql" | tail -1
+  # even under -t/-A (a "SET" command tag and the config's return value),
+  # and a final DML statement without RETURNING prints its own completion
+  # tag (e.g. "INSERT 0 1") the same way - only the final statement's
+  # actual result (a SELECT's row, or a RETURNING clause's row) is wanted,
+  # so drop every line that is just a bare command tag and take whatever
+  # remains last.
+  psql -d pfe_rls -t -A -c "set role authenticated; select set_config('request.jwt.claim.sub', '$user_id', false); $sql" \
+    | grep -Ev '^(SET|INSERT [0-9]+ [0-9]+|UPDATE [0-9]+|DELETE [0-9]+)$' \
+    | tail -1
 }
 
 # A cannot read B's workspace, account, or transaction.
@@ -829,6 +856,421 @@ if [ "$SERVICE_ROLE_SEES_BOTH" = "2" ]; then
   pass "RLS: service_role still sees every workspace's data, unaffected by RLS (as required for ingest-momo to keep working)"
 else
   fail "RLS: service_role's visibility changed ($SERVICE_ROLE_SEES_BOTH of 2 expected) - would break ingest-momo"
+fi
+
+# ===========================================================================
+# Phase C: account lifecycle (is_primary uniqueness, archived/active
+# consistency) and ingestion_connections (RLS CRUD, credential-hash
+# uniqueness, bound-account routing, and adversarial cross-workspace
+# isolation - the two-user isolation suite the master prompt requires,
+# extended to the new Phase C tables). Reuses pfe_rls (already bootstrapped
+# above with USER_A/WORKSPACE_A/account d1 and USER_B/WORKSPACE_B/account
+# c1) rather than standing up a fresh database.
+# ===========================================================================
+echo "=== Phase C: accounts and ingestion_connections ==="
+
+# --- account lifecycle -----------------------------------------------------
+
+# At most one primary account per workspace.
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.accounts (id, workspace_id, name, provider, currency)
+  values ('00000000-0000-0000-0000-0000000000e1', '$WORKSPACE_A', 'A Second Account', 'mtn_momo', 'RWF');
+  update public.accounts set is_primary = true where id = '00000000-0000-0000-0000-0000000000d1';
+" >/dev/null
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "update public.accounts set is_primary = true where id = '00000000-0000-0000-0000-0000000000e1';" >/dev/null 2>$ARTIFACT_DIR/pfe_primary_stderr.log; then
+  fail "Phase C: a workspace was allowed two primary accounts - idx_accounts_one_primary_per_workspace not enforced"
+else
+  pass "Phase C: at most one primary account per workspace is enforced"
+fi
+rm -f $ARTIFACT_DIR/pfe_primary_stderr.log
+
+# archived_at must be null iff is_active = true.
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "update public.accounts set is_active = false where id = '00000000-0000-0000-0000-0000000000e1';" >/dev/null 2>$ARTIFACT_DIR/pfe_archive_stderr.log; then
+  fail "Phase C: an account was set inactive without archived_at - accounts_archived_consistent_with_active not enforced"
+else
+  pass "Phase C: archiving an account requires archived_at to be set consistently with is_active"
+fi
+rm -f $ARTIFACT_DIR/pfe_archive_stderr.log
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "update public.accounts set is_active = false, archived_at = now() where id = '00000000-0000-0000-0000-0000000000e1';" >/dev/null
+ARCHIVED_OK="$(psql -d pfe_rls -t -A -c "select count(*) from public.accounts where id = '00000000-0000-0000-0000-0000000000e1' and is_active = false and archived_at is not null;")"
+if [ "$ARCHIVED_OK" = "1" ]; then
+  pass "Phase C: archiving an account with both fields set consistently succeeds"
+else
+  fail "Phase C: archiving an account with both fields set consistently was unexpectedly rejected"
+fi
+
+# --- ingestion_connections: ownership, RLS CRUD -----------------------------
+
+# A third user, added as a non-owner member of workspace A, to exercise the
+# select-yes/write-no boundary the owner-only write policies are meant to
+# enforce (Phase B only ever creates role=owner rows via signup, so this
+# membership is seeded directly, exactly as is_workspace_member's own
+# comments anticipate for Phase C).
+USER_C="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('c@example.com') returning id;" | head -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.workspace_memberships (workspace_id, user_id, role, status, joined_at)
+  values ('$WORKSPACE_A', '$USER_C', 'member', 'active', now());
+" >/dev/null
+
+CONN_A="$(as_user "$USER_A" "insert into public.ingestion_connections (workspace_id, account_id, label, credential_hash, credential_prefix, created_by) values ('$WORKSPACE_A', '00000000-0000-0000-0000-0000000000d1', 'A''s Phone', 'hash-a-conn-1', 'pfe_aaaa', '$USER_A') returning id;" | tail -1)"
+if [ -n "$CONN_A" ]; then
+  pass "Phase C: workspace owner can create an ingestion connection bound to their own account"
+else
+  fail "Phase C: workspace owner was unable to create an ingestion connection"
+fi
+
+# Non-owner member: can read, cannot write.
+MEMBER_SEES_CONN="$(as_user "$USER_C" "select count(*) from public.ingestion_connections where id = '$CONN_A';")"
+if [ "$MEMBER_SEES_CONN" = "1" ]; then
+  pass "Phase C: a non-owner workspace member can see the workspace's ingestion connections"
+else
+  fail "Phase C: a non-owner workspace member could not see their own workspace's ingestion connection"
+fi
+if as_user "$USER_C" "insert into public.ingestion_connections (workspace_id, account_id, label, credential_hash, credential_prefix, created_by) values ('$WORKSPACE_A', '00000000-0000-0000-0000-0000000000d1', 'C''s Phone', 'hash-c-conn-1', 'pfe_cccc', '$USER_C');" >/dev/null 2>$ARTIFACT_DIR/pfe_member_insert_stderr.log; then
+  fail "Phase C: a non-owner workspace member was able to create an ingestion connection - owner-only write policy not enforced"
+else
+  pass "Phase C: a non-owner workspace member cannot create an ingestion connection (owner-only)"
+fi
+rm -f $ARTIFACT_DIR/pfe_member_insert_stderr.log
+if as_user "$USER_C" "update public.ingestion_connections set status = 'revoked', revoked_at = now() where id = '$CONN_A';" >/dev/null 2>$ARTIFACT_DIR/pfe_member_update_stderr.log; then
+  :
+fi
+CONN_STILL_ACTIVE="$(psql -d pfe_rls -t -A -c "select count(*) from public.ingestion_connections where id = '$CONN_A' and status = 'active';")"
+if [ "$CONN_STILL_ACTIVE" = "1" ]; then
+  pass "Phase C: a non-owner workspace member cannot revoke another member's ingestion connection"
+else
+  fail "Phase C: a non-owner workspace member was able to revoke an ingestion connection - isolation breach"
+fi
+rm -f $ARTIFACT_DIR/pfe_member_update_stderr.log
+
+# --- ingestion_connections: adversarial cross-workspace isolation ----------
+
+# User B (unrelated workspace) cannot see User A's connection at all.
+B_SEES_A_CONN="$(as_user "$USER_B" "select count(*) from public.ingestion_connections where id = '$CONN_A';")"
+if [ "$B_SEES_A_CONN" = "0" ]; then
+  pass "Phase C: User B cannot see User A's ingestion connection"
+else
+  fail "Phase C: User B was able to read User A's ingestion connection - isolation breach"
+fi
+
+# User B cannot revoke User A's connection by spoofing its id.
+as_user "$USER_B" "update public.ingestion_connections set status = 'revoked', revoked_at = now() where id = '$CONN_A';" >/dev/null 2>&1 || true
+CONN_STILL_ACTIVE_2="$(psql -d pfe_rls -t -A -c "select count(*) from public.ingestion_connections where id = '$CONN_A' and status = 'active';")"
+if [ "$CONN_STILL_ACTIVE_2" = "1" ]; then
+  pass "Phase C: User B cannot revoke User A's ingestion connection by spoofing its id"
+else
+  fail "Phase C: User B was able to revoke User A's ingestion connection - isolation breach"
+fi
+
+# User A cannot create a connection in User B's workspace (owner-only write
+# policy also blocks cross-workspace forgery, independent of the FK check
+# below).
+if as_user "$USER_A" "insert into public.ingestion_connections (workspace_id, account_id, label, credential_hash, credential_prefix, created_by) values ('$WORKSPACE_B', '00000000-0000-0000-0000-0000000000c1', 'Forged', 'hash-forged-1', 'pfe_ffff', '$USER_A');" >/dev/null 2>$ARTIFACT_DIR/pfe_forge_stderr.log; then
+  fail "Phase C: User A was able to create an ingestion connection in User B's workspace - isolation breach"
+else
+  pass "Phase C: User A cannot create an ingestion connection in User B's workspace"
+fi
+rm -f $ARTIFACT_DIR/pfe_forge_stderr.log
+
+# Even service_role (bypassing RLS entirely) cannot bind a connection to an
+# account that belongs to a different workspace than the connection itself
+# - ingestion_connections_account_same_workspace is a database-level
+# guarantee, not just an RLS/application check, so a bug in future
+# application code can never route a connection cross-workspace.
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "insert into public.ingestion_connections (workspace_id, account_id, label, credential_hash, credential_prefix) values ('$WORKSPACE_A', '00000000-0000-0000-0000-0000000000c1', 'Mismatched', 'hash-mismatch-1', 'pfe_mmmm');" >/dev/null 2>$ARTIFACT_DIR/pfe_mismatch_stderr.log; then
+  fail "Phase C: a connection was created with account_id/workspace_id from different workspaces - ingestion_connections_account_same_workspace not enforced"
+else
+  pass "Phase C: a connection's account_id must belong to the same workspace_id, enforced at the database level even for service_role"
+fi
+rm -f $ARTIFACT_DIR/pfe_mismatch_stderr.log
+
+# credential_hash must be globally unique (the sole lookup path ingest-momo
+# will use to authenticate a request).
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "insert into public.ingestion_connections (workspace_id, account_id, label, credential_hash, credential_prefix) values ('$WORKSPACE_B', '00000000-0000-0000-0000-0000000000c1', 'Dup Hash', 'hash-a-conn-1', 'pfe_dddd');" >/dev/null 2>$ARTIFACT_DIR/pfe_duphash_stderr.log; then
+  fail "Phase C: two ingestion connections were created with the same credential_hash - unique constraint not enforced"
+else
+  pass "Phase C: credential_hash is globally unique across all workspaces"
+fi
+rm -f $ARTIFACT_DIR/pfe_duphash_stderr.log
+
+# Owner can revoke their own connection (positive control).
+as_user "$USER_A" "update public.ingestion_connections set status = 'revoked', revoked_at = now() where id = '$CONN_A';" >/dev/null
+CONN_REVOKED="$(psql -d pfe_rls -t -A -c "select count(*) from public.ingestion_connections where id = '$CONN_A' and status = 'revoked';")"
+if [ "$CONN_REVOKED" = "1" ]; then
+  pass "Phase C: workspace owner can revoke their own ingestion connection"
+else
+  fail "Phase C: workspace owner was unable to revoke their own ingestion connection"
+fi
+
+# ===========================================================================
+# Phase D: budgets, allocations, category mappings, and goals. Reuses
+# pfe_rls (USER_A/WORKSPACE_A, USER_B/WORKSPACE_B already established
+# above) rather than standing up a fresh database.
+# ===========================================================================
+echo "=== Phase D: budgets, allocations, category mappings, and goals ==="
+
+# --- allocation-sum-100 invariant, at activation time -----------------------
+
+DRAFT_BUDGET="$(psql -d pfe_rls -t -A -c "
+  insert into public.budgets (workspace_id, name, currency, period_start, period_end, income_amount_minor, normalized_monthly_income_minor, normalized_annual_income_minor, income_frequency)
+  values ('$WORKSPACE_A', 'August', 'RWF', '2026-08-01', '2026-08-31', 500000, 500000, 6000000, 'monthly')
+  returning id;" | head -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.budget_allocations (budget_id, workspace_id, allocation_type, percentage, target_amount_minor)
+  values
+    ('$DRAFT_BUDGET', '$WORKSPACE_A', 'ESSENTIALS', 50.00, 250000),
+    ('$DRAFT_BUDGET', '$WORKSPACE_A', 'INVESTING', 15.00, 75000),
+    ('$DRAFT_BUDGET', '$WORKSPACE_A', 'EMERGENCY', 5.00, 25000),
+    ('$DRAFT_BUDGET', '$WORKSPACE_A', 'WANTS', 20.00, 100000);
+" >/dev/null
+
+# Under-allocated (90%) budget refuses to activate.
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "update public.budgets set status = 'active' where id = '$DRAFT_BUDGET';" >/dev/null 2>$ARTIFACT_DIR/pfe_activate_stderr.log; then
+  fail "Phase D: a budget with allocations totaling 90% was allowed to activate"
+else
+  pass "Phase D: activation is refused when allocation percentages do not total 100%"
+fi
+rm -f $ARTIFACT_DIR/pfe_activate_stderr.log
+
+# Correct the allocations to sum to 100% and activation succeeds.
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  update public.budget_allocations set percentage = 30.00, target_amount_minor = 150000
+  where budget_id = '$DRAFT_BUDGET' and allocation_type = 'WANTS';
+  update public.budgets set status = 'active' where id = '$DRAFT_BUDGET';
+" >/dev/null
+BUDGET_ACTIVE="$(psql -d pfe_rls -t -A -c "select count(*) from public.budgets where id = '$DRAFT_BUDGET' and status = 'active' and activated_at is not null;")"
+if [ "$BUDGET_ACTIVE" = "1" ]; then
+  pass "Phase D: a budget with allocations totaling exactly 100% activates and stamps activated_at"
+else
+  fail "Phase D: a correctly-allocated budget failed to activate"
+fi
+
+# --- allocation-sum-100 invariant, on later edits to an active budget ------
+
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "update public.budget_allocations set percentage = 10.00, target_amount_minor = 50000 where budget_id = '$DRAFT_BUDGET' and allocation_type = 'EMERGENCY';" >/dev/null 2>$ARTIFACT_DIR/pfe_edit_stderr.log; then
+  fail "Phase D: editing an active budget's allocation to break the 100% total was allowed"
+else
+  pass "Phase D: editing an active budget's allocations to no longer total 100% is rejected"
+fi
+rm -f $ARTIFACT_DIR/pfe_edit_stderr.log
+
+# --- one active budget per workspace+currency -------------------------------
+
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.budgets (workspace_id, name, currency, period_start, period_end, income_amount_minor, normalized_monthly_income_minor, normalized_annual_income_minor, income_frequency, status, activated_at)
+  values ('$WORKSPACE_A', 'August Duplicate', 'RWF', '2026-08-01', '2026-08-31', 500000, 500000, 6000000, 'monthly', 'active', now());
+" >/dev/null 2>$ARTIFACT_DIR/pfe_dupactive_stderr.log; then
+  fail "Phase D: a second active RWF budget was allowed in the same workspace"
+else
+  pass "Phase D: at most one active budget per workspace+currency is enforced"
+fi
+rm -f $ARTIFACT_DIR/pfe_dupactive_stderr.log
+
+# --- category mappings: cross-workspace isolation ---------------------------
+
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.budget_category_mappings (workspace_id, category, allocation_type)
+  values ('$WORKSPACE_A', 'Groceries', 'ESSENTIALS');
+" >/dev/null
+B_SEES_A_MAPPING="$(as_user "$USER_B" "select count(*) from public.budget_category_mappings where workspace_id = '$WORKSPACE_A';")"
+if [ "$B_SEES_A_MAPPING" = "0" ]; then
+  pass "Phase D: User B cannot see User A's category mappings"
+else
+  fail "Phase D: User B could read User A's category mappings - isolation breach"
+fi
+
+# --- financial goals and contributions --------------------------------------
+
+GOAL_A="$(psql -d pfe_rls -t -A -c "
+  insert into public.financial_goals (workspace_id, goal_type, name, currency, target_amount_minor)
+  values ('$WORKSPACE_A', 'emergency_fund', 'Emergency fund', 'RWF', 1000000)
+  returning id;" | head -1)"
+
+as_user "$USER_A" "insert into public.goal_contributions (goal_id, workspace_id, amount_minor, source) values ('$GOAL_A', '$WORKSPACE_A', 50000, 'manual');" >/dev/null
+GOAL_TOTAL_AFTER_ONE="$(psql -d pfe_rls -t -A -c "select current_amount_minor from public.financial_goals where id = '$GOAL_A';")"
+if [ "$GOAL_TOTAL_AFTER_ONE" = "50000" ]; then
+  pass "Phase D: a goal contribution is reflected in current_amount_minor via the maintenance trigger"
+else
+  fail "Phase D: current_amount_minor was $GOAL_TOTAL_AFTER_ONE after a 50000 contribution, expected 50000"
+fi
+
+# A transaction can fund at most one goal (double-counting protection).
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.momo_messages (id, raw_message, processing_status)
+  values ('00000000-0000-0000-0000-0000000000f2', 'seed', 'processed');
+  insert into public.transactions (id, momo_message_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version)
+  values ('00000000-0000-0000-0000-0000000000f3', '00000000-0000-0000-0000-0000000000f2', '00000000-0000-0000-0000-0000000000d1', '$WORKSPACE_A', 'money_received', 'in', 'success', 20000, 0, now(), 'test');
+  insert into public.goal_contributions (goal_id, workspace_id, transaction_id, amount_minor, source)
+  values ('$GOAL_A', '$WORKSPACE_A', '00000000-0000-0000-0000-0000000000f3', 20000, 'transaction_link');
+" >/dev/null
+GOAL_B="$(psql -d pfe_rls -t -A -c "
+  insert into public.financial_goals (workspace_id, goal_type, name, currency, target_amount_minor)
+  values ('$WORKSPACE_A', 'general_savings', 'Second goal', 'RWF', 500000)
+  returning id;" | head -1)"
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.goal_contributions (goal_id, workspace_id, transaction_id, amount_minor, source)
+  values ('$GOAL_B', '$WORKSPACE_A', '00000000-0000-0000-0000-0000000000f3', 20000, 'transaction_link');
+" >/dev/null 2>$ARTIFACT_DIR/pfe_dupcontrib_stderr.log; then
+  fail "Phase D: the same transaction was linked as a contribution to two different goals"
+else
+  pass "Phase D: a transaction cannot be linked as a contribution to more than one goal"
+fi
+rm -f $ARTIFACT_DIR/pfe_dupcontrib_stderr.log
+
+# User B cannot see or delete User A's goal or contributions.
+B_SEES_GOAL="$(as_user "$USER_B" "select count(*) from public.financial_goals where id = '$GOAL_A';")"
+as_user "$USER_B" "delete from public.goal_contributions where goal_id = '$GOAL_A';" >/dev/null 2>&1 || true
+GOAL_CONTRIBUTIONS_INTACT="$(psql -d pfe_rls -t -A -c "select count(*) from public.goal_contributions where goal_id = '$GOAL_A';")"
+if [ "$B_SEES_GOAL" = "0" ] && [ "$GOAL_CONTRIBUTIONS_INTACT" = "2" ]; then
+  pass "Phase D: User B cannot see or delete User A's goal or its contributions"
+else
+  fail "Phase D: User B saw the goal ($B_SEES_GOAL) or deleted contributions (now $GOAL_CONTRIBUTIONS_INTACT of 2 expected) - isolation breach"
+fi
+
+# ===========================================================================
+# Phase E: manual transactions (momo_message_id relaxation), split
+# transactions, and transfer links. Reuses pfe_rls (USER_A/WORKSPACE_A,
+# USER_B/WORKSPACE_B, and the accounts/transactions seeded above).
+# ===========================================================================
+echo "=== Phase E: manual transactions, splits, and transfer links ==="
+
+# --- momo_message_id relaxation ---------------------------------------------
+
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.transactions (id, momo_message_id, account_id, workspace_id, source, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version)
+  values ('00000000-0000-0000-0000-0000000000f5', null, '00000000-0000-0000-0000-0000000000d1', '$WORKSPACE_A', 'manual', 'other', 'out', 'success', 1000, 0, now(), 'manual-entry-v1');
+" >/dev/null 2>$ARTIFACT_DIR/pfe_manual_stderr.log; then
+  pass "Phase E: a source='manual' transaction may have a null momo_message_id"
+else
+  fail "Phase E: a manual transaction with no momo_message_id was rejected: $(cat $ARTIFACT_DIR/pfe_manual_stderr.log)"
+fi
+rm -f $ARTIFACT_DIR/pfe_manual_stderr.log
+
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.transactions (id, momo_message_id, account_id, workspace_id, source, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version)
+  values ('00000000-0000-0000-0000-0000000000f6', null, '00000000-0000-0000-0000-0000000000d1', '$WORKSPACE_A', 'mtn_momo', 'other', 'out', 'success', 1000, 0, now(), 'test');
+" >/dev/null 2>$ARTIFACT_DIR/pfe_nonmanual_stderr.log; then
+  fail "Phase E: a non-manual transaction with a null momo_message_id was allowed"
+else
+  pass "Phase E: every non-manual transaction still requires a momo_message_id"
+fi
+rm -f $ARTIFACT_DIR/pfe_nonmanual_stderr.log
+
+# --- transaction_splits: sum-to-effect invariant ----------------------------
+
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.momo_messages (id, raw_message, processing_status)
+  values ('00000000-0000-0000-0000-0000000000f7', 'seed', 'processed');
+  insert into public.transactions (id, momo_message_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, principal_effect_rwf, fee_effect_rwf, settlement_state, affects_balance, effect_reason, occurred_at, parser_version)
+  values ('00000000-0000-0000-0000-0000000000f8', '00000000-0000-0000-0000-0000000000f7', '00000000-0000-0000-0000-0000000000d1', '$WORKSPACE_A', 'merchant_payment', 'out', 'success', 1000, 0, -1000, 0, 'settled', true, 'test', now(), 'test');
+" >/dev/null
+
+# A single multi-row insert summing exactly to the transaction's effect succeeds.
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.transaction_splits (transaction_id, workspace_id, allocation_type, amount_minor) values
+    ('00000000-0000-0000-0000-0000000000f8', '$WORKSPACE_A', 'ESSENTIALS', 600),
+    ('00000000-0000-0000-0000-0000000000f8', '$WORKSPACE_A', 'WANTS', 400);
+" >/dev/null 2>$ARTIFACT_DIR/pfe_split_ok_stderr.log; then
+  pass "Phase E: a multi-row split insert summing exactly to the transaction's effect succeeds"
+else
+  fail "Phase E: a correctly-summed split insert was rejected: $(cat $ARTIFACT_DIR/pfe_split_ok_stderr.log)"
+fi
+rm -f $ARTIFACT_DIR/pfe_split_ok_stderr.log
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "delete from public.transaction_splits where transaction_id = '00000000-0000-0000-0000-0000000000f8';" >/dev/null
+
+# A multi-row insert that does NOT sum to the transaction's effect is
+# rejected - the deferred constraint trigger catches it after all rows of
+# the single statement have landed, not on the first row.
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.transaction_splits (transaction_id, workspace_id, allocation_type, amount_minor) values
+    ('00000000-0000-0000-0000-0000000000f8', '$WORKSPACE_A', 'ESSENTIALS', 600),
+    ('00000000-0000-0000-0000-0000000000f8', '$WORKSPACE_A', 'WANTS', 500);
+" >/dev/null 2>$ARTIFACT_DIR/pfe_split_bad_stderr.log; then
+  fail "Phase E: a split insert totaling 1100 against a 1000 transaction was allowed"
+else
+  pass "Phase E: a split insert not summing to the transaction's effect is rejected"
+fi
+rm -f $ARTIFACT_DIR/pfe_split_bad_stderr.log
+SPLITS_AFTER_FAILED_INSERT="$(psql -d pfe_rls -t -A -c "select count(*) from public.transaction_splits where transaction_id = '00000000-0000-0000-0000-0000000000f8';")"
+if [ "$SPLITS_AFTER_FAILED_INSERT" = "0" ]; then
+  pass "Phase E: the rejected split insert left no partial rows behind (whole statement rolled back)"
+else
+  fail "Phase E: $SPLITS_AFTER_FAILED_INSERT split row(s) survived a rejected insert - partial write"
+fi
+
+# Cannot split a transaction the accounting engine hasn't processed yet
+# (principal_effect_rwf/fee_effect_rwf still null).
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.transaction_splits (transaction_id, workspace_id, allocation_type, amount_minor)
+  values ('00000000-0000-0000-0000-0000000000d3', '$WORKSPACE_A', 'ESSENTIALS', 750);
+" >/dev/null 2>$ARTIFACT_DIR/pfe_split_unprocessed_stderr.log; then
+  fail "Phase E: a transaction with no accounting effect yet was allowed to be split"
+else
+  pass "Phase E: an unprocessed transaction (no accounting effect) cannot be split"
+fi
+rm -f $ARTIFACT_DIR/pfe_split_unprocessed_stderr.log
+
+# User B cannot see or write User A's splits.
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.transaction_splits (transaction_id, workspace_id, allocation_type, amount_minor)
+  values ('00000000-0000-0000-0000-0000000000f8', '$WORKSPACE_A', 'ESSENTIALS', 1000);
+" >/dev/null
+B_SEES_SPLIT="$(as_user "$USER_B" "select count(*) from public.transaction_splits where transaction_id = '00000000-0000-0000-0000-0000000000f8';")"
+if [ "$B_SEES_SPLIT" = "0" ]; then
+  pass "Phase E: User B cannot see User A's transaction splits"
+else
+  fail "Phase E: User B could read User A's transaction splits - isolation breach"
+fi
+
+# --- transfer_links ----------------------------------------------------------
+
+TRANSFER_LINK_A="$(psql -d pfe_rls -t -A -c "
+  insert into public.transfer_links (workspace_id, out_transaction_id, in_transaction_id, status)
+  values ('$WORKSPACE_A', '00000000-0000-0000-0000-0000000000d3', '00000000-0000-0000-0000-0000000000f3', 'linked')
+  returning id;" | head -1)"
+
+# The same out_transaction_id cannot be the OUT side of a second active link.
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.transfer_links (workspace_id, out_transaction_id, in_transaction_id, status)
+  values ('$WORKSPACE_A', '00000000-0000-0000-0000-0000000000d3', '00000000-0000-0000-0000-0000000000f8', 'linked');
+" >/dev/null 2>$ARTIFACT_DIR/pfe_dup_transfer_stderr.log; then
+  fail "Phase E: the same transaction was linked as the OUT side of two active transfers"
+else
+  pass "Phase E: a transaction can be the OUT side of at most one active transfer link"
+fi
+rm -f $ARTIFACT_DIR/pfe_dup_transfer_stderr.log
+
+# A transaction cannot be linked to itself.
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.transfer_links (workspace_id, out_transaction_id, in_transaction_id, status)
+  values ('$WORKSPACE_A', '00000000-0000-0000-0000-0000000000f8', '00000000-0000-0000-0000-0000000000f8', 'linked');
+" >/dev/null 2>$ARTIFACT_DIR/pfe_self_transfer_stderr.log; then
+  fail "Phase E: a transaction was linked to itself as a transfer"
+else
+  pass "Phase E: a transaction cannot be linked to itself as a transfer"
+fi
+rm -f $ARTIFACT_DIR/pfe_self_transfer_stderr.log
+
+# A dismissed row reusing an already-linked out_transaction_id is allowed
+# (the partial unique index only governs status='linked').
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.transfer_links (workspace_id, out_transaction_id, in_transaction_id, status)
+  values ('$WORKSPACE_A', '00000000-0000-0000-0000-0000000000d3', '00000000-0000-0000-0000-0000000000f8', 'dismissed');
+" >/dev/null 2>$ARTIFACT_DIR/pfe_dismissed_transfer_stderr.log; then
+  pass "Phase E: a dismissed transfer suggestion does not conflict with an existing linked one"
+else
+  fail "Phase E: a dismissed-status row was incorrectly blocked by the linked-only unique index: $(cat $ARTIFACT_DIR/pfe_dismissed_transfer_stderr.log)"
+fi
+rm -f $ARTIFACT_DIR/pfe_dismissed_transfer_stderr.log
+
+# User B cannot see or delete User A's transfer link.
+B_SEES_TRANSFER="$(as_user "$USER_B" "select count(*) from public.transfer_links where id = '$TRANSFER_LINK_A';")"
+as_user "$USER_B" "delete from public.transfer_links where id = '$TRANSFER_LINK_A';" >/dev/null 2>&1 || true
+TRANSFER_LINK_INTACT="$(psql -d pfe_rls -t -A -c "select count(*) from public.transfer_links where id = '$TRANSFER_LINK_A';")"
+if [ "$B_SEES_TRANSFER" = "0" ] && [ "$TRANSFER_LINK_INTACT" = "1" ]; then
+  pass "Phase E: User B cannot see or delete User A's transfer link"
+else
+  fail "Phase E: User B saw ($B_SEES_TRANSFER) or deleted (now $TRANSFER_LINK_INTACT of 1 expected) User A's transfer link - isolation breach"
 fi
 
 echo ""

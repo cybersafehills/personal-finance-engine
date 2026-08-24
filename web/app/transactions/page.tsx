@@ -21,14 +21,28 @@ export default async function TransactionsPage({
       <PageHeader
         title={categoryFilter ?? "Transactions"}
         action={
-          categoryFilter && (
+          <div className="flex items-center gap-3">
+            {categoryFilter && (
+              <Link
+                href="/transactions"
+                className="rounded px-2 py-1 text-sm font-medium text-text-secondary hover:text-text-primary"
+              >
+                Clear filter
+              </Link>
+            )}
             <Link
-              href="/transactions"
-              className="rounded px-2 py-1 text-sm font-medium text-text-secondary hover:text-text-primary"
+              href="/transactions/transfers"
+              className="text-sm font-medium text-accent hover:underline"
             >
-              Clear filter
+              Transfers
             </Link>
-          )
+            <Link
+              href="/transactions/new"
+              className="min-h-11 rounded-control bg-accent px-4 py-2.5 text-sm font-medium text-accent-foreground"
+            >
+              Add transaction
+            </Link>
+          </div>
         }
       />
       <TransactionList

@@ -1,10 +1,12 @@
 import { notFound } from "next/navigation";
-import { getTransactionById } from "../../../lib/queries";
+import { getTransactionById, getTransactionSplits } from "../../../lib/queries";
 import { formatFullDateTime, formatRwf } from "../../../lib/format";
 import { displayName } from "../../../lib/display-name";
+import { isSupportedCurrency } from "../../../lib/money";
 import { MoneyAmount } from "../../../components/MoneyAmount";
 import { Badge } from "../../../components/Badge";
 import { CategoryCorrectionForm } from "../../../components/CategoryCorrectionForm";
+import { TransactionSplitForm } from "../../../components/TransactionSplitForm";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +27,15 @@ export default async function TransactionDetailPage({
   if (!transaction) {
     notFound();
   }
+
+  const canSplit = transaction.direction === "out" &&
+    transaction.settlement_state === "settled" &&
+    transaction.principal_effect_rwf !== null &&
+    isSupportedCurrency(transaction.currency);
+  const splits = canSplit ? await getTransactionSplits(id) : [];
+  const transactionEffectMinor = canSplit
+    ? Math.abs(Number(transaction.principal_effect_rwf) + Number(transaction.fee_effect_rwf))
+    : 0;
 
   const signedAmount =
     transaction.direction === "in"
@@ -114,6 +125,28 @@ export default async function TransactionDetailPage({
           counterpartyName={transaction.counterparty_name}
         />
       </section>
+
+      {canSplit && isSupportedCurrency(transaction.currency) && (
+        <section
+          aria-label="Budget split"
+          className="rounded-card border border-border-subtle bg-surface p-4"
+        >
+          <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+            Budget allocation
+          </p>
+          <p className="mt-1 text-sm text-text-muted">
+            By default this transaction counts entirely toward its
+            category&apos;s mapped allocation. Split it to divide the
+            amount across multiple allocations instead.
+          </p>
+          <TransactionSplitForm
+            transactionId={transaction.id}
+            currency={transaction.currency}
+            transactionEffectMinor={transactionEffectMinor}
+            existingSplits={splits}
+          />
+        </section>
+      )}
     </div>
   );
 }
