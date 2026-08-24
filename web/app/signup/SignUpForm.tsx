@@ -33,12 +33,7 @@ export function SignUpForm({ next }: { next: string }) {
         event.preventDefault();
         setError(null);
         startTransition(async () => {
-          const result = await signUp(
-            email,
-            password,
-            window.location.origin,
-            next,
-          );
+          const result = await signUp(email, password, next);
           if (!result.ok) {
             setError(result.error);
             return;

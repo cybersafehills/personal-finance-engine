@@ -71,13 +71,7 @@ export function CreateInviteForm({
         event.preventDefault();
         setErrorMessage(null);
         startTransition(async () => {
-          const result = await createInvite(
-            workspaceId,
-            email,
-            role,
-            window.location.origin,
-            workspaceName,
-          );
+          const result = await createInvite(workspaceId, email, role, workspaceName);
           if (result.ok) {
             setRevealed({ link: result.link, emailSent: result.emailSent });
           } else {

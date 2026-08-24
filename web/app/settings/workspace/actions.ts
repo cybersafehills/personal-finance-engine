@@ -6,6 +6,7 @@ import { cookies } from "next/headers";
 import { supabaseSession } from "../../../lib/supabase-session-server";
 import { generateInviteToken } from "../../../lib/credentials";
 import { sendInviteEmail } from "../../../lib/emails";
+import { siteUrl } from "../../../lib/site-url";
 import type { WorkspaceRole } from "../../../lib/queries";
 
 export type WorkspaceActionResult = { ok: true } | { ok: false; error: string };
@@ -86,7 +87,6 @@ export async function createInvite(
   workspaceId: string,
   email: string,
   role: string,
-  siteUrl: string,
   workspaceName: string,
 ): Promise<CreateInviteResult> {
   const trimmedEmail = email.trim();
@@ -126,7 +126,7 @@ export async function createInvite(
     return { ok: false, error: "Could not create the invite." };
   }
 
-  const link = `${siteUrl}/invite/${token.secret}`;
+  const link = `${siteUrl()}/invite/${token.secret}`;
   const { ok: emailSent } = await sendInviteEmail({
     to: trimmedEmail,
     workspaceName,

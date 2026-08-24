@@ -155,16 +155,24 @@ max_indexes = 5
 [auth]
 enabled = true
 # The base URL of your website. Used as an allow-list for redirects and for constructing URLs used
-# in emails.
-site_url = "https://web-tawny-omega-76.vercel.app"
+# in emails. www.oneledger.me is the real production domain (confirmed
+# live via `vercel deploy --prod`'s alias output) - the raw
+# web-tawny-omega-76.vercel.app deployment URL is kept below as an
+# additional allowed redirect only, not the primary site_url, now that
+# every Server Action builds links from SITE_URL (lib/site-url.ts)
+# instead of the request's own origin.
+site_url = "https://www.oneledger.me"
 # The public URL that Auth serves on. Defaults to the API external URL with `/auth/v1` appended.
 # external_url = ""
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
-# Includes the production callback and local dev (both the loopback IP
-# and "localhost" - browsers treat these as distinct origins), on the
+# Includes both the apex and www production hosts, the raw Vercel
+# deployment URL (kept as a fallback), and local dev (both the loopback
+# IP and "localhost" - browsers treat these as distinct origins), on the
 # actual local dev port this project runs on (3417, not the Supabase
 # CLI's own default of 3000).
 additional_redirect_urls = [
+  "https://www.oneledger.me/auth/callback",
+  "https://oneledger.me/auth/callback",
   "https://web-tawny-omega-76.vercel.app/auth/callback",
   "http://127.0.0.1:3417/auth/callback",
   "http://localhost:3417/auth/callback",
