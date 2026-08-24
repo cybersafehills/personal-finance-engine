@@ -26,9 +26,12 @@ export type TransactionRow = {
   transaction_type: string;
   direction: "in" | "out" | "neutral";
   status: string;
+  currency: string;
   amount_rwf: number;
   fee_rwf: number;
   net_effect_rwf: number;
+  principal_effect_rwf: number | null;
+  fee_effect_rwf: number | null;
   balance_after_rwf: number | null;
   counterparty_name: string | null;
   counterparty_reference: string | null;
@@ -41,7 +44,7 @@ export type TransactionRow = {
 };
 
 const TRANSACTION_COLUMNS =
-  "id, transaction_type, direction, status, amount_rwf, fee_rwf, net_effect_rwf, balance_after_rwf, counterparty_name, counterparty_reference, occurred_at, category, subcategory, category_source, settlement_state, affects_balance";
+  "id, transaction_type, direction, status, currency, amount_rwf, fee_rwf, net_effect_rwf, principal_effect_rwf, fee_effect_rwf, balance_after_rwf, counterparty_name, counterparty_reference, occurred_at, category, subcategory, category_source, settlement_state, affects_balance";
 
 export async function getCurrentBalance(): Promise<number | null> {
   const supabase = await supabaseSession();
@@ -546,7 +549,7 @@ export async function getBudgetActuals(
   const { startUtc } = kigaliDayBoundsUtc(budget.period_start);
   const { endUtc } = kigaliDayBoundsUtc(budget.period_end);
 
-  const [outResult, inResult, mappingsResult, transferLinksResult] = await Promise.all([
+  const [outResult, inResult, mappingsResult, transferLinksResult, splitsResult] = await Promise.all([
     supabase
       .from("transactions")
       .select("id, category, principal_effect_rwf, fee_effect_rwf, occurred_at")
@@ -570,12 +573,23 @@ export async function getBudgetActuals(
       .from("transfer_links")
       .select("out_transaction_id, in_transaction_id")
       .eq("status", "linked"),
+    supabase
+      .from("transaction_splits")
+      .select("transaction_id, allocation_type, amount_minor"),
   ]);
 
   if (outResult.error) console.error("getBudgetActuals (out) failed:", outResult.error.message);
   if (inResult.error) console.error("getBudgetActuals (in) failed:", inResult.error.message);
   if (mappingsResult.error) console.error("getBudgetActuals (mappings) failed:", mappingsResult.error.message);
   if (transferLinksResult.error) console.error("getBudgetActuals (transfer links) failed:", transferLinksResult.error.message);
+  if (splitsResult.error) console.error("getBudgetActuals (splits) failed:", splitsResult.error.message);
+
+  const splitsByTransaction = new Map<string, { allocation_type: AllocationType; amount_minor: number }[]>();
+  for (const row of splitsResult.data ?? []) {
+    const existing = splitsByTransaction.get(row.transaction_id) ?? [];
+    existing.push({ allocation_type: row.allocation_type as AllocationType, amount_minor: row.amount_minor });
+    splitsByTransaction.set(row.transaction_id, existing);
+  }
 
   // Confirmed self-transfers move money between the user's own accounts -
   // never expenditure or income (see the master prompt's own rule, and
@@ -598,6 +612,20 @@ export async function getBudgetActuals(
 
   for (const row of outRows) {
     const effect = Math.abs(Number(row.principal_effect_rwf) + Number(row.fee_effect_rwf));
+
+    // A split transaction is governed entirely by its own split rows -
+    // never by category mapping, even if it also has a mapped category.
+    // See transaction_splits' own comment in the Phase E migration.
+    const splits = splitsByTransaction.get(row.id);
+    if (splits && splits.length > 0) {
+      for (const split of splits) {
+        totalsByAllocation.set(
+          split.allocation_type,
+          (totalsByAllocation.get(split.allocation_type) ?? 0) + split.amount_minor,
+        );
+      }
+      continue;
+    }
 
     if (!row.category) {
       uncategorizedMinor += effect;
@@ -883,6 +911,34 @@ export async function getTransferLinks(): Promise<LinkedTransferRow[]> {
 
   if (error) {
     console.error("getTransferLinks failed:", error.message);
+    return [];
+  }
+
+  return data ?? [];
+}
+
+// ===========================================================================
+// Transaction splits
+// ===========================================================================
+
+export type TransactionSplitRow = {
+  id: string;
+  allocation_type: AllocationType;
+  amount_minor: number;
+};
+
+export async function getTransactionSplits(
+  transactionId: string,
+): Promise<TransactionSplitRow[]> {
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("transaction_splits")
+    .select("id, allocation_type, amount_minor")
+    .eq("transaction_id", transactionId)
+    .order("allocation_type", { ascending: true });
+
+  if (error) {
+    console.error("getTransactionSplits failed:", error.message);
     return [];
   }
 

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { supabaseSession } from "../../lib/supabase-session-server";
 import { getOwnedWorkspaceId } from "../../lib/queries";
 import { isSupportedCurrency, toMinorUnits } from "../../lib/money";
+import { ALLOCATION_TYPES, AllocationType } from "../../lib/budget-math";
 
 export type ManualTransactionResult =
   | { ok: true; transactionId: string }
@@ -164,4 +165,118 @@ export async function createManualTransaction(
   revalidatePath("/transactions");
   revalidatePath("/budgets");
   return { ok: true, transactionId: data.id };
+}
+
+export type SimpleActionResult = { ok: true } | { ok: false; error: string };
+
+function isAllocationType(value: string): value is AllocationType {
+  return (ALLOCATION_TYPES as readonly string[]).includes(value);
+}
+
+/**
+ * Replaces a transaction's split across allocations (delete-then-insert,
+ * not a diff/patch - the whole set is always specified together, since a
+ * partial split makes no sense). The transaction_splits_total constraint
+ * trigger (deferred to statement end, see the Phase E migration) is what
+ * actually enforces the amounts sum exactly to the transaction's settled
+ * effect - this only does the friendlier client-facing validation first.
+ */
+export async function setTransactionSplits(
+  transactionId: string,
+  splits: { allocationType: string; amountText: string }[],
+): Promise<SimpleActionResult> {
+  const supabase = await supabaseSession();
+  const { data: transaction, error: transactionError } = await supabase
+    .from("transactions")
+    .select("currency, workspace_id, principal_effect_rwf, fee_effect_rwf, settlement_state")
+    .eq("id", transactionId)
+    .maybeSingle();
+
+  if (transactionError || !transaction || !isSupportedCurrency(transaction.currency)) {
+    return { ok: false, error: "Transaction not found." };
+  }
+  if (transaction.settlement_state !== "settled" || transaction.principal_effect_rwf === null) {
+    return { ok: false, error: "Only settled transactions can be split." };
+  }
+
+  if (splits.length === 0) {
+    return { ok: false, error: "Add at least one allocation, or clear the split entirely." };
+  }
+
+  const seenTypes = new Set<string>();
+  const parsedSplits: { allocationType: AllocationType; amountMinor: bigint }[] = [];
+  for (const split of splits) {
+    if (!isAllocationType(split.allocationType)) {
+      return { ok: false, error: "Unrecognized allocation type." };
+    }
+    if (seenTypes.has(split.allocationType)) {
+      return { ok: false, error: "Each allocation can only appear once in a split." };
+    }
+    seenTypes.add(split.allocationType);
+
+    let amountMinor: bigint;
+    try {
+      amountMinor = toMinorUnits(split.amountText, transaction.currency);
+    } catch {
+      return { ok: false, error: "Enter valid amounts for every allocation." };
+    }
+    if (amountMinor <= 0n) {
+      return { ok: false, error: "Every split amount must be greater than zero." };
+    }
+    parsedSplits.push({ allocationType: split.allocationType, amountMinor });
+  }
+
+  const transactionEffect = Math.abs(
+    Number(transaction.principal_effect_rwf) + Number(transaction.fee_effect_rwf),
+  );
+  const splitsTotal = parsedSplits.reduce((sum, s) => sum + s.amountMinor, 0n);
+  if (splitsTotal !== BigInt(transactionEffect)) {
+    return {
+      ok: false,
+      error: `Splits must total exactly the transaction's amount (${transactionEffect}), got ${splitsTotal}.`,
+    };
+  }
+
+  const { error: deleteError } = await supabase
+    .from("transaction_splits")
+    .delete()
+    .eq("transaction_id", transactionId);
+  if (deleteError) {
+    return { ok: false, error: "Could not update the split." };
+  }
+
+  const { error: insertError } = await supabase.from("transaction_splits").insert(
+    parsedSplits.map((s) => ({
+      transaction_id: transactionId,
+      workspace_id: transaction.workspace_id,
+      allocation_type: s.allocationType,
+      amount_minor: s.amountMinor,
+    })),
+  );
+  if (insertError) {
+    return { ok: false, error: "Could not save the split." };
+  }
+
+  revalidatePath(`/transactions/${transactionId}`);
+  revalidatePath("/budgets");
+  return { ok: true };
+}
+
+/** Removes a transaction's split - it reverts to being assigned wholesale via its category mapping, exactly as before any split existed. */
+export async function clearTransactionSplits(
+  transactionId: string,
+): Promise<SimpleActionResult> {
+  const supabase = await supabaseSession();
+  const { error } = await supabase
+    .from("transaction_splits")
+    .delete()
+    .eq("transaction_id", transactionId);
+
+  if (error) {
+    return { ok: false, error: "Could not clear the split." };
+  }
+
+  revalidatePath(`/transactions/${transactionId}`);
+  revalidatePath("/budgets");
+  return { ok: true };
 }
