@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { supabaseSession } from "../../lib/supabase-session-server";
-import { getOwnedWorkspaceId } from "../../lib/queries";
+import { getOwnedWorkspaceId, getVariableIncomeMonths, VariableIncomeMonth } from "../../lib/queries";
 import {
   allocateAmounts,
   AllocationPercentages,
@@ -31,6 +31,8 @@ export type BudgetDraftInput = {
   incomeFrequency: string;
   percentages: AllocationPercentages;
   templateId?: string | null;
+  /** Informational only - does not change how incomeAmountText is normalized. Records that this figure came from (or was checked against) the 3-month variable-income recommendation, see BudgetCalculator's variable-income mode. */
+  incomeMode?: "fixed" | "variable";
 };
 
 function isIncomeFrequency(value: string): value is IncomeFrequency {
@@ -119,6 +121,7 @@ type InsertBudgetInput = {
   monthlyIncomeMinor: bigint;
   annualIncomeMinor: bigint;
   incomeFrequency: IncomeFrequency;
+  incomeMode: "fixed" | "variable";
   percentages: AllocationPercentages;
   sourceBudgetId?: string;
 };
@@ -158,6 +161,7 @@ async function insertBudgetWithAllocations(
       normalized_monthly_income_minor: input.monthlyIncomeMinor,
       normalized_annual_income_minor: input.annualIncomeMinor,
       income_frequency: input.incomeFrequency,
+      income_mode: input.incomeMode,
       source_budget_id: input.sourceBudgetId ?? null,
     })
     .select("id")
@@ -212,6 +216,7 @@ export async function createBudget(
     monthlyIncomeMinor: parsed.monthlyIncomeMinor,
     annualIncomeMinor: parsed.annualIncomeMinor,
     incomeFrequency: parsed.incomeFrequency,
+    incomeMode: input.incomeMode ?? "fixed",
     percentages: input.percentages,
   });
 }
@@ -441,7 +446,7 @@ export async function duplicateBudget(
   const source = await supabase
     .from("budgets")
     .select(
-      "name, currency, income_amount_minor, normalized_monthly_income_minor, normalized_annual_income_minor, income_frequency, template_id",
+      "name, currency, income_amount_minor, normalized_monthly_income_minor, normalized_annual_income_minor, income_frequency, income_mode, template_id",
     )
     .eq("id", sourceBudgetId)
     .maybeSingle();
@@ -481,7 +486,22 @@ export async function duplicateBudget(
     monthlyIncomeMinor: BigInt(source.data.normalized_monthly_income_minor),
     annualIncomeMinor: BigInt(source.data.normalized_annual_income_minor),
     incomeFrequency: source.data.income_frequency,
+    incomeMode: source.data.income_mode === "variable" ? "variable" : "fixed",
     percentages,
     sourceBudgetId,
   });
+}
+
+/**
+ * Server-action wrapper around getVariableIncomeMonths() so the calculator
+ * (a client component) can fetch this on demand - when the user switches
+ * to variable-income mode, or changes currency while already in it -
+ * rather than every currency's 3 months of candidate data being fetched
+ * upfront on page load regardless of whether it's ever used.
+ */
+export async function fetchVariableIncomeMonths(
+  currency: string,
+): Promise<VariableIncomeMonth[]> {
+  if (!isSupportedCurrency(currency)) return [];
+  return getVariableIncomeMonths(currency);
 }

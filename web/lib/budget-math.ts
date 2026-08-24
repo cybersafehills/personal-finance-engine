@@ -502,3 +502,77 @@ export function computeBudgetAlerts(input: BudgetAlertInput): BudgetAlert[] {
 
   return alerts;
 }
+
+// ---------------------------------------------------------------------------
+// Variable income: "lower of expected monthly income and the average
+// qualifying income over the previous 3 complete months" (product spec
+// section 6). Pure - the actual database query for which transactions
+// qualify lives in web/lib/queries.ts; this only does the month-key
+// arithmetic and the averaging/minimum itself.
+// ---------------------------------------------------------------------------
+
+const MONTH_KEY_PATTERN = /^\d{4}-\d{2}$/;
+
+function parseMonthKey(monthKey: string): { year: number; month: number } {
+  if (!MONTH_KEY_PATTERN.test(monthKey)) {
+    throw new RangeError(`Expected a "YYYY-MM" month key, got ${monthKey}`);
+  }
+  const [year, month] = monthKey.split("-").map(Number);
+  return { year, month };
+}
+
+/** Shifts a "YYYY-MM" month key by `deltaMonths` (negative to go back in time). */
+export function shiftMonthKey(monthKey: string, deltaMonths: number): string {
+  const { year, month } = parseMonthKey(monthKey);
+  const zeroBasedTotal = (year * 12 + (month - 1)) + deltaMonths;
+  const newYear = Math.floor(zeroBasedTotal / 12);
+  const newMonth = (zeroBasedTotal % 12) + 1;
+  return `${newYear}-${String(newMonth).padStart(2, "0")}`;
+}
+
+/**
+ * The `count` calendar months immediately BEFORE `todayMonthKey` (never
+ * including the current, still-in-progress month) - "complete months"
+ * per the product spec, oldest first.
+ */
+export function lastNCompleteMonthKeys(todayMonthKey: string, count: number): string[] {
+  if (count < 0) throw new RangeError("count must not be negative");
+  const keys: string[] = [];
+  for (let i = count; i >= 1; i--) {
+    keys.push(shiftMonthKey(todayMonthKey, -i));
+  }
+  return keys;
+}
+
+export type VariableIncomeRecommendation = {
+  averageMinor: bigint | null;
+  recommendedMinor: bigint | null;
+  monthsUsed: number;
+};
+
+/**
+ * `monthlyTotals` should contain only the complete months that actually
+ * had qualifying income (an empty month contributes nothing and is
+ * simply omitted by the caller, not included as a zero) - see
+ * getVariableIncomeMonths() in web/lib/queries.ts. Handles insufficient
+ * history explicitly: zero qualifying months yields averageMinor=null,
+ * falling back to expectedMonthlyMinor alone (or null if that's absent
+ * too) - never a fabricated average of nothing.
+ */
+export function computeVariableIncomeRecommendation(
+  monthlyTotals: bigint[],
+  expectedMonthlyMinor: bigint | null,
+): VariableIncomeRecommendation {
+  if (monthlyTotals.length === 0) {
+    return { averageMinor: null, recommendedMinor: expectedMonthlyMinor, monthsUsed: 0 };
+  }
+
+  const sum = monthlyTotals.reduce((total, m) => total + m, 0n);
+  const averageMinor = divRoundBigInt(sum, BigInt(monthlyTotals.length));
+
+  const recommendedMinor = expectedMonthlyMinor !== null
+    ? (expectedMonthlyMinor < averageMinor ? expectedMonthlyMinor : averageMinor)
+    : averageMinor;
+
+  return { averageMinor, recommendedMinor, monthsUsed: monthlyTotals.length };
+}

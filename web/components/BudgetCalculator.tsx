@@ -20,9 +20,11 @@ import {
   isSupportedCurrency,
   SUPPORTED_CURRENCIES,
   SupportedCurrency,
+  toMajorUnits,
   toMinorUnits,
 } from "../lib/money";
 import { activateBudget, createBudget } from "../app/budgets/actions";
+import { VariableIncomePicker } from "./VariableIncomePicker";
 import type { SystemTemplate } from "../lib/queries";
 
 const FREQUENCY_LABELS: Record<IncomeFrequency, string> = {
@@ -84,6 +86,7 @@ export function BudgetCalculator({
   );
   const [incomeAmountText, setIncomeAmountText] = useState("");
   const [incomeFrequency, setIncomeFrequency] = useState<IncomeFrequency>("monthly");
+  const [incomeMode, setIncomeMode] = useState<"fixed" | "variable">("fixed");
   const [percentages, setPercentages] = useState<AllocationPercentages>(standardPercentages);
   const [viewMode, setViewMode] = useState<"perPaycheck" | "monthly" | "annual">("monthly");
   const { periodStart, periodEnd } = useMemo(() => currentMonthBounds(), []);
@@ -160,6 +163,7 @@ export function BudgetCalculator({
         periodEnd,
         incomeAmountText: incomeAmountText.trim() || "0",
         incomeFrequency,
+        incomeMode,
         percentages,
         templateId: systemTemplate?.id ?? null,
       });
@@ -234,9 +238,25 @@ export function BudgetCalculator({
         </label>
       </div>
 
+      <div className="flex gap-2 rounded-control bg-background p-1 text-sm">
+        {(["fixed", "variable"] as const).map((mode) => (
+          <button
+            key={mode}
+            type="button"
+            onClick={() => setIncomeMode(mode)}
+            className={`flex-1 rounded-control py-1.5 font-medium transition-colors ${
+              incomeMode === mode ? "bg-surface text-text-primary shadow-sm" : "text-text-muted"
+            }`}
+          >
+            {mode === "fixed" ? "Fixed income" : "Variable income"}
+          </button>
+        ))}
+      </div>
+
       <label className="flex flex-col gap-1 text-sm">
         <span className="font-medium text-text-secondary">
           {perPaycheck ? "Take-home pay per paycheck" : `${FREQUENCY_LABELS[incomeFrequency]} take-home income`}
+          {incomeMode === "variable" && " (expected - optional)"}
         </span>
         <input
           type="text"
@@ -250,6 +270,18 @@ export function BudgetCalculator({
           <span className="text-xs text-attention">{incomeParseError}</span>
         )}
       </label>
+
+      {incomeMode === "variable" && (
+        <VariableIncomePicker
+          key={currency}
+          currency={currency}
+          expectedMonthlyMinor={normalized?.monthlyMinor ?? null}
+          onAcceptRecommendation={(amountMinor) => {
+            setIncomeFrequency("monthly");
+            setIncomeAmountText(String(toMajorUnits(amountMinor, currency)));
+          }}
+        />
+      )}
 
       <div className="rounded-card border border-border-subtle bg-surface p-4">
         <div className="mb-3 flex items-center justify-between gap-2">

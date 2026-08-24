@@ -9,6 +9,7 @@ import {
   computeElapsedFraction,
 } from "./budget-math";
 import { findTransferCandidates, TransferCandidateTransaction } from "./transfer-detection";
+import { lastNCompleteMonthKeys } from "./budget-math";
 
 // Every function here queries through the session-authenticated Supabase
 // client (lib/supabase-session-server.ts), never the service-role one -
@@ -943,4 +944,83 @@ export async function getTransactionSplits(
   }
 
   return data ?? [];
+}
+
+// ===========================================================================
+// Variable income: candidate transactions for the previous 3 complete
+// months, for a workspace-owner to inspect/exclude before accepting a
+// recommended baseline (see web/lib/budget-math.ts for the actual
+// averaging/minimum logic).
+// ===========================================================================
+
+export type VariableIncomeTransaction = {
+  id: string;
+  occurredAt: string;
+  counterpartyName: string | null;
+  amountMinor: number;
+};
+
+export type VariableIncomeMonth = {
+  monthKey: string;
+  transactions: VariableIncomeTransaction[];
+};
+
+function lastDayOfMonth(monthKey: string): number {
+  const [year, month] = monthKey.split("-").map(Number);
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+/**
+ * Complete calendar months are Kigali-calendar months entirely before
+ * the current one - the current, still-in-progress month is never
+ * included (matching the product spec's own "previous 3 complete
+ * months" wording). Months with zero qualifying transactions are simply
+ * absent from the result, not included as an empty/zero entry - callers
+ * feed only the months with actual data into
+ * computeVariableIncomeRecommendation().
+ */
+export async function getVariableIncomeMonths(
+  currency: string,
+  monthsBack = 3,
+): Promise<VariableIncomeMonth[]> {
+  const supabase = await supabaseSession();
+  const todayMonthKey = kigaliDateKey(new Date().toISOString()).slice(0, 7);
+  const monthKeys = lastNCompleteMonthKeys(todayMonthKey, monthsBack);
+  if (monthKeys.length === 0) return [];
+
+  const firstMonthKey = monthKeys[0];
+  const lastMonthKey = monthKeys[monthKeys.length - 1];
+  const { startUtc } = kigaliDayBoundsUtc(`${firstMonthKey}-01`);
+  const { endUtc } = kigaliDayBoundsUtc(
+    `${lastMonthKey}-${String(lastDayOfMonth(lastMonthKey)).padStart(2, "0")}`,
+  );
+
+  const { data, error } = await supabase
+    .from("transactions")
+    .select("id, occurred_at, counterparty_name, principal_effect_rwf, fee_effect_rwf")
+    .eq("currency", currency)
+    .eq("direction", "in")
+    .eq("settlement_state", "settled")
+    .gte("occurred_at", startUtc.toISOString())
+    .lte("occurred_at", endUtc.toISOString())
+    .order("occurred_at", { ascending: true });
+
+  if (error) {
+    console.error("getVariableIncomeMonths failed:", error.message);
+    return [];
+  }
+
+  const byMonth = new Map<string, VariableIncomeTransaction[]>();
+  for (const row of data ?? []) {
+    const monthKey = kigaliDateKey(row.occurred_at).slice(0, 7);
+    if (!monthKeys.includes(monthKey)) continue; // defensive: excludes any boundary row outside the intended months
+    const amountMinor = Math.abs(Number(row.principal_effect_rwf) + Number(row.fee_effect_rwf));
+    const existing = byMonth.get(monthKey) ?? [];
+    existing.push({ id: row.id, occurredAt: row.occurred_at, counterpartyName: row.counterparty_name, amountMinor });
+    byMonth.set(monthKey, existing);
+  }
+
+  return monthKeys
+    .filter((key) => byMonth.has(key))
+    .map((monthKey) => ({ monthKey, transactions: byMonth.get(monthKey)! }));
 }
