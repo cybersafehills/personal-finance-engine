@@ -72,7 +72,10 @@ export default async function WorkspacePage() {
               </div>
             )}
 
-            <CreateInviteForm workspaceId={workspace.id} />
+            <CreateInviteForm
+              workspaceId={workspace.id}
+              workspaceName={workspace.name}
+            />
           </>
         )}
       </div>

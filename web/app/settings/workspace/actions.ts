@@ -5,11 +5,12 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { supabaseSession } from "../../../lib/supabase-session-server";
 import { generateInviteToken } from "../../../lib/credentials";
+import { sendInviteEmail } from "../../../lib/emails";
 import type { WorkspaceRole } from "../../../lib/queries";
 
 export type WorkspaceActionResult = { ok: true } | { ok: false; error: string };
 export type CreateInviteResult =
-  | { ok: true; link: string }
+  | { ok: true; link: string; emailSent: boolean }
   | { ok: false; error: string };
 
 const INVITE_ROLES = ["admin", "member", "viewer"] as const;
@@ -86,6 +87,7 @@ export async function createInvite(
   email: string,
   role: string,
   siteUrl: string,
+  workspaceName: string,
 ): Promise<CreateInviteResult> {
   const trimmedEmail = email.trim();
 
@@ -124,8 +126,16 @@ export async function createInvite(
     return { ok: false, error: "Could not create the invite." };
   }
 
+  const link = `${siteUrl}/invite/${token.secret}`;
+  const { ok: emailSent } = await sendInviteEmail({
+    to: trimmedEmail,
+    workspaceName,
+    role,
+    link,
+  });
+
   revalidatePath("/settings/workspace");
-  return { ok: true, link: `${siteUrl}/invite/${token.secret}` };
+  return { ok: true, link, emailSent };
 }
 
 export async function revokeInvite(

@@ -10,31 +10,41 @@ const ROLE_OPTIONS = [
   { value: "viewer", label: "Viewer — read-only" },
 ] as const;
 
-export function CreateInviteForm({ workspaceId }: { workspaceId: string }) {
+export function CreateInviteForm({
+  workspaceId,
+  workspaceName,
+}: {
+  workspaceId: string;
+  workspaceName: string;
+}) {
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<string>("member");
   const [isPending, startTransition] = useTransition();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [revealedLink, setRevealedLink] = useState<string | null>(null);
+  const [revealed, setRevealed] = useState<{ link: string; emailSent: boolean } | null>(null);
 
-  if (revealedLink) {
+  if (revealed) {
     return (
       <RevealedSecret
-        secret={revealedLink}
+        secret={revealed.link}
         onDismiss={() => {
-          setRevealedLink(null);
+          setRevealed(null);
           setOpen(false);
           setEmail("");
         }}
         instructions={
           <>
-            <p className="font-medium text-text-primary">Send this link</p>
+            <p className="font-medium text-text-primary">
+              {revealed.emailSent ? "Also sent by email" : "Send this link"}
+            </p>
             <p className="mt-1">
+              {revealed.emailSent
+                ? `We emailed this link to ${email}. `
+                : "We couldn't send this by email — share it yourself. "}
               Anyone with this link can join the workspace at the role you
               picked, whether or not they sign up with the email address
-              above — send it directly to the person you mean to invite.
-              It expires in 7 days.
+              above. It expires in 7 days.
             </p>
           </>
         }
@@ -66,9 +76,10 @@ export function CreateInviteForm({ workspaceId }: { workspaceId: string }) {
             email,
             role,
             window.location.origin,
+            workspaceName,
           );
           if (result.ok) {
-            setRevealedLink(result.link);
+            setRevealed({ link: result.link, emailSent: result.emailSent });
           } else {
             setErrorMessage(result.error);
           }

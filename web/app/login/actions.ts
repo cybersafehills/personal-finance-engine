@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { supabaseSession } from "../../lib/supabase-session-server";
 import { supabaseServer } from "../../lib/supabase-server";
+import { sendLockoutAlertEmail, sendNewSignInEmail } from "../../lib/emails";
 
 export type AuthActionResult = { ok: true } | { ok: false; error: string };
 
@@ -41,11 +42,21 @@ export async function signIn(
   });
 
   if (error) {
+    // This exact failure is the one that pushes the count up to the
+    // threshold - send the alert here, once per lockout episode, rather
+    // than on every subsequent blocked attempt (which short-circuits
+    // above without ever reaching this branch again).
+    if ((failedCount ?? 0) + 1 === LOCKOUT_THRESHOLD) {
+      await sendLockoutAlertEmail(email);
+    }
+
     // Supabase's own message already avoids confirming whether the
     // account exists; passed through as-is rather than a custom one that
     // might leak more or less than intended.
     return { ok: false, error: error.message };
   }
+
+  await sendNewSignInEmail(email);
 
   redirect(next || "/");
 }
