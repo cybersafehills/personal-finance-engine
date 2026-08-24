@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { PageHeader } from "../../components/PageHeader";
-import { WalletIcon, PhoneIcon, LockIcon } from "../../components/icons";
+import { WalletIcon, PhoneIcon, LockIcon, UsersIcon } from "../../components/icons";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +22,12 @@ const SETTINGS_LINKS = [
     title: "Security",
     description: "Sign-in details and active sessions.",
     Icon: LockIcon,
+  },
+  {
+    href: "/settings/workspace",
+    title: "Workspace",
+    description: "Members, invites, and organizations.",
+    Icon: UsersIcon,
   },
 ] as const;
 

@@ -5,6 +5,8 @@ import { usePathname } from "next/navigation";
 import { useTransition } from "react";
 import { signOut } from "../app/login/actions";
 import { GearIcon, HomeIcon, ListIcon, PieIcon, TargetIcon } from "./icons";
+import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
+import type { WorkspaceSummary } from "../lib/queries";
 
 const NAV_ITEMS = [
   { href: "/", label: "Home", Icon: HomeIcon },
@@ -36,9 +38,13 @@ function SignOutButton() {
 export function AppShell({
   children,
   userEmail,
+  workspaces,
+  activeWorkspaceId,
 }: {
   children: React.ReactNode;
   userEmail: string | null;
+  workspaces: WorkspaceSummary[];
+  activeWorkspaceId: string | null;
 }) {
   const pathname = usePathname();
 
@@ -48,8 +54,18 @@ export function AppShell({
           the desktop nav pills below it. Absent on auth pages (no user
           yet) since there is nothing to sign out of. */}
       {userEmail && (
-        <div className="flex items-center justify-between border-b border-border-subtle bg-surface px-4 py-1.5 text-xs sm:px-6">
-          <span className="truncate text-text-muted">{userEmail}</span>
+        <div className="flex items-center justify-between gap-3 border-b border-border-subtle bg-surface px-4 py-1.5 text-xs sm:px-6">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="truncate text-text-muted">{userEmail}</span>
+            {/* Only ever shown once there's an actual choice to make -
+                see WorkspaceSwitcher's own comment. */}
+            {workspaces.length > 1 && (
+              <WorkspaceSwitcher
+                workspaces={workspaces}
+                activeWorkspaceId={activeWorkspaceId}
+              />
+            )}
+          </div>
           <SignOutButton />
         </div>
       )}

@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { supabaseSession } from "../../../lib/supabase-session-server";
-import { getOwnedWorkspaceId } from "../../../lib/queries";
+import { getActiveWorkspaceId } from "../../../lib/queries";
 
 export type SimpleActionResult = { ok: true } | { ok: false; error: string };
 
@@ -11,7 +11,7 @@ export async function confirmTransferLink(
   outTransactionId: string,
   inTransactionId: string,
 ): Promise<SimpleActionResult> {
-  const workspaceId = await getOwnedWorkspaceId();
+  const workspaceId = await getActiveWorkspaceId();
   if (!workspaceId) {
     return { ok: false, error: "Could not resolve your workspace." };
   }
@@ -38,7 +38,7 @@ export async function dismissTransferSuggestion(
   outTransactionId: string,
   inTransactionId: string,
 ): Promise<SimpleActionResult> {
-  const workspaceId = await getOwnedWorkspaceId();
+  const workspaceId = await getActiveWorkspaceId();
   if (!workspaceId) {
     return { ok: false, error: "Could not resolve your workspace." };
   }

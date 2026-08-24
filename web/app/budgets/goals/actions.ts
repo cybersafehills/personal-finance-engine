@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { supabaseSession } from "../../../lib/supabase-session-server";
-import { getOwnedWorkspaceId } from "../../../lib/queries";
+import { getActiveWorkspaceId } from "../../../lib/queries";
 import { isSupportedCurrency, toMinorUnits } from "../../../lib/money";
 
 export type GoalActionResult =
@@ -51,7 +51,7 @@ export async function createGoal(input: {
     return { ok: false, error: "Target amount must be greater than zero." };
   }
 
-  const workspaceId = await getOwnedWorkspaceId();
+  const workspaceId = await getActiveWorkspaceId();
   if (!workspaceId) {
     return { ok: false, error: "Could not resolve your workspace." };
   }

@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { supabaseSession } from "../../lib/supabase-session-server";
-import { getOwnedWorkspaceId, getVariableIncomeMonths, VariableIncomeMonth } from "../../lib/queries";
+import { getActiveWorkspaceId, getVariableIncomeMonths, VariableIncomeMonth } from "../../lib/queries";
 import {
   allocateAmounts,
   AllocationPercentages,
@@ -200,7 +200,7 @@ export async function createBudget(
   const parsed = parseDraftInput(input);
   if (!parsed.ok) return parsed;
 
-  const workspaceId = await getOwnedWorkspaceId();
+  const workspaceId = await getActiveWorkspaceId();
   if (!workspaceId) {
     return { ok: false, error: "Could not resolve your workspace." };
   }
@@ -438,7 +438,7 @@ export async function duplicateBudget(
   periodEnd: string,
 ): Promise<BudgetActionResult> {
   const supabase = await supabaseSession();
-  const workspaceId = await getOwnedWorkspaceId();
+  const workspaceId = await getActiveWorkspaceId();
   if (!workspaceId) {
     return { ok: false, error: "Could not resolve your workspace." };
   }

@@ -65,6 +65,10 @@ const PUBLIC_PATHS = [
   "/signup",
   "/auth/callback",
   "/auth/reset-password",
+  // Must be reachable pre-auth: an invite recipient may not have an
+  // account yet. The page itself bounces an unauthenticated visitor to
+  // /login or /signup with ?next= pointing back here.
+  "/invite",
 ];
 
 // Of those, only these should redirect an already-signed-in user away -

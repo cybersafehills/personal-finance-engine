@@ -1,4 +1,5 @@
 import "server-only";
+import { cookies } from "next/headers";
 import { supabaseSession } from "./supabase-session-server";
 import { kigaliDayBoundsUtc, kigaliDateKey } from "./kigali-time";
 import {
@@ -209,35 +210,55 @@ export async function getCategoryTotals(): Promise<CategoryTotal[]> {
 }
 
 /**
- * The signed-in user's own workspace_id, resolved from
- * workspace_memberships (RLS-scoped to rows the caller is actually a
- * member of - see is_workspace_member() and workspace_memberships_select_
- * member). Phase C has no team/multi-membership functionality yet, so a
- * user has exactly one active membership in practice; the owner role is
- * required for account/connection creation, so that role is what this
- * resolves.
+ * The workspace every workspace-scoped read/write in this app should use
+ * for the current request - the caller's explicitly chosen workspace if
+ * they've switched to one via the workspace switcher (AppShell's
+ * WorkspaceSwitcher, `setActiveWorkspace` in
+ * app/settings/workspace/actions.ts), otherwise their personal workspace.
+ * A user now belongs to any number of workspaces (their own personal one
+ * plus any organization they own or were invited into - see
+ * supabase/migrations/20260827000000_organization_workspaces.sql), so
+ * unlike the single-workspace assumption this replaced, "the caller's
+ * workspace" is no longer unambiguous without this resolution.
  */
-export async function getOwnedWorkspaceId(): Promise<string | null> {
+export async function getActiveWorkspaceId(): Promise<string | null> {
+  const cookieStore = await cookies();
   const supabase = await supabaseSession();
+  const requestedId = cookieStore.get("active_workspace_id")?.value;
+
+  if (requestedId) {
+    const { data } = await supabase
+      .from("workspace_memberships")
+      .select("workspace_id")
+      .eq("workspace_id", requestedId)
+      .eq("status", "active")
+      .maybeSingle();
+
+    if (data?.workspace_id) return data.workspace_id;
+  }
+
+  // No cookie, or it named a workspace the caller is no longer an active
+  // member of - fall back to their personal workspace, which always
+  // exists exactly once per user (handle_new_user()).
   const { data, error } = await supabase
     .from("workspace_memberships")
-    .select("workspace_id")
-    .eq("role", "owner")
+    .select("workspace_id, workspaces!inner(kind)")
     .eq("status", "active")
+    .eq("workspaces.kind", "personal")
     .limit(1)
     .maybeSingle();
 
   if (error) {
-    console.error("getOwnedWorkspaceId failed:", error.message);
+    console.error("getActiveWorkspaceId failed:", error.message);
     return null;
   }
 
   return data?.workspace_id ?? null;
 }
 
-/** The caller's workspace's default_currency, or "RWF" if it can't be resolved - used to pre-select a currency in the budget/goal creation forms. */
+/** The caller's active workspace's default_currency, or "RWF" if it can't be resolved - used to pre-select a currency in the budget/goal creation forms. */
 export async function getWorkspaceDefaultCurrency(): Promise<string> {
-  const workspaceId = await getOwnedWorkspaceId();
+  const workspaceId = await getActiveWorkspaceId();
   if (!workspaceId) return "RWF";
   const supabase = await supabaseSession();
   const { data } = await supabase
@@ -1023,4 +1044,137 @@ export async function getVariableIncomeMonths(
   return monthKeys
     .filter((key) => byMonth.has(key))
     .map((monthKey) => ({ monthKey, transactions: byMonth.get(monthKey)! }));
+}
+
+// ===========================================================================
+// Organization workspaces: creation, membership, invites. See
+// supabase/migrations/20260827000000_organization_workspaces.sql.
+// ===========================================================================
+
+export type WorkspaceRole = "owner" | "admin" | "member" | "viewer";
+
+export type WorkspaceSummary = {
+  id: string;
+  name: string;
+  kind: "personal" | "organization";
+  role: WorkspaceRole;
+};
+
+/** Every workspace the caller is an active member of - drives the workspace switcher. */
+export async function getUserWorkspaces(): Promise<WorkspaceSummary[]> {
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("workspace_memberships")
+    .select("role, workspaces(id, name, kind)")
+    .eq("status", "active")
+    .order("joined_at", { ascending: true });
+
+  if (error) {
+    console.error("getUserWorkspaces failed:", error.message);
+    return [];
+  }
+
+  return (data ?? []).flatMap((row) => {
+    const workspace = row.workspaces as unknown as
+      | { id: string; name: string; kind: "personal" | "organization" }
+      | null;
+    if (!workspace) return [];
+    return [
+      { id: workspace.id, name: workspace.name, kind: workspace.kind, role: row.role },
+    ] as WorkspaceSummary[];
+  });
+}
+
+/** The active workspace's own id/name/kind/the caller's role in it - for the workspace settings page and the switcher's current-selection label. */
+export async function getActiveWorkspace(): Promise<WorkspaceSummary | null> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!workspaceId) return null;
+
+  const workspaces = await getUserWorkspaces();
+  return workspaces.find((workspace) => workspace.id === workspaceId) ?? null;
+}
+
+export type WorkspaceMemberRow = {
+  membershipId: string;
+  userId: string;
+  role: WorkspaceRole;
+  status: "invited" | "active" | "suspended" | "removed";
+  joinedAt: string | null;
+  isSelf: boolean;
+};
+
+/**
+ * Active workspace's member list. No email/display-name is surfaced here -
+ * profiles is RLS-scoped to `id = auth.uid()` (profiles_select_own), so a
+ * plain authenticated query can only ever see the caller's own profile
+ * row, not other members'. Showing names/emails for other members would
+ * need a dedicated SECURITY DEFINER directory function; deferred until
+ * that's actually needed rather than building it speculatively now.
+ */
+export async function getWorkspaceMembers(
+  workspaceId: string,
+): Promise<WorkspaceMemberRow[]> {
+  const supabase = await supabaseSession();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const { data, error } = await supabase
+    .from("workspace_memberships")
+    .select("id, user_id, role, status, joined_at")
+    .eq("workspace_id", workspaceId)
+    .neq("status", "removed")
+    .order("role", { ascending: true })
+    .order("joined_at", { ascending: true });
+
+  if (error) {
+    console.error("getWorkspaceMembers failed:", error.message);
+    return [];
+  }
+
+  return (data ?? []).map((row) => ({
+    membershipId: row.id,
+    userId: row.user_id,
+    role: row.role,
+    status: row.status,
+    joinedAt: row.joined_at,
+    isSelf: row.user_id === user?.id,
+  }));
+}
+
+export type WorkspaceInviteRow = {
+  id: string;
+  email: string;
+  role: WorkspaceRole;
+  status: "pending" | "accepted" | "revoked" | "expired";
+  tokenPrefix: string;
+  createdAt: string;
+  expiresAt: string;
+};
+
+export async function getWorkspaceInvites(
+  workspaceId: string,
+): Promise<WorkspaceInviteRow[]> {
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("workspace_invites")
+    .select("id, email, role, status, token_prefix, created_at, expires_at")
+    .eq("workspace_id", workspaceId)
+    .eq("status", "pending")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("getWorkspaceInvites failed:", error.message);
+    return [];
+  }
+
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    email: row.email,
+    role: row.role,
+    status: row.status,
+    tokenPrefix: row.token_prefix,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+  }));
 }

@@ -3,7 +3,12 @@ import { SignUpForm } from "./SignUpForm";
 
 export const dynamic = "force-dynamic";
 
-export default function SignUpPage() {
+export default async function SignUpPage({
+  searchParams,
+}: PageProps<"/signup">) {
+  const { next } = await searchParams;
+  const nextPath = typeof next === "string" ? next : "/";
+
   return (
     <div className="mx-auto flex max-w-sm flex-col gap-6 py-10">
       <div className="text-center">
@@ -14,7 +19,7 @@ export default function SignUpPage() {
           Sets up your own personal finance workspace.
         </p>
       </div>
-      <SignUpForm />
+      <SignUpForm next={nextPath} />
       <p className="text-center text-sm text-text-muted">
         Already have an account?{" "}
         <Link href="/login" className="font-medium text-accent hover:underline">

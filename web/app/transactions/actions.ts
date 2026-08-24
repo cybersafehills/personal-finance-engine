@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { supabaseSession } from "../../lib/supabase-session-server";
-import { getOwnedWorkspaceId } from "../../lib/queries";
+import { getActiveWorkspaceId } from "../../lib/queries";
 import { isSupportedCurrency, toMinorUnits } from "../../lib/money";
 import { ALLOCATION_TYPES, AllocationType } from "../../lib/budget-math";
 
@@ -80,7 +80,7 @@ export async function createManualTransaction(
     return { ok: false, error: "Choose when this happened." };
   }
 
-  const workspaceId = await getOwnedWorkspaceId();
+  const workspaceId = await getActiveWorkspaceId();
   if (!workspaceId) {
     return { ok: false, error: "Could not resolve your workspace." };
   }

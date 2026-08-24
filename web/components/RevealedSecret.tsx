@@ -3,18 +3,21 @@
 import { useState } from "react";
 
 /**
- * Shows a freshly generated/rotated ingestion credential exactly once.
- * The parent only holds this value in local React state (never persisted,
- * never sent anywhere else) - once the component unmounts or the user
- * navigates away, it is genuinely gone, matching what the database itself
- * guarantees (only the hash is stored).
+ * Shows a freshly generated bearer token (an ingestion credential, an
+ * invite link, ...) exactly once. The parent only holds this value in
+ * local React state (never persisted, never sent anywhere else) - once
+ * the component unmounts or the user navigates away, it is genuinely
+ * gone, matching what the database itself guarantees (only the hash is
+ * stored).
  */
 export function RevealedSecret({
   secret,
   onDismiss,
+  instructions,
 }: {
   secret: string;
   onDismiss: () => void;
+  instructions?: React.ReactNode;
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -48,15 +51,11 @@ export function RevealedSecret({
         </button>
       </div>
 
-      <div className="border-t border-border-strong pt-3 text-xs text-text-secondary">
-        <p className="font-medium text-text-primary">iPhone Shortcut setup</p>
-        <p className="mt-1">
-          In your MTN MoMo forwarding Shortcut, set the{" "}
-          <code className="rounded bg-surface px-1 py-0.5">x-ingest-key</code>{" "}
-          header to the value above, then save. Existing forwarded messages
-          are unaffected.
-        </p>
-      </div>
+      {instructions && (
+        <div className="border-t border-border-strong pt-3 text-xs text-text-secondary">
+          {instructions}
+        </div>
+      )}
     </div>
   );
 }

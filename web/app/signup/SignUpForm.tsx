@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { signUp } from "./actions";
 
-export function SignUpForm() {
+export function SignUpForm({ next }: { next: string }) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -33,7 +33,12 @@ export function SignUpForm() {
         event.preventDefault();
         setError(null);
         startTransition(async () => {
-          const result = await signUp(email, password, window.location.origin);
+          const result = await signUp(
+            email,
+            password,
+            window.location.origin,
+            next,
+          );
           if (!result.ok) {
             setError(result.error);
             return;
@@ -41,7 +46,7 @@ export function SignUpForm() {
           if (result.needsConfirmation) {
             setConfirmationSent(true);
           } else {
-            router.push("/");
+            router.push(next || "/");
           }
         });
       }}

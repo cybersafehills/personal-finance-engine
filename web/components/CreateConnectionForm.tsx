@@ -34,6 +34,21 @@ export function CreateConnectionForm({
           setOpen(false);
           setLabel("");
         }}
+        instructions={
+          <>
+            <p className="font-medium text-text-primary">
+              iPhone Shortcut setup
+            </p>
+            <p className="mt-1">
+              In your MTN MoMo forwarding Shortcut, set the{" "}
+              <code className="rounded bg-surface px-1 py-0.5">
+                x-ingest-key
+              </code>{" "}
+              header to the value above, then save. Existing forwarded
+              messages are unaffected.
+            </p>
+          </>
+        }
       />
     );
   }

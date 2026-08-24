@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { supabaseSession } from "../../../lib/supabase-session-server";
-import { getOwnedWorkspaceId } from "../../../lib/queries";
+import { getActiveWorkspaceId } from "../../../lib/queries";
 import { generateIngestionCredential } from "../../../lib/credentials";
 
 export type CreateConnectionResult =
@@ -38,7 +38,7 @@ export async function createConnection(
     return { ok: false, error: "Choose an account for this connection." };
   }
 
-  const workspaceId = await getOwnedWorkspaceId();
+  const workspaceId = await getActiveWorkspaceId();
 
   if (!workspaceId) {
     return { ok: false, error: "Could not resolve your workspace." };

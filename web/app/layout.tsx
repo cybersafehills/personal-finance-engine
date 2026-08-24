@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist } from "next/font/google";
 import { AppShell } from "../components/AppShell";
 import { supabaseSession } from "../lib/supabase-session-server";
+import { getActiveWorkspaceId, getUserWorkspaces } from "../lib/queries";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -27,10 +28,20 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
     data: { user },
   } = await supabase.auth.getUser();
 
+  const [workspaces, activeWorkspaceId] = user
+    ? await Promise.all([getUserWorkspaces(), getActiveWorkspaceId()])
+    : [[], null];
+
   return (
     <html lang="en" className={`${geistSans.variable} h-full antialiased`}>
       <body className="min-h-full bg-background font-sans text-text-primary">
-        <AppShell userEmail={user?.email ?? null}>{children}</AppShell>
+        <AppShell
+          userEmail={user?.email ?? null}
+          workspaces={workspaces}
+          activeWorkspaceId={activeWorkspaceId}
+        >
+          {children}
+        </AppShell>
       </body>
     </html>
   );
