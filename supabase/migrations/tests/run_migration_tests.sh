@@ -510,10 +510,10 @@ fi
 echo "=== privilege/RLS regression check ==="
 RLS_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_class where relnamespace='public'::regnamespace and relkind='r' and relrowsecurity;")"
 TABLE_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_class where relnamespace='public'::regnamespace and relkind='r';")"
-if [ "$RLS_COUNT" = "$TABLE_COUNT" ] && [ "$TABLE_COUNT" = "17" ]; then
-  pass "RLS enabled on all 17 tables after the full chain (6 Phase 3 + 3 Phase B + 1 Phase C + 7 Phase D: budget_templates, budget_template_allocations, budgets, budget_allocations, budget_category_mappings, financial_goals, goal_contributions)"
+if [ "$RLS_COUNT" = "$TABLE_COUNT" ] && [ "$TABLE_COUNT" = "19" ]; then
+  pass "RLS enabled on all 19 tables after the full chain (6 Phase 3 + 3 Phase B + 1 Phase C + 7 Phase D + 2 Phase E: transaction_splits, transfer_links)"
 else
-  fail "RLS not enabled on all tables: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled (expected 17 of 17)"
+  fail "RLS not enabled on all tables: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled (expected 19 of 19)"
 fi
 
 # anon must remain fully revoked everywhere - Phase B never touches this.
@@ -536,14 +536,16 @@ fi
 # budget_allocations (select, insert, update, delete),
 # budget_category_mappings (select, insert, update), financial_goals
 # (select, insert, update), goal_contributions (select, insert, delete)
-# = 18 more, for 34 total. Asserting the exact count (not just "some")
-# forces this test to be updated - a deliberate review point - if any
-# future migration ever widens authenticated's table-level access.
+# = 18 more = 34, plus Phase E's transaction_splits (select, insert,
+# update, delete) and transfer_links (select, insert, delete) = 7 more,
+# for 41 total. Asserting the exact count (not just "some") forces this
+# test to be updated - a deliberate review point - if any future
+# migration ever widens authenticated's table-level access.
 AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and grantee = 'authenticated';")"
-if [ "$AUTHENTICATED_GRANT_COUNT" = "34" ]; then
-  pass "authenticated holds exactly the 34 Phase B + Phase C + Phase D table grants expected, no more"
+if [ "$AUTHENTICATED_GRANT_COUNT" = "41" ]; then
+  pass "authenticated holds exactly the 41 Phase B + Phase C + Phase D + Phase E table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 34 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 41 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -1123,6 +1125,152 @@ if [ "$B_SEES_GOAL" = "0" ] && [ "$GOAL_CONTRIBUTIONS_INTACT" = "2" ]; then
   pass "Phase D: User B cannot see or delete User A's goal or its contributions"
 else
   fail "Phase D: User B saw the goal ($B_SEES_GOAL) or deleted contributions (now $GOAL_CONTRIBUTIONS_INTACT of 2 expected) - isolation breach"
+fi
+
+# ===========================================================================
+# Phase E: manual transactions (momo_message_id relaxation), split
+# transactions, and transfer links. Reuses pfe_rls (USER_A/WORKSPACE_A,
+# USER_B/WORKSPACE_B, and the accounts/transactions seeded above).
+# ===========================================================================
+echo "=== Phase E: manual transactions, splits, and transfer links ==="
+
+# --- momo_message_id relaxation ---------------------------------------------
+
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.transactions (id, momo_message_id, account_id, workspace_id, source, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version)
+  values ('00000000-0000-0000-0000-0000000000f5', null, '00000000-0000-0000-0000-0000000000d1', '$WORKSPACE_A', 'manual', 'other', 'out', 'success', 1000, 0, now(), 'manual-entry-v1');
+" >/dev/null 2>$ARTIFACT_DIR/pfe_manual_stderr.log; then
+  pass "Phase E: a source='manual' transaction may have a null momo_message_id"
+else
+  fail "Phase E: a manual transaction with no momo_message_id was rejected: $(cat $ARTIFACT_DIR/pfe_manual_stderr.log)"
+fi
+rm -f $ARTIFACT_DIR/pfe_manual_stderr.log
+
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.transactions (id, momo_message_id, account_id, workspace_id, source, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version)
+  values ('00000000-0000-0000-0000-0000000000f6', null, '00000000-0000-0000-0000-0000000000d1', '$WORKSPACE_A', 'mtn_momo', 'other', 'out', 'success', 1000, 0, now(), 'test');
+" >/dev/null 2>$ARTIFACT_DIR/pfe_nonmanual_stderr.log; then
+  fail "Phase E: a non-manual transaction with a null momo_message_id was allowed"
+else
+  pass "Phase E: every non-manual transaction still requires a momo_message_id"
+fi
+rm -f $ARTIFACT_DIR/pfe_nonmanual_stderr.log
+
+# --- transaction_splits: sum-to-effect invariant ----------------------------
+
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.momo_messages (id, raw_message, processing_status)
+  values ('00000000-0000-0000-0000-0000000000f7', 'seed', 'processed');
+  insert into public.transactions (id, momo_message_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, principal_effect_rwf, fee_effect_rwf, settlement_state, affects_balance, effect_reason, occurred_at, parser_version)
+  values ('00000000-0000-0000-0000-0000000000f8', '00000000-0000-0000-0000-0000000000f7', '00000000-0000-0000-0000-0000000000d1', '$WORKSPACE_A', 'merchant_payment', 'out', 'success', 1000, 0, -1000, 0, 'settled', true, 'test', now(), 'test');
+" >/dev/null
+
+# A single multi-row insert summing exactly to the transaction's effect succeeds.
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.transaction_splits (transaction_id, workspace_id, allocation_type, amount_minor) values
+    ('00000000-0000-0000-0000-0000000000f8', '$WORKSPACE_A', 'ESSENTIALS', 600),
+    ('00000000-0000-0000-0000-0000000000f8', '$WORKSPACE_A', 'WANTS', 400);
+" >/dev/null 2>$ARTIFACT_DIR/pfe_split_ok_stderr.log; then
+  pass "Phase E: a multi-row split insert summing exactly to the transaction's effect succeeds"
+else
+  fail "Phase E: a correctly-summed split insert was rejected: $(cat $ARTIFACT_DIR/pfe_split_ok_stderr.log)"
+fi
+rm -f $ARTIFACT_DIR/pfe_split_ok_stderr.log
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "delete from public.transaction_splits where transaction_id = '00000000-0000-0000-0000-0000000000f8';" >/dev/null
+
+# A multi-row insert that does NOT sum to the transaction's effect is
+# rejected - the deferred constraint trigger catches it after all rows of
+# the single statement have landed, not on the first row.
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.transaction_splits (transaction_id, workspace_id, allocation_type, amount_minor) values
+    ('00000000-0000-0000-0000-0000000000f8', '$WORKSPACE_A', 'ESSENTIALS', 600),
+    ('00000000-0000-0000-0000-0000000000f8', '$WORKSPACE_A', 'WANTS', 500);
+" >/dev/null 2>$ARTIFACT_DIR/pfe_split_bad_stderr.log; then
+  fail "Phase E: a split insert totaling 1100 against a 1000 transaction was allowed"
+else
+  pass "Phase E: a split insert not summing to the transaction's effect is rejected"
+fi
+rm -f $ARTIFACT_DIR/pfe_split_bad_stderr.log
+SPLITS_AFTER_FAILED_INSERT="$(psql -d pfe_rls -t -A -c "select count(*) from public.transaction_splits where transaction_id = '00000000-0000-0000-0000-0000000000f8';")"
+if [ "$SPLITS_AFTER_FAILED_INSERT" = "0" ]; then
+  pass "Phase E: the rejected split insert left no partial rows behind (whole statement rolled back)"
+else
+  fail "Phase E: $SPLITS_AFTER_FAILED_INSERT split row(s) survived a rejected insert - partial write"
+fi
+
+# Cannot split a transaction the accounting engine hasn't processed yet
+# (principal_effect_rwf/fee_effect_rwf still null).
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.transaction_splits (transaction_id, workspace_id, allocation_type, amount_minor)
+  values ('00000000-0000-0000-0000-0000000000d3', '$WORKSPACE_A', 'ESSENTIALS', 750);
+" >/dev/null 2>$ARTIFACT_DIR/pfe_split_unprocessed_stderr.log; then
+  fail "Phase E: a transaction with no accounting effect yet was allowed to be split"
+else
+  pass "Phase E: an unprocessed transaction (no accounting effect) cannot be split"
+fi
+rm -f $ARTIFACT_DIR/pfe_split_unprocessed_stderr.log
+
+# User B cannot see or write User A's splits.
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.transaction_splits (transaction_id, workspace_id, allocation_type, amount_minor)
+  values ('00000000-0000-0000-0000-0000000000f8', '$WORKSPACE_A', 'ESSENTIALS', 1000);
+" >/dev/null
+B_SEES_SPLIT="$(as_user "$USER_B" "select count(*) from public.transaction_splits where transaction_id = '00000000-0000-0000-0000-0000000000f8';")"
+if [ "$B_SEES_SPLIT" = "0" ]; then
+  pass "Phase E: User B cannot see User A's transaction splits"
+else
+  fail "Phase E: User B could read User A's transaction splits - isolation breach"
+fi
+
+# --- transfer_links ----------------------------------------------------------
+
+TRANSFER_LINK_A="$(psql -d pfe_rls -t -A -c "
+  insert into public.transfer_links (workspace_id, out_transaction_id, in_transaction_id, status)
+  values ('$WORKSPACE_A', '00000000-0000-0000-0000-0000000000d3', '00000000-0000-0000-0000-0000000000f3', 'linked')
+  returning id;" | head -1)"
+
+# The same out_transaction_id cannot be the OUT side of a second active link.
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.transfer_links (workspace_id, out_transaction_id, in_transaction_id, status)
+  values ('$WORKSPACE_A', '00000000-0000-0000-0000-0000000000d3', '00000000-0000-0000-0000-0000000000f8', 'linked');
+" >/dev/null 2>$ARTIFACT_DIR/pfe_dup_transfer_stderr.log; then
+  fail "Phase E: the same transaction was linked as the OUT side of two active transfers"
+else
+  pass "Phase E: a transaction can be the OUT side of at most one active transfer link"
+fi
+rm -f $ARTIFACT_DIR/pfe_dup_transfer_stderr.log
+
+# A transaction cannot be linked to itself.
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.transfer_links (workspace_id, out_transaction_id, in_transaction_id, status)
+  values ('$WORKSPACE_A', '00000000-0000-0000-0000-0000000000f8', '00000000-0000-0000-0000-0000000000f8', 'linked');
+" >/dev/null 2>$ARTIFACT_DIR/pfe_self_transfer_stderr.log; then
+  fail "Phase E: a transaction was linked to itself as a transfer"
+else
+  pass "Phase E: a transaction cannot be linked to itself as a transfer"
+fi
+rm -f $ARTIFACT_DIR/pfe_self_transfer_stderr.log
+
+# A dismissed row reusing an already-linked out_transaction_id is allowed
+# (the partial unique index only governs status='linked').
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.transfer_links (workspace_id, out_transaction_id, in_transaction_id, status)
+  values ('$WORKSPACE_A', '00000000-0000-0000-0000-0000000000d3', '00000000-0000-0000-0000-0000000000f8', 'dismissed');
+" >/dev/null 2>$ARTIFACT_DIR/pfe_dismissed_transfer_stderr.log; then
+  pass "Phase E: a dismissed transfer suggestion does not conflict with an existing linked one"
+else
+  fail "Phase E: a dismissed-status row was incorrectly blocked by the linked-only unique index: $(cat $ARTIFACT_DIR/pfe_dismissed_transfer_stderr.log)"
+fi
+rm -f $ARTIFACT_DIR/pfe_dismissed_transfer_stderr.log
+
+# User B cannot see or delete User A's transfer link.
+B_SEES_TRANSFER="$(as_user "$USER_B" "select count(*) from public.transfer_links where id = '$TRANSFER_LINK_A';")"
+as_user "$USER_B" "delete from public.transfer_links where id = '$TRANSFER_LINK_A';" >/dev/null 2>&1 || true
+TRANSFER_LINK_INTACT="$(psql -d pfe_rls -t -A -c "select count(*) from public.transfer_links where id = '$TRANSFER_LINK_A';")"
+if [ "$B_SEES_TRANSFER" = "0" ] && [ "$TRANSFER_LINK_INTACT" = "1" ]; then
+  pass "Phase E: User B cannot see or delete User A's transfer link"
+else
+  fail "Phase E: User B saw ($B_SEES_TRANSFER) or deleted (now $TRANSFER_LINK_INTACT of 1 expected) User A's transfer link - isolation breach"
 fi
 
 echo ""
