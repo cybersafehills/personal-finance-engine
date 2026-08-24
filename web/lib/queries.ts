@@ -1,6 +1,11 @@
 import "server-only";
 import { supabaseSession } from "./supabase-session-server";
 import { kigaliDayBoundsUtc, kigaliDateKey } from "./kigali-time";
+import {
+  AllocationStatus,
+  computeAllocationActual,
+  computeElapsedFraction,
+} from "./budget-math";
 
 // Every function here queries through the session-authenticated Supabase
 // client (lib/supabase-session-server.ts), never the service-role one -
@@ -421,4 +426,210 @@ export async function getBudgetById(
   }
 
   return { ...budget, allocations: allocations ?? [] };
+}
+
+export type CategoryMappingRow = {
+  category: string;
+  allocationType: AllocationType | null;
+  transactionCount: number;
+  totalRwf: number;
+};
+
+/**
+ * Every distinct spending category currently in use (settled, direction
+ * out), alongside its currently-open budget_category_mappings row (if
+ * any). RWF-denominated totals only - see the Phase D migration's own
+ * note on why transaction actuals only ever exist for RWF today.
+ */
+export async function getCategoryMappings(): Promise<CategoryMappingRow[]> {
+  const supabase = await supabaseSession();
+
+  const [txnsResult, mappingsResult] = await Promise.all([
+    supabase
+      .from("transactions")
+      .select("category, principal_effect_rwf, fee_effect_rwf")
+      .not("category", "is", null)
+      .eq("direction", "out")
+      .eq("settlement_state", "settled"),
+    supabase
+      .from("budget_category_mappings")
+      .select("category, allocation_type")
+      .is("effective_until", null),
+  ]);
+
+  if (txnsResult.error) {
+    console.error("getCategoryMappings transactions failed:", txnsResult.error.message);
+    return [];
+  }
+  if (mappingsResult.error) {
+    console.error("getCategoryMappings mappings failed:", mappingsResult.error.message);
+  }
+
+  const mappingByCategory = new Map<string, AllocationType>();
+  for (const row of mappingsResult.data ?? []) {
+    mappingByCategory.set(row.category, row.allocation_type as AllocationType);
+  }
+
+  const totals = new Map<string, { total: number; count: number }>();
+  for (const row of txnsResult.data ?? []) {
+    const category = row.category as string;
+    const effect = Math.abs(Number(row.principal_effect_rwf) + Number(row.fee_effect_rwf));
+    const existing = totals.get(category) ?? { total: 0, count: 0 };
+    totals.set(category, { total: existing.total + effect, count: existing.count + 1 });
+  }
+
+  return Array.from(totals.entries())
+    .map(([category, { total, count }]) => ({
+      category,
+      allocationType: mappingByCategory.get(category) ?? null,
+      transactionCount: count,
+      totalRwf: total,
+    }))
+    .sort((a, b) => b.totalRwf - a.totalRwf);
+}
+
+export type { AllocationStatus };
+
+export type AllocationActual = {
+  allocationType: AllocationType;
+  targetMinor: number;
+  actualMinor: number;
+  remainingMinor: number;
+  /** null only when targetMinor is 0 and there is spending against it - a percentage is meaningless there. */
+  percentConsumed: number | null;
+  /** null unless the budget is active and today falls within its period. */
+  projectedMinor: number | null;
+  status: AllocationStatus;
+};
+
+export type BudgetActuals = {
+  allocations: AllocationActual[];
+  actualIncomeMinor: number;
+  unmappedMinor: number;
+  unmappedCount: number;
+  uncategorizedMinor: number;
+  uncategorizedCount: number;
+  /** Fraction (0-1) of the budget period elapsed so far, or null if the period doesn't cover today / the budget isn't active. */
+  elapsedFraction: number | null;
+};
+
+/**
+ * Aggregates a budget's actual income/spending from transactions,
+ * mapped to allocations through budget_category_mappings. Mapping lookup
+ * is effective-dated per transaction (not per budget period) - a later
+ * remap never changes how an already-recorded transaction was
+ * classified at the time it occurred, keeping historical periods
+ * reproducible (see the Phase D migration's own comments on
+ * budget_category_mappings).
+ */
+export async function getBudgetActuals(
+  budget: BudgetWithAllocations,
+): Promise<BudgetActuals> {
+  const supabase = await supabaseSession();
+  const { startUtc } = kigaliDayBoundsUtc(budget.period_start);
+  const { endUtc } = kigaliDayBoundsUtc(budget.period_end);
+
+  const [outResult, inResult, mappingsResult] = await Promise.all([
+    supabase
+      .from("transactions")
+      .select("category, principal_effect_rwf, fee_effect_rwf, occurred_at")
+      .eq("currency", budget.currency)
+      .eq("direction", "out")
+      .eq("settlement_state", "settled")
+      .gte("occurred_at", startUtc.toISOString())
+      .lte("occurred_at", endUtc.toISOString()),
+    supabase
+      .from("transactions")
+      .select("principal_effect_rwf, fee_effect_rwf")
+      .eq("currency", budget.currency)
+      .eq("direction", "in")
+      .eq("settlement_state", "settled")
+      .gte("occurred_at", startUtc.toISOString())
+      .lte("occurred_at", endUtc.toISOString()),
+    supabase
+      .from("budget_category_mappings")
+      .select("category, allocation_type, effective_from, effective_until"),
+  ]);
+
+  if (outResult.error) console.error("getBudgetActuals (out) failed:", outResult.error.message);
+  if (inResult.error) console.error("getBudgetActuals (in) failed:", inResult.error.message);
+  if (mappingsResult.error) console.error("getBudgetActuals (mappings) failed:", mappingsResult.error.message);
+
+  const actualIncomeMinor = (inResult.data ?? []).reduce(
+    (sum, row) => sum + Number(row.principal_effect_rwf) + Number(row.fee_effect_rwf),
+    0,
+  );
+
+  const totalsByAllocation = new Map<AllocationType, number>();
+  let unmappedMinor = 0;
+  let unmappedCount = 0;
+  let uncategorizedMinor = 0;
+  let uncategorizedCount = 0;
+
+  for (const row of outResult.data ?? []) {
+    const effect = Math.abs(Number(row.principal_effect_rwf) + Number(row.fee_effect_rwf));
+
+    if (!row.category) {
+      uncategorizedMinor += effect;
+      uncategorizedCount += 1;
+      continue;
+    }
+
+    const txnDateKey = kigaliDateKey(row.occurred_at);
+    const mapping = (mappingsResult.data ?? []).find((m) =>
+      m.category === row.category &&
+      m.effective_from <= txnDateKey &&
+      (m.effective_until === null || m.effective_until >= txnDateKey)
+    );
+
+    if (!mapping) {
+      unmappedMinor += effect;
+      unmappedCount += 1;
+      continue;
+    }
+
+    const allocationType = mapping.allocation_type as AllocationType;
+    totalsByAllocation.set(
+      allocationType,
+      (totalsByAllocation.get(allocationType) ?? 0) + effect,
+    );
+  }
+
+  const todayKey = kigaliDateKey(new Date().toISOString());
+  const elapsedFraction = computeElapsedFraction(
+    budget.period_start,
+    budget.period_end,
+    todayKey,
+    budget.status === "active",
+  );
+
+  const allocations: AllocationActual[] = budget.allocations.map((a) => {
+    const actualMinor = totalsByAllocation.get(a.allocation_type) ?? 0;
+    const targetMinor = a.target_amount_minor;
+    const math = computeAllocationActual(
+      BigInt(actualMinor),
+      BigInt(targetMinor),
+      elapsedFraction,
+    );
+
+    return {
+      allocationType: a.allocation_type,
+      targetMinor,
+      actualMinor,
+      remainingMinor: Number(math.remainingMinor),
+      percentConsumed: math.percentConsumed,
+      projectedMinor: math.projectedMinor !== null ? Number(math.projectedMinor) : null,
+      status: math.status,
+    };
+  });
+
+  return {
+    allocations,
+    actualIncomeMinor,
+    unmappedMinor,
+    unmappedCount,
+    uncategorizedMinor,
+    uncategorizedCount,
+    elapsedFraction,
+  };
 }

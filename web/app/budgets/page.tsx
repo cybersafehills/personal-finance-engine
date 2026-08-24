@@ -16,12 +16,20 @@ export default async function BudgetsPage() {
         title="Budgets"
         subtitle="Your 50/15/5/30 budgets, from draft to archived"
         action={
-          <Link
-            href="/budgets/new"
-            className="min-h-11 rounded-control bg-accent px-4 py-2.5 text-sm font-medium text-accent-foreground"
-          >
-            New budget
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link
+              href="/budgets/categories"
+              className="text-sm font-medium text-accent hover:underline"
+            >
+              Categories
+            </Link>
+            <Link
+              href="/budgets/new"
+              className="min-h-11 rounded-control bg-accent px-4 py-2.5 text-sm font-medium text-accent-foreground"
+            >
+              New budget
+            </Link>
+          </div>
         }
       />
 

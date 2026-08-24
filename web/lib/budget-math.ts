@@ -108,9 +108,9 @@ export type PercentageValidation =
 
 /**
  * Validates a set of allocation percentages for saving as a draft
- * (negative/out-of-range/>100%% total are always rejected; a total below
- * 100%% is allowed for a draft - see validateForActivation for the
- * stricter exactly-100%% rule required before activation).
+ * (negative/out-of-range/>100% total are always rejected; a total below
+ * 100% is allowed for a draft - see validateForActivation for the
+ * stricter exactly-100% rule required before activation).
  */
 export function validatePercentages(
   percentages: AllocationPercentages,
@@ -236,4 +236,119 @@ export function allocateAmounts(
   }
 
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Budget-vs-actual: allocation status thresholds and period-elapsed math.
+// Pure and dependency-free (queries.ts, which does the actual database
+// aggregation, is `server-only` and can't be unit-tested with `deno test`
+// directly - this is deliberately factored out so the thresholds and date
+// arithmetic themselves are testable independent of any database call).
+// ---------------------------------------------------------------------------
+
+export type AllocationStatus =
+  | "healthy"
+  | "watch"
+  | "at_risk"
+  | "exceeded"
+  | "insufficient_data";
+
+const WATCH_THRESHOLD_PERCENT = 75;
+const AT_RISK_THRESHOLD_PERCENT = 90;
+const EXCEEDED_THRESHOLD_PERCENT = 100;
+
+/**
+ * Status thresholds default to 75/90/100%, matching the product spec's
+ * own defaults. `targetMinor <= 0` is treated as insufficient_data unless
+ * there is already spending against it (exceeded) - a percentage against
+ * a zero target is meaningless, not "0% healthy".
+ */
+export function allocationStatus(
+  actualMinor: bigint,
+  targetMinor: bigint,
+): AllocationStatus {
+  if (targetMinor <= 0n) {
+    return actualMinor > 0n ? "exceeded" : "insufficient_data";
+  }
+  const percent = Number((actualMinor * 10000n) / targetMinor) / 100;
+  if (percent >= EXCEEDED_THRESHOLD_PERCENT) return "exceeded";
+  if (percent >= AT_RISK_THRESHOLD_PERCENT) return "at_risk";
+  if (percent >= WATCH_THRESHOLD_PERCENT) return "watch";
+  return "healthy";
+}
+
+const DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Whole-day difference between two "YYYY-MM-DD" calendar date keys (toDateKey - fromDateKey), independent of any timezone offset. */
+export function daysBetweenDateKeys(fromDateKey: string, toDateKey: string): number {
+  if (!DATE_KEY_PATTERN.test(fromDateKey) || !DATE_KEY_PATTERN.test(toDateKey)) {
+    throw new RangeError(
+      `daysBetweenDateKeys expects "YYYY-MM-DD" date keys, got ${fromDateKey} / ${toDateKey}`,
+    );
+  }
+  const [fy, fm, fd] = fromDateKey.split("-").map(Number);
+  const [ty, tm, td] = toDateKey.split("-").map(Number);
+  const fromUtc = Date.UTC(fy, fm - 1, fd);
+  const toUtc = Date.UTC(ty, tm - 1, td);
+  return Math.round((toUtc - fromUtc) / (24 * 60 * 60 * 1000));
+}
+
+/**
+ * Fraction (0-1] of a budget period elapsed as of `todayDateKey`, or null
+ * when a projection wouldn't be meaningful: the budget isn't active, or
+ * today falls outside the period entirely (a budget created mid-period
+ * for a past or future month, or not yet started). Both boundary days
+ * (period_start and the current day) count as fully elapsed - a budget
+ * on its first day has elapsedFraction = 1/totalDays, never 0, so a
+ * same-day projection is still computable rather than dividing by zero.
+ */
+export function computeElapsedFraction(
+  periodStart: string,
+  periodEnd: string,
+  todayDateKey: string,
+  isActive: boolean,
+): number | null {
+  if (!isActive) return null;
+  if (todayDateKey < periodStart || todayDateKey > periodEnd) return null;
+
+  const totalDays = daysBetweenDateKeys(periodStart, periodEnd) + 1;
+  const elapsedDays = daysBetweenDateKeys(periodStart, todayDateKey) + 1;
+  return Math.min(1, elapsedDays / totalDays);
+}
+
+export type AllocationActualMath = {
+  actualMinor: bigint;
+  targetMinor: bigint;
+  remainingMinor: bigint;
+  /** null only when targetMinor is 0 and there is spending against it - a percentage is meaningless there. */
+  percentConsumed: number | null;
+  /** null unless elapsedFraction is provided and greater than 0. */
+  projectedMinor: bigint | null;
+  status: AllocationStatus;
+};
+
+/** Combines actual/target into the full set of derived figures a dashboard card needs, given an already-computed elapsedFraction (see computeElapsedFraction). */
+export function computeAllocationActual(
+  actualMinor: bigint,
+  targetMinor: bigint,
+  elapsedFraction: number | null,
+): AllocationActualMath {
+  const percentConsumed = targetMinor > 0n
+    ? Number((actualMinor * 10000n) / targetMinor) / 100
+    : actualMinor > 0n
+    ? null
+    : 0;
+
+  const projectedMinor = elapsedFraction !== null && elapsedFraction > 0
+    ? BigInt(Math.round(Number(actualMinor) / elapsedFraction))
+    : null;
+
+  return {
+    actualMinor,
+    targetMinor,
+    remainingMinor: targetMinor - actualMinor,
+    percentConsumed,
+    projectedMinor,
+    status: allocationStatus(actualMinor, targetMinor),
+  };
 }
