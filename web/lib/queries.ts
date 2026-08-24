@@ -3,7 +3,9 @@ import { supabaseSession } from "./supabase-session-server";
 import { kigaliDayBoundsUtc, kigaliDateKey } from "./kigali-time";
 import {
   AllocationStatus,
+  BudgetAlert,
   computeAllocationActual,
+  computeBudgetAlerts,
   computeElapsedFraction,
 } from "./budget-math";
 
@@ -226,6 +228,19 @@ export async function getOwnedWorkspaceId(): Promise<string | null> {
   }
 
   return data?.workspace_id ?? null;
+}
+
+/** The caller's workspace's default_currency, or "RWF" if it can't be resolved - used to pre-select a currency in the budget/goal creation forms. */
+export async function getWorkspaceDefaultCurrency(): Promise<string> {
+  const workspaceId = await getOwnedWorkspaceId();
+  if (!workspaceId) return "RWF";
+  const supabase = await supabaseSession();
+  const { data } = await supabase
+    .from("workspaces")
+    .select("default_currency")
+    .eq("id", workspaceId)
+    .maybeSingle();
+  return data?.default_currency ?? "RWF";
 }
 
 export type AccountRow = {
@@ -511,6 +526,7 @@ export type BudgetActuals = {
   uncategorizedCount: number;
   /** Fraction (0-1) of the budget period elapsed so far, or null if the period doesn't cover today / the budget isn't active. */
   elapsedFraction: number | null;
+  alerts: BudgetAlert[];
 };
 
 /**
@@ -623,6 +639,22 @@ export async function getBudgetActuals(
     };
   });
 
+  const alerts = computeBudgetAlerts({
+    allocations: allocations.map((a) => ({
+      allocationType: a.allocationType,
+      actualMinor: BigInt(a.actualMinor),
+      targetMinor: BigInt(a.targetMinor),
+      status: a.status,
+    })),
+    unmappedCount,
+    unmappedMinor: BigInt(unmappedMinor),
+    uncategorizedCount,
+    uncategorizedMinor: BigInt(uncategorizedMinor),
+    budgetedIncomeMinor: BigInt(budget.normalized_monthly_income_minor),
+    actualIncomeMinor: BigInt(actualIncomeMinor),
+    elapsedFraction,
+  });
+
   return {
     allocations,
     actualIncomeMinor,
@@ -631,5 +663,91 @@ export async function getBudgetActuals(
     uncategorizedMinor,
     uncategorizedCount,
     elapsedFraction,
+    alerts,
   };
+}
+
+// ===========================================================================
+// Financial goals
+// ===========================================================================
+
+export type GoalType =
+  | "emergency_fund"
+  | "investing"
+  | "planned_purchase"
+  | "debt"
+  | "general_savings";
+
+export type GoalRow = {
+  id: string;
+  goal_type: GoalType;
+  name: string;
+  description: string | null;
+  currency: string;
+  target_amount_minor: number;
+  current_amount_minor: number;
+  target_date: string | null;
+  status: "active" | "completed" | "archived";
+  created_at: string;
+  completed_at: string | null;
+};
+
+const GOAL_COLUMNS =
+  "id, goal_type, name, description, currency, target_amount_minor, current_amount_minor, target_date, status, created_at, completed_at";
+
+export async function getGoals(): Promise<GoalRow[]> {
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("financial_goals")
+    .select(GOAL_COLUMNS)
+    .order("status", { ascending: true })
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("getGoals failed:", error.message);
+    return [];
+  }
+
+  return data ?? [];
+}
+
+export type GoalContributionRow = {
+  id: string;
+  amount_minor: number;
+  contribution_date: string;
+  source: "manual" | "transaction_link";
+  transaction_id: string | null;
+  created_at: string;
+};
+
+export type GoalWithContributions = GoalRow & {
+  contributions: GoalContributionRow[];
+};
+
+export async function getGoalById(id: string): Promise<GoalWithContributions | null> {
+  const supabase = await supabaseSession();
+  const { data: goal, error: goalError } = await supabase
+    .from("financial_goals")
+    .select(GOAL_COLUMNS)
+    .eq("id", id)
+    .maybeSingle();
+
+  if (goalError || !goal) {
+    if (goalError) console.error("getGoalById failed:", goalError.message);
+    return null;
+  }
+
+  const { data: contributions, error: contributionsError } = await supabase
+    .from("goal_contributions")
+    .select("id, amount_minor, contribution_date, source, transaction_id, created_at")
+    .eq("goal_id", id)
+    .order("contribution_date", { ascending: false })
+    .order("created_at", { ascending: false });
+
+  if (contributionsError) {
+    console.error("getGoalById contributions failed:", contributionsError.message);
+    return null;
+  }
+
+  return { ...goal, contributions: contributions ?? [] };
 }

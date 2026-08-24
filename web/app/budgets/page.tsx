@@ -18,6 +18,12 @@ export default async function BudgetsPage() {
         action={
           <div className="flex items-center gap-3">
             <Link
+              href="/budgets/goals"
+              className="text-sm font-medium text-accent hover:underline"
+            >
+              Goals
+            </Link>
+            <Link
               href="/budgets/categories"
               className="text-sm font-medium text-accent hover:underline"
             >

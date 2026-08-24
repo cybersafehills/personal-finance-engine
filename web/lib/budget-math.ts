@@ -352,3 +352,153 @@ export function computeAllocationActual(
     status: allocationStatus(actualMinor, targetMinor),
   };
 }
+
+// ---------------------------------------------------------------------------
+// Alerts: computed fresh on every read from already-computed actuals, not
+// a persisted/deduplicated budget_alerts table with its own resolution
+// workflow (see the D1 scope note - that needs background-job infra this
+// project doesn't have yet). Recomputing on read means an alert can never
+// go stale and never needs an explicit "resolved" step: it simply stops
+// appearing once the condition that produced it is no longer true.
+// Deduplication instead comes from `id` being deterministic per
+// condition (e.g. one allocation can only ever produce one status alert
+// at a time) - a caller rendering by `id` never sees the same thing twice.
+// ---------------------------------------------------------------------------
+
+export type AlertSeverity = "info" | "warning" | "critical";
+
+export type BudgetAlert =
+  | {
+    id: string;
+    kind: "allocation_watch" | "allocation_at_risk";
+    severity: "info" | "warning";
+    allocationType: AllocationType;
+    percentConsumed: number;
+  }
+  | {
+    id: string;
+    kind: "allocation_exceeded";
+    severity: "critical";
+    allocationType: AllocationType;
+    actualMinor: bigint;
+    targetMinor: bigint;
+  }
+  | {
+    id: string;
+    kind: "unmapped_spending" | "uncategorized_spending";
+    severity: "warning";
+    count: number;
+    totalMinor: bigint;
+  }
+  | {
+    id: string;
+    kind: "income_below_budget";
+    severity: "warning";
+    budgetedMinor: bigint;
+    actualMinor: bigint;
+    shortfallPercent: number;
+  };
+
+/** Income is flagged only once at least half the period has elapsed, so a slow-to-post paycheck on day 3 doesn't read as a shortfall. */
+const INCOME_CHECK_MIN_ELAPSED_FRACTION = 0.5;
+const INCOME_SHORTFALL_THRESHOLD_PERCENT = 10;
+
+export type BudgetAlertInput = {
+  allocations: {
+    allocationType: AllocationType;
+    actualMinor: bigint;
+    targetMinor: bigint;
+    status: AllocationStatus;
+  }[];
+  unmappedCount: number;
+  unmappedMinor: bigint;
+  uncategorizedCount: number;
+  uncategorizedMinor: bigint;
+  budgetedIncomeMinor: bigint;
+  actualIncomeMinor: bigint;
+  elapsedFraction: number | null;
+};
+
+/**
+ * Derives the current set of alerts from a budget's already-computed
+ * actuals. Pure and deterministic: the same input always produces the
+ * same alerts, in the same order, with the same `id`s - see the module
+ * comment above for why that's what stands in for persistence here.
+ */
+export function computeBudgetAlerts(input: BudgetAlertInput): BudgetAlert[] {
+  const alerts: BudgetAlert[] = [];
+
+  for (const allocation of input.allocations) {
+    if (allocation.status === "watch") {
+      alerts.push({
+        id: `allocation-watch-${allocation.allocationType}`,
+        kind: "allocation_watch",
+        severity: "info",
+        allocationType: allocation.allocationType,
+        percentConsumed: Number(
+          (allocation.actualMinor * 10000n) / allocation.targetMinor,
+        ) / 100,
+      });
+    } else if (allocation.status === "at_risk") {
+      alerts.push({
+        id: `allocation-at-risk-${allocation.allocationType}`,
+        kind: "allocation_at_risk",
+        severity: "warning",
+        allocationType: allocation.allocationType,
+        percentConsumed: Number(
+          (allocation.actualMinor * 10000n) / allocation.targetMinor,
+        ) / 100,
+      });
+    } else if (allocation.status === "exceeded") {
+      alerts.push({
+        id: `allocation-exceeded-${allocation.allocationType}`,
+        kind: "allocation_exceeded",
+        severity: "critical",
+        allocationType: allocation.allocationType,
+        actualMinor: allocation.actualMinor,
+        targetMinor: allocation.targetMinor,
+      });
+    }
+  }
+
+  if (input.unmappedCount > 0) {
+    alerts.push({
+      id: "unmapped-spending",
+      kind: "unmapped_spending",
+      severity: "warning",
+      count: input.unmappedCount,
+      totalMinor: input.unmappedMinor,
+    });
+  }
+
+  if (input.uncategorizedCount > 0) {
+    alerts.push({
+      id: "uncategorized-spending",
+      kind: "uncategorized_spending",
+      severity: "warning",
+      count: input.uncategorizedCount,
+      totalMinor: input.uncategorizedMinor,
+    });
+  }
+
+  if (
+    input.elapsedFraction !== null &&
+    input.elapsedFraction >= INCOME_CHECK_MIN_ELAPSED_FRACTION &&
+    input.budgetedIncomeMinor > 0n
+  ) {
+    const shortfallPercent = 100 -
+      Number((input.actualIncomeMinor * 10000n) / input.budgetedIncomeMinor) / 100;
+    if (shortfallPercent >= INCOME_SHORTFALL_THRESHOLD_PERCENT) {
+      alerts.push({
+        id: "income-below-budget",
+        kind: "income_below_budget",
+        severity: "warning",
+        budgetedMinor: input.budgetedIncomeMinor,
+        actualMinor: input.actualIncomeMinor,
+        shortfallPercent,
+      });
+    }
+  }
+
+  return alerts;
+}
