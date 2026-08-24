@@ -510,10 +510,10 @@ fi
 echo "=== privilege/RLS regression check ==="
 RLS_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_class where relnamespace='public'::regnamespace and relkind='r' and relrowsecurity;")"
 TABLE_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_class where relnamespace='public'::regnamespace and relkind='r';")"
-if [ "$RLS_COUNT" = "$TABLE_COUNT" ] && [ "$TABLE_COUNT" = "10" ]; then
-  pass "RLS enabled on all 10 tables after the full chain (6 Phase 3 + 3 Phase B: profiles, workspaces, workspace_memberships + 1 Phase C: ingestion_connections)"
+if [ "$RLS_COUNT" = "$TABLE_COUNT" ] && [ "$TABLE_COUNT" = "17" ]; then
+  pass "RLS enabled on all 17 tables after the full chain (6 Phase 3 + 3 Phase B + 1 Phase C + 7 Phase D: budget_templates, budget_template_allocations, budgets, budget_allocations, budget_category_mappings, financial_goals, goal_contributions)"
 else
-  fail "RLS not enabled on all tables: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled (expected 10 of 10)"
+  fail "RLS not enabled on all tables: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled (expected 17 of 17)"
 fi
 
 # anon must remain fully revoked everywhere - Phase B never touches this.
@@ -531,14 +531,19 @@ fi
 # workspace_memberships (select), accounts (select, insert, update),
 # transactions (select, update), merchant_rules (select, insert, update)
 # = 13 Phase B grants, plus Phase C's ingestion_connections (select,
-# insert, update) = 3 more, for 16 total. Asserting the exact count (not
-# just "some") forces this test to be updated - a deliberate review point
-# - if any future migration ever widens authenticated's table-level access.
+# insert, update) = 3 more = 16, plus Phase D's budget_templates (select),
+# budget_template_allocations (select), budgets (select, insert, update),
+# budget_allocations (select, insert, update, delete),
+# budget_category_mappings (select, insert, update), financial_goals
+# (select, insert, update), goal_contributions (select, insert, delete)
+# = 18 more, for 34 total. Asserting the exact count (not just "some")
+# forces this test to be updated - a deliberate review point - if any
+# future migration ever widens authenticated's table-level access.
 AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and grantee = 'authenticated';")"
-if [ "$AUTHENTICATED_GRANT_COUNT" = "16" ]; then
-  pass "authenticated holds exactly the 16 Phase B + Phase C table grants expected, no more"
+if [ "$AUTHENTICATED_GRANT_COUNT" = "34" ]; then
+  pass "authenticated holds exactly the 34 Phase B + Phase C + Phase D table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 16 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 34 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -993,6 +998,131 @@ if [ "$CONN_REVOKED" = "1" ]; then
   pass "Phase C: workspace owner can revoke their own ingestion connection"
 else
   fail "Phase C: workspace owner was unable to revoke their own ingestion connection"
+fi
+
+# ===========================================================================
+# Phase D: budgets, allocations, category mappings, and goals. Reuses
+# pfe_rls (USER_A/WORKSPACE_A, USER_B/WORKSPACE_B already established
+# above) rather than standing up a fresh database.
+# ===========================================================================
+echo "=== Phase D: budgets, allocations, category mappings, and goals ==="
+
+# --- allocation-sum-100 invariant, at activation time -----------------------
+
+DRAFT_BUDGET="$(psql -d pfe_rls -t -A -c "
+  insert into public.budgets (workspace_id, name, currency, period_start, period_end, income_amount_minor, normalized_monthly_income_minor, normalized_annual_income_minor, income_frequency)
+  values ('$WORKSPACE_A', 'August', 'RWF', '2026-08-01', '2026-08-31', 500000, 500000, 6000000, 'monthly')
+  returning id;" | head -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.budget_allocations (budget_id, workspace_id, allocation_type, percentage, target_amount_minor)
+  values
+    ('$DRAFT_BUDGET', '$WORKSPACE_A', 'ESSENTIALS', 50.00, 250000),
+    ('$DRAFT_BUDGET', '$WORKSPACE_A', 'INVESTING', 15.00, 75000),
+    ('$DRAFT_BUDGET', '$WORKSPACE_A', 'EMERGENCY', 5.00, 25000),
+    ('$DRAFT_BUDGET', '$WORKSPACE_A', 'WANTS', 20.00, 100000);
+" >/dev/null
+
+# Under-allocated (90%) budget refuses to activate.
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "update public.budgets set status = 'active' where id = '$DRAFT_BUDGET';" >/dev/null 2>$ARTIFACT_DIR/pfe_activate_stderr.log; then
+  fail "Phase D: a budget with allocations totaling 90% was allowed to activate"
+else
+  pass "Phase D: activation is refused when allocation percentages do not total 100%"
+fi
+rm -f $ARTIFACT_DIR/pfe_activate_stderr.log
+
+# Correct the allocations to sum to 100% and activation succeeds.
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  update public.budget_allocations set percentage = 30.00, target_amount_minor = 150000
+  where budget_id = '$DRAFT_BUDGET' and allocation_type = 'WANTS';
+  update public.budgets set status = 'active' where id = '$DRAFT_BUDGET';
+" >/dev/null
+BUDGET_ACTIVE="$(psql -d pfe_rls -t -A -c "select count(*) from public.budgets where id = '$DRAFT_BUDGET' and status = 'active' and activated_at is not null;")"
+if [ "$BUDGET_ACTIVE" = "1" ]; then
+  pass "Phase D: a budget with allocations totaling exactly 100% activates and stamps activated_at"
+else
+  fail "Phase D: a correctly-allocated budget failed to activate"
+fi
+
+# --- allocation-sum-100 invariant, on later edits to an active budget ------
+
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "update public.budget_allocations set percentage = 10.00, target_amount_minor = 50000 where budget_id = '$DRAFT_BUDGET' and allocation_type = 'EMERGENCY';" >/dev/null 2>$ARTIFACT_DIR/pfe_edit_stderr.log; then
+  fail "Phase D: editing an active budget's allocation to break the 100% total was allowed"
+else
+  pass "Phase D: editing an active budget's allocations to no longer total 100% is rejected"
+fi
+rm -f $ARTIFACT_DIR/pfe_edit_stderr.log
+
+# --- one active budget per workspace+currency -------------------------------
+
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.budgets (workspace_id, name, currency, period_start, period_end, income_amount_minor, normalized_monthly_income_minor, normalized_annual_income_minor, income_frequency, status, activated_at)
+  values ('$WORKSPACE_A', 'August Duplicate', 'RWF', '2026-08-01', '2026-08-31', 500000, 500000, 6000000, 'monthly', 'active', now());
+" >/dev/null 2>$ARTIFACT_DIR/pfe_dupactive_stderr.log; then
+  fail "Phase D: a second active RWF budget was allowed in the same workspace"
+else
+  pass "Phase D: at most one active budget per workspace+currency is enforced"
+fi
+rm -f $ARTIFACT_DIR/pfe_dupactive_stderr.log
+
+# --- category mappings: cross-workspace isolation ---------------------------
+
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.budget_category_mappings (workspace_id, category, allocation_type)
+  values ('$WORKSPACE_A', 'Groceries', 'ESSENTIALS');
+" >/dev/null
+B_SEES_A_MAPPING="$(as_user "$USER_B" "select count(*) from public.budget_category_mappings where workspace_id = '$WORKSPACE_A';")"
+if [ "$B_SEES_A_MAPPING" = "0" ]; then
+  pass "Phase D: User B cannot see User A's category mappings"
+else
+  fail "Phase D: User B could read User A's category mappings - isolation breach"
+fi
+
+# --- financial goals and contributions --------------------------------------
+
+GOAL_A="$(psql -d pfe_rls -t -A -c "
+  insert into public.financial_goals (workspace_id, goal_type, name, currency, target_amount_minor)
+  values ('$WORKSPACE_A', 'emergency_fund', 'Emergency fund', 'RWF', 1000000)
+  returning id;" | head -1)"
+
+as_user "$USER_A" "insert into public.goal_contributions (goal_id, workspace_id, amount_minor, source) values ('$GOAL_A', '$WORKSPACE_A', 50000, 'manual');" >/dev/null
+GOAL_TOTAL_AFTER_ONE="$(psql -d pfe_rls -t -A -c "select current_amount_minor from public.financial_goals where id = '$GOAL_A';")"
+if [ "$GOAL_TOTAL_AFTER_ONE" = "50000" ]; then
+  pass "Phase D: a goal contribution is reflected in current_amount_minor via the maintenance trigger"
+else
+  fail "Phase D: current_amount_minor was $GOAL_TOTAL_AFTER_ONE after a 50000 contribution, expected 50000"
+fi
+
+# A transaction can fund at most one goal (double-counting protection).
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.momo_messages (id, raw_message, processing_status)
+  values ('00000000-0000-0000-0000-0000000000f2', 'seed', 'processed');
+  insert into public.transactions (id, momo_message_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version)
+  values ('00000000-0000-0000-0000-0000000000f3', '00000000-0000-0000-0000-0000000000f2', '00000000-0000-0000-0000-0000000000d1', '$WORKSPACE_A', 'money_received', 'in', 'success', 20000, 0, now(), 'test');
+  insert into public.goal_contributions (goal_id, workspace_id, transaction_id, amount_minor, source)
+  values ('$GOAL_A', '$WORKSPACE_A', '00000000-0000-0000-0000-0000000000f3', 20000, 'transaction_link');
+" >/dev/null
+GOAL_B="$(psql -d pfe_rls -t -A -c "
+  insert into public.financial_goals (workspace_id, goal_type, name, currency, target_amount_minor)
+  values ('$WORKSPACE_A', 'general_savings', 'Second goal', 'RWF', 500000)
+  returning id;" | head -1)"
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.goal_contributions (goal_id, workspace_id, transaction_id, amount_minor, source)
+  values ('$GOAL_B', '$WORKSPACE_A', '00000000-0000-0000-0000-0000000000f3', 20000, 'transaction_link');
+" >/dev/null 2>$ARTIFACT_DIR/pfe_dupcontrib_stderr.log; then
+  fail "Phase D: the same transaction was linked as a contribution to two different goals"
+else
+  pass "Phase D: a transaction cannot be linked as a contribution to more than one goal"
+fi
+rm -f $ARTIFACT_DIR/pfe_dupcontrib_stderr.log
+
+# User B cannot see or delete User A's goal or contributions.
+B_SEES_GOAL="$(as_user "$USER_B" "select count(*) from public.financial_goals where id = '$GOAL_A';")"
+as_user "$USER_B" "delete from public.goal_contributions where goal_id = '$GOAL_A';" >/dev/null 2>&1 || true
+GOAL_CONTRIBUTIONS_INTACT="$(psql -d pfe_rls -t -A -c "select count(*) from public.goal_contributions where goal_id = '$GOAL_A';")"
+if [ "$B_SEES_GOAL" = "0" ] && [ "$GOAL_CONTRIBUTIONS_INTACT" = "2" ]; then
+  pass "Phase D: User B cannot see or delete User A's goal or its contributions"
+else
+  fail "Phase D: User B saw the goal ($B_SEES_GOAL) or deleted contributions (now $GOAL_CONTRIBUTIONS_INTACT of 2 expected) - isolation breach"
 fi
 
 echo ""

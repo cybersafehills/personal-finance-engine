@@ -297,3 +297,128 @@ export async function getIngestionConnections(): Promise<
     };
   });
 }
+
+// ===========================================================================
+// Phase D: budgets, allocations, category mappings, goals.
+// ===========================================================================
+
+export type AllocationType = "ESSENTIALS" | "INVESTING" | "EMERGENCY" | "WANTS";
+
+export type TemplateAllocation = {
+  allocation_type: AllocationType;
+  percentage: number;
+  sort_order: number;
+};
+
+export type SystemTemplate = {
+  id: string;
+  name: string;
+  description: string | null;
+  allocations: TemplateAllocation[];
+};
+
+/** The single active system template (50/15/5/30). Global, not workspace-scoped. */
+export async function getSystemTemplate(): Promise<SystemTemplate | null> {
+  const supabase = await supabaseSession();
+  const { data: template, error: templateError } = await supabase
+    .from("budget_templates")
+    .select("id, name, description")
+    .eq("is_system_template", true)
+    .eq("is_active", true)
+    .limit(1)
+    .maybeSingle();
+
+  if (templateError || !template) {
+    if (templateError) console.error("getSystemTemplate failed:", templateError.message);
+    return null;
+  }
+
+  const { data: allocations, error: allocationsError } = await supabase
+    .from("budget_template_allocations")
+    .select("allocation_type, percentage, sort_order")
+    .eq("template_id", template.id)
+    .order("sort_order", { ascending: true });
+
+  if (allocationsError) {
+    console.error("getSystemTemplate allocations failed:", allocationsError.message);
+    return null;
+  }
+
+  return { ...template, allocations: allocations ?? [] };
+}
+
+export type BudgetRow = {
+  id: string;
+  name: string;
+  currency: string;
+  period_start: string;
+  period_end: string;
+  income_amount_minor: number;
+  normalized_monthly_income_minor: number;
+  normalized_annual_income_minor: number;
+  income_frequency: string;
+  income_mode: string;
+  status: "draft" | "active" | "completed" | "archived";
+  created_at: string;
+  activated_at: string | null;
+};
+
+const BUDGET_COLUMNS =
+  "id, name, currency, period_start, period_end, income_amount_minor, normalized_monthly_income_minor, normalized_annual_income_minor, income_frequency, income_mode, status, created_at, activated_at";
+
+export async function getBudgets(): Promise<BudgetRow[]> {
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("budgets")
+    .select(BUDGET_COLUMNS)
+    .order("status", { ascending: true })
+    .order("period_start", { ascending: false });
+
+  if (error) {
+    console.error("getBudgets failed:", error.message);
+    return [];
+  }
+
+  return data ?? [];
+}
+
+export type BudgetAllocationRow = {
+  id: string;
+  allocation_type: AllocationType;
+  percentage: number;
+  target_amount_minor: number;
+  sort_order: number;
+};
+
+export type BudgetWithAllocations = BudgetRow & {
+  allocations: BudgetAllocationRow[];
+};
+
+export async function getBudgetById(
+  id: string,
+): Promise<BudgetWithAllocations | null> {
+  const supabase = await supabaseSession();
+  const { data: budget, error: budgetError } = await supabase
+    .from("budgets")
+    .select(BUDGET_COLUMNS)
+    .eq("id", id)
+    .maybeSingle();
+
+  if (budgetError || !budget) {
+    if (budgetError) console.error("getBudgetById failed:", budgetError.message);
+    return null;
+  }
+
+  const { data: allocations, error: allocationsError } = await supabase
+    .from("budget_allocations")
+    .select("id, allocation_type, percentage, target_amount_minor, sort_order")
+    .eq("budget_id", id)
+    .order("sort_order", { ascending: true });
+
+  if (allocationsError) {
+    console.error("getBudgetById allocations failed:", allocationsError.message);
+    return null;
+  }
+
+  return { ...budget, allocations: allocations ?? [] };
+}

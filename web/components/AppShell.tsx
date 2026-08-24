@@ -4,12 +4,13 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTransition } from "react";
 import { signOut } from "../app/login/actions";
-import { GearIcon, HomeIcon, ListIcon, PieIcon } from "./icons";
+import { GearIcon, HomeIcon, ListIcon, PieIcon, TargetIcon } from "./icons";
 
 const NAV_ITEMS = [
   { href: "/", label: "Home", Icon: HomeIcon },
   { href: "/transactions", label: "Transactions", Icon: ListIcon },
   { href: "/categories", label: "Categories", Icon: PieIcon },
+  { href: "/budgets", label: "Budgets", Icon: TargetIcon },
   { href: "/settings", label: "Settings", Icon: GearIcon },
 ] as const;
 
