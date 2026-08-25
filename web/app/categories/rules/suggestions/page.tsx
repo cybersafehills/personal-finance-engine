@@ -13,6 +13,7 @@ export default async function LearnedSuggestionsPage() {
       <PageHeader
         title="Suggested rules"
         subtitle="Based on categories you've corrected 3 or more times for the same counterparty"
+        backHref="/categories/rules"
       />
 
       {suggestions.length === 0 ? (

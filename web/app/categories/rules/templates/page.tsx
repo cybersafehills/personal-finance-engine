@@ -8,6 +8,7 @@ export default function PolicyTemplatesPage() {
       <PageHeader
         title="Templates"
         subtitle="Pick a starting point - nothing is created until you review and save the form"
+        backHref="/categories/rules"
       />
       <div className="flex flex-col gap-3">
         {POLICY_TEMPLATES.map((template) => (

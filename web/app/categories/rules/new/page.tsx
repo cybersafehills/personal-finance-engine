@@ -35,6 +35,7 @@ export default async function NewCategorizationRulePage({
       <PageHeader
         title="New rule"
         subtitle="Categorize matching transactions automatically"
+        backHref="/categories/rules"
         action={
           <Link href="/categories/rules/templates" className="text-sm font-medium text-accent">
             Start from a template

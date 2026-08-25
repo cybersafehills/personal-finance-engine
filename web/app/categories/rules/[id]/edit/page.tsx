@@ -17,7 +17,11 @@ export default async function EditCategorizationRulePage({
 
   return (
     <div>
-      <PageHeader title="Edit rule" subtitle="Categorize matching transactions automatically" />
+      <PageHeader
+        title="Edit rule"
+        subtitle="Categorize matching transactions automatically"
+        backHref="/categories/rules"
+      />
       <PolicyForm mode="edit" policy={policy} />
     </div>
   );
