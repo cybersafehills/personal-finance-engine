@@ -182,7 +182,7 @@ Deno.serve(async (req: Request) => {
     const { data: existingMessage, error: duplicateLookupError } =
       await supabase
         .from("momo_messages")
-        .select("id, processing_status")
+        .select("id, processing_status, parse_attempts")
         .eq("message_fingerprint", fingerprint)
         .maybeSingle();
 
@@ -198,7 +198,17 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    if (existingMessage) {
+    // "failed" means this exact message was already stored as raw evidence
+    // but never made it into a transaction (e.g. account resolution or the
+    // ledger insert itself failed) - that is a retryable state, not a true
+    // duplicate, so re-processing continues below using the existing row
+    // rather than being turned away. Every other non-null status
+    // (processed, needs_review, rejected, processing) represents either a
+    // successful outcome or an in-flight/needs-human-input state and stays
+    // a hard duplicate.
+    const isRetryableFailure = existingMessage?.processing_status === "failed";
+
+    if (existingMessage && !isRetryableFailure) {
       return jsonResponse({
         ok: true,
         status: "duplicate",
@@ -209,37 +219,65 @@ Deno.serve(async (req: Request) => {
     // STORE RAW SMS EVIDENCE
     // ========================================================
 
-    const { data: insertedMessage, error: messageInsertError } = await supabase
-      .from("momo_messages")
-      .insert({
-        source: "ios_shortcuts",
-        raw_message: rawMessage,
-        message_fingerprint: fingerprint,
-        device_received_at: deviceReceivedAt,
-        processing_status: "processing",
-        parser_version: PARSER_VERSION,
-        parse_attempts: 1,
-        last_parse_attempt_at: new Date().toISOString(),
-        metadata: {
-          ingestion_source: "iphone_shortcuts",
-        },
-      })
-      .select("id")
-      .single();
+    let momoMessageId: string;
 
-    if (messageInsertError || !insertedMessage) {
-      console.error("Raw message insert error:", messageInsertError);
+    if (isRetryableFailure && existingMessage) {
+      const { error: retryUpdateError } = await supabase
+        .from("momo_messages")
+        .update({
+          processing_status: "processing",
+          parse_attempts: Number(existingMessage.parse_attempts ?? 0) + 1,
+          last_parse_attempt_at: new Date().toISOString(),
+        })
+        .eq("id", existingMessage.id);
 
-      return jsonResponse(
-        {
-          ok: false,
-          error: "database_error",
-        },
-        500,
-      );
+      if (retryUpdateError) {
+        console.error("Retry message update error:", retryUpdateError);
+
+        return jsonResponse(
+          {
+            ok: false,
+            error: "database_error",
+          },
+          500,
+        );
+      }
+
+      momoMessageId = existingMessage.id;
+    } else {
+      const { data: insertedMessage, error: messageInsertError } =
+        await supabase
+          .from("momo_messages")
+          .insert({
+            source: "ios_shortcuts",
+            raw_message: rawMessage,
+            message_fingerprint: fingerprint,
+            device_received_at: deviceReceivedAt,
+            processing_status: "processing",
+            parser_version: PARSER_VERSION,
+            parse_attempts: 1,
+            last_parse_attempt_at: new Date().toISOString(),
+            metadata: {
+              ingestion_source: "iphone_shortcuts",
+            },
+          })
+          .select("id")
+          .single();
+
+      if (messageInsertError || !insertedMessage) {
+        console.error("Raw message insert error:", messageInsertError);
+
+        return jsonResponse(
+          {
+            ok: false,
+            error: "database_error",
+          },
+          500,
+        );
+      }
+
+      momoMessageId = insertedMessage.id;
     }
-
-    const momoMessageId = insertedMessage.id;
 
     // ========================================================
     // DETERMINISTIC TRANSACTION PARSING

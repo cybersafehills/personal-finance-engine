@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useTransition } from "react";
 import { signOut } from "../app/login/actions";
 import { GearIcon, HomeIcon, ListIcon, PieIcon, TargetIcon } from "./icons";
+import { LiveDataSync } from "./LiveDataSync";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 import type { WorkspaceSummary } from "../lib/queries";
 
@@ -50,6 +51,8 @@ export function AppShell({
 
   return (
     <div className="flex min-h-full flex-col">
+      {userEmail && <LiveDataSync workspaceId={activeWorkspaceId} />}
+
       {/* Slim account bar - visible on every screen size, independent of
           the desktop nav pills below it. Absent on auth pages (no user
           yet) since there is nothing to sign out of. */}
