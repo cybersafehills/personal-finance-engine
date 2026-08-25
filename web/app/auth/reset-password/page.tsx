@@ -36,7 +36,7 @@ export default function ResetPasswordRequestPage() {
           event.preventDefault();
           setError(null);
           startTransition(async () => {
-            const result = await requestPasswordReset(email, window.location.origin);
+            const result = await requestPasswordReset(email);
             if (!result.ok) {
               setError(result.error);
               return;

@@ -32,6 +32,12 @@
 
   --radius-card: 1rem;
   --radius-control: 0.625rem;
+
+  /* OneLedger brand marks, sampled directly from the approved logo
+     artwork (not the UI's own --accent, which is a separate, deliberately
+     more muted interface color - see docs/ONELEDGER_BRAND_ASSETS.md). */
+  --brand-navy: #07143a;
+  --brand-blue: #0050f4;
 }
 
 @theme inline {
@@ -52,6 +58,9 @@
 
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
+
+  --color-brand-navy: var(--brand-navy);
+  --color-brand-blue: var(--brand-blue);
 
   --radius-card: var(--radius-card);
   --radius-control: var(--radius-control);

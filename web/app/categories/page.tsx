@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { getCategoryTotals } from "../../lib/queries";
 import { PageHeader } from "../../components/PageHeader";
 import { CategoryItem } from "../../components/CategoryItem";
@@ -11,7 +12,15 @@ export default async function CategoriesPage() {
 
   return (
     <div>
-      <PageHeader title="Categories" subtitle="Where your money has gone, all time" />
+      <PageHeader
+        title="Categories"
+        subtitle="Where your money has gone, all time"
+        action={
+          <Link href="/categories/rules" className="text-sm font-medium text-accent">
+            Manage rules
+          </Link>
+        }
+      />
 
       <section className="rounded-card border border-border-subtle bg-surface p-1.5">
         {categories.length === 0 ? (

@@ -1,12 +1,19 @@
 import Link from "next/link";
+import { OneLedgerLogo } from "../../components/brand/OneLedgerLogo";
 import { SignUpForm } from "./SignUpForm";
 
 export const dynamic = "force-dynamic";
 
-export default function SignUpPage() {
+export default async function SignUpPage({
+  searchParams,
+}: PageProps<"/signup">) {
+  const { next } = await searchParams;
+  const nextPath = typeof next === "string" ? next : "/";
+
   return (
     <div className="mx-auto flex max-w-sm flex-col gap-6 py-10">
       <div className="text-center">
+        <OneLedgerLogo height={28} className="mx-auto mb-4" />
         <h1 className="text-xl font-semibold text-text-primary">
           Create your account
         </h1>
@@ -14,7 +21,7 @@ export default function SignUpPage() {
           Sets up your own personal finance workspace.
         </p>
       </div>
-      <SignUpForm />
+      <SignUpForm next={nextPath} />
       <p className="text-center text-sm text-text-muted">
         Already have an account?{" "}
         <Link href="/login" className="font-medium text-accent hover:underline">

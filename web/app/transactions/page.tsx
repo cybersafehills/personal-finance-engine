@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getTransactions } from "../../lib/queries";
+import { getReviewQueueCount, getTransactions } from "../../lib/queries";
 import { TransactionList } from "../../components/TransactionList";
 import { PageHeader } from "../../components/PageHeader";
 
@@ -11,10 +11,10 @@ export default async function TransactionsPage({
   const { category } = await searchParams;
   const categoryFilter = typeof category === "string" ? category : undefined;
 
-  const transactions = await getTransactions({
-    limit: 100,
-    category: categoryFilter,
-  });
+  const [transactions, reviewQueueCount] = await Promise.all([
+    getTransactions({ limit: 100, category: categoryFilter }),
+    getReviewQueueCount(),
+  ]);
 
   return (
     <div>
@@ -30,6 +30,12 @@ export default async function TransactionsPage({
                 Clear filter
               </Link>
             )}
+            <Link
+              href="/transactions/review"
+              className="text-sm font-medium text-accent hover:underline"
+            >
+              Review queue{reviewQueueCount > 0 ? ` (${reviewQueueCount})` : ""}
+            </Link>
             <Link
               href="/transactions/transfers"
               className="text-sm font-medium text-accent hover:underline"

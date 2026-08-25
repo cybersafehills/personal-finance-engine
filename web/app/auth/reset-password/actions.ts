@@ -1,17 +1,15 @@
 "use server";
 
 import { supabaseSession } from "../../../lib/supabase-session-server";
+import { siteUrl } from "../../../lib/site-url";
 
 export type ResetResult = { ok: true } | { ok: false; error: string };
 
-export async function requestPasswordReset(
-  email: string,
-  siteUrl: string,
-): Promise<ResetResult> {
+export async function requestPasswordReset(email: string): Promise<ResetResult> {
   const supabase = await supabaseSession();
 
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: `${siteUrl}/auth/callback?next=/auth/reset-password/confirm`,
+    redirectTo: `${siteUrl()}/auth/callback?next=/auth/reset-password/confirm`,
   });
 
   if (error) {

@@ -4,7 +4,11 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTransition } from "react";
 import { signOut } from "../app/login/actions";
+import { OneLedgerLogo } from "./brand/OneLedgerLogo";
 import { GearIcon, HomeIcon, ListIcon, PieIcon, TargetIcon } from "./icons";
+import { LiveDataSync } from "./LiveDataSync";
+import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
+import type { WorkspaceSummary } from "../lib/queries";
 
 const NAV_ITEMS = [
   { href: "/", label: "Home", Icon: HomeIcon },
@@ -36,20 +40,36 @@ function SignOutButton() {
 export function AppShell({
   children,
   userEmail,
+  workspaces,
+  activeWorkspaceId,
 }: {
   children: React.ReactNode;
   userEmail: string | null;
+  workspaces: WorkspaceSummary[];
+  activeWorkspaceId: string | null;
 }) {
   const pathname = usePathname();
 
   return (
     <div className="flex min-h-full flex-col">
+      {userEmail && <LiveDataSync workspaceId={activeWorkspaceId} />}
+
       {/* Slim account bar - visible on every screen size, independent of
           the desktop nav pills below it. Absent on auth pages (no user
           yet) since there is nothing to sign out of. */}
       {userEmail && (
-        <div className="flex items-center justify-between border-b border-border-subtle bg-surface px-4 py-1.5 text-xs sm:px-6">
-          <span className="truncate text-text-muted">{userEmail}</span>
+        <div className="flex items-center justify-between gap-3 border-b border-border-subtle bg-surface px-4 py-1.5 text-xs sm:px-6">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="truncate text-text-muted">{userEmail}</span>
+            {/* Only ever shown once there's an actual choice to make -
+                see WorkspaceSwitcher's own comment. */}
+            {workspaces.length > 1 && (
+              <WorkspaceSwitcher
+                workspaces={workspaces}
+                activeWorkspaceId={activeWorkspaceId}
+              />
+            )}
+          </div>
           <SignOutButton />
         </div>
       )}
@@ -59,9 +79,9 @@ export function AppShell({
           a 3-destination app. */}
       <header className="sticky top-0 z-10 hidden border-b border-border-subtle bg-surface/95 backdrop-blur sm:block">
         <div className="mx-auto flex max-w-3xl items-center justify-between px-6 py-3">
-          <span className="text-sm font-semibold tracking-tight text-text-primary">
-            Personal Finance
-          </span>
+          <Link href="/" aria-label="OneLedger home">
+            <OneLedgerLogo height={20} decorative />
+          </Link>
           <nav className="flex items-center gap-1" aria-label="Primary">
             {NAV_ITEMS.map(({ href, label }) => {
               const active = isActive(pathname, href);

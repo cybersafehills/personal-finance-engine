@@ -1,5 +1,9 @@
 import { notFound } from "next/navigation";
-import { getTransactionById, getTransactionSplits } from "../../../lib/queries";
+import {
+  getCategoryHistory,
+  getTransactionById,
+  getTransactionSplits,
+} from "../../../lib/queries";
 import { formatFullDateTime, formatRwf } from "../../../lib/format";
 import { displayName } from "../../../lib/display-name";
 import { isSupportedCurrency } from "../../../lib/money";
@@ -33,6 +37,8 @@ export default async function TransactionDetailPage({
     transaction.principal_effect_rwf !== null &&
     isSupportedCurrency(transaction.currency);
   const splits = canSplit ? await getTransactionSplits(id) : [];
+  const categoryHistory = await getCategoryHistory(id);
+  const latestDecision = categoryHistory[0] ?? null;
   const transactionEffectMinor = canSplit
     ? Math.abs(Number(transaction.principal_effect_rwf) + Number(transaction.fee_effect_rwf))
     : 0;
@@ -116,7 +122,8 @@ export default async function TransactionDetailPage({
           {!transaction.category && <Badge variant="attention">Needs review</Badge>}
         </div>
         <p className="mt-1 text-sm text-text-muted">
-          {reasonToSentence(transaction.category_source)}
+          {latestDecision?.decision_reason ??
+            reasonToSentence(transaction.category_source)}
         </p>
         <CategoryCorrectionForm
           transactionId={transaction.id}
@@ -124,6 +131,27 @@ export default async function TransactionDetailPage({
           currentSubcategory={transaction.subcategory}
           counterpartyName={transaction.counterparty_name}
         />
+        {categoryHistory.length > 1 && (
+          <div className="mt-3 border-t border-border-subtle pt-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+              Category history
+            </p>
+            <ul className="mt-1.5 flex flex-col gap-1.5">
+              {categoryHistory.map((entry) => (
+                <li key={entry.id} className="text-sm text-text-muted">
+                  <span className="text-text-primary">
+                    {entry.previous_category ?? "Uncategorized"} →{" "}
+                    {entry.new_category ?? "Uncategorized"}
+                  </span>
+                  {" · "}
+                  {entry.actor_type === "user" ? "you" : "system"}
+                  {" · "}
+                  {formatFullDateTime(entry.created_at)}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </section>
 
       {canSplit && isSupportedCurrency(transaction.currency) && (

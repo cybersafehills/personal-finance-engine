@@ -1,4 +1,5 @@
 import "server-only";
+import { cookies } from "next/headers";
 import { supabaseSession } from "./supabase-session-server";
 import { kigaliDayBoundsUtc, kigaliDateKey } from "./kigali-time";
 import {
@@ -40,12 +41,16 @@ export type TransactionRow = {
   category: string | null;
   subcategory: string | null;
   category_source: string | null;
+  category_confidence: number | null;
+  category_decision_status: string;
+  suggested_category: string | null;
+  suggested_subcategory: string | null;
   settlement_state: string | null;
   affects_balance: boolean | null;
 };
 
 const TRANSACTION_COLUMNS =
-  "id, transaction_type, direction, status, currency, amount_rwf, fee_rwf, net_effect_rwf, principal_effect_rwf, fee_effect_rwf, balance_after_rwf, counterparty_name, counterparty_reference, occurred_at, category, subcategory, category_source, settlement_state, affects_balance";
+  "id, transaction_type, direction, status, currency, amount_rwf, fee_rwf, net_effect_rwf, principal_effect_rwf, fee_effect_rwf, balance_after_rwf, counterparty_name, counterparty_reference, occurred_at, category, subcategory, category_source, category_confidence, category_decision_status, suggested_category, suggested_subcategory, settlement_state, affects_balance";
 
 export async function getCurrentBalance(): Promise<number | null> {
   const supabase = await supabaseSession();
@@ -151,6 +156,46 @@ export async function getTransactions(
   return data ?? [];
 }
 
+const REVIEW_QUEUE_STATUSES = ["provisional", "suggested", "conflict"] as const;
+const REVIEW_QUEUE_LIMIT = 100;
+
+// Unlike most reads in this file, review-queue rows are read through RLS
+// alone (no active-workspace filter) - same as getTransactions/
+// getTransactionById above - since a review item belongs to whichever
+// workspace its transaction does, and RLS already scopes that correctly
+// per-row.
+export async function getReviewQueueTransactions(): Promise<TransactionRow[]> {
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("transactions")
+    .select(TRANSACTION_COLUMNS)
+    .in("category_decision_status", REVIEW_QUEUE_STATUSES)
+    .order("occurred_at", { ascending: false })
+    .limit(REVIEW_QUEUE_LIMIT);
+
+  if (error) {
+    console.error("getReviewQueueTransactions failed:", error.message);
+    return [];
+  }
+
+  return data ?? [];
+}
+
+export async function getReviewQueueCount(): Promise<number> {
+  const supabase = await supabaseSession();
+  const { count, error } = await supabase
+    .from("transactions")
+    .select("id", { count: "exact", head: true })
+    .in("category_decision_status", REVIEW_QUEUE_STATUSES);
+
+  if (error) {
+    console.error("getReviewQueueCount failed:", error.message);
+    return 0;
+  }
+
+  return count ?? 0;
+}
+
 export async function getTransactionById(
   id: string,
 ): Promise<TransactionRow | null> {
@@ -209,35 +254,55 @@ export async function getCategoryTotals(): Promise<CategoryTotal[]> {
 }
 
 /**
- * The signed-in user's own workspace_id, resolved from
- * workspace_memberships (RLS-scoped to rows the caller is actually a
- * member of - see is_workspace_member() and workspace_memberships_select_
- * member). Phase C has no team/multi-membership functionality yet, so a
- * user has exactly one active membership in practice; the owner role is
- * required for account/connection creation, so that role is what this
- * resolves.
+ * The workspace every workspace-scoped read/write in this app should use
+ * for the current request - the caller's explicitly chosen workspace if
+ * they've switched to one via the workspace switcher (AppShell's
+ * WorkspaceSwitcher, `setActiveWorkspace` in
+ * app/settings/workspace/actions.ts), otherwise their personal workspace.
+ * A user now belongs to any number of workspaces (their own personal one
+ * plus any organization they own or were invited into - see
+ * supabase/migrations/20260827000000_organization_workspaces.sql), so
+ * unlike the single-workspace assumption this replaced, "the caller's
+ * workspace" is no longer unambiguous without this resolution.
  */
-export async function getOwnedWorkspaceId(): Promise<string | null> {
+export async function getActiveWorkspaceId(): Promise<string | null> {
+  const cookieStore = await cookies();
   const supabase = await supabaseSession();
+  const requestedId = cookieStore.get("active_workspace_id")?.value;
+
+  if (requestedId) {
+    const { data } = await supabase
+      .from("workspace_memberships")
+      .select("workspace_id")
+      .eq("workspace_id", requestedId)
+      .eq("status", "active")
+      .maybeSingle();
+
+    if (data?.workspace_id) return data.workspace_id;
+  }
+
+  // No cookie, or it named a workspace the caller is no longer an active
+  // member of - fall back to their personal workspace, which always
+  // exists exactly once per user (handle_new_user()).
   const { data, error } = await supabase
     .from("workspace_memberships")
-    .select("workspace_id")
-    .eq("role", "owner")
+    .select("workspace_id, workspaces!inner(kind)")
     .eq("status", "active")
+    .eq("workspaces.kind", "personal")
     .limit(1)
     .maybeSingle();
 
   if (error) {
-    console.error("getOwnedWorkspaceId failed:", error.message);
+    console.error("getActiveWorkspaceId failed:", error.message);
     return null;
   }
 
   return data?.workspace_id ?? null;
 }
 
-/** The caller's workspace's default_currency, or "RWF" if it can't be resolved - used to pre-select a currency in the budget/goal creation forms. */
+/** The caller's active workspace's default_currency, or "RWF" if it can't be resolved - used to pre-select a currency in the budget/goal creation forms. */
 export async function getWorkspaceDefaultCurrency(): Promise<string> {
-  const workspaceId = await getOwnedWorkspaceId();
+  const workspaceId = await getActiveWorkspaceId();
   if (!workspaceId) return "RWF";
   const supabase = await supabaseSession();
   const { data } = await supabase
@@ -928,6 +993,188 @@ export type TransactionSplitRow = {
   amount_minor: number;
 };
 
+export type CategoryHistoryEntry = {
+  id: string;
+  previous_category: string | null;
+  new_category: string | null;
+  new_category_source: string;
+  decision_reason: string | null;
+  actor_type: string;
+  created_at: string;
+};
+
+// RLS (transaction_category_history_select_member, see
+// 20260829000000_phase_f_categorization_policies.sql) is what actually
+// scopes this to the caller's own workspace - most-recent first, so the
+// transaction detail page can show the latest decision's explanation
+// without a second round trip.
+export async function getCategoryHistory(
+  transactionId: string,
+): Promise<CategoryHistoryEntry[]> {
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("transaction_category_history")
+    .select(
+      "id, previous_category, new_category, new_category_source, decision_reason, actor_type, created_at",
+    )
+    .eq("transaction_id", transactionId)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("getCategoryHistory failed:", error.message);
+    return [];
+  }
+
+  return data ?? [];
+}
+
+const CATEGORIZATION_POLICY_COLUMNS =
+  "id, name, description, category, subcategory, match_type, merchant_pattern, direction, amount_min_rwf, amount_max_rwf, time_start, time_end, priority, is_active, rule_source, confidence, usage_count, last_used_at";
+
+export type CategorizationPolicyRow = {
+  id: string;
+  name: string | null;
+  description: string | null;
+  category: string;
+  subcategory: string | null;
+  match_type: string;
+  merchant_pattern: string | null;
+  direction: "in" | "out" | "neutral" | null;
+  amount_min_rwf: number | null;
+  amount_max_rwf: number | null;
+  time_start: string | null;
+  time_end: string | null;
+  priority: number;
+  is_active: boolean;
+  rule_source: string;
+  confidence: number;
+  usage_count: number;
+  last_used_at: string | null;
+};
+
+// Unlike most reads in this file, policies genuinely need explicit
+// active-workspace scoping (not just RLS) - a user who belongs to more
+// than one workspace (organization membership) would otherwise see every
+// workspace's rules mixed into one list, and RLS alone would still permit
+// editing a rule outside the workspace the user is currently viewing.
+// Same reasoning budget_category_mappings' actions already use
+// getActiveWorkspaceId() for.
+export async function getCategorizationPolicies(): Promise<CategorizationPolicyRow[]> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!workspaceId) {
+    return [];
+  }
+
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("categorization_policies")
+    .select(CATEGORIZATION_POLICY_COLUMNS)
+    .eq("workspace_id", workspaceId)
+    .order("priority", { ascending: true });
+
+  if (error) {
+    console.error("getCategorizationPolicies failed:", error.message);
+    return [];
+  }
+
+  return data ?? [];
+}
+
+export async function getCategorizationPolicyById(
+  id: string,
+): Promise<CategorizationPolicyRow | null> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!workspaceId) {
+    return null;
+  }
+
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("categorization_policies")
+    .select(CATEGORIZATION_POLICY_COLUMNS)
+    .eq("id", id)
+    .eq("workspace_id", workspaceId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("getCategorizationPolicyById failed:", error.message);
+    return null;
+  }
+
+  return data;
+}
+
+export type LearnedPolicySuggestionSample = {
+  id: string;
+  amount_rwf: number;
+  occurred_at: string;
+};
+
+export type LearnedPolicySuggestion = {
+  suggestionKey: string;
+  counterpartyName: string;
+  category: string;
+  subcategory: string | null;
+  occurrenceCount: number;
+  lastOccurredAt: string;
+  sample: LearnedPolicySuggestionSample[];
+};
+
+// Suggestions are computed on demand (see detect_learned_policy_suggestions
+// in 20260831000000_phase_h_learned_suggestions.sql) - there's no
+// background job in this app, so this always reflects the current state
+// of transaction_category_history, not a stale cached list.
+export async function getLearnedPolicySuggestions(): Promise<LearnedPolicySuggestion[]> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!workspaceId) {
+    return [];
+  }
+
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase.rpc("detect_learned_policy_suggestions", {
+    p_workspace_id: workspaceId,
+    p_min_occurrences: 3,
+  });
+
+  if (error || !data) {
+    console.error("getLearnedPolicySuggestions failed:", error?.message);
+    return [];
+  }
+
+  const sampleIds = data.flatMap((s: { sample_transaction_ids: string[] }) => s.sample_transaction_ids);
+  const { data: sampleTransactions } = sampleIds.length > 0
+    ? await supabase.from("transactions").select("id, amount_rwf, occurred_at").in("id", sampleIds)
+    : { data: [] as LearnedPolicySuggestionSample[] };
+  const byId = new Map((sampleTransactions ?? []).map((t) => [t.id, t]));
+
+  return data.map((
+    s: {
+      suggestion_key: string;
+      counterparty_name: string;
+      category: string;
+      subcategory: string | null;
+      occurrence_count: number;
+      last_occurred_at: string;
+      sample_transaction_ids: string[];
+    },
+  ) => ({
+    suggestionKey: s.suggestion_key,
+    counterpartyName: s.counterparty_name,
+    category: s.category,
+    subcategory: s.subcategory,
+    occurrenceCount: s.occurrence_count,
+    lastOccurredAt: s.last_occurred_at,
+    sample: s.sample_transaction_ids.map((id) => byId.get(id)).filter((t) =>
+      t !== undefined
+    ) as LearnedPolicySuggestionSample[],
+  }));
+}
+
+export async function getLearnedPolicySuggestionCount(): Promise<number> {
+  const suggestions = await getLearnedPolicySuggestions();
+  return suggestions.length;
+}
+
 export async function getTransactionSplits(
   transactionId: string,
 ): Promise<TransactionSplitRow[]> {
@@ -1023,4 +1270,137 @@ export async function getVariableIncomeMonths(
   return monthKeys
     .filter((key) => byMonth.has(key))
     .map((monthKey) => ({ monthKey, transactions: byMonth.get(monthKey)! }));
+}
+
+// ===========================================================================
+// Organization workspaces: creation, membership, invites. See
+// supabase/migrations/20260827000000_organization_workspaces.sql.
+// ===========================================================================
+
+export type WorkspaceRole = "owner" | "admin" | "member" | "viewer";
+
+export type WorkspaceSummary = {
+  id: string;
+  name: string;
+  kind: "personal" | "organization";
+  role: WorkspaceRole;
+};
+
+/** Every workspace the caller is an active member of - drives the workspace switcher. */
+export async function getUserWorkspaces(): Promise<WorkspaceSummary[]> {
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("workspace_memberships")
+    .select("role, workspaces(id, name, kind)")
+    .eq("status", "active")
+    .order("joined_at", { ascending: true });
+
+  if (error) {
+    console.error("getUserWorkspaces failed:", error.message);
+    return [];
+  }
+
+  return (data ?? []).flatMap((row) => {
+    const workspace = row.workspaces as unknown as
+      | { id: string; name: string; kind: "personal" | "organization" }
+      | null;
+    if (!workspace) return [];
+    return [
+      { id: workspace.id, name: workspace.name, kind: workspace.kind, role: row.role },
+    ] as WorkspaceSummary[];
+  });
+}
+
+/** The active workspace's own id/name/kind/the caller's role in it - for the workspace settings page and the switcher's current-selection label. */
+export async function getActiveWorkspace(): Promise<WorkspaceSummary | null> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!workspaceId) return null;
+
+  const workspaces = await getUserWorkspaces();
+  return workspaces.find((workspace) => workspace.id === workspaceId) ?? null;
+}
+
+export type WorkspaceMemberRow = {
+  membershipId: string;
+  userId: string;
+  role: WorkspaceRole;
+  status: "invited" | "active" | "suspended" | "removed";
+  joinedAt: string | null;
+  isSelf: boolean;
+};
+
+/**
+ * Active workspace's member list. No email/display-name is surfaced here -
+ * profiles is RLS-scoped to `id = auth.uid()` (profiles_select_own), so a
+ * plain authenticated query can only ever see the caller's own profile
+ * row, not other members'. Showing names/emails for other members would
+ * need a dedicated SECURITY DEFINER directory function; deferred until
+ * that's actually needed rather than building it speculatively now.
+ */
+export async function getWorkspaceMembers(
+  workspaceId: string,
+): Promise<WorkspaceMemberRow[]> {
+  const supabase = await supabaseSession();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const { data, error } = await supabase
+    .from("workspace_memberships")
+    .select("id, user_id, role, status, joined_at")
+    .eq("workspace_id", workspaceId)
+    .neq("status", "removed")
+    .order("role", { ascending: true })
+    .order("joined_at", { ascending: true });
+
+  if (error) {
+    console.error("getWorkspaceMembers failed:", error.message);
+    return [];
+  }
+
+  return (data ?? []).map((row) => ({
+    membershipId: row.id,
+    userId: row.user_id,
+    role: row.role,
+    status: row.status,
+    joinedAt: row.joined_at,
+    isSelf: row.user_id === user?.id,
+  }));
+}
+
+export type WorkspaceInviteRow = {
+  id: string;
+  email: string;
+  role: WorkspaceRole;
+  status: "pending" | "accepted" | "revoked" | "expired";
+  tokenPrefix: string;
+  createdAt: string;
+  expiresAt: string;
+};
+
+export async function getWorkspaceInvites(
+  workspaceId: string,
+): Promise<WorkspaceInviteRow[]> {
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("workspace_invites")
+    .select("id, email, role, status, token_prefix, created_at, expires_at")
+    .eq("workspace_id", workspaceId)
+    .eq("status", "pending")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("getWorkspaceInvites failed:", error.message);
+    return [];
+  }
+
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    email: row.email,
+    role: row.role,
+    status: row.status,
+    tokenPrefix: row.token_prefix,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+  }));
 }

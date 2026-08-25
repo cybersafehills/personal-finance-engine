@@ -23,6 +23,9 @@ export function TransactionItem({
         : 0;
 
   const isFailed = transaction.status !== "success";
+  const needsReview = ["provisional", "suggested", "conflict"].includes(
+    transaction.category_decision_status,
+  );
 
   return (
     <Link
@@ -45,6 +48,7 @@ export function TransactionItem({
             <Badge variant="attention">Uncategorized</Badge>
           )}
           {isFailed && <Badge variant="attention">Failed</Badge>}
+          {needsReview && <Badge variant="attention">Review</Badge>}
         </p>
       </div>
       <MoneyAmount amountRwf={isFailed ? 0 : signedAmount} size="sm" />

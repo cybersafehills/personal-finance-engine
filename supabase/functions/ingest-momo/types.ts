@@ -34,21 +34,44 @@ export type ParsedTransaction = {
   metadata: Record<string, unknown>;
 };
 
-export type MerchantClassification = {
+export type DecisionStatus =
+  | "uncategorized"
+  | "suggested"
+  | "provisional"
+  | "auto"
+  | "confirmed"
+  | "conflict";
+
+export type PolicyClassification = {
   normalizedMerchantName: string | null;
+  /** Populated only for the 'auto'/'provisional' tiers - what actually gets committed to transactions.category. */
   category: string | null;
   subcategory: string | null;
+  /** Populated only for the 'auto'/'provisional' tiers, matching category. */
   categorySource: string | null;
   categoryConfidence: number | null;
+  /** Populated only for the 'suggested' tier - not committed, offered for review. */
+  suggestedCategory: string | null;
+  suggestedSubcategory: string | null;
+  decisionStatus: DecisionStatus;
+  matchedPolicyId: string | null;
+  explanation: string | null;
 };
 
-export type MerchantRuleRow = {
+export type CategorizationPolicyRow = {
   id: string;
+  name: string | null;
+  priority: number;
   match_type: "exact" | "contains" | "starts_with" | "regex" | string;
-  merchant_pattern: string;
+  merchant_pattern: string | null;
   normalized_merchant_name: string | null;
   category: string | null;
   subcategory: string | null;
   confidence: number | null;
   usage_count: number | null;
+  direction: TransactionDirection | null;
+  amount_min_rwf: number | null;
+  amount_max_rwf: number | null;
+  time_start: string | null;
+  time_end: string | null;
 };

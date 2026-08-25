@@ -131,3 +131,42 @@ export function PhoneIcon({ className }: { className?: string }) {
     </svg>
   );
 }
+
+export function UsersIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <circle cx="9" cy="8" r="3.25" />
+      <path d="M3.5 19.5c0-3.04 2.46-5.5 5.5-5.5s5.5 2.46 5.5 5.5" />
+      <path d="M15.5 8.75a2.75 2.75 0 1 0 0-5.5" />
+      <path d="M17 14.25c2.35.35 4 2.2 4 5.25" />
+    </svg>
+  );
+}
+
+export function LockIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <rect x="4.5" y="10.5" width="15" height="10" rx="2" />
+      <path d="M7.5 10.5V7a4.5 4.5 0 0 1 9 0v3.5" />
+      <path d="M12 14.5v2.5" />
+    </svg>
+  );
+}

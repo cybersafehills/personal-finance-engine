@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { supabaseSession } from "../../../lib/supabase-session-server";
-import { getOwnedWorkspaceId } from "../../../lib/queries";
+import { getActiveWorkspaceId } from "../../../lib/queries";
 import { ALLOCATION_TYPES, AllocationType } from "../../../lib/budget-math";
 
 export type SimpleActionResult = { ok: true } | { ok: false; error: string };
@@ -35,7 +35,7 @@ export async function setCategoryMapping(
     return { ok: false, error: "Unrecognized allocation type." };
   }
 
-  const workspaceId = await getOwnedWorkspaceId();
+  const workspaceId = await getActiveWorkspaceId();
   if (!workspaceId) {
     return { ok: false, error: "Could not resolve your workspace." };
   }
@@ -91,7 +91,7 @@ export async function setCategoryMapping(
 export async function removeCategoryMapping(
   category: string,
 ): Promise<SimpleActionResult> {
-  const workspaceId = await getOwnedWorkspaceId();
+  const workspaceId = await getActiveWorkspaceId();
   if (!workspaceId) {
     return { ok: false, error: "Could not resolve your workspace." };
   }

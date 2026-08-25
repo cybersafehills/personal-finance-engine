@@ -1,6 +1,7 @@
 "use server";
 
 import { supabaseSession } from "../../lib/supabase-session-server";
+import { siteUrl } from "../../lib/site-url";
 
 export type SignUpResult =
   | { ok: true; needsConfirmation: boolean }
@@ -9,15 +10,18 @@ export type SignUpResult =
 export async function signUp(
   email: string,
   password: string,
-  siteUrl: string,
+  next: string,
 ): Promise<SignUpResult> {
   const supabase = await supabaseSession();
+
+  const callbackUrl = new URL("/auth/callback", siteUrl());
+  if (next) callbackUrl.searchParams.set("next", next);
 
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
     options: {
-      emailRedirectTo: `${siteUrl}/auth/callback`,
+      emailRedirectTo: callbackUrl.toString(),
     },
   });
 
