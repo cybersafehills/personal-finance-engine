@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useTransition } from "react";
 import { signOut } from "../app/login/actions";
 import { OneLedgerLogo } from "./brand/OneLedgerLogo";
-import { GearIcon, HomeIcon, ListIcon, PieIcon, TargetIcon } from "./icons";
+import { DocumentIcon, GearIcon, HomeIcon, ListIcon, PieIcon, TargetIcon } from "./icons";
 import { LiveDataSync } from "./LiveDataSync";
 import { ProfileMenu } from "./ProfileMenu";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
@@ -16,6 +16,7 @@ const NAV_ITEMS = [
   { href: "/transactions", label: "Transactions", Icon: ListIcon },
   { href: "/categories", label: "Categories", Icon: PieIcon },
   { href: "/budgets", label: "Budgets", Icon: TargetIcon },
+  { href: "/reports", label: "Reports", Icon: DocumentIcon },
   { href: "/settings", label: "Settings", Icon: GearIcon },
 ] as const;
 

@@ -8,7 +8,9 @@ import {
 } from "./report-period";
 import {
   aggregateOutflowsByAllocation,
+  AllocationStatus,
   AllocationType,
+  BudgetAlert,
   computeAllocationActual,
   computeBudgetAlerts,
   computeElapsedFraction,
@@ -313,29 +315,86 @@ async function fetchActiveRwfBudget(
   return { budget, allocations: allocations ?? [] };
 }
 
+// report_payload is stored as JSONB - every value reaching it must survive
+// JSON.stringify (which throws on a raw `bigint`). budget-math.ts is
+// deliberately bigint-based (currency-generic minor units), so its output
+// is converted to plain `number` at this one boundary, immediately before
+// it's embedded in the payload - RWF has zero decimal places, so this
+// conversion is always exact for any realistic amount. This is the ONLY
+// place that conversion happens; the math itself stays in budget-math.ts.
+
+export type AllocationActualJson = {
+  allocationType: AllocationType;
+  targetMinor: number;
+  actualMinor: number;
+  remainingMinor: number;
+  percentConsumed: number | null;
+  projectedMinor: number | null;
+  status: AllocationStatus;
+};
+
+function toAllocationActualJson(
+  allocationType: AllocationType,
+  actual: ReturnType<typeof computeAllocationActual>,
+): AllocationActualJson {
+  return {
+    allocationType,
+    targetMinor: Number(actual.targetMinor),
+    actualMinor: Number(actual.actualMinor),
+    remainingMinor: Number(actual.remainingMinor),
+    percentConsumed: actual.percentConsumed,
+    projectedMinor: actual.projectedMinor !== null ? Number(actual.projectedMinor) : null,
+    status: actual.status,
+  };
+}
+
+export type BudgetAlertJson =
+  | { id: string; kind: "allocation_watch" | "allocation_at_risk"; severity: "info" | "warning"; allocationType: AllocationType; percentConsumed: number }
+  | { id: string; kind: "allocation_exceeded"; severity: "critical"; allocationType: AllocationType; actualMinor: number; targetMinor: number }
+  | { id: string; kind: "unmapped_spending" | "uncategorized_spending"; severity: "warning"; count: number; totalMinor: number }
+  | { id: string; kind: "income_below_budget"; severity: "warning"; budgetedMinor: number; actualMinor: number; shortfallPercent: number };
+
+function toBudgetAlertJson(alert: BudgetAlert): BudgetAlertJson {
+  switch (alert.kind) {
+    case "allocation_watch":
+    case "allocation_at_risk":
+      return alert;
+    case "allocation_exceeded":
+      return {
+        ...alert,
+        actualMinor: Number(alert.actualMinor),
+        targetMinor: Number(alert.targetMinor),
+      };
+    case "unmapped_spending":
+    case "uncategorized_spending":
+      return { ...alert, totalMinor: Number(alert.totalMinor) };
+    case "income_below_budget":
+      return {
+        ...alert,
+        budgetedMinor: Number(alert.budgetedMinor),
+        actualMinor: Number(alert.actualMinor),
+      };
+  }
+}
+
 export type BudgetSection = {
   budgetId: string;
   periodStart: string;
   periodEnd: string;
-  overallStatus:
-    | ReturnType<typeof computeAllocationActual>["status"]
-    | "no_active_budget";
-  allocations: ReturnType<typeof computeAllocationActual>[];
-  allocationTypes: AllocationType[];
-  alerts: ReturnType<typeof computeBudgetAlerts>;
+  overallStatus: AllocationStatus;
+  allocations: AllocationActualJson[];
+  alerts: BudgetAlertJson[];
 } | { overallStatus: "no_active_budget" };
 
 /** Worst-of ordering across allocation statuses, for the section's single overall status badge. */
-function worstAllocationStatus(
-  statuses: ReturnType<typeof computeAllocationActual>["status"][],
-): ReturnType<typeof computeAllocationActual>["status"] {
-  const severityOrder = [
+function worstAllocationStatus(statuses: AllocationStatus[]): AllocationStatus {
+  const severityOrder: AllocationStatus[] = [
     "exceeded",
     "at_risk",
     "watch",
     "healthy",
     "insufficient_data",
-  ] as const;
+  ];
   for (const level of severityOrder) {
     if (statuses.includes(level)) return level;
   }
@@ -442,16 +501,17 @@ async function computeBudgetSection(
     elapsedFraction,
   });
 
+  const allocationsJson = allocations.map((a, i) =>
+    toAllocationActualJson(a.allocation_type, allocationActuals[i])
+  );
+
   return {
     budgetId: budget.id,
     periodStart: budget.period_start,
     periodEnd: budget.period_end,
-    overallStatus: worstAllocationStatus(
-      allocationActuals.map((a) => a.status),
-    ),
-    allocations: allocationActuals,
-    allocationTypes: allocations.map((a) => a.allocation_type),
-    alerts,
+    overallStatus: worstAllocationStatus(allocationsJson.map((a) => a.status)),
+    allocations: allocationsJson,
+    alerts: alerts.map(toBudgetAlertJson),
   };
 }
 

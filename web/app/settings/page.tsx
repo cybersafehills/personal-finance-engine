@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { PageHeader } from "../../components/PageHeader";
-import { WalletIcon, PhoneIcon, LockIcon, UsersIcon } from "../../components/icons";
+import { WalletIcon, PhoneIcon, LockIcon, UsersIcon, DocumentIcon } from "../../components/icons";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +16,12 @@ const SETTINGS_LINKS = [
     title: "Connections",
     description: "Manage the devices and Shortcuts that send transactions in.",
     Icon: PhoneIcon,
+  },
+  {
+    href: "/settings/reports",
+    title: "Daily reports",
+    description: "Configure when your daily financial report is generated and emailed.",
+    Icon: DocumentIcon,
   },
   {
     href: "/settings/security",

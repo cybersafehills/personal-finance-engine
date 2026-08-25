@@ -13,6 +13,14 @@ import {
 } from "./budget-math";
 import { findTransferCandidates, TransferCandidateTransaction } from "./transfer-detection";
 import { lastNCompleteMonthKeys } from "./budget-math";
+import type {
+  CategoryTotal as ReportCategoryTotal,
+  FinancialSnapshot,
+  Forecast,
+  ReportAlert,
+  TrendComparison,
+} from "./report-math";
+import type { BudgetSection } from "./report-generation";
 
 // Every function here queries through the session-authenticated Supabase
 // client (lib/supabase-session-server.ts), never the service-role one -
@@ -1512,4 +1520,123 @@ export async function getWorkspaceInvites(
     createdAt: row.created_at,
     expiresAt: row.expires_at,
   }));
+}
+
+// ===========================================================================
+// Phase E: Scheduled Financial Reporting - preferences and report_runs.
+// Session-scoped (RLS-enforced), matching every other function in this
+// file - report generation itself is service-role (web/lib/
+// report-generation.ts) and deliberately does not share these functions.
+// ===========================================================================
+
+export type ReportRunStatus =
+  | "scheduled"
+  | "generating"
+  | "generated"
+  | "generation_failed"
+  | "delivery_pending"
+  | "delivering"
+  | "delivered"
+  | "delivery_failed";
+
+export type ReportPayload = {
+  schemaVersion: number;
+  dateKey: string;
+  timezone: string;
+  financialSnapshot: FinancialSnapshot;
+  categoryTotals: ReportCategoryTotal[];
+  trends: TrendComparison[];
+  alerts: ReportAlert[];
+  budget: BudgetSection;
+  forecast: Forecast | null;
+};
+
+export type ReportRunSummary = {
+  id: string;
+  report_type: string;
+  period_start: string;
+  period_end: string;
+  timezone: string;
+  status: ReportRunStatus;
+  generated_at: string | null;
+  created_at: string;
+};
+
+const REPORT_RUN_SUMMARY_COLUMNS =
+  "id, report_type, period_start, period_end, timezone, status, generated_at, created_at";
+
+/** Most recent reports first, for the caller's own user_id (RLS: report_runs_select_own) - never filtered by workspace_id here, since a report belongs to its recipient, not broadly to every workspace member. */
+export async function getReportRuns(limit = 30): Promise<ReportRunSummary[]> {
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("report_runs")
+    .select(REPORT_RUN_SUMMARY_COLUMNS)
+    .order("period_start", { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    console.error("getReportRuns failed:", error.message);
+    return [];
+  }
+
+  return data ?? [];
+}
+
+export type ReportRunDetail = ReportRunSummary & {
+  report_payload: ReportPayload | null;
+  error_message: string | null;
+};
+
+export async function getReportRunById(id: string): Promise<ReportRunDetail | null> {
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("report_runs")
+    .select(`${REPORT_RUN_SUMMARY_COLUMNS}, report_payload, error_message`)
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error) {
+    console.error("getReportRunById failed:", error.message);
+    return null;
+  }
+
+  return data as unknown as ReportRunDetail | null;
+}
+
+export type ReportPreferencesRow = {
+  id: string;
+  timezone: string;
+  daily_report_enabled: boolean;
+  generation_time: string;
+  delivery_time: string;
+  email_enabled: boolean;
+  delivery_email: string | null;
+};
+
+const REPORT_PREFERENCES_COLUMNS =
+  "id, timezone, daily_report_enabled, generation_time, delivery_time, email_enabled, delivery_email";
+
+/** The caller's own report preferences in their active workspace, or null if they've never set any (defaults are then whatever the settings form itself shows, never silently assumed enabled - see report_preferences' own migration comment on opt-in defaults). */
+export async function getReportPreferences(): Promise<ReportPreferencesRow | null> {
+  const supabase = await supabaseSession();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const workspaceId = await getActiveWorkspaceId();
+
+  if (!user || !workspaceId) return null;
+
+  const { data, error } = await supabase
+    .from("report_preferences")
+    .select(REPORT_PREFERENCES_COLUMNS)
+    .eq("workspace_id", workspaceId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (error) {
+    console.error("getReportPreferences failed:", error.message);
+    return null;
+  }
+
+  return data;
 }

@@ -77,3 +77,31 @@ export function formatFullDateTime(occurredAtIso: string): string {
     timeZone: "UTC",
   });
 }
+
+/**
+ * The local calendar date (e.g. "August 24, 2026") `instantIso` falls on
+ * in an ARBITRARY IANA timezone - unlike every other formatter in this
+ * file, which hardcodes Kigali. Used for report period labels, where the
+ * report's own configured timezone (report_runs.timezone) - not the
+ * viewer's browser timezone - is the correct source of truth for which
+ * calendar day it represents (master prompt §11).
+ */
+export function formatZonedDate(instantIso: string, timeZone: string): string {
+  return new Date(instantIso).toLocaleString("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone,
+  });
+}
+
+/** Zoned instant with time, e.g. "Aug 25, 00:07" - for "generated at" / "delivered at" timestamps. */
+export function formatZonedDateTime(instantIso: string, timeZone: string): string {
+  return new Date(instantIso).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone,
+  });
+}
