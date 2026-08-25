@@ -23,6 +23,7 @@ export default async function ApplyPolicyToHistoryPage({
       <PageHeader
         title="Apply to existing transactions"
         subtitle={`"${policy.name || policy.category}" against transactions still Uncategorized`}
+        backHref="/categories/rules"
       />
       <ApplyPolicyPanel policyId={id} initialPreview={preview} />
     </div>

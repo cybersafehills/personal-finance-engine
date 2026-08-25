@@ -13,6 +13,7 @@ export default async function ReviewQueuePage() {
       <PageHeader
         title="Review queue"
         subtitle="Transactions categorized with less than full confidence, or where two rules disagreed"
+        backHref="/transactions"
       />
 
       {transactions.length === 0 ? (

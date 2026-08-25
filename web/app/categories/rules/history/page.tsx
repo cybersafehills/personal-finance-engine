@@ -13,6 +13,7 @@ export default async function BulkCategorizationHistoryPage() {
       <PageHeader
         title="Bulk categorization history"
         subtitle="Every historical-apply run, oldest and newest - revert any of them, not just the one you just ran"
+        backHref="/categories/rules"
       />
 
       {runs.length === 0 ? (

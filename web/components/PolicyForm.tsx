@@ -156,6 +156,17 @@ export function PolicyForm(
             placeholder="e.g. James KAYIJE"
             className={INPUT_CLASS}
           />
+          <span className="text-xs text-text-muted">
+            Matches the transaction&apos;s recipient/sender name — not the amount or currency.
+            Leave blank to match on direction, amount, or time alone.
+          </span>
+          {merchantPattern.trim().toLowerCase() === "rwf" && (
+            <span role="alert" className="text-xs text-attention">
+              &ldquo;RWF&rdquo; won&apos;t match any real counterparty name — transaction names
+              don&apos;t contain the currency. Leave this blank if you meant to filter by amount
+              only (set that below).
+            </span>
+          )}
         </label>
       </div>
 

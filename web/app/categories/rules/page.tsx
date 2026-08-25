@@ -17,23 +17,26 @@ export default async function CategorizationRulesPage() {
       <PageHeader
         title="Categorization rules"
         subtitle="Automatically categorize transactions by counterparty, direction, amount, or time"
+        backHref="/categories"
         action={
-          <div className="flex flex-wrap items-center gap-3">
-            <Link href="/categories/insights" className="text-sm font-medium text-accent">
-              Insights
-            </Link>
-            <Link href="/categories/rules/suggestions" className="text-sm font-medium text-accent">
-              Suggestions{suggestionCount > 0 ? ` (${suggestionCount})` : ""}
-            </Link>
-            <Link href="/categories/rules/history" className="text-sm font-medium text-accent">
-              History
-            </Link>
-            <Link href="/categories/rules/templates" className="text-sm font-medium text-accent">
-              Templates
-            </Link>
+          <div className="flex flex-col gap-2.5 sm:items-end">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm">
+              <Link href="/categories/insights" className="font-medium text-accent">
+                Insights
+              </Link>
+              <Link href="/categories/rules/suggestions" className="font-medium text-accent">
+                Suggestions{suggestionCount > 0 ? ` (${suggestionCount})` : ""}
+              </Link>
+              <Link href="/categories/rules/history" className="font-medium text-accent">
+                History
+              </Link>
+              <Link href="/categories/rules/templates" className="font-medium text-accent">
+                Templates
+              </Link>
+            </div>
             <Link
               href="/categories/rules/new"
-              className="min-h-11 rounded-control bg-accent px-4 py-2.5 text-sm font-medium text-accent-foreground"
+              className="min-h-11 rounded-control bg-accent px-4 py-2.5 text-center text-sm font-medium text-accent-foreground"
             >
               New rule
             </Link>

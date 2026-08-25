@@ -29,6 +29,7 @@ export default async function CategorizationInsightsPage() {
       <PageHeader
         title="Categorization insights"
         subtitle="How well your rules are covering your transactions"
+        backHref="/categories/rules"
       />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
