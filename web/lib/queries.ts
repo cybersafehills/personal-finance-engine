@@ -984,6 +984,82 @@ export async function getCategoryHistory(
   return data ?? [];
 }
 
+const CATEGORIZATION_POLICY_COLUMNS =
+  "id, name, description, category, subcategory, match_type, merchant_pattern, direction, amount_min_rwf, amount_max_rwf, time_start, time_end, priority, is_active, rule_source, confidence, usage_count, last_used_at";
+
+export type CategorizationPolicyRow = {
+  id: string;
+  name: string | null;
+  description: string | null;
+  category: string;
+  subcategory: string | null;
+  match_type: string;
+  merchant_pattern: string | null;
+  direction: "in" | "out" | "neutral" | null;
+  amount_min_rwf: number | null;
+  amount_max_rwf: number | null;
+  time_start: string | null;
+  time_end: string | null;
+  priority: number;
+  is_active: boolean;
+  rule_source: string;
+  confidence: number;
+  usage_count: number;
+  last_used_at: string | null;
+};
+
+// Unlike most reads in this file, policies genuinely need explicit
+// active-workspace scoping (not just RLS) - a user who belongs to more
+// than one workspace (organization membership) would otherwise see every
+// workspace's rules mixed into one list, and RLS alone would still permit
+// editing a rule outside the workspace the user is currently viewing.
+// Same reasoning budget_category_mappings' actions already use
+// getActiveWorkspaceId() for.
+export async function getCategorizationPolicies(): Promise<CategorizationPolicyRow[]> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!workspaceId) {
+    return [];
+  }
+
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("categorization_policies")
+    .select(CATEGORIZATION_POLICY_COLUMNS)
+    .eq("workspace_id", workspaceId)
+    .order("priority", { ascending: true });
+
+  if (error) {
+    console.error("getCategorizationPolicies failed:", error.message);
+    return [];
+  }
+
+  return data ?? [];
+}
+
+export async function getCategorizationPolicyById(
+  id: string,
+): Promise<CategorizationPolicyRow | null> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!workspaceId) {
+    return null;
+  }
+
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("categorization_policies")
+    .select(CATEGORIZATION_POLICY_COLUMNS)
+    .eq("id", id)
+    .eq("workspace_id", workspaceId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("getCategorizationPolicyById failed:", error.message);
+    return null;
+  }
+
+  return data;
+}
+
 export async function getTransactionSplits(
   transactionId: string,
 ): Promise<TransactionSplitRow[]> {
