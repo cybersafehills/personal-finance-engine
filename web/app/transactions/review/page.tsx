@@ -1,7 +1,7 @@
 import { getReviewQueueTransactions } from "../../../lib/queries";
 import { PageHeader } from "../../../components/PageHeader";
 import { EmptyState } from "../../../components/EmptyState";
-import { ReviewQueueItem } from "../../../components/ReviewQueueItem";
+import { ReviewQueueList } from "../../../components/ReviewQueueList";
 
 export const dynamic = "force-dynamic";
 
@@ -21,9 +21,7 @@ export default async function ReviewQueuePage() {
           description="Provisional, suggested, and conflicting categorizations will appear here."
         />
       ) : (
-        <div className="flex flex-col gap-3">
-          {transactions.map((t) => <ReviewQueueItem key={t.id} transaction={t} />)}
-        </div>
+        <ReviewQueueList transactions={transactions} />
       )}
     </div>
   );

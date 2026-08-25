@@ -18,9 +18,15 @@ export default async function CategorizationRulesPage() {
         title="Categorization rules"
         subtitle="Automatically categorize transactions by counterparty, direction, amount, or time"
         action={
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <Link href="/categories/insights" className="text-sm font-medium text-accent">
+              Insights
+            </Link>
             <Link href="/categories/rules/suggestions" className="text-sm font-medium text-accent">
               Suggestions{suggestionCount > 0 ? ` (${suggestionCount})` : ""}
+            </Link>
+            <Link href="/categories/rules/history" className="text-sm font-medium text-accent">
+              History
             </Link>
             <Link href="/categories/rules/templates" className="text-sm font-medium text-accent">
               Templates

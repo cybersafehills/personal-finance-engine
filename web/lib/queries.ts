@@ -1175,6 +1175,138 @@ export async function getLearnedPolicySuggestionCount(): Promise<number> {
   return suggestions.length;
 }
 
+export type CategorizationInsights = {
+  totalTransactions: number;
+  statusCounts: Record<string, number>;
+  activePolicyCount: number;
+  /** Active policies that have never matched a transaction - worth a look. */
+  unusedPolicies: { id: string; name: string | null; category: string }[];
+  /**
+   * Of transactions the engine auto/provisionally/suggestion-categorized
+   * at ingestion, what fraction were later corrected by a human -
+   * "accuracy" grounded in confirmed/corrected outcomes (spec §23.1),
+   * not a raw self-reported percentage. Null when there's no automatic
+   * decision to measure yet.
+   */
+  correctionRate: number | null;
+};
+
+// Follows the same full-column-scan-then-aggregate-in-JS pattern as
+// getCategoryTotals() above - PostgREST has no server-side GROUP BY, and
+// this repo's established convention for small aggregate views is a
+// single bounded read plus client-side reduction rather than a new SQL
+// function for every stats page.
+export async function getCategorizationInsights(): Promise<CategorizationInsights> {
+  const supabase = await supabaseSession();
+
+  const [{ data: transactions, error: txnError }, { data: policies, error: policyError }, {
+    data: historyRows,
+    error: historyError,
+  }] = await Promise.all([
+    supabase.from("transactions").select("category_decision_status"),
+    supabase.from("categorization_policies").select("id, name, category, is_active, usage_count").eq(
+      "is_active",
+      true,
+    ),
+    supabase.from("transaction_category_history").select("transaction_id, actor_type"),
+  ]);
+
+  if (txnError || policyError || historyError) {
+    console.error(
+      "getCategorizationInsights failed:",
+      txnError?.message ?? policyError?.message ?? historyError?.message,
+    );
+    return {
+      totalTransactions: 0,
+      statusCounts: {},
+      activePolicyCount: 0,
+      unusedPolicies: [],
+      correctionRate: null,
+    };
+  }
+
+  const statusCounts: Record<string, number> = {};
+  for (const t of transactions ?? []) {
+    statusCounts[t.category_decision_status] = (statusCounts[t.category_decision_status] ?? 0) + 1;
+  }
+
+  const unusedPolicies = (policies ?? [])
+    .filter((p) => p.usage_count === 0)
+    .map((p) => ({ id: p.id, name: p.name, category: p.category }));
+
+  const actorsByTransaction = new Map<string, Set<string>>();
+  for (const row of historyRows ?? []) {
+    const set = actorsByTransaction.get(row.transaction_id) ?? new Set<string>();
+    set.add(row.actor_type);
+    actorsByTransaction.set(row.transaction_id, set);
+  }
+  let autoDecidedCount = 0;
+  let correctedCount = 0;
+  for (const actors of actorsByTransaction.values()) {
+    const hadAutoDecision = actors.has("ingestion_engine") || actors.has("system");
+    if (hadAutoDecision) {
+      autoDecidedCount += 1;
+      if (actors.has("user")) correctedCount += 1;
+    }
+  }
+
+  return {
+    totalTransactions: (transactions ?? []).length,
+    statusCounts,
+    activePolicyCount: (policies ?? []).length,
+    unusedPolicies,
+    correctionRate: autoDecidedCount > 0 ? correctedCount / autoDecidedCount : null,
+  };
+}
+
+export type BulkCategorizationRun = {
+  bulkOperationId: string;
+  policyId: string | null;
+  policyName: string | null;
+  appliedAt: string;
+  rowCount: number;
+  actorType: string;
+};
+
+export async function getBulkCategorizationRuns(): Promise<BulkCategorizationRun[]> {
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("transaction_category_history")
+    .select("bulk_operation_id, policy_id, actor_type, created_at, categorization_policies(name, category)")
+    .not("bulk_operation_id", "is", null)
+    .order("created_at", { ascending: false });
+
+  if (error || !data) {
+    console.error("getBulkCategorizationRuns failed:", error?.message);
+    return [];
+  }
+
+  const runs = new Map<string, BulkCategorizationRun>();
+  for (const row of data) {
+    const key = row.bulk_operation_id as string;
+    const existing = runs.get(key);
+    if (existing) {
+      existing.rowCount += 1;
+      continue;
+    }
+    const policyRelation = row.categorization_policies as unknown as
+      | { name: string | null; category: string }
+      | { name: string | null; category: string }[]
+      | null;
+    const policy = Array.isArray(policyRelation) ? policyRelation[0] : policyRelation;
+    runs.set(key, {
+      bulkOperationId: key,
+      policyId: row.policy_id,
+      policyName: policy?.name ?? policy?.category ?? null,
+      appliedAt: row.created_at,
+      rowCount: 1,
+      actorType: row.actor_type,
+    });
+  }
+
+  return Array.from(runs.values());
+}
+
 export async function getTransactionSplits(
   transactionId: string,
 ): Promise<TransactionSplitRow[]> {

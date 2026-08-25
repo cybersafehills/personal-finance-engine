@@ -7,6 +7,7 @@ import { signOut } from "../app/login/actions";
 import { OneLedgerLogo } from "./brand/OneLedgerLogo";
 import { GearIcon, HomeIcon, ListIcon, PieIcon, TargetIcon } from "./icons";
 import { LiveDataSync } from "./LiveDataSync";
+import { ProfileMenu } from "./ProfileMenu";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 import type { WorkspaceSummary } from "../lib/queries";
 
@@ -54,11 +55,29 @@ export function AppShell({
     <div className="flex min-h-full flex-col">
       {userEmail && <LiveDataSync workspaceId={activeWorkspaceId} />}
 
-      {/* Slim account bar - visible on every screen size, independent of
-          the desktop nav pills below it. Absent on auth pages (no user
-          yet) since there is nothing to sign out of. */}
+      {/* Mobile top bar: logo on the left, a single profile-menu entry
+          point in the standard top-right spot (see ProfileMenu's own
+          comment for why account details live behind it instead of
+          being spread across the header). Absent on auth pages. */}
       {userEmail && (
-        <div className="flex items-center justify-between gap-3 border-b border-border-subtle bg-surface px-4 py-1.5 text-xs sm:px-6">
+        <div className="flex items-center justify-between gap-3 border-b border-border-subtle bg-surface px-4 py-2.5 sm:hidden">
+          <Link href="/" aria-label="OneLedger home">
+            <OneLedgerLogo variant="mark" height={28} decorative />
+          </Link>
+          <ProfileMenu
+            userEmail={userEmail}
+            workspaces={workspaces}
+            activeWorkspaceId={activeWorkspaceId}
+          />
+        </div>
+      )}
+
+      {/* Slim account bar - desktop/tablet only. On mobile this collapses
+          into the ProfileMenu above instead of competing for header space
+          with the logo. Absent on auth pages (no user yet) since there is
+          nothing to sign out of. */}
+      {userEmail && (
+        <div className="hidden items-center justify-between gap-3 border-b border-border-subtle bg-surface px-4 py-1.5 text-xs sm:flex sm:px-6">
           <div className="flex min-w-0 items-center gap-2">
             <span className="truncate text-text-muted">{userEmail}</span>
             {/* Only ever shown once there's an actual choice to make -
@@ -80,7 +99,7 @@ export function AppShell({
       <header className="sticky top-0 z-10 hidden border-b border-border-subtle bg-surface/95 backdrop-blur sm:block">
         <div className="mx-auto flex max-w-3xl items-center justify-between px-6 py-3">
           <Link href="/" aria-label="OneLedger home">
-            <OneLedgerLogo height={20} decorative />
+            <OneLedgerLogo height={32} decorative />
           </Link>
           <nav className="flex items-center gap-1" aria-label="Primary">
             {NAV_ITEMS.map(({ href, label }) => {

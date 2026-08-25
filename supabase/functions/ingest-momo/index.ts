@@ -465,6 +465,7 @@ Deno.serve(async (req: Request) => {
     // evaluating any earlier would mean either matching against every
     // workspace's policies indiscriminately or none at all.
 
+    const evaluationStartedAt = performance.now();
     const classification = await evaluatePolicies(supabase, {
       workspaceId: resolvedWorkspaceId,
       direction: parsed.direction,
@@ -472,6 +473,20 @@ Deno.serve(async (req: Request) => {
       counterpartyName: parsed.counterparty_name,
       occurredAt: parsed.occurred_at,
     });
+    const evaluationMs = performance.now() - evaluationStartedAt;
+
+    // Structured, single-line log (not .error - this is routine, not a
+    // failure) - the only "monitoring" this app's infrastructure can
+    // consume today is Supabase's own Edge Function log viewer, which is
+    // easiest to filter/alert on with one JSON object per decision rather
+    // than free-form text.
+    console.log(JSON.stringify({
+      event: "categorization_decision",
+      decision_status: classification.decisionStatus,
+      matched_policy_id: classification.matchedPolicyId,
+      confidence: classification.categoryConfidence,
+      evaluation_ms: Math.round(evaluationMs),
+    }));
 
     // ========================================================
     // STRUCTURED FINANCIAL LEDGER INSERT
