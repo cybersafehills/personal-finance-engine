@@ -152,7 +152,9 @@ export function validatePercentages(
 }
 
 /** The stricter rule required before a budget may activate: total must be exactly 100% (0.01 tolerance for display rounding). */
-export function isExactly100Percent(percentages: AllocationPercentages): boolean {
+export function isExactly100Percent(
+  percentages: AllocationPercentages,
+): boolean {
   const total = ALLOCATION_TYPES.reduce(
     (sum, type) => sum + percentages[type],
     0,
@@ -280,8 +282,13 @@ export function allocationStatus(
 const DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 /** Whole-day difference between two "YYYY-MM-DD" calendar date keys (toDateKey - fromDateKey), independent of any timezone offset. */
-export function daysBetweenDateKeys(fromDateKey: string, toDateKey: string): number {
-  if (!DATE_KEY_PATTERN.test(fromDateKey) || !DATE_KEY_PATTERN.test(toDateKey)) {
+export function daysBetweenDateKeys(
+  fromDateKey: string,
+  toDateKey: string,
+): number {
+  if (
+    !DATE_KEY_PATTERN.test(fromDateKey) || !DATE_KEY_PATTERN.test(toDateKey)
+  ) {
     throw new RangeError(
       `daysBetweenDateKeys expects "YYYY-MM-DD" date keys, got ${fromDateKey} / ${toDateKey}`,
     );
@@ -487,7 +494,8 @@ export function computeBudgetAlerts(input: BudgetAlertInput): BudgetAlert[] {
     input.budgetedIncomeMinor > 0n
   ) {
     const shortfallPercent = 100 -
-      Number((input.actualIncomeMinor * 10000n) / input.budgetedIncomeMinor) / 100;
+      Number((input.actualIncomeMinor * 10000n) / input.budgetedIncomeMinor) /
+        100;
     if (shortfallPercent >= INCOME_SHORTFALL_THRESHOLD_PERCENT) {
       alerts.push({
         id: "income-below-budget",
@@ -535,7 +543,10 @@ export function shiftMonthKey(monthKey: string, deltaMonths: number): string {
  * including the current, still-in-progress month) - "complete months"
  * per the product spec, oldest first.
  */
-export function lastNCompleteMonthKeys(todayMonthKey: string, count: number): string[] {
+export function lastNCompleteMonthKeys(
+  todayMonthKey: string,
+  count: number,
+): string[] {
   if (count < 0) throw new RangeError("count must not be negative");
   const keys: string[] = [];
   for (let i = count; i >= 1; i--) {
@@ -549,6 +560,120 @@ export type VariableIncomeRecommendation = {
   recommendedMinor: bigint | null;
   monthsUsed: number;
 };
+
+// ---------------------------------------------------------------------------
+// Outflow-to-allocation aggregation: which allocation bucket each settled
+// outgoing transaction's effect counts against. Extracted out of
+// web/lib/queries.ts's getBudgetActuals (which still owns fetching the
+// rows) so this classification logic has exactly one implementation -
+// the Scheduled Financial Reporting engine's budget section
+// (web/lib/report-generation.ts) needs the identical aggregation for a
+// service-role, explicitly workspace-scoped query and must not
+// reimplement it (master prompt §64: no parallel financial logic). Pure
+// and dependency-free, like the rest of this module.
+// ---------------------------------------------------------------------------
+
+export type MappedOutflow = {
+  transactionId: string;
+  category: string | null;
+  /** Absolute value of principal_effect + fee_effect for this transaction, already excluding confirmed self-transfers. */
+  effectMinor: bigint;
+  /** "YYYY-MM-DD" - the mapping lookup is effective-dated per transaction, not per budget period (see budget_category_mappings' own migration comment). */
+  occurredAtDateKey: string;
+};
+
+export type SplitAllocation = {
+  transactionId: string;
+  allocationType: AllocationType;
+  amountMinor: bigint;
+};
+
+export type CategoryMappingWindow = {
+  category: string;
+  allocationType: AllocationType;
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+};
+
+export type AllocationActualsAggregation = {
+  totalsByAllocation: Record<AllocationType, bigint>;
+  unmappedMinor: bigint;
+  unmappedCount: number;
+  uncategorizedMinor: bigint;
+  uncategorizedCount: number;
+};
+
+/**
+ * Classifies each outflow into an allocation bucket: a transaction with
+ * its own split rows is governed entirely by those splits regardless of
+ * its category (a split transaction's category, if any, is ignored here -
+ * matching the pre-extraction behavior); otherwise a null/empty category
+ * counts as uncategorized, a category with no currently-effective mapping
+ * counts as unmapped, and everything else counts against its mapped
+ * allocation. `outflows` must already exclude confirmed self-transfers -
+ * this function has no transfer-link data to filter with.
+ */
+export function aggregateOutflowsByAllocation(
+  outflows: MappedOutflow[],
+  splits: SplitAllocation[],
+  mappings: CategoryMappingWindow[],
+): AllocationActualsAggregation {
+  const splitsByTransaction = new Map<string, SplitAllocation[]>();
+  for (const split of splits) {
+    const existing = splitsByTransaction.get(split.transactionId) ?? [];
+    existing.push(split);
+    splitsByTransaction.set(split.transactionId, existing);
+  }
+
+  const totalsByAllocation: Record<AllocationType, bigint> = {
+    ESSENTIALS: 0n,
+    INVESTING: 0n,
+    EMERGENCY: 0n,
+    WANTS: 0n,
+  };
+  let unmappedMinor = 0n;
+  let unmappedCount = 0;
+  let uncategorizedMinor = 0n;
+  let uncategorizedCount = 0;
+
+  for (const row of outflows) {
+    const splitsForTransaction = splitsByTransaction.get(row.transactionId);
+    if (splitsForTransaction && splitsForTransaction.length > 0) {
+      for (const split of splitsForTransaction) {
+        totalsByAllocation[split.allocationType] += split.amountMinor;
+      }
+      continue;
+    }
+
+    if (!row.category) {
+      uncategorizedMinor += row.effectMinor;
+      uncategorizedCount += 1;
+      continue;
+    }
+
+    const mapping = mappings.find((m) =>
+      m.category === row.category &&
+      m.effectiveFrom <= row.occurredAtDateKey &&
+      (m.effectiveUntil === null || m.effectiveUntil >= row.occurredAtDateKey)
+    );
+
+    if (!mapping) {
+      unmappedMinor += row.effectMinor;
+      unmappedCount += 1;
+      continue;
+    }
+
+    totalsByAllocation[mapping.allocationType] += row.effectMinor;
+  }
+
+  return {
+    totalsByAllocation,
+    unmappedMinor,
+    unmappedCount,
+    uncategorizedMinor,
+    uncategorizedCount,
+  };
+}
 
 /**
  * `monthlyTotals` should contain only the complete months that actually
@@ -564,14 +689,20 @@ export function computeVariableIncomeRecommendation(
   expectedMonthlyMinor: bigint | null,
 ): VariableIncomeRecommendation {
   if (monthlyTotals.length === 0) {
-    return { averageMinor: null, recommendedMinor: expectedMonthlyMinor, monthsUsed: 0 };
+    return {
+      averageMinor: null,
+      recommendedMinor: expectedMonthlyMinor,
+      monthsUsed: 0,
+    };
   }
 
   const sum = monthlyTotals.reduce((total, m) => total + m, 0n);
   const averageMinor = divRoundBigInt(sum, BigInt(monthlyTotals.length));
 
   const recommendedMinor = expectedMonthlyMinor !== null
-    ? (expectedMonthlyMinor < averageMinor ? expectedMonthlyMinor : averageMinor)
+    ? (expectedMonthlyMinor < averageMinor
+      ? expectedMonthlyMinor
+      : averageMinor)
     : averageMinor;
 
   return { averageMinor, recommendedMinor, monthsUsed: monthlyTotals.length };

@@ -3,6 +3,8 @@ import { cookies } from "next/headers";
 import { supabaseSession } from "./supabase-session-server";
 import { kigaliDayBoundsUtc, kigaliDateKey } from "./kigali-time";
 import {
+  aggregateOutflowsByAllocation,
+  ALLOCATION_TYPES,
   AllocationStatus,
   BudgetAlert,
   computeAllocationActual,
@@ -650,13 +652,6 @@ export async function getBudgetActuals(
   if (transferLinksResult.error) console.error("getBudgetActuals (transfer links) failed:", transferLinksResult.error.message);
   if (splitsResult.error) console.error("getBudgetActuals (splits) failed:", splitsResult.error.message);
 
-  const splitsByTransaction = new Map<string, { allocation_type: AllocationType; amount_minor: number }[]>();
-  for (const row of splitsResult.data ?? []) {
-    const existing = splitsByTransaction.get(row.transaction_id) ?? [];
-    existing.push({ allocation_type: row.allocation_type as AllocationType, amount_minor: row.amount_minor });
-    splitsByTransaction.set(row.transaction_id, existing);
-  }
-
   // Confirmed self-transfers move money between the user's own accounts -
   // never expenditure or income (see the master prompt's own rule, and
   // transfer_links' comment in the Phase E migration).
@@ -670,54 +665,36 @@ export async function getBudgetActuals(
     0,
   );
 
-  const totalsByAllocation = new Map<AllocationType, number>();
-  let unmappedMinor = 0;
-  let unmappedCount = 0;
-  let uncategorizedMinor = 0;
-  let uncategorizedCount = 0;
-
-  for (const row of outRows) {
-    const effect = Math.abs(Number(row.principal_effect_rwf) + Number(row.fee_effect_rwf));
-
-    // A split transaction is governed entirely by its own split rows -
-    // never by category mapping, even if it also has a mapped category.
-    // See transaction_splits' own comment in the Phase E migration.
-    const splits = splitsByTransaction.get(row.id);
-    if (splits && splits.length > 0) {
-      for (const split of splits) {
-        totalsByAllocation.set(
-          split.allocation_type,
-          (totalsByAllocation.get(split.allocation_type) ?? 0) + split.amount_minor,
-        );
-      }
-      continue;
-    }
-
-    if (!row.category) {
-      uncategorizedMinor += effect;
-      uncategorizedCount += 1;
-      continue;
-    }
-
-    const txnDateKey = kigaliDateKey(row.occurred_at);
-    const mapping = (mappingsResult.data ?? []).find((m) =>
-      m.category === row.category &&
-      m.effective_from <= txnDateKey &&
-      (m.effective_until === null || m.effective_until >= txnDateKey)
-    );
-
-    if (!mapping) {
-      unmappedMinor += effect;
-      unmappedCount += 1;
-      continue;
-    }
-
-    const allocationType = mapping.allocation_type as AllocationType;
-    totalsByAllocation.set(
-      allocationType,
-      (totalsByAllocation.get(allocationType) ?? 0) + effect,
-    );
-  }
+  // Classification (split-governed / uncategorized / unmapped / mapped
+  // allocation) is the canonical, single-implementation aggregation in
+  // budget-math.ts - see aggregateOutflowsByAllocation's own comment for
+  // why this must not be reimplemented here or anywhere else.
+  const aggregation = aggregateOutflowsByAllocation(
+    outRows.map((row) => ({
+      transactionId: row.id,
+      category: row.category,
+      effectMinor: BigInt(Math.abs(Number(row.principal_effect_rwf) + Number(row.fee_effect_rwf))),
+      occurredAtDateKey: kigaliDateKey(row.occurred_at),
+    })),
+    (splitsResult.data ?? []).map((row) => ({
+      transactionId: row.transaction_id,
+      allocationType: row.allocation_type as AllocationType,
+      amountMinor: BigInt(row.amount_minor),
+    })),
+    (mappingsResult.data ?? []).map((row) => ({
+      category: row.category,
+      allocationType: row.allocation_type as AllocationType,
+      effectiveFrom: row.effective_from,
+      effectiveUntil: row.effective_until,
+    })),
+  );
+  const totalsByAllocation = new Map<AllocationType, number>(
+    ALLOCATION_TYPES.map((type) => [type, Number(aggregation.totalsByAllocation[type])]),
+  );
+  const unmappedMinor = Number(aggregation.unmappedMinor);
+  const unmappedCount = aggregation.unmappedCount;
+  const uncategorizedMinor = Number(aggregation.uncategorizedMinor);
+  const uncategorizedCount = aggregation.uncategorizedCount;
 
   const todayKey = kigaliDateKey(new Date().toISOString());
   const elapsedFraction = computeElapsedFraction(

@@ -93,6 +93,29 @@ export function zonedDateKey(instant: Date, timeZone: string): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone }).format(instant);
 }
 
+/**
+ * The "HH:MM:SS" wall-clock time `instant` falls on in `timeZone` -
+ * lexicographically comparable against a Postgres `time` column's own
+ * "HH:MM:SS" text representation (report_preferences.generation_time/
+ * delivery_time), which is what the generation/delivery due-work checks
+ * compare it against.
+ */
+export function zonedTimeOfDay(instant: Date, timeZone: string): string {
+  if (Number.isNaN(instant.getTime())) {
+    throw new RangeError("zonedTimeOfDay: invalid instant");
+  }
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hourCycle: "h23",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(instant);
+  const get = (type: string) =>
+    parts.find((p) => p.type === type)?.value ?? "00";
+  return `${get("hour")}:${get("minute")}:${get("second")}`;
+}
+
 /** Shifts a "YYYY-MM-DD" date key by `deltaDays` (negative to go back), independent of any timezone - pure calendar arithmetic. */
 export function shiftDateKey(dateKey: string, deltaDays: number): string {
   assertValidDateKey(dateKey);

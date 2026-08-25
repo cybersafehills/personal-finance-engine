@@ -5,6 +5,7 @@ import {
   previousCompleteDayKey,
   shiftDateKey,
   zonedDateKey,
+  zonedTimeOfDay,
 } from "./report-period.ts";
 
 Deno.test("localMidnightUtc: Africa/Kigali (fixed UTC+2, no DST) matches the known offset", () => {
@@ -122,4 +123,27 @@ Deno.test("previousCompleteDayKey: works correctly across a month boundary", () 
   // 2026-09-01 00:05 Kigali time.
   const now = new Date("2026-08-31T22:05:00.000Z");
   assertEquals(previousCompleteDayKey(now, "Africa/Kigali"), "2026-08-31");
+});
+
+Deno.test("zonedTimeOfDay: formats as lexicographically-comparable HH:MM:SS", () => {
+  // 2026-08-25T00:05:00Z is 02:05:00 in Kigali (UTC+2).
+  const instant = new Date("2026-08-25T00:05:00.000Z");
+  assertEquals(zonedTimeOfDay(instant, "Africa/Kigali"), "02:05:00");
+});
+
+Deno.test("zonedTimeOfDay: is comparable against a Postgres time-of-day string for a due-work check", () => {
+  const generationTime = "00:05:00";
+  // 2026-08-24T22:03:00Z is 00:03 in Kigali (UTC+2) - 2 minutes before the
+  // configured generation time on the same local calendar day.
+  const before = zonedTimeOfDay(
+    new Date("2026-08-24T22:03:00.000Z"),
+    "Africa/Kigali",
+  );
+  // 2026-08-24T22:06:00Z is 00:06 in Kigali - 1 minute after.
+  const after = zonedTimeOfDay(
+    new Date("2026-08-24T22:06:00.000Z"),
+    "Africa/Kigali",
+  );
+  assertEquals(before < generationTime, true);
+  assertEquals(after >= generationTime, true);
 });
