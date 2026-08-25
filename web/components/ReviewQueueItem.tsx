@@ -19,7 +19,15 @@ const STATUS_LABELS: Record<string, string> = {
   conflict: "Conflict",
 };
 
-export function ReviewQueueItem({ transaction }: { transaction: TransactionRow }) {
+export function ReviewQueueItem({
+  transaction,
+  selected,
+  onToggleSelect,
+}: {
+  transaction: TransactionRow;
+  selected: boolean;
+  onToggleSelect: (id: string) => void;
+}) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [resolved, setResolved] = useState(false);
@@ -80,9 +88,18 @@ export function ReviewQueueItem({ transaction }: { transaction: TransactionRow }
   return (
     <div className="flex flex-col gap-2 rounded-card border border-border-subtle bg-surface p-4">
       <div className="flex items-start justify-between gap-2">
-        <div>
-          <p className="text-sm font-medium text-text-primary">{displayName(transaction)}</p>
-          <p className="text-xs text-text-muted">{formatDateTime(transaction.occurred_at)}</p>
+        <div className="flex items-start gap-2">
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={() => onToggleSelect(transaction.id)}
+            aria-label={`Select ${displayName(transaction)} for bulk action`}
+            className="mt-0.5 h-4 w-4"
+          />
+          <div>
+            <p className="text-sm font-medium text-text-primary">{displayName(transaction)}</p>
+            <p className="text-xs text-text-muted">{formatDateTime(transaction.occurred_at)}</p>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <Badge variant="attention">

@@ -52,3 +52,51 @@ export async function dismissSuggestedCategory(
   revalidateReviewRoutes(transactionId);
   return { ok: true };
 }
+
+export type BulkActionResult = { ok: true; succeededCount: number; failedCount: number };
+
+/**
+ * Confirms multiple review-queue transactions at once. Loops the same
+ * single-row confirm_transaction_category RPC used above rather than a
+ * new bulk SQL function - each call is already cheap and
+ * membership-checked, and the review queue's realistic scale (a user
+ * reviewing their own uncertain transactions) doesn't warrant a
+ * set-based bulk RPC the way historical backfill's hundreds-of-rows
+ * batches did.
+ */
+export async function bulkConfirmTransactionCategories(
+  transactionIds: string[],
+): Promise<BulkActionResult> {
+  const supabase = await supabaseSession();
+  let succeededCount = 0;
+  let failedCount = 0;
+
+  for (const id of transactionIds) {
+    const { error } = await supabase.rpc("confirm_transaction_category", { p_transaction_id: id });
+    if (error) failedCount += 1;
+    else succeededCount += 1;
+  }
+
+  revalidatePath("/transactions/review");
+  revalidatePath("/transactions");
+  revalidatePath("/categories");
+  return { ok: true, succeededCount, failedCount };
+}
+
+export async function bulkDismissSuggestedCategories(
+  transactionIds: string[],
+): Promise<BulkActionResult> {
+  const supabase = await supabaseSession();
+  let succeededCount = 0;
+  let failedCount = 0;
+
+  for (const id of transactionIds) {
+    const { error } = await supabase.rpc("dismiss_suggested_category", { p_transaction_id: id });
+    if (error) failedCount += 1;
+    else succeededCount += 1;
+  }
+
+  revalidatePath("/transactions/review");
+  revalidatePath("/transactions");
+  return { ok: true, succeededCount, failedCount };
+}
