@@ -1273,6 +1273,103 @@ else
   fail "Phase E: User B saw ($B_SEES_TRANSFER) or deleted (now $TRANSFER_LINK_INTACT of 1 expected) User A's transfer link - isolation breach"
 fi
 
+# ===========================================================================
+# Phase F: categorization policy engine, increment 1. Reuses pfe_rls
+# (USER_A/WORKSPACE_A/transaction d3 and USER_B/WORKSPACE_B/transaction c3,
+# both seeded above with category left null).
+# ===========================================================================
+echo "=== Phase F: categorization policies and category history ==="
+
+# The rename left no trace of the old table name.
+OLD_TABLE_GONE="$(psql -d pfe_rls -t -A -c "select count(*) from information_schema.tables where table_schema = 'public' and table_name = 'merchant_rules';")"
+NEW_TABLE_PRESENT="$(psql -d pfe_rls -t -A -c "select count(*) from information_schema.tables where table_schema = 'public' and table_name = 'categorization_policies';")"
+if [ "$OLD_TABLE_GONE" = "0" ] && [ "$NEW_TABLE_PRESENT" = "1" ]; then
+  pass "Phase F: merchant_rules was renamed to categorization_policies"
+else
+  fail "Phase F: rename did not take effect (old present=$OLD_TABLE_GONE new present=$NEW_TABLE_PRESENT)"
+fi
+
+# A policy with no counterparty pattern - only direction/amount/time
+# conditions - is now allowed (merchant_pattern is nullable).
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.categorization_policies (workspace_id, category, direction, amount_min_rwf, amount_max_rwf, time_start, time_end)
+  values ('$WORKSPACE_A', 'Transport', 'out', 1000, 1500, '06:00', '11:00');
+" >/dev/null 2>$ARTIFACT_DIR/pfe_policy_nocounterparty_stderr.log; then
+  pass "Phase F: a policy with only direction/amount/time conditions (no counterparty pattern) is accepted"
+else
+  fail "Phase F: a condition-based policy without a counterparty pattern was rejected: $(cat $ARTIFACT_DIR/pfe_policy_nocounterparty_stderr.log)"
+fi
+rm -f $ARTIFACT_DIR/pfe_policy_nocounterparty_stderr.log
+
+# A condition-less policy (every condition null) is rejected.
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.categorization_policies (workspace_id, category) values ('$WORKSPACE_A', 'Everything');
+" >/dev/null 2>$ARTIFACT_DIR/pfe_policy_nocondition_stderr.log; then
+  fail "Phase F: a policy with zero conditions (would match every transaction) was allowed"
+else
+  pass "Phase F: a policy with no conditions at all is rejected"
+fi
+rm -f $ARTIFACT_DIR/pfe_policy_nocondition_stderr.log
+
+# amount_max_rwf below amount_min_rwf is rejected.
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.categorization_policies (workspace_id, category, amount_min_rwf, amount_max_rwf) values ('$WORKSPACE_A', 'Bad Range', 2000, 1000);
+" >/dev/null 2>$ARTIFACT_DIR/pfe_policy_badrange_stderr.log; then
+  fail "Phase F: a policy with amount_max_rwf < amount_min_rwf was allowed"
+else
+  pass "Phase F: amount_max_rwf < amount_min_rwf is rejected"
+fi
+rm -f $ARTIFACT_DIR/pfe_policy_badrange_stderr.log
+
+# time_start without a matching time_end is rejected.
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.categorization_policies (workspace_id, category, time_start) values ('$WORKSPACE_A', 'Half Window', '06:00');
+" >/dev/null 2>$ARTIFACT_DIR/pfe_policy_halfwindow_stderr.log; then
+  fail "Phase F: a policy with time_start but no time_end was allowed"
+else
+  pass "Phase F: time_start without time_end is rejected"
+fi
+rm -f $ARTIFACT_DIR/pfe_policy_halfwindow_stderr.log
+
+# authenticated has no direct insert grant on transaction_category_history -
+# every history row must go through apply_manual_category_correction().
+if as_user "$USER_A" "insert into public.transaction_category_history (transaction_id, workspace_id, new_category, new_category_source, actor_type, actor_user_id) values ('00000000-0000-0000-0000-0000000000d3', '$WORKSPACE_A', 'Forged', 'manual', 'user', '$USER_A');" >/dev/null 2>$ARTIFACT_DIR/pfe_history_direct_insert_stderr.log; then
+  fail "Phase F: an authenticated user inserted directly into transaction_category_history - the RPC is not the sole write path"
+else
+  pass "Phase F: authenticated cannot insert directly into transaction_category_history"
+fi
+rm -f $ARTIFACT_DIR/pfe_history_direct_insert_stderr.log
+
+# apply_manual_category_correction: User A correcting their own transaction
+# (d3) succeeds, updates the transaction, and writes exactly one history row.
+as_user "$USER_A" "select public.apply_manual_category_correction('00000000-0000-0000-0000-0000000000d3', 'Food', 'Restaurant');" >/dev/null
+CORRECTED_CATEGORY="$(psql -d pfe_rls -t -A -c "select category from public.transactions where id = '00000000-0000-0000-0000-0000000000d3';")"
+CORRECTED_SOURCE="$(psql -d pfe_rls -t -A -c "select category_source from public.transactions where id = '00000000-0000-0000-0000-0000000000d3';")"
+HISTORY_ROW_COUNT="$(psql -d pfe_rls -t -A -c "select count(*) from public.transaction_category_history where transaction_id = '00000000-0000-0000-0000-0000000000d3';")"
+if [ "$CORRECTED_CATEGORY" = "Food" ] && [ "$CORRECTED_SOURCE" = "manual" ] && [ "$HISTORY_ROW_COUNT" = "1" ]; then
+  pass "Phase F: apply_manual_category_correction updates the transaction and writes one history row"
+else
+  fail "Phase F: correction result was category=$CORRECTED_CATEGORY source=$CORRECTED_SOURCE history_rows=$HISTORY_ROW_COUNT (expected Food/manual/1)"
+fi
+
+# apply_manual_category_correction: User A cannot correct User B's
+# transaction (c3) - the function's own membership check must reject it
+# even though it runs SECURITY DEFINER.
+if as_user "$USER_A" "select public.apply_manual_category_correction('00000000-0000-0000-0000-0000000000c3', 'Hacked', null);" >/dev/null 2>$ARTIFACT_DIR/pfe_correction_forbidden_stderr.log; then
+  fail "Phase F: User A was able to correct User B's transaction via apply_manual_category_correction - isolation breach"
+else
+  pass "Phase F: apply_manual_category_correction refuses to correct a transaction outside the caller's workspace"
+fi
+rm -f $ARTIFACT_DIR/pfe_correction_forbidden_stderr.log
+
+# User B cannot see User A's category history.
+B_SEES_HISTORY="$(as_user "$USER_B" "select count(*) from public.transaction_category_history where transaction_id = '00000000-0000-0000-0000-0000000000d3';")"
+if [ "$B_SEES_HISTORY" = "0" ]; then
+  pass "Phase F: User B cannot see User A's transaction_category_history rows"
+else
+  fail "Phase F: User B could read $B_SEES_HISTORY of User A's transaction_category_history rows - isolation breach"
+fi
+
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="
 if [ "$FAIL_COUNT" -ne 0 ]; then

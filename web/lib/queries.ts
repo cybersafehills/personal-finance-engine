@@ -949,6 +949,41 @@ export type TransactionSplitRow = {
   amount_minor: number;
 };
 
+export type CategoryHistoryEntry = {
+  id: string;
+  previous_category: string | null;
+  new_category: string | null;
+  new_category_source: string;
+  decision_reason: string | null;
+  actor_type: string;
+  created_at: string;
+};
+
+// RLS (transaction_category_history_select_member, see
+// 20260829000000_phase_f_categorization_policies.sql) is what actually
+// scopes this to the caller's own workspace - most-recent first, so the
+// transaction detail page can show the latest decision's explanation
+// without a second round trip.
+export async function getCategoryHistory(
+  transactionId: string,
+): Promise<CategoryHistoryEntry[]> {
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("transaction_category_history")
+    .select(
+      "id, previous_category, new_category, new_category_source, decision_reason, actor_type, created_at",
+    )
+    .eq("transaction_id", transactionId)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("getCategoryHistory failed:", error.message);
+    return [];
+  }
+
+  return data ?? [];
+}
+
 export async function getTransactionSplits(
   transactionId: string,
 ): Promise<TransactionSplitRow[]> {

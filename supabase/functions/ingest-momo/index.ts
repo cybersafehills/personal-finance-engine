@@ -1,5 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { applyMerchantRule } from "./merchant-rules.ts";
+import { evaluatePolicies } from "./policy-engine.ts";
 import { parseMomoMessage } from "./parser.ts";
 import { normalizeMessage, sha256 } from "./parser-utils.ts";
 import { jsonResponse } from "./responses.ts";
@@ -346,15 +346,6 @@ Deno.serve(async (req: Request) => {
     }
 
     // ========================================================
-    // MERCHANT RULE CLASSIFICATION
-    // ========================================================
-
-    const classification = await applyMerchantRule(
-      supabase,
-      parsed.counterparty_name,
-    );
-
-    // ========================================================
     // ACCOUNTING EFFECT (Phase 4.2) - the same canonical engine that
     // processed historical transactions in Phase 4.1, invoked inline here
     // rather than as a separate Edge Function. computeAccountingEffect()
@@ -466,6 +457,23 @@ Deno.serve(async (req: Request) => {
     const ingestionConnectionId = routeResult.route.ingestionConnectionId;
 
     // ========================================================
+    // CATEGORIZATION POLICY EVALUATION
+    // ========================================================
+    //
+    // Runs after workspace resolution (not before, unlike the old
+    // merchant-only classifier) because policies are workspace-scoped -
+    // evaluating any earlier would mean either matching against every
+    // workspace's policies indiscriminately or none at all.
+
+    const classification = await evaluatePolicies(supabase, {
+      workspaceId: resolvedWorkspaceId,
+      direction: parsed.direction,
+      amountRwf: parsed.amount_rwf,
+      counterpartyName: parsed.counterparty_name,
+      occurredAt: parsed.occurred_at,
+    });
+
+    // ========================================================
     // STRUCTURED FINANCIAL LEDGER INSERT
     // ========================================================
     //
@@ -481,44 +489,47 @@ Deno.serve(async (req: Request) => {
     // exact same error path as any other insert failure below - no
     // separate pre-check duplicates that invariant here.
 
-    const { error: transactionInsertError } = await supabase
-      .from("transactions")
-      .insert({
-        momo_message_id: momoMessageId,
-        account_id: resolvedAccountId,
-        workspace_id: resolvedWorkspaceId,
-        ingestion_connection_id: ingestionConnectionId,
-        external_transaction_id: parsed.external_transaction_id,
-        source: "mtn_momo",
-        transaction_type: parsed.transaction_type,
-        direction: parsed.direction,
-        status: parsed.status,
-        currency: "RWF",
-        amount_rwf: parsed.amount_rwf,
-        fee_rwf: parsed.fee_rwf,
-        balance_after_rwf: parsed.balance_after_rwf,
-        counterparty_name: classification.normalizedMerchantName ??
-          parsed.counterparty_name,
-        counterparty_reference: parsed.counterparty_reference,
-        occurred_at: parsed.occurred_at,
-        category: classification.category,
-        subcategory: classification.subcategory,
-        category_source: classification.categorySource,
-        category_confidence: classification.categoryConfidence,
-        parser_version: PARSER_VERSION,
-        metadata: {
-          ...parsed.metadata,
-          original_counterparty_name: parsed.counterparty_name,
-          merchant_rule_applied: classification.categorySource === "rule",
-        },
-        principal_effect_rwf: accountingEffect.principal_effect_rwf,
-        fee_effect_rwf: accountingEffect.fee_effect_rwf,
-        settlement_state: accountingEffect.settlement_state,
-        affects_balance: accountingEffect.affects_balance,
-        effect_reason: accountingEffect.effect_reason,
-      });
+    const { data: insertedTransaction, error: transactionInsertError } =
+      await supabase
+        .from("transactions")
+        .insert({
+          momo_message_id: momoMessageId,
+          account_id: resolvedAccountId,
+          workspace_id: resolvedWorkspaceId,
+          ingestion_connection_id: ingestionConnectionId,
+          external_transaction_id: parsed.external_transaction_id,
+          source: "mtn_momo",
+          transaction_type: parsed.transaction_type,
+          direction: parsed.direction,
+          status: parsed.status,
+          currency: "RWF",
+          amount_rwf: parsed.amount_rwf,
+          fee_rwf: parsed.fee_rwf,
+          balance_after_rwf: parsed.balance_after_rwf,
+          counterparty_name: classification.normalizedMerchantName ??
+            parsed.counterparty_name,
+          counterparty_reference: parsed.counterparty_reference,
+          occurred_at: parsed.occurred_at,
+          category: classification.category,
+          subcategory: classification.subcategory,
+          category_source: classification.categorySource,
+          category_confidence: classification.categoryConfidence,
+          parser_version: PARSER_VERSION,
+          metadata: {
+            ...parsed.metadata,
+            original_counterparty_name: parsed.counterparty_name,
+            policy_applied: classification.categorySource === "rule",
+          },
+          principal_effect_rwf: accountingEffect.principal_effect_rwf,
+          fee_effect_rwf: accountingEffect.fee_effect_rwf,
+          settlement_state: accountingEffect.settlement_state,
+          affects_balance: accountingEffect.affects_balance,
+          effect_reason: accountingEffect.effect_reason,
+        })
+        .select("id")
+        .single();
 
-    if (transactionInsertError) {
+    if (transactionInsertError || !insertedTransaction) {
       console.error("Transaction insert error:", transactionInsertError);
 
       await supabase
@@ -538,7 +549,7 @@ Deno.serve(async (req: Request) => {
             "The parsed transaction could not be saved to the ledger.",
           parser_version: PARSER_VERSION,
           error_details: {
-            postgres_message: transactionInsertError.message,
+            postgres_message: transactionInsertError?.message ?? null,
           },
         });
 
@@ -548,6 +559,34 @@ Deno.serve(async (req: Request) => {
           error: "transaction_store_failed",
         },
         500,
+      );
+    }
+
+    // ========================================================
+    // CATEGORY DECISION HISTORY (best-effort, non-fatal) - the
+    // transaction itself is already durably stored above; a failure to
+    // record how it was categorized must never undo or fail that.
+    // ========================================================
+
+    const { error: historyInsertError } = await supabase
+      .from("transaction_category_history")
+      .insert({
+        transaction_id: insertedTransaction.id,
+        workspace_id: resolvedWorkspaceId,
+        new_category: classification.category,
+        new_subcategory: classification.subcategory,
+        new_category_source: classification.categorySource ?? "system",
+        new_category_confidence: classification.categoryConfidence,
+        decision_reason: classification.explanation,
+        policy_id: classification.matchedPolicyId,
+        actor_type: "ingestion_engine",
+        engine_version: "policy-engine@1",
+      });
+
+    if (historyInsertError) {
+      console.error(
+        "Category history insert error (non-fatal):",
+        historyInsertError,
       );
     }
 
