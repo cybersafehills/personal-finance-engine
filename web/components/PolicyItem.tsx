@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { setPolicyActive } from "../app/categories/rules/actions";
+import { movePolicyPriority, setPolicyActive } from "../app/categories/rules/actions";
 import { Badge } from "./Badge";
 import type { CategorizationPolicyRow } from "../lib/queries";
 
@@ -53,6 +53,18 @@ export function PolicyItem({ policy }: { policy: CategorizationPolicyRow }) {
     });
   }
 
+  function move(direction: "up" | "down") {
+    setErrorMessage(null);
+    startTransition(async () => {
+      const result = await movePolicyPriority(policy.id, direction);
+      if (!result.ok) {
+        setErrorMessage(result.error);
+        return;
+      }
+      router.refresh();
+    });
+  }
+
   return (
     <div className="flex flex-col gap-2 rounded-card border border-border-subtle bg-surface p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -79,6 +91,27 @@ export function PolicyItem({ policy }: { policy: CategorizationPolicyRow }) {
           time{policy.usage_count === 1 ? "" : "s"}
         </span>
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => move("up")}
+            disabled={isPending}
+            aria-label="Move up (checked earlier)"
+            className="font-medium text-accent disabled:opacity-50"
+          >
+            ↑
+          </button>
+          <button
+            type="button"
+            onClick={() => move("down")}
+            disabled={isPending}
+            aria-label="Move down (checked later)"
+            className="font-medium text-accent disabled:opacity-50"
+          >
+            ↓
+          </button>
+          <Link href={`/categories/rules/${policy.id}/apply`} className="font-medium text-accent">
+            Apply to history
+          </Link>
           <Link href={`/categories/rules/${policy.id}/edit`} className="font-medium text-accent">
             Edit
           </Link>

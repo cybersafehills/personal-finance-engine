@@ -194,3 +194,65 @@ export async function setPolicyActive(
   revalidatePath("/categories");
   return { ok: true };
 }
+
+/**
+ * Moves a policy one place up/down in evaluation order. Renumbers every
+ * policy in the workspace to sequential multiples of 10 in the new order
+ * rather than just swapping two raw priority values - most policies
+ * default to priority 100, so a plain swap would frequently be a no-op
+ * against a tied neighbor. A handful of .update() calls, not a single
+ * transaction, but each is workspace-scoped like every other write here
+ * and the worst case of a partial failure is a harmless temporary
+ * reordering, not data loss.
+ */
+export async function movePolicyPriority(
+  policyId: string,
+  direction: "up" | "down",
+): Promise<PolicyActionResult> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!workspaceId) {
+    return { ok: false, error: "Could not resolve your workspace." };
+  }
+
+  const supabase = await supabaseSession();
+  const { data: policies, error: fetchError } = await supabase
+    .from("categorization_policies")
+    .select("id, priority, created_at")
+    .eq("workspace_id", workspaceId)
+    .order("priority", { ascending: true })
+    .order("created_at", { ascending: true });
+
+  if (fetchError || !policies) {
+    return { ok: false, error: "Could not load rules to reorder." };
+  }
+
+  const index = policies.findIndex((p) => p.id === policyId);
+  if (index === -1) {
+    return { ok: false, error: "Rule not found." };
+  }
+
+  const swapIndex = direction === "up" ? index - 1 : index + 1;
+  if (swapIndex < 0 || swapIndex >= policies.length) {
+    return { ok: true };
+  }
+
+  const reordered = [...policies];
+  [reordered[index], reordered[swapIndex]] = [reordered[swapIndex], reordered[index]];
+
+  for (let i = 0; i < reordered.length; i++) {
+    const newPriority = (i + 1) * 10;
+    if (reordered[i].priority !== newPriority) {
+      const { error } = await supabase
+        .from("categorization_policies")
+        .update({ priority: newPriority })
+        .eq("id", reordered[i].id)
+        .eq("workspace_id", workspaceId);
+      if (error) {
+        return { ok: false, error: "Could not save the new order." };
+      }
+    }
+  }
+
+  revalidatePath("/categories/rules");
+  return { ok: true };
+}
