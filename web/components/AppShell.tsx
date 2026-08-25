@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTransition } from "react";
 import { signOut } from "../app/login/actions";
+import { OneLedgerLogo } from "./brand/OneLedgerLogo";
 import { GearIcon, HomeIcon, ListIcon, PieIcon, TargetIcon } from "./icons";
 import { LiveDataSync } from "./LiveDataSync";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
@@ -78,9 +79,9 @@ export function AppShell({
           a 3-destination app. */}
       <header className="sticky top-0 z-10 hidden border-b border-border-subtle bg-surface/95 backdrop-blur sm:block">
         <div className="mx-auto flex max-w-3xl items-center justify-between px-6 py-3">
-          <span className="text-sm font-semibold tracking-tight text-text-primary">
-            Personal Finance
-          </span>
+          <Link href="/" aria-label="OneLedger home">
+            <OneLedgerLogo height={20} decorative />
+          </Link>
           <nav className="flex items-center gap-1" aria-label="Primary">
             {NAV_ITEMS.map(({ href, label }) => {
               const active = isActive(pathname, href);

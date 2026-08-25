@@ -11,8 +11,16 @@ const geistSans = Geist({
 });
 
 export const metadata: Metadata = {
-  title: "Personal Finance",
+  title: "OneLedger",
   description: "MoMo balance, transactions, and categories.",
+  applicationName: "OneLedger",
+  appleWebApp: {
+    title: "OneLedger",
+  },
+  openGraph: {
+    title: "OneLedger",
+    siteName: "OneLedger",
+  },
 };
 
 export const viewport: Viewport = {
