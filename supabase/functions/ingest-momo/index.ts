@@ -514,6 +514,9 @@ Deno.serve(async (req: Request) => {
           subcategory: classification.subcategory,
           category_source: classification.categorySource,
           category_confidence: classification.categoryConfidence,
+          category_decision_status: classification.decisionStatus,
+          suggested_category: classification.suggestedCategory,
+          suggested_subcategory: classification.suggestedSubcategory,
           parser_version: PARSER_VERSION,
           metadata: {
             ...parsed.metadata,
@@ -577,10 +580,11 @@ Deno.serve(async (req: Request) => {
         new_subcategory: classification.subcategory,
         new_category_source: classification.categorySource ?? "system",
         new_category_confidence: classification.categoryConfidence,
+        new_decision_status: classification.decisionStatus,
         decision_reason: classification.explanation,
         policy_id: classification.matchedPolicyId,
         actor_type: "ingestion_engine",
-        engine_version: "policy-engine@1",
+        engine_version: "policy-engine@2",
       });
 
     if (historyInsertError) {

@@ -335,3 +335,162 @@ Deno.test("evaluatePolicies: no active policies at all returns empty classificat
   const result = await evaluatePolicies(supabase, BASE_INPUT);
   assertEquals(result.category, null);
 });
+
+// --- confidence tiers ---------------------------------------------------
+
+Deno.test("evaluatePolicies: 90%+ confidence auto-categorizes (commits the category)", async () => {
+  const supabase = fakeSupabase([
+    policy({ category: "Transport", confidence: 0.90 }),
+  ]);
+  const result = await evaluatePolicies(supabase, {
+    ...BASE_INPUT,
+    counterpartyName: null,
+  });
+  assertEquals(result.decisionStatus, "auto");
+  assertEquals(result.category, "Transport");
+  assertEquals(result.categorySource, "rule");
+  assertEquals(result.suggestedCategory, null);
+});
+
+Deno.test("evaluatePolicies: 89% confidence just misses auto and lands provisional (still committed)", async () => {
+  const supabase = fakeSupabase([
+    policy({ category: "Transport", confidence: 0.89 }),
+  ]);
+  const result = await evaluatePolicies(supabase, {
+    ...BASE_INPUT,
+    counterpartyName: null,
+  });
+  assertEquals(result.decisionStatus, "provisional");
+  assertEquals(result.category, "Transport");
+  assertEquals(result.categorySource, "rule");
+});
+
+Deno.test("evaluatePolicies: 70-89% confidence is provisional - committed, but flagged", async () => {
+  const supabase = fakeSupabase([
+    policy({ category: "Transport", confidence: 0.75 }),
+  ]);
+  const result = await evaluatePolicies(supabase, {
+    ...BASE_INPUT,
+    counterpartyName: null,
+  });
+  assertEquals(result.decisionStatus, "provisional");
+  assertEquals(result.category, "Transport");
+});
+
+Deno.test("evaluatePolicies: 50-69% confidence is suggested only - never commits category", async () => {
+  const supabase = fakeSupabase([
+    policy({ category: "Transport", subcategory: "Moto", confidence: 0.60 }),
+  ]);
+  const result = await evaluatePolicies(supabase, {
+    ...BASE_INPUT,
+    counterpartyName: null,
+  });
+  assertEquals(result.decisionStatus, "suggested");
+  assertEquals(result.category, null);
+  assertEquals(result.categorySource, null);
+  assertEquals(result.suggestedCategory, "Transport");
+  assertEquals(result.suggestedSubcategory, "Moto");
+});
+
+Deno.test("evaluatePolicies: below 50% confidence leaves the transaction fully uncategorized, not even a suggestion", async () => {
+  const supabase = fakeSupabase([
+    policy({ category: "Transport", confidence: 0.40 }),
+  ]);
+  const result = await evaluatePolicies(supabase, {
+    ...BASE_INPUT,
+    counterpartyName: null,
+  });
+  assertEquals(result.decisionStatus, "uncategorized");
+  assertEquals(result.category, null);
+  assertEquals(result.suggestedCategory, null);
+});
+
+// --- conflict detection ---------------------------------------------------
+
+Deno.test("evaluatePolicies: two equally-credible policies disagreeing on category produce a conflict, nothing committed", async () => {
+  const supabase = fakeSupabase([
+    policy({
+      id: "p-transport",
+      name: "Transport rule",
+      priority: 50,
+      direction: "out",
+      category: "Transport",
+    }),
+    policy({
+      id: "p-food",
+      name: "Food rule",
+      priority: 50,
+      direction: "out",
+      category: "Food",
+    }),
+  ]);
+
+  const result = await evaluatePolicies(supabase, {
+    ...BASE_INPUT,
+    counterpartyName: null,
+  });
+
+  assertEquals(result.decisionStatus, "conflict");
+  assertEquals(result.category, null);
+  assertEquals(result.suggestedCategory, null);
+  assertEquals(result.matchedPolicyId, null);
+  if (
+    !result.explanation?.includes("Transport rule") ||
+    !result.explanation?.includes("Food rule")
+  ) {
+    throw new Error(
+      `expected explanation to name both conflicting policies, got: ${result.explanation}`,
+    );
+  }
+});
+
+Deno.test("evaluatePolicies: two tied policies agreeing on the same category is NOT a conflict", async () => {
+  const supabase = fakeSupabase([
+    policy({
+      id: "p-1",
+      priority: 50,
+      direction: "out",
+      category: "Transport",
+    }),
+    policy({
+      id: "p-2",
+      priority: 50,
+      direction: "out",
+      category: "Transport",
+    }),
+  ]);
+
+  const result = await evaluatePolicies(supabase, {
+    ...BASE_INPUT,
+    counterpartyName: null,
+  });
+
+  assertEquals(result.decisionStatus, "auto");
+  assertEquals(result.category, "Transport");
+});
+
+Deno.test("evaluatePolicies: a lower-priority-number policy is never treated as conflicting with a higher-priority one, even with a different category", async () => {
+  const supabase = fakeSupabase([
+    policy({
+      id: "p-winner",
+      priority: 10,
+      direction: "out",
+      category: "Transport",
+    }),
+    policy({
+      id: "p-loser",
+      priority: 100,
+      direction: "out",
+      category: "Food",
+    }),
+  ]);
+
+  const result = await evaluatePolicies(supabase, {
+    ...BASE_INPUT,
+    counterpartyName: null,
+  });
+
+  assertEquals(result.decisionStatus, "auto");
+  assertEquals(result.category, "Transport");
+  assertEquals(result.matchedPolicyId, "p-winner");
+});

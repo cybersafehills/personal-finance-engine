@@ -292,6 +292,21 @@ stable
 as \$\$
   select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
 \$\$;
+
+-- Real Supabase provisions the supabase_realtime publication on every
+-- project; this disposable cluster doesn't, so
+-- 20260828000000_realtime_publication.sql's ALTER PUBLICATION statements
+-- would otherwise fail here (and nowhere else) with "publication
+-- supabase_realtime does not exist". Pre-creating an empty one mirrors
+-- what the real platform already does, rather than papering over a
+-- genuine migration problem.
+do \$\$
+begin
+  if not exists (select from pg_publication where pubname = 'supabase_realtime') then
+    create publication supabase_realtime;
+  end if;
+end
+\$\$;
 SQL
 }
 
@@ -508,12 +523,22 @@ fi
 # Privilege/RLS regression check after the full chain (all 4 migrations).
 # ===========================================================================
 echo "=== privilege/RLS regression check ==="
+# 19 from the original comment (6 Phase 3 + 3 Phase B + 1 Phase C + 7
+# Phase D + 2 Phase E: transaction_splits, transfer_links), plus 3 more
+# added since: auth_login_attempts (20260826000000, deliberately
+# service_role-only, no RLS - it's login-lockout bookkeeping, never
+# queried by an authenticated user), a table from
+# 20260827000000_organization_workspaces.sql, and
+# transaction_category_history (20260829000000, RLS enabled) = 22 tables,
+# 21 with RLS - the one gap (auth_login_attempts) is intentional and
+# named explicitly here so a genuinely *new* gap still fails loudly.
 RLS_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_class where relnamespace='public'::regnamespace and relkind='r' and relrowsecurity;")"
 TABLE_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_class where relnamespace='public'::regnamespace and relkind='r';")"
-if [ "$RLS_COUNT" = "$TABLE_COUNT" ] && [ "$TABLE_COUNT" = "19" ]; then
-  pass "RLS enabled on all 19 tables after the full chain (6 Phase 3 + 3 Phase B + 1 Phase C + 7 Phase D + 2 Phase E: transaction_splits, transfer_links)"
+TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' order by relname) from pg_class where relnamespace='public'::regnamespace and relkind='r' and not relrowsecurity;")"
+if [ "$TABLE_COUNT" = "22" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+  pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
-  fail "RLS not enabled on all tables: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled (expected 19 of 19)"
+  fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
 fi
 
 # anon must remain fully revoked everywhere - Phase B never touches this.
@@ -538,14 +563,17 @@ fi
 # (select, insert, update), goal_contributions (select, insert, delete)
 # = 18 more = 34, plus Phase E's transaction_splits (select, insert,
 # update, delete) and transfer_links (select, insert, delete) = 7 more,
-# for 41 total. Asserting the exact count (not just "some") forces this
+# for 41 total as of Phase E. Since then: organization_workspaces
+# (20260827000000) added a handful more (workspace invite handling), and
+# Phase F/G's transaction_category_history (select only) added 1, for 45
+# total today. Asserting the exact count (not just "some") forces this
 # test to be updated - a deliberate review point - if any future
 # migration ever widens authenticated's table-level access.
 AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and grantee = 'authenticated';")"
-if [ "$AUTHENTICATED_GRANT_COUNT" = "41" ]; then
-  pass "authenticated holds exactly the 41 Phase B + Phase C + Phase D + Phase E table grants expected, no more"
+if [ "$AUTHENTICATED_GRANT_COUNT" = "45" ]; then
+  pass "authenticated holds exactly the 45 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 41 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 45 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -564,23 +592,34 @@ fi
 # ===========================================================================
 echo "=== function/sequence privilege regression check ==="
 
+# anon legitimately gains EXECUTE on exactly one function since
+# organization_workspaces (20260827000000): invite_preview(), which by
+# design must be callable by someone who has an invite link but hasn't
+# signed in yet.
 ANON_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname = 'anon' where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
-if [ "$ANON_FN_EXEC_COUNT" = "0" ]; then
-  pass "anon holds no EXECUTE on any public-schema function after the full chain"
+if [ "$ANON_FN_EXEC_COUNT" = "1" ]; then
+  pass "anon holds EXECUTE on exactly one function (invite_preview) after the full chain"
 else
-  fail "anon still holds EXECUTE on $ANON_FN_EXEC_COUNT function grant(s) after the full chain"
+  fail "anon holds EXECUTE on $ANON_FN_EXEC_COUNT function grant(s) after the full chain, expected exactly 1 (invite_preview)"
 fi
 
-# authenticated legitimately gains EXECUTE on exactly one function in
-# Phase B - is_workspace_member(), the RLS policies' own authorization
-# primitive (every policy above calls it, so authenticated must be able
-# to execute it). Every other existing function (set_updated_at,
-# handle_new_user) remains authenticated-inaccessible.
+# authenticated gains EXECUTE on is_workspace_member() in Phase B (the RLS
+# policies' own authorization primitive), 5 more from
+# organization_workspaces (accept_workspace_invite, create_organization_workspace,
+# invite_preview, remove_member, set_member_role), and 7 more from the
+# categorization policy engine's SECURITY DEFINER functions
+# (apply_manual_category_correction, confirm_transaction_category,
+# dismiss_suggested_category, preview_policy_historical_match_count,
+# preview_policy_historical_matches, apply_policy_to_historical,
+# revert_bulk_categorization) = 13 total. Every other existing function
+# (set_updated_at, handle_new_user, policy_matches_transaction - SQL-only,
+# no grant needed since it's only ever called from within another
+# SECURITY DEFINER function) remains authenticated-inaccessible.
 AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname = 'authenticated' where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "1" ]; then
-  pass "authenticated holds EXECUTE on exactly one function (is_workspace_member) after the full chain"
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "13" ]; then
+  pass "authenticated holds EXECUTE on exactly the 13 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 1 (is_workspace_member) - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 13 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -1369,6 +1408,111 @@ if [ "$B_SEES_HISTORY" = "0" ]; then
 else
   fail "Phase F: User B could read $B_SEES_HISTORY of User A's transaction_category_history rows - isolation breach"
 fi
+
+# ===========================================================================
+# Phase G: confidence tiers, review queue, and historical backfill. Reuses
+# pfe_rls (USER_A/WORKSPACE_A/account d1). Seeds its own transactions with
+# a counterparty_name so policy_matches_transaction() has something to
+# match against.
+# ===========================================================================
+echo "=== Phase G: confidence tiers, review queue, and historical backfill ==="
+
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.momo_messages (id, raw_message, processing_status)
+  select ('00000000-0000-0000-0000-0000000003' || lpad(i::text,2,'0'))::uuid, 'seed-g'||i, 'processed'
+  from generate_series(1,3) i;
+  insert into public.transactions (id, momo_message_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version, counterparty_name)
+  select
+    ('00000000-0000-0000-0000-0000000004' || lpad(i::text,2,'0'))::uuid,
+    ('00000000-0000-0000-0000-0000000003' || lpad(i::text,2,'0'))::uuid,
+    '00000000-0000-0000-0000-0000000000d1', '$WORKSPACE_A',
+    'send_money', 'out', 'success', 1200, 0, ('2026-08-2'||i||' 08:00:00+02')::timestamptz, 'test', 'James KAYIJE'
+  from generate_series(1,3) i;
+" >/dev/null
+
+GTXN1="00000000-0000-0000-0000-000000000401"
+GTXN2="00000000-0000-0000-0000-000000000402"
+GTXN3="00000000-0000-0000-0000-000000000403"
+
+SUGGESTED_POLICY="$(psql -d pfe_rls -t -A -c "
+  insert into public.categorization_policies (workspace_id, category, subcategory, name, merchant_pattern, match_type, direction, amount_min_rwf, amount_max_rwf, time_start, time_end, confidence, priority)
+  values ('$WORKSPACE_A', 'Transport', 'Moto', 'Morning commute', 'james kayije', 'exact', 'out', 1000, 1500, '06:00', '11:00', 0.60, 100)
+  returning id;" | head -1)"
+
+MATCH_COUNT="$(as_user "$USER_A" "select public.preview_policy_historical_match_count('$SUGGESTED_POLICY');")"
+if [ "$MATCH_COUNT" = "3" ]; then
+  pass "Phase G: preview_policy_historical_match_count finds the 3 seeded matching transactions"
+else
+  fail "Phase G: preview count was $MATCH_COUNT, expected 3"
+fi
+
+BULK_G1="33333333-3333-3333-3333-333333333331"
+APPLIED_COUNT="$(as_user "$USER_A" "select public.apply_policy_to_historical('$SUGGESTED_POLICY', '$BULK_G1', 200);")"
+SUGGESTED_STATE="$(psql -d pfe_rls -t -A -c "select count(*) from public.transactions where id in ('$GTXN1','$GTXN2','$GTXN3') and category is null and suggested_category = 'Transport' and category_decision_status = 'suggested';")"
+if [ "$APPLIED_COUNT" = "3" ] && [ "$SUGGESTED_STATE" = "3" ]; then
+  pass "Phase G: a 60%-confidence policy applied historically only sets suggested_category, never commits category"
+else
+  fail "Phase G: applied_count=$APPLIED_COUNT suggested_state=$SUGGESTED_STATE (expected 3/3) - suggested tier committed a category or didn't apply"
+fi
+
+REAPPLY_COUNT="$(as_user "$USER_A" "select public.apply_policy_to_historical('$SUGGESTED_POLICY', '$BULK_G1', 200);")"
+if [ "$REAPPLY_COUNT" = "0" ]; then
+  pass "Phase G: re-running apply_policy_to_historical on an already-applied batch is a no-op"
+else
+  fail "Phase G: re-applying matched $REAPPLY_COUNT transactions again - not idempotent"
+fi
+
+as_user "$USER_A" "select public.confirm_transaction_category('$GTXN1');" >/dev/null
+CONFIRMED_STATE="$(psql -d pfe_rls -t -A -c "select category||'|'||category_source||'|'||category_decision_status from public.transactions where id='$GTXN1';")"
+if [ "$CONFIRMED_STATE" = "Transport|manual|confirmed" ]; then
+  pass "Phase G: confirm_transaction_category promotes the suggestion and marks it confirmed"
+else
+  fail "Phase G: confirm_transaction_category left state '$CONFIRMED_STATE', expected 'Transport|manual|confirmed'"
+fi
+
+as_user "$USER_A" "select public.dismiss_suggested_category('$GTXN2');" >/dev/null
+DISMISSED_STATE="$(psql -d pfe_rls -t -A -c "select coalesce(category,'NULL')||'|'||category_decision_status from public.transactions where id='$GTXN2';")"
+if [ "$DISMISSED_STATE" = "NULL|uncategorized" ]; then
+  pass "Phase G: dismiss_suggested_category clears the suggestion back to uncategorized"
+else
+  fail "Phase G: dismiss_suggested_category left state '$DISMISSED_STATE', expected 'NULL|uncategorized'"
+fi
+
+if as_user "$USER_A" "select public.dismiss_suggested_category('$GTXN1');" >/dev/null 2>$ARTIFACT_DIR/pfe_redismiss_stderr.log; then
+  fail "Phase G: dismiss_suggested_category succeeded on an already-confirmed transaction"
+else
+  pass "Phase G: dismiss_suggested_category refuses to act on an already-confirmed transaction"
+fi
+rm -f $ARTIFACT_DIR/pfe_redismiss_stderr.log
+
+# The revert must protect GTXN1 (confirmed by the user above) while still
+# reverting GTXN3 (still exactly as the bulk apply left it) - this is the
+# tier-aware protection guard, not a blanket category_source check (a
+# suggested-tier row never gets category_source set at all).
+REVERT_COUNT="$(as_user "$USER_A" "select public.revert_bulk_categorization('$BULK_G1');")"
+GTXN1_AFTER="$(psql -d pfe_rls -t -A -c "select category from public.transactions where id='$GTXN1';")"
+GTXN3_AFTER="$(psql -d pfe_rls -t -A -c "select coalesce(category,'NULL')||'|'||category_decision_status from public.transactions where id='$GTXN3';")"
+if [ "$REVERT_COUNT" = "1" ] && [ "$GTXN1_AFTER" = "Transport" ] && [ "$GTXN3_AFTER" = "NULL|uncategorized" ]; then
+  pass "Phase G: revert_bulk_categorization reverts only the untouched suggested-tier row, protecting the confirmed one"
+else
+  fail "Phase G: revert_count=$REVERT_COUNT gtxn1=$GTXN1_AFTER gtxn3=$GTXN3_AFTER - protection or revert logic is wrong"
+fi
+
+# Cross-workspace: User B cannot preview, apply, or revert against
+# WORKSPACE_A's policy or bulk operation.
+if as_user "$USER_B" "select public.preview_policy_historical_match_count('$SUGGESTED_POLICY');" >/dev/null 2>$ARTIFACT_DIR/pfe_g_cross_stderr.log; then
+  fail "Phase G: User B could preview User A's policy - isolation breach"
+else
+  pass "Phase G: User B cannot preview User A's policy"
+fi
+rm -f $ARTIFACT_DIR/pfe_g_cross_stderr.log
+
+if as_user "$USER_B" "select public.revert_bulk_categorization('$BULK_G1');" >/dev/null 2>$ARTIFACT_DIR/pfe_g_cross_revert_stderr.log; then
+  fail "Phase G: User B could revert User A's bulk operation - isolation breach"
+else
+  pass "Phase G: User B cannot revert User A's bulk operation"
+fi
+rm -f $ARTIFACT_DIR/pfe_g_cross_revert_stderr.log
 
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="

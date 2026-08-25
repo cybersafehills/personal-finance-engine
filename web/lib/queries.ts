@@ -41,12 +41,16 @@ export type TransactionRow = {
   category: string | null;
   subcategory: string | null;
   category_source: string | null;
+  category_confidence: number | null;
+  category_decision_status: string;
+  suggested_category: string | null;
+  suggested_subcategory: string | null;
   settlement_state: string | null;
   affects_balance: boolean | null;
 };
 
 const TRANSACTION_COLUMNS =
-  "id, transaction_type, direction, status, currency, amount_rwf, fee_rwf, net_effect_rwf, principal_effect_rwf, fee_effect_rwf, balance_after_rwf, counterparty_name, counterparty_reference, occurred_at, category, subcategory, category_source, settlement_state, affects_balance";
+  "id, transaction_type, direction, status, currency, amount_rwf, fee_rwf, net_effect_rwf, principal_effect_rwf, fee_effect_rwf, balance_after_rwf, counterparty_name, counterparty_reference, occurred_at, category, subcategory, category_source, category_confidence, category_decision_status, suggested_category, suggested_subcategory, settlement_state, affects_balance";
 
 export async function getCurrentBalance(): Promise<number | null> {
   const supabase = await supabaseSession();
@@ -150,6 +154,46 @@ export async function getTransactions(
   }
 
   return data ?? [];
+}
+
+const REVIEW_QUEUE_STATUSES = ["provisional", "suggested", "conflict"] as const;
+const REVIEW_QUEUE_LIMIT = 100;
+
+// Unlike most reads in this file, review-queue rows are read through RLS
+// alone (no active-workspace filter) - same as getTransactions/
+// getTransactionById above - since a review item belongs to whichever
+// workspace its transaction does, and RLS already scopes that correctly
+// per-row.
+export async function getReviewQueueTransactions(): Promise<TransactionRow[]> {
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("transactions")
+    .select(TRANSACTION_COLUMNS)
+    .in("category_decision_status", REVIEW_QUEUE_STATUSES)
+    .order("occurred_at", { ascending: false })
+    .limit(REVIEW_QUEUE_LIMIT);
+
+  if (error) {
+    console.error("getReviewQueueTransactions failed:", error.message);
+    return [];
+  }
+
+  return data ?? [];
+}
+
+export async function getReviewQueueCount(): Promise<number> {
+  const supabase = await supabaseSession();
+  const { count, error } = await supabase
+    .from("transactions")
+    .select("id", { count: "exact", head: true })
+    .in("category_decision_status", REVIEW_QUEUE_STATUSES);
+
+  if (error) {
+    console.error("getReviewQueueCount failed:", error.message);
+    return 0;
+  }
+
+  return count ?? 0;
 }
 
 export async function getTransactionById(

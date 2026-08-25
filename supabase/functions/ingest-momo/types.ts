@@ -34,12 +34,26 @@ export type ParsedTransaction = {
   metadata: Record<string, unknown>;
 };
 
+export type DecisionStatus =
+  | "uncategorized"
+  | "suggested"
+  | "provisional"
+  | "auto"
+  | "confirmed"
+  | "conflict";
+
 export type PolicyClassification = {
   normalizedMerchantName: string | null;
+  /** Populated only for the 'auto'/'provisional' tiers - what actually gets committed to transactions.category. */
   category: string | null;
   subcategory: string | null;
+  /** Populated only for the 'auto'/'provisional' tiers, matching category. */
   categorySource: string | null;
   categoryConfidence: number | null;
+  /** Populated only for the 'suggested' tier - not committed, offered for review. */
+  suggestedCategory: string | null;
+  suggestedSubcategory: string | null;
+  decisionStatus: DecisionStatus;
   matchedPolicyId: string | null;
   explanation: string | null;
 };
