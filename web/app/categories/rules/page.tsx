@@ -15,12 +15,17 @@ export default async function CategorizationRulesPage() {
         title="Categorization rules"
         subtitle="Automatically categorize transactions by counterparty, direction, amount, or time"
         action={
-          <Link
-            href="/categories/rules/new"
-            className="min-h-11 rounded-control bg-accent px-4 py-2.5 text-sm font-medium text-accent-foreground"
-          >
-            New rule
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link href="/categories/rules/templates" className="text-sm font-medium text-accent">
+              Templates
+            </Link>
+            <Link
+              href="/categories/rules/new"
+              className="min-h-11 rounded-control bg-accent px-4 py-2.5 text-sm font-medium text-accent-foreground"
+            >
+              New rule
+            </Link>
+          </div>
         }
       />
 

@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { upsertPolicy } from "../app/categories/rules/actions";
 import type { CategorizationPolicyRow } from "../lib/queries";
+import type { PolicyTemplate } from "../lib/policy-templates";
 
 const MATCH_TYPE_OPTIONS = [
   { value: "contains", label: "Contains" },
@@ -23,19 +24,26 @@ const INPUT_CLASS =
   "min-h-11 rounded-control border border-border-strong bg-background px-3 py-2 text-sm text-text-primary";
 
 export function PolicyForm(
-  { mode, policy }: { mode: "create" | "edit"; policy?: CategorizationPolicyRow },
+  { mode, policy, template }: {
+    mode: "create" | "edit";
+    policy?: CategorizationPolicyRow;
+    /** Pre-fills defaults on a fresh create form; ignored in edit mode. Nothing is saved until the user submits. */
+    template?: PolicyTemplate;
+  },
 ) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const [name, setName] = useState(policy?.name ?? "");
+  const [name, setName] = useState(policy?.name ?? template?.defaults.name ?? "");
   const [description, setDescription] = useState(policy?.description ?? "");
-  const [category, setCategory] = useState(policy?.category ?? "");
-  const [subcategory, setSubcategory] = useState(policy?.subcategory ?? "");
+  const [category, setCategory] = useState(policy?.category ?? template?.defaults.category ?? "");
+  const [subcategory, setSubcategory] = useState(
+    policy?.subcategory ?? template?.defaults.subcategory ?? "",
+  );
   const [matchType, setMatchType] = useState(policy?.match_type ?? "contains");
   const [merchantPattern, setMerchantPattern] = useState(policy?.merchant_pattern ?? "");
-  const [direction, setDirection] = useState(policy?.direction ?? "");
+  const [direction, setDirection] = useState(policy?.direction ?? template?.defaults.direction ?? "");
   const [amountMin, setAmountMin] = useState(policy?.amount_min_rwf?.toString() ?? "");
   const [amountMax, setAmountMax] = useState(policy?.amount_max_rwf?.toString() ?? "");
   const [timeStart, setTimeStart] = useState(policy?.time_start?.slice(0, 5) ?? "");
