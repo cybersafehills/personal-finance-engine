@@ -1104,6 +1104,77 @@ export async function getCategorizationPolicyById(
   return data;
 }
 
+export type LearnedPolicySuggestionSample = {
+  id: string;
+  amount_rwf: number;
+  occurred_at: string;
+};
+
+export type LearnedPolicySuggestion = {
+  suggestionKey: string;
+  counterpartyName: string;
+  category: string;
+  subcategory: string | null;
+  occurrenceCount: number;
+  lastOccurredAt: string;
+  sample: LearnedPolicySuggestionSample[];
+};
+
+// Suggestions are computed on demand (see detect_learned_policy_suggestions
+// in 20260831000000_phase_h_learned_suggestions.sql) - there's no
+// background job in this app, so this always reflects the current state
+// of transaction_category_history, not a stale cached list.
+export async function getLearnedPolicySuggestions(): Promise<LearnedPolicySuggestion[]> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!workspaceId) {
+    return [];
+  }
+
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase.rpc("detect_learned_policy_suggestions", {
+    p_workspace_id: workspaceId,
+    p_min_occurrences: 3,
+  });
+
+  if (error || !data) {
+    console.error("getLearnedPolicySuggestions failed:", error?.message);
+    return [];
+  }
+
+  const sampleIds = data.flatMap((s: { sample_transaction_ids: string[] }) => s.sample_transaction_ids);
+  const { data: sampleTransactions } = sampleIds.length > 0
+    ? await supabase.from("transactions").select("id, amount_rwf, occurred_at").in("id", sampleIds)
+    : { data: [] as LearnedPolicySuggestionSample[] };
+  const byId = new Map((sampleTransactions ?? []).map((t) => [t.id, t]));
+
+  return data.map((
+    s: {
+      suggestion_key: string;
+      counterparty_name: string;
+      category: string;
+      subcategory: string | null;
+      occurrence_count: number;
+      last_occurred_at: string;
+      sample_transaction_ids: string[];
+    },
+  ) => ({
+    suggestionKey: s.suggestion_key,
+    counterpartyName: s.counterparty_name,
+    category: s.category,
+    subcategory: s.subcategory,
+    occurrenceCount: s.occurrence_count,
+    lastOccurredAt: s.last_occurred_at,
+    sample: s.sample_transaction_ids.map((id) => byId.get(id)).filter((t) =>
+      t !== undefined
+    ) as LearnedPolicySuggestionSample[],
+  }));
+}
+
+export async function getLearnedPolicySuggestionCount(): Promise<number> {
+  const suggestions = await getLearnedPolicySuggestions();
+  return suggestions.length;
+}
+
 export async function getTransactionSplits(
   transactionId: string,
 ): Promise<TransactionSplitRow[]> {

@@ -18,6 +18,8 @@ export type PolicyTemplate = {
     category: string;
     subcategory: string;
     direction: "" | "in" | "out" | "neutral";
+    /** Only set by the "edit before accepting" flow from a learned suggestion - the 5 static templates below never prefill a counterparty, since that's personal/situational. */
+    merchantPattern?: string;
   };
 };
 

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getCategorizationPolicies } from "../../../lib/queries";
+import { getCategorizationPolicies, getLearnedPolicySuggestionCount } from "../../../lib/queries";
 import { PageHeader } from "../../../components/PageHeader";
 import { EmptyState } from "../../../components/EmptyState";
 import { PolicyItem } from "../../../components/PolicyItem";
@@ -7,7 +7,10 @@ import { PolicyItem } from "../../../components/PolicyItem";
 export const dynamic = "force-dynamic";
 
 export default async function CategorizationRulesPage() {
-  const policies = await getCategorizationPolicies();
+  const [policies, suggestionCount] = await Promise.all([
+    getCategorizationPolicies(),
+    getLearnedPolicySuggestionCount(),
+  ]);
 
   return (
     <div>
@@ -16,6 +19,9 @@ export default async function CategorizationRulesPage() {
         subtitle="Automatically categorize transactions by counterparty, direction, amount, or time"
         action={
           <div className="flex items-center gap-3">
+            <Link href="/categories/rules/suggestions" className="text-sm font-medium text-accent">
+              Suggestions{suggestionCount > 0 ? ` (${suggestionCount})` : ""}
+            </Link>
             <Link href="/categories/rules/templates" className="text-sm font-medium text-accent">
               Templates
             </Link>

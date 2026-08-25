@@ -528,14 +528,15 @@ echo "=== privilege/RLS regression check ==="
 # added since: auth_login_attempts (20260826000000, deliberately
 # service_role-only, no RLS - it's login-lockout bookkeeping, never
 # queried by an authenticated user), a table from
-# 20260827000000_organization_workspaces.sql, and
-# transaction_category_history (20260829000000, RLS enabled) = 22 tables,
-# 21 with RLS - the one gap (auth_login_attempts) is intentional and
-# named explicitly here so a genuinely *new* gap still fails loudly.
+# 20260827000000_organization_workspaces.sql,
+# transaction_category_history (20260829000000, RLS enabled), and
+# learned_policy_suggestion_decisions (20260831000000, RLS enabled) = 23
+# tables, 22 with RLS - the one gap (auth_login_attempts) is intentional
+# and named explicitly here so a genuinely *new* gap still fails loudly.
 RLS_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_class where relnamespace='public'::regnamespace and relkind='r' and relrowsecurity;")"
 TABLE_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_class where relnamespace='public'::regnamespace and relkind='r';")"
 TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' order by relname) from pg_class where relnamespace='public'::regnamespace and relkind='r' and not relrowsecurity;")"
-if [ "$TABLE_COUNT" = "22" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+if [ "$TABLE_COUNT" = "23" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -564,16 +565,17 @@ fi
 # = 18 more = 34, plus Phase E's transaction_splits (select, insert,
 # update, delete) and transfer_links (select, insert, delete) = 7 more,
 # for 41 total as of Phase E. Since then: organization_workspaces
-# (20260827000000) added a handful more (workspace invite handling), and
-# Phase F/G's transaction_category_history (select only) added 1, for 45
-# total today. Asserting the exact count (not just "some") forces this
-# test to be updated - a deliberate review point - if any future
-# migration ever widens authenticated's table-level access.
+# (20260827000000) added a handful more (workspace invite handling),
+# Phase F/G's transaction_category_history (select only) added 1, and
+# Phase H's learned_policy_suggestion_decisions (select, insert) added 2
+# more, for 47 total today. Asserting the exact count (not just "some")
+# forces this test to be updated - a deliberate review point - if any
+# future migration ever widens authenticated's table-level access.
 AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and grantee = 'authenticated';")"
-if [ "$AUTHENTICATED_GRANT_COUNT" = "45" ]; then
-  pass "authenticated holds exactly the 45 table grants expected, no more"
+if [ "$AUTHENTICATED_GRANT_COUNT" = "47" ]; then
+  pass "authenticated holds exactly the 47 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 45 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 47 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -611,15 +613,16 @@ fi
 # (apply_manual_category_correction, confirm_transaction_category,
 # dismiss_suggested_category, preview_policy_historical_match_count,
 # preview_policy_historical_matches, apply_policy_to_historical,
-# revert_bulk_categorization) = 13 total. Every other existing function
-# (set_updated_at, handle_new_user, policy_matches_transaction - SQL-only,
-# no grant needed since it's only ever called from within another
-# SECURITY DEFINER function) remains authenticated-inaccessible.
+# revert_bulk_categorization) = 13, plus Phase H's
+# detect_learned_policy_suggestions = 14 total. Every other existing
+# function (set_updated_at, handle_new_user, policy_matches_transaction -
+# SQL-only, no grant needed since it's only ever called from within
+# another SECURITY DEFINER function) remains authenticated-inaccessible.
 AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname = 'authenticated' where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "13" ]; then
-  pass "authenticated holds EXECUTE on exactly the 13 functions expected, no more"
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "14" ]; then
+  pass "authenticated holds EXECUTE on exactly the 14 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 13 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 14 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -1513,6 +1516,143 @@ else
   pass "Phase G: User B cannot revert User A's bulk operation"
 fi
 rm -f $ARTIFACT_DIR/pfe_g_cross_revert_stderr.log
+
+# preview_policy_historical_matches (the sample-rows RPC, distinct from
+# preview_policy_historical_match_count) has no direct coverage above -
+# GTXN2/GTXN3 are back to uncategorized after the revert tested above and
+# still match SUGGESTED_POLICY, so this is a genuine positive check before
+# re-applying (below) to also prove it excludes rows once they're no
+# longer uncategorized.
+PREVIEW_SAMPLE_IDS="$(as_user "$USER_A" "select string_agg(id::text, ',' order by id) from public.preview_policy_historical_matches('$SUGGESTED_POLICY', 10) where id in ('$GTXN2', '$GTXN3');")"
+EXPECTED_SAMPLE_IDS="$(echo -e "$GTXN2\n$GTXN3" | sort | paste -sd, -)"
+if [ "$PREVIEW_SAMPLE_IDS" = "$EXPECTED_SAMPLE_IDS" ]; then
+  pass "Phase G: preview_policy_historical_matches returns the actual matching uncategorized transactions"
+else
+  fail "Phase G: preview_policy_historical_matches returned '$PREVIEW_SAMPLE_IDS', expected '$EXPECTED_SAMPLE_IDS'"
+fi
+
+BULK_G2="33333333-3333-3333-3333-333333333332"
+as_user "$USER_A" "select public.apply_policy_to_historical('$SUGGESTED_POLICY', '$BULK_G2', 200);" >/dev/null
+SAMPLE_ROW_COUNT="$(as_user "$USER_A" "select count(*) from public.preview_policy_historical_matches('$SUGGESTED_POLICY', 10);")"
+if [ "$SAMPLE_ROW_COUNT" = "0" ]; then
+  pass "Phase G: preview_policy_historical_matches excludes rows once they're no longer uncategorized"
+else
+  fail "Phase G: preview_policy_historical_matches showed $SAMPLE_ROW_COUNT already-applied rows as still eligible"
+fi
+
+if as_user "$USER_B" "select public.confirm_transaction_category('$GTXN2');" >/dev/null 2>$ARTIFACT_DIR/pfe_g_cross_confirm_stderr.log; then
+  fail "Phase G: User B could confirm a category on User A's transaction - isolation breach"
+else
+  pass "Phase G: User B cannot confirm a category on User A's transaction"
+fi
+rm -f $ARTIFACT_DIR/pfe_g_cross_confirm_stderr.log
+
+if as_user "$USER_B" "select public.dismiss_suggested_category('$GTXN2');" >/dev/null 2>$ARTIFACT_DIR/pfe_g_cross_dismiss_stderr.log; then
+  fail "Phase G: User B could dismiss a suggestion on User A's transaction - isolation breach"
+else
+  pass "Phase G: User B cannot dismiss a suggestion on User A's transaction"
+fi
+rm -f $ARTIFACT_DIR/pfe_g_cross_dismiss_stderr.log
+
+# ===========================================================================
+# Phase H: learned-policy suggestions. Reuses pfe_rls (USER_A/WORKSPACE_A/
+# account d1). Seeds its own transactions/corrections for a counterparty
+# with 3+ manual corrections to the same category.
+# ===========================================================================
+echo "=== Phase H: learned-policy suggestions ==="
+
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.momo_messages (id, raw_message, processing_status)
+  select ('00000000-0000-0000-0000-0000000009' || lpad(i::text,2,'0'))::uuid, 'seed-h'||i, 'processed'
+  from generate_series(1,3) i;
+  insert into public.transactions (id, momo_message_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version, counterparty_name)
+  select
+    ('00000000-0000-0000-0000-0000000010' || lpad(i::text,2,'0'))::uuid,
+    ('00000000-0000-0000-0000-0000000009' || lpad(i::text,2,'0'))::uuid,
+    '00000000-0000-0000-0000-0000000000d1', '$WORKSPACE_A',
+    'send_money', 'out', 'success', 2000, 0, ('2026-08-2'||i||' 09:00:00+02')::timestamptz, 'test', 'Kigali Supermarket H'
+  from generate_series(1,3) i;
+" >/dev/null
+
+for i in 01 02 03; do
+  as_user "$USER_A" "select public.apply_manual_category_correction('00000000-0000-0000-0000-0000000010$i'::uuid, 'Food', 'Groceries');" >/dev/null
+done
+
+SUGGESTION_COUNT="$(as_user "$USER_A" "select count(*) from public.detect_learned_policy_suggestions('$WORKSPACE_A', 3) where counterparty_name = 'Kigali Supermarket H';")"
+if [ "$SUGGESTION_COUNT" = "1" ]; then
+  pass "Phase H: 3 manual corrections to the same counterparty/category produce a suggestion"
+else
+  fail "Phase H: expected 1 suggestion for the 3x-corrected counterparty, got $SUGGESTION_COUNT"
+fi
+
+SUGGESTION_KEY="$(as_user "$USER_A" "select suggestion_key from public.detect_learned_policy_suggestions('$WORKSPACE_A', 3) where counterparty_name = 'Kigali Supermarket H';")"
+
+BELOW_THRESHOLD_COUNT="$(as_user "$USER_A" "select count(*) from public.detect_learned_policy_suggestions('$WORKSPACE_A', 4) where counterparty_name = 'Kigali Supermarket H';")"
+if [ "$BELOW_THRESHOLD_COUNT" = "0" ]; then
+  pass "Phase H: raising the occurrence threshold above the actual count excludes the suggestion"
+else
+  fail "Phase H: a suggestion with only 3 occurrences matched a minimum-occurrence threshold of 4"
+fi
+
+as_user "$USER_A" "insert into public.learned_policy_suggestion_decisions (workspace_id, suggestion_key, status, decided_by) values ('$WORKSPACE_A', '$SUGGESTION_KEY', 'dismissed', '$USER_A');" >/dev/null
+AFTER_DISMISS_COUNT="$(as_user "$USER_A" "select count(*) from public.detect_learned_policy_suggestions('$WORKSPACE_A', 3) where counterparty_name = 'Kigali Supermarket H';")"
+if [ "$AFTER_DISMISS_COUNT" = "0" ]; then
+  pass "Phase H: a dismissed suggestion never resurfaces"
+else
+  fail "Phase H: a dismissed suggestion still appeared - dismissal exclusion is broken"
+fi
+
+if as_user "$USER_A" "insert into public.learned_policy_suggestion_decisions (workspace_id, suggestion_key, status, decided_by) values ('$WORKSPACE_A', '$SUGGESTION_KEY', 'accepted', '$USER_A');" >/dev/null 2>$ARTIFACT_DIR/pfe_h_dup_decision_stderr.log; then
+  fail "Phase H: the same suggestion could be decided twice (unique constraint not enforced)"
+else
+  pass "Phase H: a suggestion can only be decided once per workspace (unique constraint enforced)"
+fi
+rm -f $ARTIFACT_DIR/pfe_h_dup_decision_stderr.log
+
+# An active policy already covering the counterparty+category excludes it
+# even without an explicit dismissal - proven on a second, undismissed
+# counterparty so this test is independent of the dismissal above.
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.momo_messages (id, raw_message, processing_status)
+  select ('00000000-0000-0000-0000-0000000011' || lpad(i::text,2,'0'))::uuid, 'seed-h2-'||i, 'processed'
+  from generate_series(1,3) i;
+  insert into public.transactions (id, momo_message_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version, counterparty_name)
+  select
+    ('00000000-0000-0000-0000-0000000012' || lpad(i::text,2,'0'))::uuid,
+    ('00000000-0000-0000-0000-0000000011' || lpad(i::text,2,'0'))::uuid,
+    '00000000-0000-0000-0000-0000000000d1', '$WORKSPACE_A',
+    'send_money', 'out', 'success', 500, 0, ('2026-08-2'||i||' 10:00:00+02')::timestamptz, 'test', 'Chez Robert H'
+  from generate_series(1,3) i;
+" >/dev/null
+for i in 01 02 03; do
+  as_user "$USER_A" "select public.apply_manual_category_correction('00000000-0000-0000-0000-0000000012$i'::uuid, 'Food', 'Restaurant');" >/dev/null
+done
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.categorization_policies (workspace_id, category, subcategory, merchant_pattern, match_type, is_active, confidence)
+  values ('$WORKSPACE_A', 'Food', 'Restaurant', 'Chez Robert H', 'exact', true, 1.0);
+" >/dev/null
+ALREADY_COVERED_COUNT="$(as_user "$USER_A" "select count(*) from public.detect_learned_policy_suggestions('$WORKSPACE_A', 3) where counterparty_name = 'Chez Robert H';")"
+if [ "$ALREADY_COVERED_COUNT" = "0" ]; then
+  pass "Phase H: a counterparty/category already covered by an active policy is excluded from suggestions"
+else
+  fail "Phase H: a suggestion appeared even though an active policy already covers that counterparty/category"
+fi
+
+# Cross-workspace: User B cannot call detect_learned_policy_suggestions
+# against WORKSPACE_A, and cannot see or insert decisions there either.
+if as_user "$USER_B" "select public.detect_learned_policy_suggestions('$WORKSPACE_A', 3);" >/dev/null 2>$ARTIFACT_DIR/pfe_h_cross_stderr.log; then
+  fail "Phase H: User B could call detect_learned_policy_suggestions against User A's workspace - isolation breach"
+else
+  pass "Phase H: User B cannot call detect_learned_policy_suggestions against User A's workspace"
+fi
+rm -f $ARTIFACT_DIR/pfe_h_cross_stderr.log
+
+B_SEES_DECISIONS="$(as_user "$USER_B" "select count(*) from public.learned_policy_suggestion_decisions where workspace_id = '$WORKSPACE_A';")"
+if [ "$B_SEES_DECISIONS" = "0" ]; then
+  pass "Phase H: User B cannot see User A's learned_policy_suggestion_decisions rows"
+else
+  fail "Phase H: User B could read $B_SEES_DECISIONS of User A's learned_policy_suggestion_decisions rows - isolation breach"
+fi
 
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="

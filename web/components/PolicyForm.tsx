@@ -41,8 +41,12 @@ export function PolicyForm(
   const [subcategory, setSubcategory] = useState(
     policy?.subcategory ?? template?.defaults.subcategory ?? "",
   );
-  const [matchType, setMatchType] = useState(policy?.match_type ?? "contains");
-  const [merchantPattern, setMerchantPattern] = useState(policy?.merchant_pattern ?? "");
+  const [matchType, setMatchType] = useState(
+    policy?.match_type ?? (template?.defaults.merchantPattern ? "exact" : "contains"),
+  );
+  const [merchantPattern, setMerchantPattern] = useState(
+    policy?.merchant_pattern ?? template?.defaults.merchantPattern ?? "",
+  );
   const [direction, setDirection] = useState(policy?.direction ?? template?.defaults.direction ?? "");
   const [amountMin, setAmountMin] = useState(policy?.amount_min_rwf?.toString() ?? "");
   const [amountMax, setAmountMax] = useState(policy?.amount_max_rwf?.toString() ?? "");

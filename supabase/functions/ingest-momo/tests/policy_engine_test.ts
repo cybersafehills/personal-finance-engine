@@ -494,3 +494,49 @@ Deno.test("evaluatePolicies: a lower-priority-number policy is never treated as 
   assertEquals(result.category, "Transport");
   assertEquals(result.matchedPolicyId, "p-winner");
 });
+
+// --- regex match_type end-to-end ---------------------------------------
+
+Deno.test("evaluatePolicies: regex match_type matches through the full evaluation pipeline", async () => {
+  const supabase = fakeSupabase([
+    policy({
+      match_type: "regex",
+      merchant_pattern: "^(MTN|Airtel) ?Money$",
+      category: "Transfers",
+    }),
+  ]);
+
+  const matching = await evaluatePolicies(supabase, {
+    ...BASE_INPUT,
+    counterpartyName: "MTN Money",
+  });
+  const alsoMatching = await evaluatePolicies(supabase, {
+    ...BASE_INPUT,
+    counterpartyName: "Airtel Money",
+  });
+  const notMatching = await evaluatePolicies(supabase, {
+    ...BASE_INPUT,
+    counterpartyName: "Some Random Shop",
+  });
+
+  assertEquals(matching.category, "Transfers");
+  assertEquals(alsoMatching.category, "Transfers");
+  assertEquals(notMatching.category, null);
+});
+
+Deno.test("evaluatePolicies: an invalid regex pattern never matches and never throws", async () => {
+  const supabase = fakeSupabase([
+    policy({
+      match_type: "regex",
+      merchant_pattern: "(unclosed",
+      category: "Should Never Match",
+    }),
+  ]);
+
+  const result = await evaluatePolicies(supabase, {
+    ...BASE_INPUT,
+    counterpartyName: "Anything",
+  });
+
+  assertEquals(result.category, null);
+});
