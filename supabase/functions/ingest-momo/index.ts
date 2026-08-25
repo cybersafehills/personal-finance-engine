@@ -13,17 +13,6 @@ import {
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
   "";
-// TEMPORARY TRANSITION-ONLY: the Phase B global ingestion secret. Read only
-// as a fallback when the presented credential doesn't match any row in
-// ingestion_connections (Phase C's real per-connection credential model -
-// see the auth block below). Remove this constant, the usingLegacyCredential
-// fallback in the auth block, MOMO_INGEST_SECRET from the deployed function
-// secrets, and the legacy branch of the ACCOUNT/WORKSPACE RESOLUTION block
-// below, all together, once the production iPhone Shortcut is confirmed
-// migrated to a per-connection credential and the old secret is explicitly
-// revoked (a human-approval-gated production action - never automatic,
-// never implied by this fallback existing).
-const MOMO_INGEST_SECRET = Deno.env.get("MOMO_INGEST_SECRET") ?? "";
 
 const PARSER_VERSION = "momo-parser-v1.1";
 
@@ -54,13 +43,12 @@ Deno.serve(async (req: Request) => {
     // CUSTOM INGESTION AUTHENTICATION (Phase C: per-connection credentials)
     // ========================================================
     //
-    // Replaces Phase B's single shared MOMO_INGEST_SECRET with per-
-    // connection credentials: the presented secret is hashed and looked up
-    // in ingestion_connections. A match resolves that specific connection's
-    // workspace_id/account_id later in this function (see ACCOUNT
-    // RESOLUTION below) - never re-derived from anything else the client
-    // submits. Only the hash is ever compared; the plaintext credential is
-    // never stored anywhere, here or in the database.
+    // The presented secret is hashed and looked up in ingestion_connections.
+    // A match resolves that specific connection's workspace_id/account_id
+    // later in this function (see ACCOUNT RESOLUTION below) - never
+    // re-derived from anything else the client submits. Only the hash is
+    // ever compared; the plaintext credential is never stored anywhere,
+    // here or in the database.
     //
     // A blank, malformed, revoked, or simply unrecognized credential all
     // fail identically (401 unauthorized) - the response never reveals
@@ -71,7 +59,6 @@ Deno.serve(async (req: Request) => {
 
     const authResult = await authenticateCredential(suppliedSecret, {
       hash: sha256,
-      legacySecret: MOMO_INGEST_SECRET,
       findConnectionByCredentialHash: async (credentialHash) => {
         const { data, error } = await supabase
           .from("ingestion_connections")
@@ -424,17 +411,13 @@ Deno.serve(async (req: Request) => {
     // ACCOUNT/WORKSPACE RESOLUTION (Phase C: bound account routing)
     // ========================================================
     //
-    // A matched ingestion_connections row is the sole source of truth for
+    // The matched ingestion_connections row is the sole source of truth for
     // where this transaction is attributed: workspace_id/account_id come
     // directly from that row, never re-derived, never client-supplied.
     // The account is re-checked live (not trusted from the connection row,
     // which may be stale) - if it has since been archived or deactivated,
     // the request fails closed rather than silently routing into an
     // account the workspace owner explicitly retired.
-    //
-    // The legacy (MOMO_INGEST_SECRET) path retains Phase B's exact
-    // single-active-account resolver, unchanged, for as long as that
-    // transition path exists - see the removal note above.
 
     const routeResult = await resolveAccountRoute(connection, {
       findActiveAccountById: async (accountId) => {
@@ -450,28 +433,6 @@ Deno.serve(async (req: Request) => {
 
         return data ?? null;
       },
-      findSingleLegacyActiveAccount: async () => {
-        const { data: resolvedAccounts, error: accountLookupError } =
-          await supabase
-            .from("accounts")
-            .select("id, workspace_id")
-            .eq("is_active", true);
-
-        if (accountLookupError) {
-          console.error("Legacy account resolution error:", accountLookupError);
-          return null;
-        }
-
-        if (resolvedAccounts.length === 0) return null;
-        if (resolvedAccounts.length > 1) return "ambiguous";
-
-        return {
-          id: resolvedAccounts[0].id,
-          workspace_id: resolvedAccounts[0].workspace_id,
-          is_active: true,
-          archived_at: null,
-        };
-      },
     });
 
     if (!routeResult.ok) {
@@ -480,41 +441,23 @@ Deno.serve(async (req: Request) => {
         .update({ processing_status: "failed" })
         .eq("id", momoMessageId);
 
-      if (routeResult.reason === "account_unavailable") {
-        await supabase
-          .from("processing_errors")
-          .insert({
-            momo_message_id: momoMessageId,
-            stage: "database",
-            error_code: "ACCOUNT_UNAVAILABLE",
-            error_message:
-              "This ingestion connection's bound account is archived or inactive; ingestion was refused rather than silently rerouted.",
-            parser_version: PARSER_VERSION,
-            error_details: {
-              ingestion_connection_id: routeResult.connectionId,
-            },
-          });
-
-        return jsonResponse(
-          { ok: false, error: "account_unavailable" },
-          409,
-        );
-      }
-
       await supabase
         .from("processing_errors")
         .insert({
           momo_message_id: momoMessageId,
           stage: "database",
-          error_code: "ACCOUNT_RESOLUTION_FAILED",
+          error_code: "ACCOUNT_UNAVAILABLE",
           error_message:
-            "Could not resolve exactly one active account to attribute this transaction to.",
+            "This ingestion connection's bound account is archived or inactive; ingestion was refused rather than silently rerouted.",
           parser_version: PARSER_VERSION,
+          error_details: {
+            ingestion_connection_id: routeResult.connectionId,
+          },
         });
 
       return jsonResponse(
-        { ok: false, error: "account_resolution_failed" },
-        500,
+        { ok: false, error: "account_unavailable" },
+        409,
       );
     }
 
@@ -635,18 +578,16 @@ Deno.serve(async (req: Request) => {
     // never load-bearing for authorization or routing, so a failure here
     // must never fail a request that already successfully ingested.
 
-    if (ingestionConnectionId) {
-      const { error: lastUsedUpdateError } = await supabase
-        .from("ingestion_connections")
-        .update({ last_used_at: new Date().toISOString() })
-        .eq("id", ingestionConnectionId);
+    const { error: lastUsedUpdateError } = await supabase
+      .from("ingestion_connections")
+      .update({ last_used_at: new Date().toISOString() })
+      .eq("id", ingestionConnectionId);
 
-      if (lastUsedUpdateError) {
-        console.error(
-          "last_used_at update error (non-fatal):",
-          lastUsedUpdateError,
-        );
-      }
+    if (lastUsedUpdateError) {
+      console.error(
+        "last_used_at update error (non-fatal):",
+        lastUsedUpdateError,
+      );
     }
 
     // ========================================================

@@ -1,8 +1,8 @@
-// Phase C: pure, dependency-injected credential/account resolution logic,
-// factored out of index.ts so it can be unit-tested (blank/malformed/
-// random/revoked/cross-workspace/archived-account credentials) without a
-// live database or HTTP server. index.ts wires this to the real Supabase
-// client; tests/connection_resolver_test.ts wires it to fakes.
+// Pure, dependency-injected credential/account resolution logic, factored
+// out of index.ts so it can be unit-tested (blank/malformed/random/revoked/
+// cross-workspace/archived-account credentials) without a live database or
+// HTTP server. index.ts wires this to the real Supabase client;
+// tests/connection_resolver_test.ts wires it to fakes.
 //
 // Never trusts anything client-supplied beyond the raw credential string
 // itself - every other value (workspace_id, account_id, connection id)
@@ -11,11 +11,9 @@
 // Split into two phases, matching index.ts's own two-phase flow:
 //   1. authenticateCredential() - cheap, runs before any request body is
 //      even read. Answers only "is this credential valid at all", and
-//      resolves to either a specific connection or the legacy fallback -
-//      never to a specific account yet.
+//      resolves to the matching connection.
 //   2. resolveAccountRoute() - runs later, once a momo_messages row exists
-//      to attribute a resolution failure to, exactly where index.ts's
-//      original single-account resolver ran. Re-checks the account live
+//      to attribute a resolution failure to. Re-checks the account live
 //      (never trusts a possibly-stale connection row) and resolves the
 //      final workspace_id/account_id/ingestion_connection_id used for the
 //      transaction insert.
@@ -39,12 +37,10 @@ export type AuthenticateCredentialDeps = {
   findConnectionByCredentialHash: (
     credentialHash: string,
   ) => Promise<IngestionConnectionRow | null>;
-  legacySecret: string;
 };
 
 export type AuthenticateCredentialResult =
   | { ok: true; connection: IngestionConnectionRow }
-  | { ok: true; connection: null } // authenticated via the legacy fallback
   | { ok: false };
 
 export async function authenticateCredential(
@@ -60,74 +56,47 @@ export async function authenticateCredential(
     credentialHash,
   );
 
-  if (connection) {
-    return connection.status === "active"
-      ? { ok: true, connection }
-      : { ok: false };
+  if (!connection || connection.status !== "active") {
+    return { ok: false };
   }
 
-  const usingLegacyCredential = deps.legacySecret.length > 0 &&
-    suppliedSecret === deps.legacySecret;
-
-  return usingLegacyCredential ? { ok: true, connection: null } : {
-    ok: false,
-  };
+  return { ok: true, connection };
 }
 
 export type ResolveAccountRouteDeps = {
   findActiveAccountById: (accountId: string) => Promise<AccountRow | null>;
-  /** Legacy Phase B behavior: exactly one active account, workspace-wide. */
-  findSingleLegacyActiveAccount: () => Promise<AccountRow | null | "ambiguous">;
 };
 
 export type ResolvedIngestionRoute = {
   accountId: string;
   workspaceId: string;
-  ingestionConnectionId: string | null;
+  ingestionConnectionId: string;
 };
 
 export type ResolveAccountRouteResult =
   | { ok: true; route: ResolvedIngestionRoute }
-  | { ok: false; reason: "account_unavailable"; connectionId: string }
-  | { ok: false; reason: "account_resolution_failed" };
+  | { ok: false; reason: "account_unavailable"; connectionId: string };
 
 export async function resolveAccountRoute(
-  connection: IngestionConnectionRow | null,
+  connection: IngestionConnectionRow,
   deps: ResolveAccountRouteDeps,
 ): Promise<ResolveAccountRouteResult> {
-  if (connection) {
-    const account = await deps.findActiveAccountById(connection.account_id);
+  const account = await deps.findActiveAccountById(connection.account_id);
 
-    if (!account || !account.is_active || account.archived_at) {
-      return {
-        ok: false,
-        reason: "account_unavailable",
-        connectionId: connection.id,
-      };
-    }
-
+  if (!account || !account.is_active || account.archived_at) {
     return {
-      ok: true,
-      route: {
-        accountId: account.id,
-        workspaceId: account.workspace_id,
-        ingestionConnectionId: connection.id,
-      },
+      ok: false,
+      reason: "account_unavailable",
+      connectionId: connection.id,
     };
-  }
-
-  const legacyAccount = await deps.findSingleLegacyActiveAccount();
-
-  if (!legacyAccount || legacyAccount === "ambiguous") {
-    return { ok: false, reason: "account_resolution_failed" };
   }
 
   return {
     ok: true,
     route: {
-      accountId: legacyAccount.id,
-      workspaceId: legacyAccount.workspace_id,
-      ingestionConnectionId: null,
+      accountId: account.id,
+      workspaceId: account.workspace_id,
+      ingestionConnectionId: connection.id,
     },
   };
 }
