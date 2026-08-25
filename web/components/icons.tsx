@@ -152,6 +152,24 @@ export function UsersIcon({ className }: { className?: string }) {
   );
 }
 
+export function UserIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="8" r="3.75" />
+      <path d="M4.5 20c0-3.73 3.36-6.75 7.5-6.75s7.5 3.02 7.5 6.75" />
+    </svg>
+  );
+}
+
 export function LockIcon({ className }: { className?: string }) {
   return (
     <svg

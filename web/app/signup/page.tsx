@@ -13,7 +13,7 @@ export default async function SignUpPage({
   return (
     <div className="mx-auto flex max-w-sm flex-col gap-6 py-10">
       <div className="text-center">
-        <OneLedgerLogo height={28} className="mx-auto mb-4" />
+        <OneLedgerLogo height={40} className="mx-auto mb-4" />
         <h1 className="text-xl font-semibold text-text-primary">
           Create your account
         </h1>
