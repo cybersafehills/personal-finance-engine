@@ -13,6 +13,14 @@
 # testing
 /coverage
 
+# Playwright e2e/visual-regression suite - stored auth state, run
+# artifacts, and reports are all reproducible from a fresh
+# `supabase start` + `playwright test` run, never committed.
+/e2e/.auth/
+/test-results/
+/playwright-report/
+/blob-report/
+
 # next.js
 /.next/
 /out/
