@@ -1,13 +1,20 @@
 name: Generate e2e visual-regression baselines
 
-# One-off/maintenance workflow, never run automatically (workflow_dispatch
-# only - no push/pull_request trigger). Boots the exact same disposable
-# local Supabase stack as the e2e-tests job in ci.yml, runs the full
-# Playwright suite (including @visual) with --update-snapshots, and
-# uploads the resulting *-snapshots/*-linux.png files as a build artifact
-# for a maintainer to download and commit - see web/e2e/README.md's
-# "Updating visual-regression baselines" section for why this is a
-# separate, deliberate step rather than something CI does on every run.
+# One-off/maintenance workflow, normally never run automatically
+# (workflow_dispatch only). Boots the exact same disposable local
+# Supabase stack as the e2e-tests job in ci.yml, runs the full Playwright
+# suite (including @visual) with --update-snapshots, and uploads the
+# resulting *-snapshots/*-linux.png files as a build artifact for a
+# maintainer to download and commit - see web/e2e/README.md's "Updating
+# visual-regression baselines" section for why this is a separate,
+# deliberate step rather than something CI does on every run.
+#
+# TEMPORARY: the `pull_request` trigger below exists only to generate the
+# very first Linux baselines on this PR's own CI run (this repo has no
+# committed Linux baselines yet - see web/e2e/README.md). It will be
+# removed again in a follow-up commit once that artifact has been
+# downloaded and applied; the workflow's steady state is
+# workflow_dispatch-only.
 #
 # Same non-negotiable rule as every other job in this repo that touches
 # Supabase: never the linked production project. This workflow configures
@@ -21,6 +28,7 @@ on:
         description: "Space-separated Playwright project names to generate baselines for"
         required: false
         default: "unauthenticated chromium-desktop"
+  pull_request: {} # TEMPORARY - see comment above, removed once the initial Linux baselines are committed
 
 permissions:
   contents: read
@@ -62,10 +70,15 @@ jobs:
 
       - name: Generate/update snapshots
         working-directory: web
+        env:
+          # github.event.inputs.* is only populated for workflow_dispatch -
+          # empty (falls back to the same default) for the temporary
+          # pull_request trigger.
+          PROJECTS_INPUT: ${{ github.event.inputs.projects || 'unauthenticated chromium-desktop' }}
         run: |
           set -euo pipefail
           PROJECT_ARGS=""
-          for p in ${{ github.event.inputs.projects }}; do
+          for p in $PROJECTS_INPUT; do
             PROJECT_ARGS="$PROJECT_ARGS --project=$p"
           done
           # PROJECT_ARGS is deliberately unquoted below - it holds several
