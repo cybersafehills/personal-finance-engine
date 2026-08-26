@@ -88,6 +88,13 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
+  // /api/cron/* is excluded: those routes authenticate via their own
+  // shared-secret header (isAuthorizedCronRequest, cron-auth.ts), never
+  // via a browser session - pg_cron/curl never carry a Supabase session
+  // cookie, so leaving them subject to this session gate meant every
+  // cron call was redirected to /login before the route handler's own
+  // secret check ever ran (discovered via a manual curl smoke test
+  // returning a 307 to /login instead of reaching the route).
   matcher:
-    "/((?!_next/static|_next/image|favicon.ico|icon.png|apple-icon.png).*)",
+    "/((?!_next/static|_next/image|favicon.ico|icon.png|apple-icon.png|api/cron).*)",
 };
