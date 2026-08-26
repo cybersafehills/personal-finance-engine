@@ -718,6 +718,15 @@ export type GenerationTickSummary = {
   generated: number;
   alreadyExists: number;
   errors: { candidateId: string; message: string }[];
+  /** true when this tick did nothing because REPORT_GENERATION_ENABLED=false (operational kill switch). */
+  disabled?: true;
+};
+
+const EMPTY_TICK_SUMMARY: GenerationTickSummary = {
+  candidatesEvaluated: 0,
+  generated: 0,
+  alreadyExists: 0,
+  errors: [],
 };
 
 /**
@@ -726,10 +735,20 @@ export type GenerationTickSummary = {
  * every opted-in candidate whose generation_time has passed and is not
  * yet generated for today; each candidate is independent, so one
  * candidate's failure never blocks the others'.
+ *
+ * Guarded by REPORT_GENERATION_ENABLED, an operational kill switch
+ * (master prompt's own rollback strategy: "disable scheduler/flag" -
+ * default enabled, set to the literal string "false" to pause generation
+ * without touching pg_cron itself or any report data). Reports already
+ * generated are unaffected either way.
  */
 export async function runDailyReportGenerationTick(
   nowInstant: Date = new Date(),
 ): Promise<GenerationTickSummary> {
+  if (process.env.REPORT_GENERATION_ENABLED === "false") {
+    return { ...EMPTY_TICK_SUMMARY, disabled: true };
+  }
+
   const supabase = supabaseServer();
   const candidates = await getDailyReportCandidates(supabase);
   const due = candidates.filter((c) => isGenerationDue(c, nowInstant));

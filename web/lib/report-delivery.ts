@@ -276,12 +276,35 @@ export type DeliveryTickSummary = {
   delivered: number;
   skipped: number;
   errors: { candidateId: string; message: string }[];
+  /** true when this tick did nothing because REPORT_EMAIL_DELIVERY_ENABLED=false (operational kill switch). */
+  disabled?: true;
 };
 
-/** The delivery tick's entry point - what the (future, not-yet-scheduled) pg_cron-invoked route calls. */
+const EMPTY_DELIVERY_SUMMARY: DeliveryTickSummary = {
+  candidatesEvaluated: 0,
+  delivered: 0,
+  skipped: 0,
+  errors: [],
+};
+
+/**
+ * The delivery tick's entry point - what the (future, not-yet-scheduled)
+ * pg_cron-invoked route calls.
+ *
+ * Guarded by REPORT_EMAIL_DELIVERY_ENABLED, an operational kill switch
+ * (master prompt's own rollback strategy: "disable delivery flag without
+ * deleting reports" - default enabled, set to the literal string "false"
+ * to pause email delivery independently of generation). Reports keep
+ * generating and remain fully viewable in-app either way; only the email
+ * send itself is paused.
+ */
 export async function runDailyReportDeliveryTick(
   nowInstant: Date = new Date(),
 ): Promise<DeliveryTickSummary> {
+  if (process.env.REPORT_EMAIL_DELIVERY_ENABLED === "false") {
+    return { ...EMPTY_DELIVERY_SUMMARY, disabled: true };
+  }
+
   const supabase = supabaseServer();
   const candidates = await getEmailDeliveryCandidates(supabase);
   const due = candidates.filter((c) => isDeliveryDue(c, nowInstant));
