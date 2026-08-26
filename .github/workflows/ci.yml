@@ -57,6 +57,19 @@ jobs:
       - name: deno test (_shared)
         run: deno test supabase/functions/_shared/tests
 
+      # web/lib's pure/deno-testable modules (budget-math.ts, money.ts,
+      # report-math.ts, report-period.ts, report-alert-messages.ts,
+      # report-types.ts, transfer-detection.ts) and their *_test.ts files -
+      # previously untested in CI (only supabase/functions ran here).
+      # Deliberately not also running `deno fmt --check`/`deno lint`
+      # against web/lib: those files follow this project's normal
+      # TypeScript/ESLint conventions (checked separately, outside this
+      # workflow, by the Next.js toolchain), not this repo's Deno-specific
+      # formatting/lint rules - only `deno test`'s type-check + assertions
+      # apply here.
+      - name: deno test (web/lib)
+        run: deno test web/lib
+
   migration-tests:
     name: Migration chain tests (disposable PostgreSQL 17)
     runs-on: ubuntu-24.04

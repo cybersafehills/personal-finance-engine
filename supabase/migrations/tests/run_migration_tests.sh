@@ -307,6 +307,18 @@ begin
   end if;
 end
 \$\$;
+
+-- Minimal mock of the Supabase-platform-managed storage schema (Phase K:
+-- 20260903000000_phase_k_report_artifacts.sql's
+-- `insert into storage.buckets (...)`) - just enough columns to satisfy
+-- that one insert. Real Supabase provisions the full Storage API schema;
+-- this disposable cluster only needs the table to exist.
+create schema if not exists storage;
+create table if not exists storage.buckets (
+  id text primary key,
+  name text not null,
+  public boolean not null default false
+);
 SQL
 }
 
@@ -531,12 +543,16 @@ echo "=== privilege/RLS regression check ==="
 # 20260827000000_organization_workspaces.sql,
 # transaction_category_history (20260829000000, RLS enabled), and
 # learned_policy_suggestion_decisions (20260831000000, RLS enabled) = 23
-# tables, 22 with RLS - the one gap (auth_login_attempts) is intentional
-# and named explicitly here so a genuinely *new* gap still fails loudly.
+# tables, plus Phase J's report_preferences/report_runs/report_deliveries
+# (20260902000000, all 3 RLS enabled) = 26, plus Phase K's
+# report_artifacts (20260903000000, RLS enabled, zero authenticated/anon
+# grants) = 27 tables, 26 with RLS - the one gap (auth_login_attempts) is
+# intentional and named explicitly here so a genuinely *new* gap still
+# fails loudly.
 RLS_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_class where relnamespace='public'::regnamespace and relkind='r' and relrowsecurity;")"
 TABLE_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_class where relnamespace='public'::regnamespace and relkind='r';")"
 TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' order by relname) from pg_class where relnamespace='public'::regnamespace and relkind='r' and not relrowsecurity;")"
-if [ "$TABLE_COUNT" = "23" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+if [ "$TABLE_COUNT" = "27" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -568,14 +584,20 @@ fi
 # (20260827000000) added a handful more (workspace invite handling),
 # Phase F/G's transaction_category_history (select only) added 1, and
 # Phase H's learned_policy_suggestion_decisions (select, insert) added 2
-# more, for 47 total today. Asserting the exact count (not just "some")
-# forces this test to be updated - a deliberate review point - if any
-# future migration ever widens authenticated's table-level access.
+# more, for 47 total before Phase J. Phase J's report_preferences (select,
+# insert, update) adds 3 more, and report_runs/report_deliveries (select
+# only, no authenticated write path - only service_role writes them) add
+# 1 each, for 52 total before Phase K. Phase K's report_artifacts adds
+# zero (no authenticated/anon grants at all - see that migration's own
+# header comment), so 52 remains the total today. Asserting the exact
+# count (not just "some") forces this test to be updated - a deliberate
+# review point - if any future migration ever widens authenticated's
+# table-level access.
 AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and grantee = 'authenticated';")"
-if [ "$AUTHENTICATED_GRANT_COUNT" = "47" ]; then
-  pass "authenticated holds exactly the 47 table grants expected, no more"
+if [ "$AUTHENTICATED_GRANT_COUNT" = "52" ]; then
+  pass "authenticated holds exactly the 52 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 47 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 52 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -1652,6 +1674,136 @@ if [ "$B_SEES_DECISIONS" = "0" ]; then
   pass "Phase H: User B cannot see User A's learned_policy_suggestion_decisions rows"
 else
   fail "Phase H: User B could read $B_SEES_DECISIONS of User A's learned_policy_suggestion_decisions rows - isolation breach"
+fi
+
+# ===========================================================================
+# Phase J: report_preferences / report_runs / report_deliveries RLS.
+# Reuses pfe_rls's existing USER_A/WORKSPACE_A/USER_B/WORKSPACE_B/as_user
+# from the block above.
+# ===========================================================================
+echo "=== Phase J: reporting RLS ==="
+
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.report_preferences (id, workspace_id, user_id, delivery_email, email_enabled, daily_report_enabled)
+  values ('00000000-0000-0000-0000-0000000000e1', '$WORKSPACE_B', '$USER_B', 'b@example.com', true, true);
+  insert into public.report_runs (id, workspace_id, user_id, period_start, period_end, timezone, scheduled_for, status, report_payload)
+  values ('00000000-0000-0000-0000-0000000000e2', '$WORKSPACE_B', '$USER_B', '2026-08-24T00:00:00+02', '2026-08-25T00:00:00+02', 'Africa/Kigali', '2026-08-25T00:05:00+02', 'generated', '{\"closing_balance_minor\": 100000}'::jsonb);
+  insert into public.report_deliveries (id, report_run_id, user_id, destination, status)
+  values ('00000000-0000-0000-0000-0000000000e3', '00000000-0000-0000-0000-0000000000e2', '$USER_B', 'b@example.com', 'pending');
+" >/dev/null
+
+# A cannot read B's report preferences, report run, or delivery row.
+READ_OTHER_PREFS="$(as_user "$USER_A" "select count(*) from public.report_preferences where id = '00000000-0000-0000-0000-0000000000e1';")"
+READ_OTHER_RUN="$(as_user "$USER_A" "select count(*) from public.report_runs where id = '00000000-0000-0000-0000-0000000000e2';")"
+READ_OTHER_DELIVERY="$(as_user "$USER_A" "select count(*) from public.report_deliveries where id = '00000000-0000-0000-0000-0000000000e3';")"
+if [ "$READ_OTHER_PREFS" = "0" ] && [ "$READ_OTHER_RUN" = "0" ] && [ "$READ_OTHER_DELIVERY" = "0" ]; then
+  pass "Phase J RLS: User A cannot read User B's report preferences, report run, or delivery"
+else
+  fail "Phase J RLS: User A read User B's reporting data (prefs=$READ_OTHER_PREFS run=$READ_OTHER_RUN delivery=$READ_OTHER_DELIVERY) - isolation breach"
+fi
+
+# A cannot update B's report preferences (destination hijack attempt).
+as_user "$USER_A" "update public.report_preferences set delivery_email = 'attacker@example.com' where id = '00000000-0000-0000-0000-0000000000e1';" >/dev/null
+PREFS_EMAIL_UNCHANGED="$(psql -d pfe_rls -t -A -c "select count(*) from public.report_preferences where id = '00000000-0000-0000-0000-0000000000e1' and delivery_email = 'b@example.com';")"
+if [ "$PREFS_EMAIL_UNCHANGED" = "1" ]; then
+  pass "Phase J RLS: User A cannot update User B's report delivery email"
+else
+  fail "Phase J RLS: User A's update against User B's report_preferences was not blocked - isolation breach"
+fi
+
+# A cannot trigger/insert a delivery against B's report run.
+if as_user "$USER_A" "insert into public.report_deliveries (report_run_id, user_id, destination) values ('00000000-0000-0000-0000-0000000000e2', '$USER_A', 'a@example.com');" >/dev/null 2>$ARTIFACT_DIR/pfe_rls_j_stderr.log; then
+  fail "Phase J RLS: User A was able to insert a delivery attempt against User B's report run - isolation breach"
+else
+  pass "Phase J RLS: User A cannot insert a delivery attempt against User B's report run (no authenticated write policy)"
+fi
+rm -f $ARTIFACT_DIR/pfe_rls_j_stderr.log
+
+# A CAN manage their own report_preferences and read their own report_runs
+# (positive control).
+as_user "$USER_A" "insert into public.report_preferences (workspace_id, user_id, delivery_email, email_enabled, daily_report_enabled) values ('$WORKSPACE_A', '$USER_A', 'a@example.com', true, true);" >/dev/null
+OWN_PREFS_COUNT="$(psql -d pfe_rls -t -A -c "select count(*) from public.report_preferences where workspace_id = '$WORKSPACE_A' and user_id = '$USER_A' and delivery_email = 'a@example.com';")"
+if [ "$OWN_PREFS_COUNT" = "1" ]; then
+  pass "Phase J RLS: User A can create and read their own report preferences (positive control)"
+else
+  fail "Phase J RLS: User A could not create their own report preferences - policies are over-blocking"
+fi
+
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.report_runs (id, workspace_id, user_id, period_start, period_end, timezone, scheduled_for, status, report_payload)
+  values ('00000000-0000-0000-0000-0000000000e4', '$WORKSPACE_A', '$USER_A', '2026-08-24T00:00:00+02', '2026-08-25T00:00:00+02', 'Africa/Kigali', '2026-08-25T00:05:00+02', 'generated', '{\"closing_balance_minor\": 50000}'::jsonb);
+" >/dev/null
+OWN_RUN_READABLE="$(as_user "$USER_A" "select count(*) from public.report_runs where id = '00000000-0000-0000-0000-0000000000e4';")"
+if [ "$OWN_RUN_READABLE" = "1" ]; then
+  pass "Phase J RLS: User A can read their own report run (positive control)"
+else
+  fail "Phase J RLS: User A could not read their own report run - policies are over-blocking"
+fi
+
+# Idempotency: a second insert for the identical (workspace, user, type,
+# period_start) is rejected by the unique constraint, not silently
+# duplicated - this is what the generation job's ON CONFLICT DO NOTHING
+# relies on.
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.report_runs (workspace_id, user_id, period_start, period_end, timezone, scheduled_for, status)
+  values ('$WORKSPACE_A', '$USER_A', '2026-08-24T00:00:00+02', '2026-08-25T00:00:00+02', 'Africa/Kigali', '2026-08-25T00:05:00+02', 'scheduled');
+" >/dev/null 2>$ARTIFACT_DIR/pfe_rls_j_dup_stderr.log; then
+  fail "Phase J RLS: a second report_runs row for the same (workspace, user, type, period_start) was accepted - idempotency constraint missing/broken"
+else
+  pass "Phase J RLS: a duplicate report_runs insert for the same recipient/period is rejected (idempotency constraint enforced)"
+fi
+rm -f $ARTIFACT_DIR/pfe_rls_j_dup_stderr.log
+
+# service_role remains completely unaffected by every policy above.
+SERVICE_ROLE_SEES_BOTH_RUNS="$(psql -d pfe_rls -t -A -c "set role service_role; select count(*) from public.report_runs where id in ('00000000-0000-0000-0000-0000000000e2', '00000000-0000-0000-0000-0000000000e4');" | tail -1)"
+if [ "$SERVICE_ROLE_SEES_BOTH_RUNS" = "2" ]; then
+  pass "Phase J RLS: service_role can read both users' report_runs, unaffected by RLS"
+else
+  fail "Phase J RLS: service_role could not see both report_runs rows ($SERVICE_ROLE_SEES_BOTH_RUNS of 2) - service_role should bypass RLS entirely"
+fi
+
+# ===========================================================================
+# Phase K: report_artifacts grants NOTHING to authenticated/anon at all
+# (unlike report_preferences/report_runs/report_deliveries, which at
+# least grant select) - the PDF route is the only path to this table's
+# data, and it always uses service_role. Prove authenticated genuinely
+# cannot read or write it, even its own report's row.
+# ===========================================================================
+echo "=== Phase K: report_artifacts has zero authenticated/anon access ==="
+
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.report_artifacts (id, report_run_id, storage_path, byte_size)
+  values ('00000000-0000-0000-0000-0000000000f1', '00000000-0000-0000-0000-0000000000e4', 'reports/e4.pdf', 12345);
+" >/dev/null
+
+# Direct `if as_user ...; then` (not a command-substitution assignment) is
+# deliberate here: authenticated has no SELECT grant on report_artifacts
+# at all, so this query fails outright (permission denied), not merely
+# an RLS-filtered empty result - a command-substitution assignment would
+# trip `set -e` on that failure before this script could even check it.
+if as_user "$USER_A" "select count(*) from public.report_artifacts where id = '00000000-0000-0000-0000-0000000000f1';" >/dev/null 2>$ARTIFACT_DIR/pfe_rls_k_read_stderr.log; then
+  fail "Phase K RLS: authenticated was able to query report_artifacts - should have no grant at all"
+else
+  pass "Phase K RLS: authenticated cannot query report_artifacts, even for their own report (no grant at all)"
+fi
+rm -f $ARTIFACT_DIR/pfe_rls_k_read_stderr.log
+
+if as_user "$USER_A" "insert into public.report_artifacts (report_run_id, storage_path, byte_size) values ('00000000-0000-0000-0000-0000000000e4', 'reports/forged.pdf', 1);" >/dev/null 2>$ARTIFACT_DIR/pfe_rls_k_stderr.log; then
+  fail "Phase K RLS: authenticated was able to insert into report_artifacts - isolation breach"
+else
+  pass "Phase K RLS: authenticated cannot insert into report_artifacts (no grant at all)"
+fi
+rm -f $ARTIFACT_DIR/pfe_rls_k_stderr.log
+
+SERVICE_ROLE_SEES_ARTIFACT="$(psql -d pfe_rls -t -A -c "set role service_role; select count(*) from public.report_artifacts where id = '00000000-0000-0000-0000-0000000000f1';" | tail -1)"
+if [ "$SERVICE_ROLE_SEES_ARTIFACT" = "1" ]; then
+  pass "Phase K RLS: service_role can read report_artifacts, unaffected by RLS"
+else
+  fail "Phase K RLS: service_role could not see the report_artifacts row - service_role should bypass RLS entirely"
 fi
 
 echo ""

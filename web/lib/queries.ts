@@ -3,6 +3,8 @@ import { cookies } from "next/headers";
 import { supabaseSession } from "./supabase-session-server";
 import { kigaliDayBoundsUtc, kigaliDateKey } from "./kigali-time";
 import {
+  aggregateOutflowsByAllocation,
+  ALLOCATION_TYPES,
   AllocationStatus,
   BudgetAlert,
   computeAllocationActual,
@@ -650,13 +652,6 @@ export async function getBudgetActuals(
   if (transferLinksResult.error) console.error("getBudgetActuals (transfer links) failed:", transferLinksResult.error.message);
   if (splitsResult.error) console.error("getBudgetActuals (splits) failed:", splitsResult.error.message);
 
-  const splitsByTransaction = new Map<string, { allocation_type: AllocationType; amount_minor: number }[]>();
-  for (const row of splitsResult.data ?? []) {
-    const existing = splitsByTransaction.get(row.transaction_id) ?? [];
-    existing.push({ allocation_type: row.allocation_type as AllocationType, amount_minor: row.amount_minor });
-    splitsByTransaction.set(row.transaction_id, existing);
-  }
-
   // Confirmed self-transfers move money between the user's own accounts -
   // never expenditure or income (see the master prompt's own rule, and
   // transfer_links' comment in the Phase E migration).
@@ -670,54 +665,36 @@ export async function getBudgetActuals(
     0,
   );
 
-  const totalsByAllocation = new Map<AllocationType, number>();
-  let unmappedMinor = 0;
-  let unmappedCount = 0;
-  let uncategorizedMinor = 0;
-  let uncategorizedCount = 0;
-
-  for (const row of outRows) {
-    const effect = Math.abs(Number(row.principal_effect_rwf) + Number(row.fee_effect_rwf));
-
-    // A split transaction is governed entirely by its own split rows -
-    // never by category mapping, even if it also has a mapped category.
-    // See transaction_splits' own comment in the Phase E migration.
-    const splits = splitsByTransaction.get(row.id);
-    if (splits && splits.length > 0) {
-      for (const split of splits) {
-        totalsByAllocation.set(
-          split.allocation_type,
-          (totalsByAllocation.get(split.allocation_type) ?? 0) + split.amount_minor,
-        );
-      }
-      continue;
-    }
-
-    if (!row.category) {
-      uncategorizedMinor += effect;
-      uncategorizedCount += 1;
-      continue;
-    }
-
-    const txnDateKey = kigaliDateKey(row.occurred_at);
-    const mapping = (mappingsResult.data ?? []).find((m) =>
-      m.category === row.category &&
-      m.effective_from <= txnDateKey &&
-      (m.effective_until === null || m.effective_until >= txnDateKey)
-    );
-
-    if (!mapping) {
-      unmappedMinor += effect;
-      unmappedCount += 1;
-      continue;
-    }
-
-    const allocationType = mapping.allocation_type as AllocationType;
-    totalsByAllocation.set(
-      allocationType,
-      (totalsByAllocation.get(allocationType) ?? 0) + effect,
-    );
-  }
+  // Classification (split-governed / uncategorized / unmapped / mapped
+  // allocation) is the canonical, single-implementation aggregation in
+  // budget-math.ts - see aggregateOutflowsByAllocation's own comment for
+  // why this must not be reimplemented here or anywhere else.
+  const aggregation = aggregateOutflowsByAllocation(
+    outRows.map((row) => ({
+      transactionId: row.id,
+      category: row.category,
+      effectMinor: BigInt(Math.abs(Number(row.principal_effect_rwf) + Number(row.fee_effect_rwf))),
+      occurredAtDateKey: kigaliDateKey(row.occurred_at),
+    })),
+    (splitsResult.data ?? []).map((row) => ({
+      transactionId: row.transaction_id,
+      allocationType: row.allocation_type as AllocationType,
+      amountMinor: BigInt(row.amount_minor),
+    })),
+    (mappingsResult.data ?? []).map((row) => ({
+      category: row.category,
+      allocationType: row.allocation_type as AllocationType,
+      effectiveFrom: row.effective_from,
+      effectiveUntil: row.effective_until,
+    })),
+  );
+  const totalsByAllocation = new Map<AllocationType, number>(
+    ALLOCATION_TYPES.map((type) => [type, Number(aggregation.totalsByAllocation[type])]),
+  );
+  const unmappedMinor = Number(aggregation.unmappedMinor);
+  const unmappedCount = aggregation.unmappedCount;
+  const uncategorizedMinor = Number(aggregation.uncategorizedMinor);
+  const uncategorizedCount = aggregation.uncategorizedCount;
 
   const todayKey = kigaliDateKey(new Date().toISOString());
   const elapsedFraction = computeElapsedFraction(
@@ -1535,4 +1512,116 @@ export async function getWorkspaceInvites(
     createdAt: row.created_at,
     expiresAt: row.expires_at,
   }));
+}
+
+// ===========================================================================
+// Phase E: Scheduled Financial Reporting - preferences and report_runs.
+// Session-scoped (RLS-enforced), matching every other function in this
+// file - report generation itself is service-role (web/lib/
+// report-generation.ts) and deliberately does not share these functions.
+// ===========================================================================
+
+export type ReportRunStatus =
+  | "scheduled"
+  | "generating"
+  | "generated"
+  | "generation_failed"
+  | "delivery_pending"
+  | "delivering"
+  | "delivered"
+  | "delivery_failed";
+
+import type { AiCommentaryPayload, ReportPayload } from "./report-types";
+export type { AiCommentaryPayload, ReportPayload };
+
+export type ReportRunSummary = {
+  id: string;
+  report_type: string;
+  period_start: string;
+  period_end: string;
+  timezone: string;
+  status: ReportRunStatus;
+  generated_at: string | null;
+  created_at: string;
+};
+
+const REPORT_RUN_SUMMARY_COLUMNS =
+  "id, report_type, period_start, period_end, timezone, status, generated_at, created_at";
+
+/** Most recent reports first, for the caller's own user_id (RLS: report_runs_select_own) - never filtered by workspace_id here, since a report belongs to its recipient, not broadly to every workspace member. */
+export async function getReportRuns(limit = 30): Promise<ReportRunSummary[]> {
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("report_runs")
+    .select(REPORT_RUN_SUMMARY_COLUMNS)
+    .order("period_start", { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    console.error("getReportRuns failed:", error.message);
+    return [];
+  }
+
+  return data ?? [];
+}
+
+export type ReportRunDetail = ReportRunSummary & {
+  report_payload: ReportPayload | null;
+  ai_payload: AiCommentaryPayload | null;
+  error_message: string | null;
+};
+
+export async function getReportRunById(id: string): Promise<ReportRunDetail | null> {
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("report_runs")
+    .select(`${REPORT_RUN_SUMMARY_COLUMNS}, report_payload, ai_payload, error_message`)
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error) {
+    console.error("getReportRunById failed:", error.message);
+    return null;
+  }
+
+  return data as unknown as ReportRunDetail | null;
+}
+
+export type ReportPreferencesRow = {
+  id: string;
+  timezone: string;
+  daily_report_enabled: boolean;
+  generation_time: string;
+  delivery_time: string;
+  email_enabled: boolean;
+  delivery_email: string | null;
+  include_ai_analysis: boolean;
+};
+
+const REPORT_PREFERENCES_COLUMNS =
+  "id, timezone, daily_report_enabled, generation_time, delivery_time, email_enabled, delivery_email, include_ai_analysis";
+
+/** The caller's own report preferences in their active workspace, or null if they've never set any (defaults are then whatever the settings form itself shows, never silently assumed enabled - see report_preferences' own migration comment on opt-in defaults). */
+export async function getReportPreferences(): Promise<ReportPreferencesRow | null> {
+  const supabase = await supabaseSession();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const workspaceId = await getActiveWorkspaceId();
+
+  if (!user || !workspaceId) return null;
+
+  const { data, error } = await supabase
+    .from("report_preferences")
+    .select(REPORT_PREFERENCES_COLUMNS)
+    .eq("workspace_id", workspaceId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (error) {
+    console.error("getReportPreferences failed:", error.message);
+    return null;
+  }
+
+  return data;
 }
