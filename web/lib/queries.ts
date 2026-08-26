@@ -10,6 +10,7 @@ import {
   computeAllocationActual,
   computeBudgetAlerts,
   computeElapsedFraction,
+  daysBetweenDateKeys,
 } from "./budget-math";
 import { findTransferCandidates, TransferCandidateTransaction } from "./transfer-detection";
 import { lastNCompleteMonthKeys } from "./budget-math";
@@ -750,6 +751,141 @@ export async function getBudgetActuals(
     elapsedFraction,
     alerts,
   };
+}
+
+export type DashboardBudgetSummary = {
+  budgetId: string;
+  budgetName: string;
+  totalTargetMinor: number;
+  totalActualMinor: number;
+  remainingMinor: number;
+  percentUsed: number | null;
+  /** The single worst allocation status across the budget, in the same
+   *  severity order allocationStatus() itself defines - a dashboard
+   *  summary card shows one status, not five, so this picks the one that
+   *  most needs the user's attention rather than an arbitrary first
+   *  allocation. */
+  worstStatus: AllocationStatus;
+  daysRemainingInPeriod: number | null;
+  periodEnd: string;
+  actionableAlertCount: number;
+};
+
+const STATUS_SEVERITY: Record<AllocationStatus, number> = {
+  insufficient_data: 0,
+  healthy: 1,
+  watch: 2,
+  at_risk: 3,
+  exceeded: 4,
+};
+
+/**
+ * A single-card summary of the caller's one active budget, for the Home
+ * dashboard - reuses getBudgets/getBudgetById/getBudgetActuals verbatim
+ * (the per-allocation math itself is never reimplemented here, only
+ * summed/maxed across allocations) rather than a separate dashboard-only
+ * computation. Returns null when there is no active budget - the Home
+ * page simply omits the card rather than showing an empty-state box for
+ * a legitimate, common state (see master prompt §8.2/§11.2).
+ */
+export async function getDashboardBudgetSummary(): Promise<DashboardBudgetSummary | null> {
+  const budgets = await getBudgets();
+  const active = budgets.find((b) => b.status === "active");
+  if (!active) return null;
+
+  const withAllocations = await getBudgetById(active.id);
+  if (!withAllocations) return null;
+
+  const actuals = await getBudgetActuals(withAllocations);
+
+  const totalTargetMinor = actuals.allocations.reduce((sum, a) => sum + a.targetMinor, 0);
+  const totalActualMinor = actuals.allocations.reduce((sum, a) => sum + a.actualMinor, 0);
+  const worstStatus = actuals.allocations.reduce<AllocationStatus>(
+    (worst, a) => (STATUS_SEVERITY[a.status] > STATUS_SEVERITY[worst] ? a.status : worst),
+    "insufficient_data",
+  );
+  const actionableAlertCount = actuals.alerts.filter(
+    (alert) => alert.severity === "warning" || alert.severity === "critical",
+  ).length;
+
+  const todayKey = kigaliDateKey(new Date().toISOString());
+  const daysRemainingInPeriod = todayKey <= withAllocations.period_end
+    ? Math.max(0, daysBetweenDateKeys(todayKey, withAllocations.period_end))
+    : null;
+
+  return {
+    budgetId: withAllocations.id,
+    budgetName: withAllocations.name,
+    totalTargetMinor,
+    totalActualMinor,
+    remainingMinor: totalTargetMinor - totalActualMinor,
+    percentUsed: totalTargetMinor > 0 ? (totalActualMinor / totalTargetMinor) * 100 : null,
+    worstStatus,
+    daysRemainingInPeriod,
+    periodEnd: withAllocations.period_end,
+    actionableAlertCount,
+  };
+}
+
+// ===========================================================================
+// Home dashboard "attention items" - concise, actionable states surfaced
+// only from data this codebase already computes reliably elsewhere
+// (review queue, learned-suggestion detection, budget alerts). See master
+// prompt §8.3: no new detection logic is introduced here. Duplicate/
+// suspicious-transaction detection, failed-import tracking, and stale-
+// account-data detection are deliberately left out - there is no
+// existing reliable signal for them yet - and are documented as future
+// extension points rather than guessed at.
+// ===========================================================================
+
+export type AttentionItem = {
+  id: string;
+  label: string;
+  count: number;
+  href: string;
+};
+
+export async function getAttentionItems(): Promise<AttentionItem[]> {
+  const [reviewQueueCount, learnedSuggestionCount, budgetSummary] = await Promise.all([
+    getReviewQueueCount(),
+    getLearnedPolicySuggestionCount(),
+    getDashboardBudgetSummary(),
+  ]);
+
+  const items: AttentionItem[] = [];
+
+  if (reviewQueueCount > 0) {
+    items.push({
+      id: "review-queue",
+      label: reviewQueueCount === 1 ? "Transaction needs review" : "Transactions need review",
+      count: reviewQueueCount,
+      href: "/transactions/review",
+    });
+  }
+
+  if (learnedSuggestionCount > 0) {
+    items.push({
+      id: "learned-suggestions",
+      label: learnedSuggestionCount === 1
+        ? "Categorization rule suggested"
+        : "Categorization rules suggested",
+      count: learnedSuggestionCount,
+      href: "/categories/rules/suggestions",
+    });
+  }
+
+  if (budgetSummary && budgetSummary.actionableAlertCount > 0) {
+    items.push({
+      id: "budget-alerts",
+      label: budgetSummary.actionableAlertCount === 1
+        ? "Budget category needs attention"
+        : "Budget categories need attention",
+      count: budgetSummary.actionableAlertCount,
+      href: `/budgets/${budgetSummary.budgetId}`,
+    });
+  }
+
+  return items;
 }
 
 // ===========================================================================
@@ -1624,4 +1760,70 @@ export async function getReportPreferences(): Promise<ReportPreferencesRow | nul
   }
 
   return data;
+}
+
+// ===========================================================================
+// Phase L: application-shell UI preferences (navigation order, balance/
+// dashboard display-privacy, one-time notices). Session-scoped (RLS-
+// enforced) like everything else in this file - see
+// supabase/migrations/20260904000000_phase_l_ui_preferences.sql.
+// ===========================================================================
+
+import { normalizeNavOrder, type NavKey } from "./navigation";
+
+export type UiPreferencesRow = {
+  navOrder: NavKey[];
+  hideBalance: boolean;
+  privacyMode: boolean;
+  reportsRelocationNoticeDismissed: boolean;
+};
+
+const UI_PREFERENCES_COLUMNS =
+  "nav_order, hide_balance, privacy_mode, reports_relocation_notice_dismissed";
+
+/**
+ * The caller's own shell/navigation/privacy preferences in their active
+ * workspace, or a safe all-default value if they've never set any, the
+ * lookup fails, or there is no session - callers should never need to
+ * null-check this the way getReportPreferences' callers do, since an
+ * application shell must always have *some* nav order/privacy state to
+ * render with on first paint (see master prompt §6.4/§11.1 on avoiding a
+ * flash of sensitive content and blocking navigation on preference load).
+ */
+export async function getUiPreferences(): Promise<UiPreferencesRow> {
+  const fallback: UiPreferencesRow = {
+    navOrder: normalizeNavOrder(undefined),
+    hideBalance: false,
+    privacyMode: false,
+    reportsRelocationNoticeDismissed: false,
+  };
+
+  const supabase = await supabaseSession();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const workspaceId = await getActiveWorkspaceId();
+
+  if (!user || !workspaceId) return fallback;
+
+  const { data, error } = await supabase
+    .from("ui_preferences")
+    .select(UI_PREFERENCES_COLUMNS)
+    .eq("workspace_id", workspaceId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (error) {
+    console.error("getUiPreferences failed:", error.message);
+    return fallback;
+  }
+
+  if (!data) return fallback;
+
+  return {
+    navOrder: normalizeNavOrder(data.nav_order),
+    hideBalance: data.hide_balance,
+    privacyMode: data.privacy_mode,
+    reportsRelocationNoticeDismissed: data.reports_relocation_notice_dismissed,
+  };
 }

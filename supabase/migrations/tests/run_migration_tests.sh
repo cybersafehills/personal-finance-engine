@@ -546,13 +546,14 @@ echo "=== privilege/RLS regression check ==="
 # tables, plus Phase J's report_preferences/report_runs/report_deliveries
 # (20260902000000, all 3 RLS enabled) = 26, plus Phase K's
 # report_artifacts (20260903000000, RLS enabled, zero authenticated/anon
-# grants) = 27 tables, 26 with RLS - the one gap (auth_login_attempts) is
-# intentional and named explicitly here so a genuinely *new* gap still
-# fails loudly.
+# grants) = 27 tables, 26 with RLS, plus Phase L's ui_preferences
+# (20260904000000, RLS enabled) = 28 tables, 27 with RLS - the one gap
+# (auth_login_attempts) is intentional and named explicitly here so a
+# genuinely *new* gap still fails loudly.
 RLS_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_class where relnamespace='public'::regnamespace and relkind='r' and relrowsecurity;")"
 TABLE_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_class where relnamespace='public'::regnamespace and relkind='r';")"
 TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' order by relname) from pg_class where relnamespace='public'::regnamespace and relkind='r' and not relrowsecurity;")"
-if [ "$TABLE_COUNT" = "27" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+if [ "$TABLE_COUNT" = "28" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -589,15 +590,16 @@ fi
 # only, no authenticated write path - only service_role writes them) add
 # 1 each, for 52 total before Phase K. Phase K's report_artifacts adds
 # zero (no authenticated/anon grants at all - see that migration's own
-# header comment), so 52 remains the total today. Asserting the exact
-# count (not just "some") forces this test to be updated - a deliberate
-# review point - if any future migration ever widens authenticated's
-# table-level access.
+# header comment), so 52 remained the total through Phase K. Phase L's
+# ui_preferences (select, insert, update) adds 3 more, for 55 total
+# today. Asserting the exact count (not just "some") forces this test to
+# be updated - a deliberate review point - if any future migration ever
+# widens authenticated's table-level access.
 AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and grantee = 'authenticated';")"
-if [ "$AUTHENTICATED_GRANT_COUNT" = "52" ]; then
-  pass "authenticated holds exactly the 52 table grants expected, no more"
+if [ "$AUTHENTICATED_GRANT_COUNT" = "55" ]; then
+  pass "authenticated holds exactly the 55 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 52 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 55 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.

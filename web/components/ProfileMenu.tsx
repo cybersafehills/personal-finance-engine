@@ -8,11 +8,12 @@ import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 import type { WorkspaceSummary } from "../lib/queries";
 
 /**
- * The single top-right "account" entry point on mobile, where there isn't
- * room for the email address, workspace switcher, and a sign-out button to
- * all sit in the header at once (see AppShell's mobile top bar). Desktop
- * keeps those inline instead - this menu exists to declutter the small
- * viewport, not to replace the desktop layout.
+ * The single top-right "account" entry point in the unified application
+ * shell header, on every device size (see AppShell) - email, workspace
+ * switcher, settings shortcuts, and sign-out all live behind one control
+ * rather than being spread across the header or a separate account bar,
+ * per the master prompt's unified-shell requirement. Sign-out
+ * deliberately has no permanent visual prominence in the header itself.
  */
 export function ProfileMenu({
   userEmail,
@@ -67,6 +68,20 @@ export function ProfileMenu({
                 className="rounded-control px-2 py-2 text-sm font-medium text-text-secondary hover:bg-background hover:text-text-primary"
               >
                 Settings
+              </Link>
+              <Link
+                href="/settings/appearance"
+                onClick={() => setOpen(false)}
+                className="rounded-control px-2 py-2 text-sm font-medium text-text-secondary hover:bg-background hover:text-text-primary"
+              >
+                Appearance and navigation
+              </Link>
+              <Link
+                href="/settings/privacy"
+                onClick={() => setOpen(false)}
+                className="rounded-control px-2 py-2 text-sm font-medium text-text-secondary hover:bg-background hover:text-text-primary"
+              >
+                Privacy and security
               </Link>
               <button
                 type="button"

@@ -1,10 +1,30 @@
 import Link from "next/link";
 import { PageHeader } from "../../components/PageHeader";
-import { WalletIcon, PhoneIcon, LockIcon, UsersIcon, DocumentIcon } from "../../components/icons";
+import {
+  WalletIcon,
+  PhoneIcon,
+  LockIcon,
+  UsersIcon,
+  DocumentIcon,
+  GearIcon,
+  EyeIcon,
+} from "../../components/icons";
 
 export const dynamic = "force-dynamic";
 
 const SETTINGS_LINKS = [
+  {
+    href: "/settings/appearance",
+    title: "Appearance and navigation",
+    description: "Arrange your primary navigation order.",
+    Icon: GearIcon,
+  },
+  {
+    href: "/settings/privacy",
+    title: "Privacy and security",
+    description: "Balance visibility, full privacy mode, and sign-in security.",
+    Icon: EyeIcon,
+  },
   {
     href: "/settings/accounts",
     title: "Accounts",
@@ -16,6 +36,12 @@ const SETTINGS_LINKS = [
     title: "Connections",
     description: "Manage the devices and Shortcuts that send transactions in.",
     Icon: PhoneIcon,
+  },
+  {
+    href: "/reports",
+    title: "Reports",
+    description: "View your generated daily financial reports.",
+    Icon: DocumentIcon,
   },
   {
     href: "/settings/reports",

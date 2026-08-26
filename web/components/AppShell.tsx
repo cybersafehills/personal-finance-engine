@@ -2,41 +2,44 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useTransition } from "react";
-import { signOut } from "../app/login/actions";
 import { OneLedgerLogo } from "./brand/OneLedgerLogo";
-import { DocumentIcon, GearIcon, HomeIcon, ListIcon, PieIcon, TargetIcon } from "./icons";
+import { GearIcon, HomeIcon, ListIcon, PieIcon, TargetIcon } from "./icons";
 import { LiveDataSync } from "./LiveDataSync";
 import { ProfileMenu } from "./ProfileMenu";
-import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
+import { PrivacyProvider } from "./PrivacyProvider";
+import { ReportsButton } from "./ReportsButton";
+import { ReportsRelocationNotice } from "./ReportsRelocationNotice";
+import { NAV_ITEM_META, type NavKey } from "../lib/navigation";
 import type { WorkspaceSummary } from "../lib/queries";
 
-const NAV_ITEMS = [
-  { href: "/", label: "Home", Icon: HomeIcon },
-  { href: "/transactions", label: "Transactions", Icon: ListIcon },
-  { href: "/categories", label: "Categories", Icon: PieIcon },
-  { href: "/budgets", label: "Budgets", Icon: TargetIcon },
-  { href: "/reports", label: "Reports", Icon: DocumentIcon },
-  { href: "/settings", label: "Settings", Icon: GearIcon },
-] as const;
+const NAV_ICONS: Record<NavKey, (props: { className?: string }) => React.JSX.Element> = {
+  transactions: ListIcon,
+  categories: PieIcon,
+  budgets: TargetIcon,
+  settings: GearIcon,
+};
 
 function isActive(pathname: string, href: string): boolean {
   if (href === "/") return pathname === "/";
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-function SignOutButton() {
-  const [isPending, startTransition] = useTransition();
-  return (
-    <button
-      type="button"
-      onClick={() => startTransition(() => signOut())}
-      disabled={isPending}
-      className="rounded-full px-3 py-1 text-xs font-medium text-text-muted transition-colors hover:bg-background hover:text-text-primary disabled:opacity-50"
-    >
-      {isPending ? "Signing out…" : "Sign out"}
-    </button>
-  );
+/**
+ * The five primary destinations in the caller's chosen order: Home is
+ * always first and never movable (master prompt §5), the remaining four
+ * follow navOrder (already validated/normalized server-side by
+ * getUiPreferences - see lib/navigation.ts). Reports is never a member of
+ * this list; it lives only behind ReportsButton and the Settings link.
+ */
+function useOrderedNavItems(navOrder: NavKey[]) {
+  return [
+    { href: "/", label: "Home", Icon: HomeIcon },
+    ...navOrder.map((key) => ({
+      href: NAV_ITEM_META[key].href,
+      label: NAV_ITEM_META[key].label,
+      Icon: NAV_ICONS[key],
+    })),
+  ];
 }
 
 export function AppShell({
@@ -44,67 +47,50 @@ export function AppShell({
   userEmail,
   workspaces,
   activeWorkspaceId,
+  navOrder,
+  hideBalance,
+  privacyMode,
+  reportsRelocationNoticeDismissed,
 }: {
   children: React.ReactNode;
   userEmail: string | null;
   workspaces: WorkspaceSummary[];
   activeWorkspaceId: string | null;
+  navOrder: NavKey[];
+  hideBalance: boolean;
+  privacyMode: boolean;
+  reportsRelocationNoticeDismissed: boolean;
 }) {
   const pathname = usePathname();
+  const navItems = useOrderedNavItems(navOrder);
 
-  return (
+  const shell = (
     <div className="flex min-h-full flex-col">
       {userEmail && <LiveDataSync workspaceId={activeWorkspaceId} />}
 
-      {/* Mobile top bar: logo on the left, a single profile-menu entry
-          point in the standard top-right spot (see ProfileMenu's own
-          comment for why account details live behind it instead of
-          being spread across the header). Absent on auth pages. */}
+      {/* Unified authenticated header - one definition for every device
+          size, so mobile and desktop can never drift into two competing
+          navigation/account implementations. Brand left; Reports icon
+          and the profile menu (email, workspace switcher, settings
+          shortcuts, sign-out) on the right. Absent entirely on
+          unauthenticated pages (no user yet). */}
       {userEmail && (
-        <div className="flex items-center justify-between gap-3 border-b border-border-subtle bg-surface px-4 py-2.5 sm:hidden">
-          <Link href="/" aria-label="OneLedger home">
-            <OneLedgerLogo variant="mark" height={28} decorative />
-          </Link>
-          <ProfileMenu
-            userEmail={userEmail}
-            workspaces={workspaces}
-            activeWorkspaceId={activeWorkspaceId}
-          />
-        </div>
-      )}
-
-      {/* Slim account bar - desktop/tablet only. On mobile this collapses
-          into the ProfileMenu above instead of competing for header space
-          with the logo. Absent on auth pages (no user yet) since there is
-          nothing to sign out of. */}
-      {userEmail && (
-        <div className="hidden items-center justify-between gap-3 border-b border-border-subtle bg-surface px-4 py-1.5 text-xs sm:flex sm:px-6">
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="truncate text-text-muted">{userEmail}</span>
-            {/* Only ever shown once there's an actual choice to make -
-                see WorkspaceSwitcher's own comment. */}
-            {workspaces.length > 1 && (
-              <WorkspaceSwitcher
-                workspaces={workspaces}
-                activeWorkspaceId={activeWorkspaceId}
-              />
-            )}
-          </div>
-          <SignOutButton />
-        </div>
-      )}
-
-      {/* Desktop / tablet: compact top header. Hidden on narrow phones in
-          favor of the bottom bar, which is the primary mobile pattern for
-          a 3-destination app. Absent on auth pages (no user yet). */}
-      {userEmail && (
-        <header className="sticky top-0 z-10 hidden border-b border-border-subtle bg-surface/95 backdrop-blur sm:block">
-          <div className="mx-auto flex max-w-3xl items-center justify-between px-6 py-3">
-            <Link href="/" aria-label="OneLedger home">
-              <OneLedgerLogo height={32} decorative />
+        <header className="sticky top-0 z-10 border-b border-border-subtle bg-surface/95 backdrop-blur">
+          <div className="mx-auto flex max-w-3xl items-center justify-between gap-3 px-4 py-2.5 sm:px-6">
+            <Link href="/" aria-label="OneLedger home" className="shrink-0">
+              <OneLedgerLogo variant="mark" height={28} decorative className="sm:hidden" />
+              <OneLedgerLogo height={32} decorative className="hidden sm:block" />
             </Link>
-            <nav className="flex items-center gap-1" aria-label="Primary">
-              {NAV_ITEMS.map(({ href, label }) => {
+
+            {/* Desktop/tablet primary nav lives inline in the header, to
+                the left of the account controls, rather than as a second
+                stacked bar - compact icon+label pills, ordered per the
+                caller's saved preference. */}
+            <nav
+              aria-label="Primary"
+              className="hidden flex-1 items-center justify-center gap-1 sm:flex"
+            >
+              {navItems.map(({ href, label }) => {
                 const active = isActive(pathname, href);
                 return (
                   <Link
@@ -122,23 +108,36 @@ export function AppShell({
                 );
               })}
             </nav>
+
+            <div className="flex shrink-0 items-center gap-1">
+              <ReportsButton />
+              <ProfileMenu
+                userEmail={userEmail}
+                workspaces={workspaces}
+                activeWorkspaceId={activeWorkspaceId}
+              />
+            </div>
           </div>
         </header>
       )}
+
+      {userEmail && !reportsRelocationNoticeDismissed && <ReportsRelocationNotice />}
 
       <main className="mx-auto w-full max-w-3xl flex-1 px-4 pb-24 pt-5 sm:px-6 sm:pb-10 sm:pt-6">
         {children}
       </main>
 
       {/* Mobile: persistent bottom navigation with icon + label, honoring
-          the iPhone home-indicator safe area. Absent on auth pages. */}
+          the iPhone home-indicator safe area. Same five destinations, same
+          order, as the desktop header nav above - never a second
+          independent navigation definition. Absent on auth pages. */}
       {userEmail && (
         <nav
           aria-label="Primary"
           className="fixed inset-x-0 bottom-0 z-10 border-t border-border-subtle bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden"
         >
           <div className="mx-auto flex max-w-3xl items-stretch justify-around">
-            {NAV_ITEMS.map(({ href, label, Icon }) => {
+            {navItems.map(({ href, label, Icon }) => {
               const active = isActive(pathname, href);
               return (
                 <Link
@@ -160,5 +159,11 @@ export function AppShell({
         </nav>
       )}
     </div>
+  );
+
+  return (
+    <PrivacyProvider initialHideBalance={hideBalance} privacyMode={privacyMode}>
+      {shell}
+    </PrivacyProvider>
   );
 }

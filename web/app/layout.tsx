@@ -2,7 +2,8 @@ import type { Metadata, Viewport } from "next";
 import { Geist } from "next/font/google";
 import { AppShell } from "../components/AppShell";
 import { supabaseSession } from "../lib/supabase-session-server";
-import { getActiveWorkspaceId, getUserWorkspaces } from "../lib/queries";
+import { getActiveWorkspaceId, getUiPreferences, getUserWorkspaces } from "../lib/queries";
+import { DEFAULT_NAV_ORDER } from "../lib/navigation";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -36,9 +37,29 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const [workspaces, activeWorkspaceId] = user
-    ? await Promise.all([getUserWorkspaces(), getActiveWorkspaceId()])
-    : [[], null];
+  // Fetched once here, in the root layout, and threaded down as props -
+  // never re-fetched separately by the header, mobile nav, desktop nav,
+  // or dashboard components (master prompt §18's "single source of
+  // truth" requirement). This also gives the shell its nav order and
+  // privacy preference on the very first server-rendered paint, so there
+  // is no client-side fetch and no flash of an unmasked balance or a
+  // default nav order before the real one loads (§6.4/§11.1).
+  const [workspaces, activeWorkspaceId, uiPreferences] = user
+    ? await Promise.all([
+        getUserWorkspaces(),
+        getActiveWorkspaceId(),
+        getUiPreferences(),
+      ])
+    : [
+        [],
+        null,
+        {
+          navOrder: DEFAULT_NAV_ORDER,
+          hideBalance: false,
+          privacyMode: false,
+          reportsRelocationNoticeDismissed: true,
+        },
+      ];
 
   return (
     <html lang="en" className={`${geistSans.variable} h-full antialiased`}>
@@ -47,6 +68,10 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           userEmail={user?.email ?? null}
           workspaces={workspaces}
           activeWorkspaceId={activeWorkspaceId}
+          navOrder={uiPreferences.navOrder}
+          hideBalance={uiPreferences.hideBalance}
+          privacyMode={uiPreferences.privacyMode}
+          reportsRelocationNoticeDismissed={uiPreferences.reportsRelocationNoticeDismissed}
         >
           {children}
         </AppShell>
