@@ -1,0 +1,27 @@
+-- Phase L follow-up: grant EXECUTE on is_valid_nav_order() to authenticated.
+--
+-- Bug fix for a real gap in 20260904000000_phase_l_ui_preferences.sql:
+-- 20260819000000_harden_function_and_sequence_default_privileges.sql
+-- (applied long before Phase L) globally revoked the default EXECUTE
+-- grant every new public-schema function would otherwise silently
+-- receive - every other RPC-style function in this schema
+-- (is_workspace_member, apply_manual_category_correction,
+-- confirm_transaction_category, detect_learned_policy_suggestions, ...)
+-- has its own explicit `grant execute ... to authenticated` for exactly
+-- this reason. is_valid_nav_order() - called from inside
+-- ui_preferences_nav_order_shape's CHECK constraint, itself invoked with
+-- the calling role's own privileges since the function is not SECURITY
+-- DEFINER - never got that grant, so every authenticated insert/update
+-- against ui_preferences (i.e. every real nav-order/privacy-preference
+-- save) failed with "permission denied for function is_valid_nav_order".
+--
+-- Discovered by the e2e suite's very first real save attempt against a
+-- disposable local Supabase stack - confirmed live in production too
+-- (this function has held no anon/authenticated/PUBLIC grant there
+-- since 20260904000000 was pushed).
+--
+-- A follow-up migration rather than editing 20260904000000 in place,
+-- matching this project's own established pattern (e.g. Phase B's
+-- identity/backfill split) - purely additive, and idempotent: granting
+-- an already-held privilege is a no-op.
+grant execute on function public.is_valid_nav_order(text[]) to authenticated, service_role;

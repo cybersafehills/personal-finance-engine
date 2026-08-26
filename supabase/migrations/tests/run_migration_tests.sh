@@ -638,15 +638,20 @@ fi
 # dismiss_suggested_category, preview_policy_historical_match_count,
 # preview_policy_historical_matches, apply_policy_to_historical,
 # revert_bulk_categorization) = 13, plus Phase H's
-# detect_learned_policy_suggestions = 14 total. Every other existing
-# function (set_updated_at, handle_new_user, policy_matches_transaction -
-# SQL-only, no grant needed since it's only ever called from within
-# another SECURITY DEFINER function) remains authenticated-inaccessible.
+# detect_learned_policy_suggestions = 14, plus Phase L's follow-up grant
+# on is_valid_nav_order() (the ui_preferences_nav_order_shape CHECK
+# constraint's helper function - not SECURITY DEFINER, so it runs with
+# the calling role's own privileges and needs its own explicit grant like
+# every other authenticated-callable function here) = 15 total. Every
+# other existing function (set_updated_at, handle_new_user,
+# policy_matches_transaction - SQL-only, no grant needed since it's only
+# ever called from within another SECURITY DEFINER function) remains
+# authenticated-inaccessible.
 AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname = 'authenticated' where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "14" ]; then
-  pass "authenticated holds EXECUTE on exactly the 14 functions expected, no more"
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "15" ]; then
+  pass "authenticated holds EXECUTE on exactly the 15 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 14 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 15 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"

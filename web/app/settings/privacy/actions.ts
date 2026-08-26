@@ -55,6 +55,7 @@ async function upsertUiPreferences(
   );
 
   if (error) {
+    console.error("upsertUiPreferences (privacy) failed:", error.message, error.details, error.hint, error.code);
     return { ok: false, error: "Could not save your privacy preferences." };
   }
 
