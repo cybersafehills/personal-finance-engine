@@ -2,7 +2,9 @@
 
 Playwright suite covering the application-shell/navigation/dashboard-privacy
 modernization: the unified header, the 5-item primary nav (Reports removed),
-user-configurable nav ordering, and balance/dashboard privacy mode.
+user-configurable nav ordering, and balance/dashboard privacy mode. See
+`docs/application-shell.md` for what the feature actually does and why -
+this file is about running and maintaining the test suite itself.
 
 ## What it never does
 
