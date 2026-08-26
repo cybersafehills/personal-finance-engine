@@ -29,6 +29,9 @@ export function ReportPreferencesForm({
   const [deliveryEmail, setDeliveryEmail] = useState(
     preferences?.delivery_email ?? suggestedEmail ?? "",
   );
+  const [includeAiAnalysis, setIncludeAiAnalysis] = useState(
+    preferences?.include_ai_analysis ?? false,
+  );
   const [isPending, startTransition] = useTransition();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -47,6 +50,7 @@ export function ReportPreferencesForm({
             deliveryTime,
             emailEnabled,
             deliveryEmail,
+            includeAiAnalysis,
           });
           if (result.ok) {
             setSavedAt(Date.now());
@@ -99,6 +103,23 @@ export function ReportPreferencesForm({
         />
         <span className="text-xs text-text-muted">
           Local time, shortly after midnight is recommended so the report covers a complete day.
+        </span>
+      </label>
+
+      <label className="flex items-start gap-3 text-sm">
+        <input
+          type="checkbox"
+          checked={includeAiAnalysis}
+          onChange={(event) => setIncludeAiAnalysis(event.target.checked)}
+          className="mt-0.5 h-5 w-5 shrink-0 accent-accent"
+        />
+        <span>
+          <span className="block font-medium text-text-primary">AI commentary</span>
+          <span className="block text-text-muted">
+            Add a short, AI-generated interpretation of your report (&ldquo;OneLedger Insights&rdquo;) grounded
+            only in the figures already in the report. Informational only, never financial advice - and if it&apos;s
+            ever unavailable, the rest of the report is unaffected.
+          </span>
         </span>
       </label>
 

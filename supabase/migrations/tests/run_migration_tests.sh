@@ -307,6 +307,18 @@ begin
   end if;
 end
 \$\$;
+
+-- Minimal mock of the Supabase-platform-managed storage schema (Phase K:
+-- 20260903000000_phase_k_report_artifacts.sql's
+-- `insert into storage.buckets (...)`) - just enough columns to satisfy
+-- that one insert. Real Supabase provisions the full Storage API schema;
+-- this disposable cluster only needs the table to exist.
+create schema if not exists storage;
+create table if not exists storage.buckets (
+  id text primary key,
+  name text not null,
+  public boolean not null default false
+);
 SQL
 }
 
@@ -532,13 +544,15 @@ echo "=== privilege/RLS regression check ==="
 # transaction_category_history (20260829000000, RLS enabled), and
 # learned_policy_suggestion_decisions (20260831000000, RLS enabled) = 23
 # tables, plus Phase J's report_preferences/report_runs/report_deliveries
-# (20260902000000, all 3 RLS enabled) = 26 tables, 25 with RLS - the one
-# gap (auth_login_attempts) is intentional and named explicitly here so a
-# genuinely *new* gap still fails loudly.
+# (20260902000000, all 3 RLS enabled) = 26, plus Phase K's
+# report_artifacts (20260903000000, RLS enabled, zero authenticated/anon
+# grants) = 27 tables, 26 with RLS - the one gap (auth_login_attempts) is
+# intentional and named explicitly here so a genuinely *new* gap still
+# fails loudly.
 RLS_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_class where relnamespace='public'::regnamespace and relkind='r' and relrowsecurity;")"
 TABLE_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_class where relnamespace='public'::regnamespace and relkind='r';")"
 TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' order by relname) from pg_class where relnamespace='public'::regnamespace and relkind='r' and not relrowsecurity;")"
-if [ "$TABLE_COUNT" = "26" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+if [ "$TABLE_COUNT" = "27" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -573,9 +587,12 @@ fi
 # more, for 47 total before Phase J. Phase J's report_preferences (select,
 # insert, update) adds 3 more, and report_runs/report_deliveries (select
 # only, no authenticated write path - only service_role writes them) add
-# 1 each, for 52 total today. Asserting the exact count (not just "some")
-# forces this test to be updated - a deliberate review point - if any
-# future migration ever widens authenticated's table-level access.
+# 1 each, for 52 total before Phase K. Phase K's report_artifacts adds
+# zero (no authenticated/anon grants at all - see that migration's own
+# header comment), so 52 remains the total today. Asserting the exact
+# count (not just "some") forces this test to be updated - a deliberate
+# review point - if any future migration ever widens authenticated's
+# table-level access.
 AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and grantee = 'authenticated';")"
 if [ "$AUTHENTICATED_GRANT_COUNT" = "52" ]; then
   pass "authenticated holds exactly the 52 table grants expected, no more"
@@ -1746,6 +1763,47 @@ if [ "$SERVICE_ROLE_SEES_BOTH_RUNS" = "2" ]; then
   pass "Phase J RLS: service_role can read both users' report_runs, unaffected by RLS"
 else
   fail "Phase J RLS: service_role could not see both report_runs rows ($SERVICE_ROLE_SEES_BOTH_RUNS of 2) - service_role should bypass RLS entirely"
+fi
+
+# ===========================================================================
+# Phase K: report_artifacts grants NOTHING to authenticated/anon at all
+# (unlike report_preferences/report_runs/report_deliveries, which at
+# least grant select) - the PDF route is the only path to this table's
+# data, and it always uses service_role. Prove authenticated genuinely
+# cannot read or write it, even its own report's row.
+# ===========================================================================
+echo "=== Phase K: report_artifacts has zero authenticated/anon access ==="
+
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.report_artifacts (id, report_run_id, storage_path, byte_size)
+  values ('00000000-0000-0000-0000-0000000000f1', '00000000-0000-0000-0000-0000000000e4', 'reports/e4.pdf', 12345);
+" >/dev/null
+
+# Direct `if as_user ...; then` (not a command-substitution assignment) is
+# deliberate here: authenticated has no SELECT grant on report_artifacts
+# at all, so this query fails outright (permission denied), not merely
+# an RLS-filtered empty result - a command-substitution assignment would
+# trip `set -e` on that failure before this script could even check it.
+if as_user "$USER_A" "select count(*) from public.report_artifacts where id = '00000000-0000-0000-0000-0000000000f1';" >/dev/null 2>$ARTIFACT_DIR/pfe_rls_k_read_stderr.log; then
+  fail "Phase K RLS: authenticated was able to query report_artifacts - should have no grant at all"
+else
+  pass "Phase K RLS: authenticated cannot query report_artifacts, even for their own report (no grant at all)"
+fi
+rm -f $ARTIFACT_DIR/pfe_rls_k_read_stderr.log
+
+if as_user "$USER_A" "insert into public.report_artifacts (report_run_id, storage_path, byte_size) values ('00000000-0000-0000-0000-0000000000e4', 'reports/forged.pdf', 1);" >/dev/null 2>$ARTIFACT_DIR/pfe_rls_k_stderr.log; then
+  fail "Phase K RLS: authenticated was able to insert into report_artifacts - isolation breach"
+else
+  pass "Phase K RLS: authenticated cannot insert into report_artifacts (no grant at all)"
+fi
+rm -f $ARTIFACT_DIR/pfe_rls_k_stderr.log
+
+SERVICE_ROLE_SEES_ARTIFACT="$(psql -d pfe_rls -t -A -c "set role service_role; select count(*) from public.report_artifacts where id = '00000000-0000-0000-0000-0000000000f1';" | tail -1)"
+if [ "$SERVICE_ROLE_SEES_ARTIFACT" = "1" ]; then
+  pass "Phase K RLS: service_role can read report_artifacts, unaffected by RLS"
+else
+  fail "Phase K RLS: service_role could not see the report_artifacts row - service_role should bypass RLS entirely"
 fi
 
 echo ""

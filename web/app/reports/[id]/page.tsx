@@ -52,7 +52,19 @@ export default async function ReportDetailPage({
         backHref="/reports"
         title={dateLabel}
         subtitle={`Daily financial report · ${report.timezone}`}
-        action={<ReportStatusBadge status={report.status} />}
+        action={
+          <div className="flex items-center gap-3">
+            {payload && (
+              <a
+                href={`/api/reports/${report.id}/pdf`}
+                className="text-sm font-medium text-accent hover:underline"
+              >
+                Download PDF
+              </a>
+            )}
+            <ReportStatusBadge status={report.status} />
+          </div>
+        }
       />
 
       {report.status === "generation_failed" && (
@@ -199,6 +211,25 @@ export default async function ReportDetailPage({
               </p>
             )}
           </Section>
+
+          {report.ai_payload && (
+            <Section title="OneLedger Insights">
+              <div className="flex flex-col gap-2">
+                <p className="text-sm text-text-primary">{report.ai_payload.summary}</p>
+                {report.ai_payload.observations.length > 0 && (
+                  <ul className="flex flex-col gap-1 pl-4 text-sm text-text-secondary">
+                    {report.ai_payload.observations.map((observation, i) => (
+                      <li key={i} className="list-disc">{observation}</li>
+                    ))}
+                  </ul>
+                )}
+                <p className="text-xs text-text-muted">
+                  AI-generated interpretation of the figures above, provided for informational purposes only —
+                  not financial advice.
+                </p>
+              </div>
+            </Section>
+          )}
 
           <p className="px-1 text-center text-xs text-text-muted">
             Reporting period: {formatZonedDate(report.period_start, report.timezone)} ·

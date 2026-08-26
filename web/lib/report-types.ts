@@ -73,6 +73,19 @@ export type BudgetSection = {
   alerts: BudgetAlertJson[];
 } | { overallStatus: "no_active_budget" };
 
+// AI enrichment (Phase I) is deliberately NOT a field on ReportPayload -
+// it is persisted in its own report_runs.ai_payload column, separate
+// from report_payload, so an AI failure/timeout/invalid response can
+// never block or mutate the deterministic snapshot (master prompt §21).
+// See AiCommentaryPayload below and lib/ai/*.
+export type AiCommentaryPayload = {
+  summary: string;
+  observations: string[];
+  provider: "anthropic" | "openai";
+  model: string;
+  generatedAt: string;
+};
+
 export type ReportPayload = {
   schemaVersion: number;
   dateKey: string;

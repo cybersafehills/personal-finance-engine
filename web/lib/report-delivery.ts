@@ -8,6 +8,7 @@ import {
 } from "./report-period";
 import { siteUrl } from "./site-url";
 import { sendDailyReportEmail } from "./emails";
+import { formatDateKeyLabel } from "./format";
 import {
   allocationLabel,
   budgetAlertMessage,
@@ -62,16 +63,6 @@ export function isDeliveryDue(
 ): boolean {
   return zonedTimeOfDay(nowInstant, candidate.timezone) >=
     candidate.delivery_time;
-}
-
-function formatDateKeyLabel(dateKey: string): string {
-  const [year, month, day] = dateKey.split("-").map(Number);
-  return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString("en-US", {
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-    timeZone: "UTC",
-  });
 }
 
 function buildBudgetSummaryLines(budget: ReportPayload["budget"]): string[] {

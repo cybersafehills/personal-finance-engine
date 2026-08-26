@@ -87,6 +87,22 @@ export function formatFullDateTime(occurredAtIso: string): string {
 }
 
 /**
+ * A plain "YYYY-MM-DD" report dateKey (already a local calendar date in
+ * the report's own timezone - no further timezone conversion needed) as
+ * "August 24, 2026". Used by the email renderer and the PDF renderer, so
+ * the two never format the same report's date differently.
+ */
+export function formatDateKeyLabel(dateKey: string): string {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+/**
  * The local calendar date (e.g. "August 24, 2026") `instantIso` falls on
  * in an ARBITRARY IANA timezone - unlike every other formatter in this
  * file, which hardcodes Kigali. Used for report period labels, where the

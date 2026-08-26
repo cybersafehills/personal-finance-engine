@@ -30,6 +30,8 @@ import type {
   BudgetSection,
   ReportPayload,
 } from "./report-types";
+import { budgetAlertMessage, reportAlertMessage } from "./report-alert-messages";
+import { generateReportCommentary } from "./ai/report-commentary";
 
 // Phase D: idempotent, service-role report generation. This module is the
 // ONLY place daily reports are actually assembled - everything here is
@@ -71,6 +73,7 @@ export type ReportPreferenceCandidate = {
   timezone: string;
   generation_time: string;
   delivery_email: string | null;
+  include_ai_analysis: boolean;
 };
 
 /**
@@ -86,7 +89,7 @@ export async function getDailyReportCandidates(
   const { data, error } = await supabase
     .from("report_preferences")
     .select(
-      "id, workspace_id, user_id, timezone, generation_time, delivery_email",
+      "id, workspace_id, user_id, timezone, generation_time, delivery_email, include_ai_analysis",
     )
     .eq("daily_report_enabled", true);
 
@@ -669,6 +672,19 @@ export async function generateDailyReportForCandidate(
       forecast,
     };
 
+    // Optional AI enrichment (Phase I) - persisted in its own column,
+    // never blocking generation. generateReportCommentary already
+    // swallows every failure mode and returns null; per-user opt-in via
+    // report_preferences.include_ai_analysis is the gate here.
+    const aiPayload = candidate.include_ai_analysis
+      ? await generateReportCommentary(
+        reportPayload,
+        [...alerts.map(reportAlertMessage), ...(
+          budgetSection.overallStatus === "no_active_budget" ? [] : budgetSection.alerts.map(budgetAlertMessage)
+        )],
+      )
+      : null;
+
     const { data: inserted, error: insertError } = await supabase
       .from("report_runs")
       .insert({
@@ -683,6 +699,7 @@ export async function generateDailyReportForCandidate(
         generation_started_at: new Date().toISOString(),
         generated_at: new Date().toISOString(),
         report_payload: reportPayload,
+        ai_payload: aiPayload,
       })
       .select("id")
       .maybeSingle();

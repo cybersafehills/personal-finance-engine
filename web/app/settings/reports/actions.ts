@@ -28,6 +28,7 @@ export async function saveReportPreferences(input: {
   deliveryTime: string;
   emailEnabled: boolean;
   deliveryEmail: string;
+  includeAiAnalysis: boolean;
 }): Promise<ReportPreferencesActionResult> {
   if (!isValidReportTimezone(input.timezone)) {
     return { ok: false, error: "Unrecognized timezone." };
@@ -76,6 +77,7 @@ export async function saveReportPreferences(input: {
         delivery_time: deliveryTime,
         email_enabled: input.emailEnabled,
         delivery_email: input.emailEnabled ? trimmedEmail : null,
+        include_ai_analysis: input.includeAiAnalysis,
       },
       { onConflict: "workspace_id,user_id" },
     );

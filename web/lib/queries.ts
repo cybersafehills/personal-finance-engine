@@ -1531,8 +1531,8 @@ export type ReportRunStatus =
   | "delivered"
   | "delivery_failed";
 
-import type { ReportPayload } from "./report-types";
-export type { ReportPayload };
+import type { AiCommentaryPayload, ReportPayload } from "./report-types";
+export type { AiCommentaryPayload, ReportPayload };
 
 export type ReportRunSummary = {
   id: string;
@@ -1567,6 +1567,7 @@ export async function getReportRuns(limit = 30): Promise<ReportRunSummary[]> {
 
 export type ReportRunDetail = ReportRunSummary & {
   report_payload: ReportPayload | null;
+  ai_payload: AiCommentaryPayload | null;
   error_message: string | null;
 };
 
@@ -1574,7 +1575,7 @@ export async function getReportRunById(id: string): Promise<ReportRunDetail | nu
   const supabase = await supabaseSession();
   const { data, error } = await supabase
     .from("report_runs")
-    .select(`${REPORT_RUN_SUMMARY_COLUMNS}, report_payload, error_message`)
+    .select(`${REPORT_RUN_SUMMARY_COLUMNS}, report_payload, ai_payload, error_message`)
     .eq("id", id)
     .maybeSingle();
 
@@ -1594,10 +1595,11 @@ export type ReportPreferencesRow = {
   delivery_time: string;
   email_enabled: boolean;
   delivery_email: string | null;
+  include_ai_analysis: boolean;
 };
 
 const REPORT_PREFERENCES_COLUMNS =
-  "id, timezone, daily_report_enabled, generation_time, delivery_time, email_enabled, delivery_email";
+  "id, timezone, daily_report_enabled, generation_time, delivery_time, email_enabled, delivery_email, include_ai_analysis";
 
 /** The caller's own report preferences in their active workspace, or null if they've never set any (defaults are then whatever the settings form itself shows, never silently assumed enabled - see report_preferences' own migration comment on opt-in defaults). */
 export async function getReportPreferences(): Promise<ReportPreferencesRow | null> {
