@@ -98,10 +98,13 @@ test("a failed save rolls back the balance toggle rather than leaving a stale UI
 
   await balanceToggle.click();
 
-  // Optimistic UI shows the click immediately...
-  await expect(page.getByLabel("Show current balance")).toBeVisible();
-  // ...then rolls back once the save is confirmed to have failed (see
-  // PrivacyProvider.toggleBalanceVisible's rollback-on-failure path).
+  // The optimistic flip and the abort-triggered rollback both happen
+  // client-side with no real network latency in this test, so the
+  // transient "optimistic" state can already be gone by the time an
+  // assertion polls for it - only the settled end state (rolled back to
+  // "Hide current balance" once the save is confirmed to have failed;
+  // see PrivacyProvider.toggleBalanceVisible's rollback-on-failure path)
+  // is a reliable thing to assert on here.
   await expect(page.getByLabel("Hide current balance")).toBeVisible();
 
   await page.unroute("**/*");
