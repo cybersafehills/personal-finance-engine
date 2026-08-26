@@ -197,9 +197,28 @@ jobs:
       - name: supabase start (disposable local stack)
         run: supabase start
 
-      # e2e/auth.setup.ts resolves the local stack's URL/service-role key
-      # from `supabase status` automatically (see e2e/README.md) - no
-      # secrets are configured in this job at all.
+      # The Next.js app itself (not just e2e/auth.setup.ts) needs these to
+      # build/run at all - lib/supabase-server.ts and lib/site-url.ts throw
+      # at import time otherwise. Every value here points at the
+      # disposable local stack just started above; nothing here is a
+      # secret (these are well-known, fixed local-dev defaults baked into
+      # the Supabase CLI itself, never the linked production project's
+      # credentials).
+      - name: Export local Supabase connection details for the app build
+        run: |
+          set -euo pipefail
+          STATUS_JSON="$(supabase status --output json)"
+          {
+            echo "SUPABASE_URL=$(echo "$STATUS_JSON" | jq -r '.API_URL')"
+            echo "SUPABASE_SERVICE_ROLE_KEY=$(echo "$STATUS_JSON" | jq -r '.SERVICE_ROLE_KEY')"
+            echo "NEXT_PUBLIC_SUPABASE_URL=$(echo "$STATUS_JSON" | jq -r '.API_URL')"
+            echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$(echo "$STATUS_JSON" | jq -r '.ANON_KEY')"
+            echo "SITE_URL=http://127.0.0.1:3417"
+          } >> "$GITHUB_ENV"
+
+      # e2e/auth.setup.ts separately resolves these same values itself
+      # (see e2e/README.md) for the test user it creates - this step only
+      # covers the app server Playwright's webServer builds/starts.
       - name: Run e2e/accessibility suite (chromium-desktop + unauthenticated)
         working-directory: web
         run: npx playwright test --project=unauthenticated --project=chromium-desktop --grep-invert "@visual"

@@ -68,6 +68,20 @@ jobs:
       - name: supabase start (disposable local stack)
         run: supabase start
 
+      # See ci.yml's identical step for why: the Next.js app itself needs
+      # these to build/run, pointing at the disposable stack just started.
+      - name: Export local Supabase connection details for the app build
+        run: |
+          set -euo pipefail
+          STATUS_JSON="$(supabase status --output json)"
+          {
+            echo "SUPABASE_URL=$(echo "$STATUS_JSON" | jq -r '.API_URL')"
+            echo "SUPABASE_SERVICE_ROLE_KEY=$(echo "$STATUS_JSON" | jq -r '.SERVICE_ROLE_KEY')"
+            echo "NEXT_PUBLIC_SUPABASE_URL=$(echo "$STATUS_JSON" | jq -r '.API_URL')"
+            echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$(echo "$STATUS_JSON" | jq -r '.ANON_KEY')"
+            echo "SITE_URL=http://127.0.0.1:3417"
+          } >> "$GITHUB_ENV"
+
       - name: Generate/update snapshots
         working-directory: web
         env:
