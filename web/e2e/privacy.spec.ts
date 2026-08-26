@@ -37,6 +37,13 @@ test("the balance eye control toggles visibility and persists across reload", as
   await expect(page.getByLabel("Show current balance")).toBeVisible();
   await expect(page.getByText("••••••")).toBeVisible();
 
+  // The click's persistence is a Server Action call the dashboard
+  // deliberately never shows a "Saved" indicator for (meant to feel
+  // instant/silent) - so there is no UI signal to wait on directly.
+  // Reloading immediately can race an in-flight save that hasn't
+  // committed server-side yet, which this test would then misread as a
+  // real persistence bug. Wait for network activity to settle first.
+  await page.waitForLoadState("networkidle");
   await page.reload();
   // No flash of the real value before the persisted preference resolves -
   // the server-rendered first paint already reflects hide_balance=true

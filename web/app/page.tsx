@@ -28,6 +28,15 @@ export default async function HomePage() {
     getAttentionItems(),
   ]);
 
+  // Whether the secondary (right) column has anything to show at all -
+  // when neither exists (a new/quiet account), the main column expands
+  // to the full width instead of leaving a permanently blank third
+  // column, per master prompt §10's "do not leave the majority of the
+  // desktop viewport unused without a design reason" - an empty right
+  // column here has no design reason, it's just nothing to show yet.
+  const hasSecondaryColumn = Boolean(budgetSummary) || attentionItems.length > 0;
+  const mainColumnSpan = hasSecondaryColumn ? "lg:col-span-2" : "lg:col-span-3";
+
   return (
     // Single column on mobile/tablet, in the exact IA order from master
     // prompt §8 (balance, today's totals, budget status, attention items,
@@ -39,13 +48,13 @@ export default async function HomePage() {
     // across breakpoints (no separate mobile/desktop markup to keep in
     // sync) and only the visual position changes.
     <div className="flex flex-col gap-5 lg:grid lg:grid-cols-3 lg:items-start lg:gap-5">
-      <div className="lg:col-start-1 lg:col-span-2">
+      <div className={`lg:col-start-1 ${mainColumnSpan}`}>
         <BalanceCard balanceRwf={balance} />
       </div>
 
       <section
         aria-label="Today's activity"
-        className="grid grid-cols-2 gap-3 lg:col-start-1 lg:col-span-2"
+        className={`grid grid-cols-2 gap-3 lg:col-start-1 ${mainColumnSpan}`}
       >
         <SummaryMetric label="Received today" amountRwf={today.receivedRwf} />
         <SummaryMetric label="Spent today" amountRwf={-today.spentRwf} />
@@ -74,7 +83,7 @@ export default async function HomePage() {
         </div>
       )}
 
-      <section className="rounded-card border border-border-subtle bg-surface p-1.5 lg:col-start-1 lg:col-span-2">
+      <section className={`rounded-card border border-border-subtle bg-surface p-1.5 lg:col-start-1 ${mainColumnSpan}`}>
         <div className="flex items-center justify-between px-3 pb-1 pt-2">
           <h2 className="text-xs font-semibold uppercase tracking-wide text-text-muted">
             Recent transactions
