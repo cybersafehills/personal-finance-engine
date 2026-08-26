@@ -9,13 +9,21 @@ import { test, expect } from "./fixtures";
 
 test.beforeEach(async ({ page }) => {
   // Known starting privacy state for every test in this file, regardless
-  // of what a previous test in the same worker left behind.
+  // of what a previous test in the same worker left behind. "Saved" is
+  // only ever asserted when a click actually happened - on the very
+  // first run both checkboxes are already at their default (unchecked)
+  // state, so neither click fires and there is nothing to wait for.
   await page.goto("/settings/privacy");
   const hideBalanceCheckbox = page.getByRole("checkbox", { name: /Hide balance when OneLedger opens/ });
-  if (await hideBalanceCheckbox.isChecked()) await hideBalanceCheckbox.click();
+  if (await hideBalanceCheckbox.isChecked()) {
+    await hideBalanceCheckbox.click();
+    await expect(page.getByText("Saved")).toBeVisible();
+  }
   const privacyModeCheckbox = page.getByRole("checkbox", { name: /Full financial privacy mode/ });
-  if (await privacyModeCheckbox.isChecked()) await privacyModeCheckbox.click();
-  await expect(page.getByText("Saved")).toBeVisible();
+  if (await privacyModeCheckbox.isChecked()) {
+    await privacyModeCheckbox.click();
+    await expect(page.getByText("Saved")).toBeVisible();
+  }
 });
 
 test("the balance eye control toggles visibility and persists across reload", async ({ page }) => {

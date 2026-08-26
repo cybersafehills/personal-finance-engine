@@ -88,6 +88,14 @@ test("the one-time Reports relocation notice can be dismissed and never reappear
   if (await notice.isVisible().catch(() => false)) {
     await page.getByRole("button", { name: "Got it" }).click();
     await expect(notice).toBeHidden();
+    // The dismiss persists via a fire-and-forget Server Action call
+    // (ReportsRelocationNotice intentionally doesn't block the UI on it -
+    // this is a low-stakes one-time notice, not a security-sensitive
+    // toggle). Reloading immediately can abort that still-in-flight
+    // request before the server commits it, so wait for network activity
+    // to settle first - otherwise this assertion races the app's own
+    // persistence.
+    await page.waitForLoadState("networkidle");
     await page.reload();
     await expect(notice).toHaveCount(0);
   }
