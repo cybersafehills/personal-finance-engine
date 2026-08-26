@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { AUTH_STORAGE_STATE_PATH } from "./e2e/test-users";
 
 // e2e/visual-regression suite for the application-shell/navigation/
 // dashboard-privacy modernization (see AGENTS/CLAUDE.md task history).
@@ -67,11 +68,18 @@ export default defineConfig({
     },
 
     // Chrome/Chromium desktop - the project's primary supported desktop
-    // browser (master prompt §19).
+    // browser (master prompt §19). storageState here is what actually
+    // carries the "setup" project's real login into every test in this
+    // project - `dependencies` alone only guarantees run ORDER, it does
+    // not apply the saved session on its own.
     {
       name: "chromium-desktop",
       testIgnore: /unauthenticated\.spec\.ts/,
-      use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 900 } },
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 1280, height: 900 },
+        storageState: AUTH_STORAGE_STATE_PATH,
+      },
       dependencies: ["setup"],
     },
 
@@ -80,7 +88,7 @@ export default defineConfig({
     {
       name: "chrome-android",
       testIgnore: /unauthenticated\.spec\.ts/,
-      use: { ...devices["Pixel 7"] },
+      use: { ...devices["Pixel 7"], storageState: AUTH_STORAGE_STATE_PATH },
       dependencies: ["setup"],
     },
 
@@ -88,7 +96,11 @@ export default defineConfig({
     {
       name: "webkit-desktop",
       testIgnore: /unauthenticated\.spec\.ts/,
-      use: { ...devices["Desktop Safari"], viewport: { width: 1280, height: 900 } },
+      use: {
+        ...devices["Desktop Safari"],
+        viewport: { width: 1280, height: 900 },
+        storageState: AUTH_STORAGE_STATE_PATH,
+      },
       dependencies: ["setup"],
     },
 
@@ -96,7 +108,7 @@ export default defineConfig({
     {
       name: "mobile-safari",
       testIgnore: /unauthenticated\.spec\.ts/,
-      use: { ...devices["iPhone 14"] },
+      use: { ...devices["iPhone 14"], storageState: AUTH_STORAGE_STATE_PATH },
       dependencies: ["setup"],
     },
   ],
