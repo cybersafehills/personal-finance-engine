@@ -15,6 +15,27 @@
 -- linked, or there is more than one unlinked account - the migration
 -- raises and refuses to guess, exactly like this project's standing rule
 -- against inferring ownership from unstable values.
+--
+-- UPDATE (post-production-application, purely additive for future fresh
+-- applies - a no-op against the already-migrated production database,
+-- which never re-runs this file): a genuinely fresh, non-interactive
+-- chain application (`supabase start`, this project's CI, a new
+-- developer's local environment) has no way to interpose a real signup
+-- between this migration and the previous one - there is no "production-
+-- application approval gate" pausing anything, the whole chain just
+-- runs straight through. That left `supabase start` permanently unable
+-- to succeed from an empty database, which nothing had ever actually
+-- exercised until an e2e/visual-regression suite tried to boot one from
+-- scratch. The zero-workspace branch below (previously an unconditional
+-- exception) now self-heals that one specific case by creating its own
+-- placeholder personal workspace - workspaces.created_by is nullable
+-- (20260821000000) and nothing in this schema requires a workspace to
+-- have an owning membership row, so an ownerless workspace is a fully
+-- valid, inert row: is_workspace_member() never grants any real user
+-- access to it, so it's invisible to every RLS policy and every
+-- application query. It exists solely so this migration has a link
+-- target. The >1 branch is untouched - a genuinely ambiguous state still
+-- refuses to guess, exactly as before.
 
 do $$
 declare
@@ -31,16 +52,21 @@ begin
   if v_unlinked_account_count = 0 then
     raise notice 'Phase B backfill: no unlinked accounts found, nothing to backfill.';
   else
-    select count(*) into v_personal_workspace_count
-      from public.workspaces where kind = 'personal';
-
     if v_unlinked_account_count <> 1 then
       raise exception
         'Phase B backfill expects exactly one unlinked account, found %. Refusing to guess which one is the pre-Phase-B owner''s account.',
         v_unlinked_account_count;
     end if;
 
-    if v_personal_workspace_count <> 1 then
+    select count(*) into v_personal_workspace_count
+      from public.workspaces where kind = 'personal';
+
+    if v_personal_workspace_count = 0 then
+      insert into public.workspaces (kind, name)
+      values ('personal', 'Bootstrap (fresh-environment placeholder)');
+
+      raise notice 'Phase B backfill: no personal workspace exists yet (a genuinely fresh chain application, not production) - created a placeholder to link the legacy account to.';
+    elsif v_personal_workspace_count <> 1 then
       raise exception
         'Phase B backfill expects exactly one personal workspace to exist (the migrated owner''s), found %. Create the owner''s auth.users row first (via signup or an approved admin-created user) so handle_new_user() provisions it, then re-run this migration.',
         v_personal_workspace_count;
