@@ -1,4 +1,5 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect } from "./fixtures";
+import type { Page } from "@playwright/test";
 
 // Covers master prompt §5/§20.4 items 4-8: user-configurable nav order,
 // Home fixed, keyboard-only reordering, persistence across reload (a

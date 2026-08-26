@@ -21,12 +21,17 @@ export function PrivacyPreferencesForm({
     setHideBalanceState(next);
     setErrorMessage(null);
     startTransition(async () => {
-      const result = await setHideBalance(next);
-      if (result.ok) {
-        setSavedAt(Date.now());
-      } else {
+      try {
+        const result = await setHideBalance(next);
+        if (result.ok) {
+          setSavedAt(Date.now());
+        } else {
+          setHideBalanceState(previous);
+          setErrorMessage(result.error);
+        }
+      } catch {
         setHideBalanceState(previous);
-        setErrorMessage(result.error);
+        setErrorMessage("Could not save your privacy preferences. Please try again.");
       }
     });
   }
@@ -36,12 +41,17 @@ export function PrivacyPreferencesForm({
     setPrivacyModeState(next);
     setErrorMessage(null);
     startTransition(async () => {
-      const result = await setPrivacyMode(next);
-      if (result.ok) {
-        setSavedAt(Date.now());
-      } else {
+      try {
+        const result = await setPrivacyMode(next);
+        if (result.ok) {
+          setSavedAt(Date.now());
+        } else {
+          setPrivacyModeState(previous);
+          setErrorMessage(result.error);
+        }
+      } catch {
         setPrivacyModeState(previous);
-        setErrorMessage(result.error);
+        setErrorMessage("Could not save your privacy preferences. Please try again.");
       }
     });
   }

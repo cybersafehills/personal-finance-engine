@@ -37,11 +37,18 @@ export function NavOrderForm({ initialOrder }: { initialOrder: NavKey[] }) {
   function save(nextOrder: NavKey[]) {
     setErrorMessage(null);
     startTransition(async () => {
-      const result = await saveNavOrder(nextOrder);
-      if (result.ok) {
-        setSavedAt(Date.now());
-      } else {
-        setErrorMessage(result.error);
+      try {
+        const result = await saveNavOrder(nextOrder);
+        if (result.ok) {
+          setSavedAt(Date.now());
+        } else {
+          setErrorMessage(result.error);
+        }
+      } catch {
+        // The action itself threw (network failure, server error) rather
+        // than returning its typed { ok: false, error } shape - still
+        // surfaced visibly, never a silent no-op.
+        setErrorMessage("Could not save your preferences. Please try again.");
       }
     });
   }

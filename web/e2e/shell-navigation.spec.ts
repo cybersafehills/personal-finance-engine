@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 
 // Covers master prompt §24's definition-of-done for the unified shell:
 // exactly 5 primary destinations (Home + 4 movable), Reports removed from
@@ -47,7 +47,9 @@ test("Reports is reachable from Settings, distinct from the Daily reports schedu
   // The Settings list row's accessible name is its title AND description
   // text concatenated (both live inside the one <a>), so an exact-name
   // match on just the title never matches - select by href instead.
-  await page.locator('a[href="/reports"]').click();
+  // Scoped to <main> since the header's ReportsButton also links to
+  // /reports and would otherwise make this locator ambiguous.
+  await page.locator('main a[href="/reports"]').click();
   await expect(page).toHaveURL(/\/reports$/);
 
   await page.goto("/settings");

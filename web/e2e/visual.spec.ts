@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 
 // Visual-regression coverage (master prompt §20.5) for the shell/nav/
 // dashboard/settings surfaces this task touched. Runs against the seeded

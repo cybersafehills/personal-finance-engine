@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 
 // Covers master prompt §6/§20.4 items 9-14: the balance eye/eye-off
 // control, its persistence, full privacy mode masking every sensitive
