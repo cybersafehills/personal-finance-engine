@@ -28,9 +28,11 @@
 --          'Shared secret for the report-generation/delivery cron routes'
 --        );
 --
--- Also replace REPORT_APP_BASE_URL_PLACEHOLDER below with the real
--- production URL (https://www.oneledger.me as of this writing - see
--- SITE_URL in web/.env.local.example) before running this file.
+-- Base URL below is already set to the confirmed production domain
+-- (https://www.oneledger.me - see supabase/config.toml's own
+-- `site_url`/`additional_redirect_urls`, which independently confirm
+-- this is the real production domain, not the raw Vercel deployment
+-- URL). Update it here first if that domain ever changes.
 --
 -- Effect once run: two 5-minute-interval pg_cron jobs that POST to
 -- /api/cron/generate-reports and /api/cron/deliver-reports. Both routes
@@ -59,7 +61,7 @@ set search_path = public, extensions, vault
 as $$
 declare
   cron_secret text;
-  base_url text := 'REPORT_APP_BASE_URL_PLACEHOLDER'; -- e.g. https://www.oneledger.me
+  base_url text := 'https://www.oneledger.me';
 begin
   select decrypted_secret into cron_secret
   from vault.decrypted_secrets
@@ -67,10 +69,6 @@ begin
 
   if cron_secret is null then
     raise exception 'report_cron_secret not found in Vault - see supabase/scheduling/README.md prerequisite 2';
-  end if;
-
-  if base_url = 'REPORT_APP_BASE_URL_PLACEHOLDER' then
-    raise exception 'REPORT_APP_BASE_URL_PLACEHOLDER was never replaced with the real production URL';
   end if;
 
   perform net.http_post(

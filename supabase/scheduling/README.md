@@ -45,11 +45,11 @@ step (not bundled into the schema/code merge).
    );
    ```
    Never commit the real secret value to any file, including this one.
-4. Open `activate_report_scheduler.sql`, replace
-   `REPORT_APP_BASE_URL_PLACEHOLDER` with the real production URL
-   (`https://www.oneledger.me` as of this writing - see `SITE_URL` in
-   `web/.env.local.example`), and run the whole file once in the SQL
-   editor.
+4. Run `activate_report_scheduler.sql` once, in full, in the SQL editor.
+   It already targets the confirmed production URL
+   (`https://www.oneledger.me` - see `SITE_URL` in
+   `web/.env.local.example` and `supabase/config.toml`'s own
+   `site_url`); only change it there first if that domain ever changes.
 5. Verify (see below).
 
 ## Manual verification before activating pg_cron
