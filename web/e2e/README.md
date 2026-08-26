@@ -39,25 +39,27 @@ actually exercises today (see below).
 
 Playwright snapshot filenames are automatically platform-suffixed
 (`-darwin`, `-linux`, ...), so macOS and Linux baselines coexist in the same
-`*-snapshots/` directories without conflicting. **The committed baselines
-today are macOS-only** (generated in this task's own sandbox, which has no
-Docker and therefore couldn't run the authenticated projects against a local
-Supabase stack - see the final report for what was and wasn't validated).
+`*-snapshots/` directories without conflicting. Both are committed today -
+macOS from local development, Linux (what CI actually compares against) from
+a run of `.github/workflows/generate-e2e-baselines.yml`.
 
-Before the authenticated visual-regression tests can pass in CI (Linux), a
-maintainer needs to generate Linux baselines once:
+To regenerate baselines after an intentional visual change, dispatch that
+workflow (Actions tab → "Generate e2e visual-regression baselines" → Run
+workflow), download the `e2e-visual-baselines-linux` artifact it produces,
+and commit the updated `*-linux.png` files - or do the equivalent locally on
+Linux/in a container with Docker + the Supabase CLI:
 
 ```bash
-# in CI, or any Linux box/container with Docker + the Supabase CLI available
 supabase start
 cd web
 npm run test:e2e:update-snapshots
 git add e2e/**/*-snapshots/*-linux.png
-git commit -m "test: add Linux e2e visual-regression baselines"
+git commit -m "test: update Linux e2e visual-regression baselines"
 ```
 
-After that one-time step, ordinary CI runs compare against the committed
-Linux baselines like any other regression test.
+CI's required gate (`ci.yml`) runs the full suite, including `@visual`,
+against the committed Linux baselines - a real, intentional visual
+difference fails the build like any other regression test.
 
 ## Layout
 

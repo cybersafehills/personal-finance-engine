@@ -219,13 +219,9 @@ jobs:
       # e2e/auth.setup.ts separately resolves these same values itself
       # (see e2e/README.md) for the test user it creates - this step only
       # covers the app server Playwright's webServer builds/starts.
-      - name: Run e2e/accessibility suite (chromium-desktop + unauthenticated)
+      - name: Run e2e/accessibility/visual-regression suite (chromium-desktop + unauthenticated)
         working-directory: web
-        run: npx playwright test --project=unauthenticated --project=chromium-desktop --grep-invert "@visual"
-        # Visual-regression tests (@visual) are excluded from this required
-        # gate until Linux baselines are generated and committed - see
-        # web/e2e/README.md's "Updating visual-regression baselines"
-        # section. They still run locally/on demand via `npm run test:e2e`.
+        run: npx playwright test --project=unauthenticated --project=chromium-desktop
 
       - name: Upload Playwright report on failure
         if: failure()
