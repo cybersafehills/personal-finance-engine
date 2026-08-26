@@ -26,6 +26,7 @@ on:
         description: "Space-separated Playwright project names to generate baselines for"
         required: false
         default: "unauthenticated chromium-desktop"
+  pull_request: {} # TEMPORARY - see §10 desktop-layout commit; removed once the updated Home-dashboard baseline is committed. workflow_dispatch still can't target a branch-only workflow file (needs the default branch), so this is the only way to re-trigger a baseline run from a still-open PR.
 
 permissions:
   contents: read

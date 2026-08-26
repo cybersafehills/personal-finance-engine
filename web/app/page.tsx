@@ -29,12 +29,23 @@ export default async function HomePage() {
   ]);
 
   return (
-    <div className="flex flex-col gap-5">
-      <BalanceCard balanceRwf={balance} />
+    // Single column on mobile/tablet, in the exact IA order from master
+    // prompt §8 (balance, today's totals, budget status, attention items,
+    // recent transactions). At lg: and up this becomes a 2:1 two-column
+    // grid (§10) - the wider left column (balance, today's totals,
+    // transactions) explicitly spans both grid columns via col-span-2,
+    // while budget/attention get explicit col-start-3 placement into the
+    // narrower right column, so document/reading order stays identical
+    // across breakpoints (no separate mobile/desktop markup to keep in
+    // sync) and only the visual position changes.
+    <div className="flex flex-col gap-5 lg:grid lg:grid-cols-3 lg:items-start lg:gap-5">
+      <div className="lg:col-start-1 lg:col-span-2">
+        <BalanceCard balanceRwf={balance} />
+      </div>
 
       <section
         aria-label="Today's activity"
-        className="grid grid-cols-2 gap-3"
+        className="grid grid-cols-2 gap-3 lg:col-start-1 lg:col-span-2"
       >
         <SummaryMetric label="Received today" amountRwf={today.receivedRwf} />
         <SummaryMetric label="Spent today" amountRwf={-today.spentRwf} />
@@ -44,20 +55,26 @@ export default async function HomePage() {
           active budget / nothing needs attention - a quiet dashboard on a
           quiet day is correct, not broken (master prompt §8.2/§8.3). */}
       {budgetSummary && (
-        <BudgetStatusCard
-          budgetId={budgetSummary.budgetId}
-          totalTargetMinor={budgetSummary.totalTargetMinor}
-          totalActualMinor={budgetSummary.totalActualMinor}
-          remainingMinor={budgetSummary.remainingMinor}
-          percentUsed={budgetSummary.percentUsed}
-          worstStatus={budgetSummary.worstStatus}
-          daysRemainingInPeriod={budgetSummary.daysRemainingInPeriod}
-        />
+        <div className="lg:col-start-3 lg:row-start-1">
+          <BudgetStatusCard
+            budgetId={budgetSummary.budgetId}
+            totalTargetMinor={budgetSummary.totalTargetMinor}
+            totalActualMinor={budgetSummary.totalActualMinor}
+            remainingMinor={budgetSummary.remainingMinor}
+            percentUsed={budgetSummary.percentUsed}
+            worstStatus={budgetSummary.worstStatus}
+            daysRemainingInPeriod={budgetSummary.daysRemainingInPeriod}
+          />
+        </div>
       )}
 
-      <AttentionItemsCard items={attentionItems} />
+      {attentionItems.length > 0 && (
+        <div className="lg:col-start-3 lg:row-start-2">
+          <AttentionItemsCard items={attentionItems} />
+        </div>
+      )}
 
-      <section className="rounded-card border border-border-subtle bg-surface p-1.5">
+      <section className="rounded-card border border-border-subtle bg-surface p-1.5 lg:col-start-1 lg:col-span-2">
         <div className="flex items-center justify-between px-3 pb-1 pt-2">
           <h2 className="text-xs font-semibold uppercase tracking-wide text-text-muted">
             Recent transactions

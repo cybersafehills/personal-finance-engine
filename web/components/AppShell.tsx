@@ -76,7 +76,7 @@ export function AppShell({
           unauthenticated pages (no user yet). */}
       {userEmail && (
         <header className="sticky top-0 z-10 border-b border-border-subtle bg-surface/95 backdrop-blur">
-          <div className="mx-auto flex max-w-3xl items-center justify-between gap-3 px-4 py-2.5 sm:px-6">
+          <div className="mx-auto flex max-w-3xl items-center justify-between gap-3 px-4 py-2.5 sm:px-6 lg:max-w-5xl lg:px-8">
             <Link href="/" aria-label="OneLedger home" className="shrink-0">
               <OneLedgerLogo variant="mark" height={28} decorative className="sm:hidden" />
               <OneLedgerLogo height={32} decorative className="hidden sm:block" />
@@ -123,7 +123,12 @@ export function AppShell({
 
       {userEmail && !reportsRelocationNoticeDismissed && <ReportsRelocationNotice />}
 
-      <main className="mx-auto w-full max-w-3xl flex-1 px-4 pb-24 pt-5 sm:px-6 sm:pb-10 sm:pt-6">
+      {/* Wider (not full-bleed) on large screens - see master prompt §10:
+          "constrained but appropriately wider content container" -
+          giving Home's desktop two-column grid (app/page.tsx) room to
+          breathe without stretching every other page's simple stacked
+          lists to an uncomfortable width. */}
+      <main className="mx-auto w-full max-w-3xl flex-1 px-4 pb-24 pt-5 sm:px-6 sm:pb-10 sm:pt-6 lg:max-w-5xl lg:px-8">
         {children}
       </main>
 
