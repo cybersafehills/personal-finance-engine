@@ -1,5 +1,5 @@
-import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
+import { isAuthorizedCronRequest } from "../../../../lib/cron-auth";
 import { runDailyReportGenerationTick } from "../../../../lib/report-generation";
 
 // The scheduled-report generation tick's HTTP entry point (master prompt
@@ -15,25 +15,8 @@ import { runDailyReportGenerationTick } from "../../../../lib/report-generation"
 // (Phase 3 of that sequence), before any automatic recurring invocation
 // exists. Calling this repeatedly is always safe regardless: every
 // candidate is independently idempotent (report_runs_unique_period).
-//
-// Authenticated via a shared secret header, not a user session - the
-// caller is a trusted scheduler (Postgres via pg_net, or a manual
-// operator), never a browser. Constant-time comparison avoids a timing
-// side-channel on the secret itself (master prompt §39).
 export async function POST(request: NextRequest) {
-  const configuredSecret = process.env.REPORT_CRON_SECRET;
-  if (!configuredSecret) {
-    console.error("generate-reports: REPORT_CRON_SECRET is not configured");
-    return NextResponse.json({ error: "not configured" }, { status: 500 });
-  }
-
-  const provided = request.headers.get("x-report-cron-secret") ?? "";
-  const configuredBuf = Buffer.from(configuredSecret);
-  const providedBuf = Buffer.from(provided);
-  const authorized = configuredBuf.length === providedBuf.length &&
-    timingSafeEqual(configuredBuf, providedBuf);
-
-  if (!authorized) {
+  if (!isAuthorizedCronRequest(request)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 

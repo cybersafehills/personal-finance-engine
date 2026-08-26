@@ -1,7 +1,6 @@
-import { formatRwf } from "../lib/format";
+import { reportAlertMessage, budgetAlertMessage } from "../lib/report-alert-messages";
 import type { ReportAlert } from "../lib/report-math";
-import type { BudgetAlertJson } from "../lib/report-generation";
-import type { AllocationType } from "../lib/budget-math";
+import type { BudgetAlertJson } from "../lib/report-types";
 
 // Combines the report engine's two independent alert sources - deterministic
 // transaction-activity alerts (report-math.ts) and the budget section's own
@@ -9,13 +8,9 @@ import type { AllocationType } from "../lib/budget-math";
 // report-generation.ts boundary - see that module's comment) - into the
 // single "Watch-outs" section the report UX calls for (master prompt §67).
 // Both stay deterministic; nothing here is AI-generated (master prompt §5).
-
-const ALLOCATION_LABELS: Record<AllocationType, string> = {
-  ESSENTIALS: "Essentials",
-  INVESTING: "Investing",
-  EMERGENCY: "Emergency savings",
-  WANTS: "Wants",
-};
+// Message text itself lives in lib/report-alert-messages.ts, shared with
+// the morning email renderer so the two surfaces never word an alert
+// differently.
 
 const SEVERITY_CLASSES: Record<string, string> = {
   info: "bg-background text-text-secondary",
@@ -23,52 +18,6 @@ const SEVERITY_CLASSES: Record<string, string> = {
   warning: "bg-attention-bg text-attention",
   critical: "bg-attention-bg text-attention",
 };
-
-function reportAlertMessage(alert: ReportAlert): string {
-  switch (alert.kind) {
-    case "large_transaction":
-      return `A large transaction of ${formatRwf(alert.amountRwf)} was recorded (over your ${
-        formatRwf(alert.thresholdRwf)
-      } threshold).`;
-    case "high_daily_spend":
-      return `Total spending today (${formatRwf(alert.spentRwf)}) was higher than usual.`;
-    case "elevated_fees":
-      return `Fees today (${formatRwf(alert.feesRwf)}) were higher than usual.`;
-    case "low_balance":
-      return `Your balance (${formatRwf(alert.balanceRwf)}) is at or below ${formatRwf(alert.thresholdRwf)}.`;
-    case "sustained_negative_cashflow":
-      return `You've spent more than you've received for ${alert.consecutiveDays} days in a row.`;
-    case "excessive_uncategorized":
-      return `${alert.count} transaction${alert.count === 1 ? " is" : "s are"} uncategorized (${
-        Math.round(alert.percentOfTransactions)
-      }% of today's activity).`;
-  }
-}
-
-function budgetAlertMessage(alert: BudgetAlertJson): string {
-  switch (alert.kind) {
-    case "allocation_watch":
-      return `${ALLOCATION_LABELS[alert.allocationType]} has used ${Math.round(alert.percentConsumed)}% of its target.`;
-    case "allocation_at_risk":
-      return `${ALLOCATION_LABELS[alert.allocationType]} is nearing its limit - ${Math.round(alert.percentConsumed)}% used.`;
-    case "allocation_exceeded":
-      return `${ALLOCATION_LABELS[alert.allocationType]} exceeded its target: ${formatRwf(alert.actualMinor)} of ${
-        formatRwf(alert.targetMinor)
-      }.`;
-    case "unmapped_spending":
-      return `${alert.count} unmapped transaction${alert.count === 1 ? "" : "s"} (${
-        formatRwf(alert.totalMinor)
-      }) aren't counted in any budget allocation.`;
-    case "uncategorized_spending":
-      return `${alert.count} uncategorized transaction${alert.count === 1 ? "" : "s"} (${
-        formatRwf(alert.totalMinor)
-      }) aren't counted in any budget allocation.`;
-    case "income_below_budget":
-      return `Actual income (${formatRwf(alert.actualMinor)}) is ${Math.round(alert.shortfallPercent)}% below the budgeted ${
-        formatRwf(alert.budgetedMinor)
-      }.`;
-  }
-}
 
 export function ReportWatchOutsList({
   reportAlerts,

@@ -13,14 +13,6 @@ import {
 } from "./budget-math";
 import { findTransferCandidates, TransferCandidateTransaction } from "./transfer-detection";
 import { lastNCompleteMonthKeys } from "./budget-math";
-import type {
-  CategoryTotal as ReportCategoryTotal,
-  FinancialSnapshot,
-  Forecast,
-  ReportAlert,
-  TrendComparison,
-} from "./report-math";
-import type { BudgetSection } from "./report-generation";
 
 // Every function here queries through the session-authenticated Supabase
 // client (lib/supabase-session-server.ts), never the service-role one -
@@ -1539,17 +1531,8 @@ export type ReportRunStatus =
   | "delivered"
   | "delivery_failed";
 
-export type ReportPayload = {
-  schemaVersion: number;
-  dateKey: string;
-  timezone: string;
-  financialSnapshot: FinancialSnapshot;
-  categoryTotals: ReportCategoryTotal[];
-  trends: TrendComparison[];
-  alerts: ReportAlert[];
-  budget: BudgetSection;
-  forecast: Forecast | null;
-};
+import type { ReportPayload } from "./report-types";
+export type { ReportPayload };
 
 export type ReportRunSummary = {
   id: string;

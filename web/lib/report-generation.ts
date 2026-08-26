@@ -24,6 +24,12 @@ import {
   ReportAlertThresholds,
   ReportTransactionFact,
 } from "./report-math";
+import type {
+  AllocationActualJson,
+  BudgetAlertJson,
+  BudgetSection,
+  ReportPayload,
+} from "./report-types";
 
 // Phase D: idempotent, service-role report generation. This module is the
 // ONLY place daily reports are actually assembled - everything here is
@@ -322,16 +328,11 @@ async function fetchActiveRwfBudget(
 // it's embedded in the payload - RWF has zero decimal places, so this
 // conversion is always exact for any realistic amount. This is the ONLY
 // place that conversion happens; the math itself stays in budget-math.ts.
-
-export type AllocationActualJson = {
-  allocationType: AllocationType;
-  targetMinor: number;
-  actualMinor: number;
-  remainingMinor: number;
-  percentConsumed: number | null;
-  projectedMinor: number | null;
-  status: AllocationStatus;
-};
+// The resulting types (AllocationActualJson/BudgetAlertJson/BudgetSection)
+// live in report-types.ts, not here - see that file's own comment on why
+// (this module needs @supabase/supabase-js and can't be resolved by
+// `deno test`'s type-checker; pure consumers of these shapes must not be
+// forced to resolve this module just to see their types).
 
 function toAllocationActualJson(
   allocationType: AllocationType,
@@ -343,16 +344,12 @@ function toAllocationActualJson(
     actualMinor: Number(actual.actualMinor),
     remainingMinor: Number(actual.remainingMinor),
     percentConsumed: actual.percentConsumed,
-    projectedMinor: actual.projectedMinor !== null ? Number(actual.projectedMinor) : null,
+    projectedMinor: actual.projectedMinor !== null
+      ? Number(actual.projectedMinor)
+      : null,
     status: actual.status,
   };
 }
-
-export type BudgetAlertJson =
-  | { id: string; kind: "allocation_watch" | "allocation_at_risk"; severity: "info" | "warning"; allocationType: AllocationType; percentConsumed: number }
-  | { id: string; kind: "allocation_exceeded"; severity: "critical"; allocationType: AllocationType; actualMinor: number; targetMinor: number }
-  | { id: string; kind: "unmapped_spending" | "uncategorized_spending"; severity: "warning"; count: number; totalMinor: number }
-  | { id: string; kind: "income_below_budget"; severity: "warning"; budgetedMinor: number; actualMinor: number; shortfallPercent: number };
 
 function toBudgetAlertJson(alert: BudgetAlert): BudgetAlertJson {
   switch (alert.kind) {
@@ -376,15 +373,6 @@ function toBudgetAlertJson(alert: BudgetAlert): BudgetAlertJson {
       };
   }
 }
-
-export type BudgetSection = {
-  budgetId: string;
-  periodStart: string;
-  periodEnd: string;
-  overallStatus: AllocationStatus;
-  allocations: AllocationActualJson[];
-  alerts: BudgetAlertJson[];
-} | { overallStatus: "no_active_budget" };
 
 /** Worst-of ordering across allocation statuses, for the section's single overall status badge. */
 function worstAllocationStatus(statuses: AllocationStatus[]): AllocationStatus {
@@ -669,7 +657,7 @@ export async function generateDailyReportForCandidate(
       daysInMonth(dateKey),
     );
 
-    const reportPayload = {
+    const reportPayload: ReportPayload = {
       schemaVersion: 1,
       dateKey,
       timezone: candidate.timezone,
