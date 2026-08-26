@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { signOut } from "../app/login/actions";
 import { UserIcon } from "./icons";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
@@ -26,15 +26,32 @@ export function ProfileMenu({
 }) {
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  // Escape-to-close, with focus returned to the trigger - the click-
+  // outside backdrop below handles the mouse case, this handles the
+  // keyboard one (master prompt §3.1/§13).
+  useEffect(() => {
+    if (!open) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [open]);
 
   return (
     <div className="relative">
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-label="Account menu"
         aria-expanded={open}
-        className="flex h-9 w-9 items-center justify-center rounded-full border border-border-subtle bg-surface text-text-secondary transition-colors hover:bg-background"
+        className="flex h-11 w-11 items-center justify-center rounded-full border border-border-subtle bg-surface text-text-secondary transition-colors hover:bg-background"
       >
         <UserIcon className="h-5 w-5" />
       </button>

@@ -22,10 +22,21 @@ const BASE_URL = `http://127.0.0.1:${PORT}`;
 
 export default defineConfig({
   testDir: "./e2e",
-  fullyParallel: true,
+  // Every authenticated test shares the ONE seeded e2e user (test-users.ts)
+  // and mutates its server-side ui_preferences row (nav order, balance/
+  // privacy toggles, the relocation notice) - running those tests in
+  // parallel workers races on that one row (a save from worker A can
+  // clobber a concurrent read-modify-write from worker B). Forced fully
+  // serial rather than per-file isolation (test.describe.serial), since
+  // the race is cross-FILE (nav-reorder.spec.ts and privacy.spec.ts both
+  // touch the same row), not just within one file. A distinct e2e user
+  // per spec file would allow real parallelism again, but adds a real
+  // signup per file for a suite this size that isn't worth it yet - see
+  // e2e/README.md.
+  fullyParallel: false,
+  workers: 1,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  workers: process.env.CI ? 2 : undefined,
   reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : "html",
   timeout: 30_000,
 

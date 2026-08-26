@@ -44,11 +44,14 @@ test("Reports opens from the header icon", async ({ page }) => {
 test("Reports is reachable from Settings, distinct from the Daily reports scheduling page", async ({ page }) => {
   await page.goto("/settings");
 
-  await page.getByRole("link", { name: "Reports", exact: true }).click();
+  // The Settings list row's accessible name is its title AND description
+  // text concatenated (both live inside the one <a>), so an exact-name
+  // match on just the title never matches - select by href instead.
+  await page.locator('a[href="/reports"]').click();
   await expect(page).toHaveURL(/\/reports$/);
 
   await page.goto("/settings");
-  await page.getByRole("link", { name: "Daily reports" }).click();
+  await page.locator('a[href="/settings/reports"]').click();
   await expect(page).toHaveURL(/\/settings\/reports$/);
 });
 
