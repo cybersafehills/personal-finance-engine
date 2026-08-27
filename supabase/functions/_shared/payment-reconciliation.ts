@@ -71,7 +71,10 @@ export function normalizeRwMsisdn(raw: string | null): string | null {
   return /^2507[2389]\d{7}$/.test(candidate) ? candidate : null;
 }
 
-function providerAgrees(intentProvider: string | null, txnSource: string): boolean {
+function providerAgrees(
+  intentProvider: string | null,
+  txnSource: string,
+): boolean {
   if (!intentProvider) return true;
   if (intentProvider === "mtn" || intentProvider === "airtel") {
     // Both MTN and Airtel SMS ingest as `mtn_momo`-shaped today; tighten
@@ -85,7 +88,10 @@ export function matchTransactionToIntents(
   txn: ReconTransaction,
   intents: ReconIntent[],
 ): ReconResult {
-  if (txn.direction !== "out" || txn.status !== "success" || txn.currency !== "RWF") {
+  if (
+    txn.direction !== "out" || txn.status !== "success" ||
+    txn.currency !== "RWF"
+  ) {
     return { status: "skipped", reason: "not_an_outgoing_rwf_success" };
   }
   if (txn.already_linked) {
@@ -103,7 +109,10 @@ export function matchTransactionToIntents(
     if (!OPEN_STATES.has(i.state)) return false;
     if (i.linked_transaction_id) return false;
     if (i.amount_minor !== txn.amount_rwf) return false;
-    if (!i.recipient_msisdn_normalized || i.recipient_msisdn_normalized !== normTxnMsisdn) {
+    if (
+      !i.recipient_msisdn_normalized ||
+      i.recipient_msisdn_normalized !== normTxnMsisdn
+    ) {
       return false;
     }
     if (!providerAgrees(i.provider, txn.source)) return false;
@@ -115,6 +124,8 @@ export function matchTransactionToIntents(
   });
 
   if (candidates.length === 0) return { status: "no_match" };
-  if (candidates.length === 1) return { status: "linked", intentId: candidates[0].id };
+  if (candidates.length === 1) {
+    return { status: "linked", intentId: candidates[0].id };
+  }
   return { status: "conflict", intentIds: candidates.map((c) => c.id) };
 }

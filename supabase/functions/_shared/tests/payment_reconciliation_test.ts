@@ -57,20 +57,32 @@ Deno.test("a single deterministic match links", () => {
 });
 
 Deno.test("amount mismatch -> no match", () => {
-  assertEquals(matchTransactionToIntents(txn({ amount_rwf: 4999 }), [intent()]).status, "no_match");
+  assertEquals(
+    matchTransactionToIntents(txn({ amount_rwf: 4999 }), [intent()]).status,
+    "no_match",
+  );
 });
 
 Deno.test("msisdn mismatch -> no match", () => {
   assertEquals(
-    matchTransactionToIntents(txn({ counterparty_reference: "0788888888" }), [intent()]).status,
+    matchTransactionToIntents(txn({ counterparty_reference: "0788888888" }), [
+      intent(),
+    ]).status,
     "no_match",
   );
 });
 
 Deno.test("outside the time window (before, and long after) -> no match", () => {
-  assertEquals(matchTransactionToIntents(txn({ occurred_at: T_MINUS_1H }), [intent()]).status, "no_match");
   assertEquals(
-    matchTransactionToIntents(txn({ occurred_at: "2026-08-29T10:00:00.000Z" }), [intent()]).status,
+    matchTransactionToIntents(txn({ occurred_at: T_MINUS_1H }), [intent()])
+      .status,
+    "no_match",
+  );
+  assertEquals(
+    matchTransactionToIntents(
+      txn({ occurred_at: "2026-08-29T10:00:00.000Z" }),
+      [intent()],
+    ).status,
     "no_match",
   );
 });
@@ -86,31 +98,51 @@ Deno.test("within an explicit expires_at window -> links", () => {
 
 Deno.test("provider disagreement is not a match", () => {
   assertEquals(
-    matchTransactionToIntents(txn({ source: "bank_card" }), [intent({ provider: "mtn" })]).status,
+    matchTransactionToIntents(txn({ source: "bank_card" }), [
+      intent({ provider: "mtn" }),
+    ]).status,
     "no_match",
   );
   // A null-provider intent tolerates any source.
   assertEquals(
-    matchTransactionToIntents(txn({ source: "bank_card" }), [intent({ provider: null })]).status,
+    matchTransactionToIntents(txn({ source: "bank_card" }), [
+      intent({ provider: null }),
+    ]).status,
     "linked",
   );
 });
 
 Deno.test("two candidate intents -> conflict, never a guess", () => {
-  const r = matchTransactionToIntents(txn(), [intent({ id: "a" }), intent({ id: "b" })]);
+  const r = matchTransactionToIntents(txn(), [
+    intent({ id: "a" }),
+    intent({ id: "b" }),
+  ]);
   assertEquals(r, { status: "conflict", intentIds: ["a", "b"] });
 });
 
 Deno.test("a non-open or already-linked intent is ignored", () => {
-  assertEquals(matchTransactionToIntents(txn(), [intent({ state: "successful" })]).status, "no_match");
   assertEquals(
-    matchTransactionToIntents(txn(), [intent({ linked_transaction_id: "tx" })]).status,
+    matchTransactionToIntents(txn(), [intent({ state: "successful" })]).status,
+    "no_match",
+  );
+  assertEquals(
+    matchTransactionToIntents(txn(), [intent({ linked_transaction_id: "tx" })])
+      .status,
     "no_match",
   );
 });
 
 Deno.test("a non-outgoing / non-RWF / already-linked transaction is skipped", () => {
-  assertEquals(matchTransactionToIntents(txn({ direction: "in" }), [intent()]).status, "skipped");
-  assertEquals(matchTransactionToIntents(txn({ currency: "USD" }), [intent()]).status, "skipped");
-  assertEquals(matchTransactionToIntents(txn({ already_linked: true }), [intent()]).status, "skipped");
+  assertEquals(
+    matchTransactionToIntents(txn({ direction: "in" }), [intent()]).status,
+    "skipped",
+  );
+  assertEquals(
+    matchTransactionToIntents(txn({ currency: "USD" }), [intent()]).status,
+    "skipped",
+  );
+  assertEquals(
+    matchTransactionToIntents(txn({ already_linked: true }), [intent()]).status,
+    "skipped",
+  );
 });

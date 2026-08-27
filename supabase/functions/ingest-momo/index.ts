@@ -652,7 +652,10 @@ Deno.serve(async (req: Request) => {
           { p_transaction_id: insertedTransaction.id, p_mode: reconMode },
         );
         if (reconError) {
-          console.error("Payment reconciliation error (non-fatal):", reconError);
+          console.error(
+            "Payment reconciliation error (non-fatal):",
+            reconError,
+          );
         } else {
           console.log(JSON.stringify({
             event: "payment_reconciliation",
