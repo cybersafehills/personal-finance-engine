@@ -120,11 +120,14 @@ export async function getServiceCodeBySlug(
   slug: string,
 ): Promise<ServiceCodeDetail | null> {
   const supabase = await supabaseSession();
+  // NOTE: no `replacement:service_codes!...(slug)` embed here - PostgREST
+  // cannot resolve a self-referential FK embed on this table ("Could not
+  // find a relationship between 'service_codes' and 'service_codes'"), so
+  // the replacement slug is fetched with a second query below.
   const { data, error } = await supabase
     .from("service_codes")
     .select(
       `${LIST_COLUMNS}, description_en, description_rw, official_source_url, official_source_label, review_due_at, effective_to, risk_text, caution_text, replacement_code_id, version,
-       replacement:service_codes!service_codes_replacement_code_id_fkey(slug),
        parameters:service_code_parameters(key, label_en, label_rw, kind, required, position, format_regex, format_hint_en, format_hint_rw, min_length, max_length),
        steps:service_code_steps(position, instruction_en, instruction_rw)`,
     )
@@ -138,7 +141,6 @@ export async function getServiceCodeBySlug(
   if (!data) return null;
 
   const row = data as Record<string, unknown>;
-  const replacement = row.replacement as { slug: string } | null;
   const parameters = ((row.parameters as ServiceCodeParameterRow[]) ?? []).sort(
     (a, b) => a.position - b.position,
   );
@@ -146,9 +148,19 @@ export async function getServiceCodeBySlug(
     (a, b) => a.position - b.position,
   );
 
+  let replacementSlug: string | null = null;
+  if (row.replacement_code_id) {
+    const { data: repl } = await supabase
+      .from("service_codes")
+      .select("slug")
+      .eq("id", row.replacement_code_id as string)
+      .maybeSingle();
+    replacementSlug = (repl as { slug: string } | null)?.slug ?? null;
+  }
+
   return {
     ...(row as unknown as ServiceCodeDetail),
-    replacement_slug: replacement?.slug ?? null,
+    replacement_slug: replacementSlug,
     parameters,
     steps,
   };

@@ -71,10 +71,6 @@ function LauncherPanel({ onClose }: { onClose: () => void }) {
     const prevOverflow = body.style.overflow;
     body.style.overflow = "hidden";
 
-    window.history.pushState({ payLauncher: true }, "");
-    const onPopState = () => onClose();
-    window.addEventListener("popstate", onPopState);
-
     const raf = requestAnimationFrame(() => {
       const nodes = panelRef.current ? focusable(panelRef.current) : [];
       (nodes[0] ?? panelRef.current)?.focus();
@@ -82,12 +78,9 @@ function LauncherPanel({ onClose }: { onClose: () => void }) {
 
     return () => {
       cancelAnimationFrame(raf);
-      window.removeEventListener("popstate", onPopState);
       body.style.overflow = prevOverflow;
       previouslyFocused.current?.focus?.();
     };
-    // onClose is stable (useCallback in PayProvider)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function onKeyDown(e: React.KeyboardEvent) {
@@ -111,8 +104,10 @@ function LauncherPanel({ onClose }: { onClose: () => void }) {
   }
 
   function go(href: string) {
-    onClose();
+    // Navigate first, then close - closing unmounts this panel; doing it
+    // the other way round briefly races the router.
     router.push(href);
+    onClose();
   }
 
   return (

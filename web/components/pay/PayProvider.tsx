@@ -48,14 +48,7 @@ export function PayProvider({
     if (enabled) setOpen(true);
   }, [enabled]);
 
-  const closePay = useCallback(() => {
-    setOpen(false);
-    // Discard the history entry PayLauncher pushed on open, so the
-    // back button isn't left pointing at a no-op.
-    if (typeof window !== "undefined" && window.history.state?.payLauncher) {
-      window.history.back();
-    }
-  }, []);
+  const closePay = useCallback(() => setOpen(false), []);
 
   const value = useMemo(
     () => ({ enabled, open, openPay, closePay }),
