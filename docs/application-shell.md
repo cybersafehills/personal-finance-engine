@@ -69,6 +69,29 @@ without needing to be online at the same moment - there is no
 device-to-device messaging, each device just reads the same server row on
 its own next load.
 
+### The global Pay action
+
+Added with Pay & Services Phase 1 (see `docs/pay-and-services.md`). A
+persistent primary action labelled **Pay**, present throughout the
+authenticated app - **not** a sixth navigation destination and **not** a
+member of `MOVABLE_NAV_KEYS`: it opens the Pay & Services launcher and
+never navigates or executes anything.
+
+- **Mobile / tablet (`< lg`)**: an elevated circular action nested in the
+  centre of the fixed bottom nav, between the 2nd and 3rd destinations,
+  with a visible "Pay" text label (never icon-only), a >=44px target,
+  safe-area-aware, and a restrained pressed state (no pulsing).
+- **Desktop (`>= lg`)**: a labelled pill button in the header, immediately
+  left of the Reports icon.
+
+One component, both renderings (`components/pay/PayTrigger.tsx`); a single
+owner of the launcher's open state (`components/pay/PayProvider.tsx`,
+mounted once in `AppShell`), so there is never a second launcher instance
+or a second piece of state. Visibility is server-authoritative: the root
+layout computes `payEnabled` from `lib/pay/gate.ts` (env flag + optional
+per-workspace allowlist) and threads it in; the action is also absent on
+the unauthenticated pages the shell already hides its header/nav on.
+
 ## Balance and dashboard privacy
 
 Two independent, layered controls, both stored on the same
