@@ -117,6 +117,23 @@ migration file claims:
    dump raw row content unnecessarily) is cheap insurance.
 5. **Existing grants and RLS state** - `information_schema.role_table_grants`,
    `pg_class.relrowsecurity`/`relforcerowsecurity`, `pg_policies`.
+6. **Any new function referenced by a CHECK constraint, trigger body, or
+   RPC needs its own explicit `grant execute ... to authenticated` (or
+   `service_role`) if it must be callable by that role - never assume it
+   inherits one.** `20260819000000_harden_function_and_sequence_default_
+   privileges.sql` globally revoked the default EXECUTE grant every new
+   `public`-schema function would otherwise silently receive; every
+   RPC-style function since has its own explicit grant for exactly this
+   reason. **This is the check that was missed for Phase L's
+   `is_valid_nav_order()`** - a non-`SECURITY DEFINER` function invoked
+   from a CHECK constraint, so it runs with the *calling* role's own
+   privileges. Without the grant, every authenticated insert/update
+   hitting that constraint failed with "permission denied for function
+   is_valid_nav_order", silently breaking every real save in production
+   until `20260905000000_phase_l_grant_is_valid_nav_order_execute.sql`
+   fixed it. `select grantee, privilege_type from information_schema.
+   role_routine_grants where routine_name = '<name>';` is the cheap check
+   before shipping any new function meant to be authenticated-callable.
 
 ## Testing the migration chain locally
 

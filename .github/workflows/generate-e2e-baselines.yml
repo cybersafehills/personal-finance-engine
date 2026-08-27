@@ -1,0 +1,120 @@
+name: Generate e2e visual-regression baselines
+
+# One-off/maintenance workflow, run only on demand (workflow_dispatch).
+# Boots the exact same disposable local Supabase stack as the e2e-tests
+# job in ci.yml, runs the full Playwright suite (including @visual) with
+# --update-snapshots, and uploads the resulting *-snapshots/*-linux.png
+# files as a build artifact for a maintainer to download and commit - see
+# web/e2e/README.md's "Updating visual-regression baselines" section.
+#
+# The initial Linux baselines were generated via a temporary
+# `pull_request` trigger on the PR that introduced this suite (removed
+# again once that artifact was downloaded and committed - see this
+# workflow's git history) since workflow_dispatch cannot target a
+# workflow file that doesn't exist on the default branch yet. Steady
+# state from here on is workflow_dispatch-only.
+#
+# Same non-negotiable rule as every other job in this repo that touches
+# Supabase: never the linked production project. This workflow configures
+# no production credential of any kind, and e2e/production-guard.ts
+# independently refuses to run otherwise.
+
+on:
+  workflow_dispatch:
+    inputs:
+      projects:
+        description: "Space-separated Playwright project names to generate baselines for"
+        required: false
+        default: "unauthenticated chromium-desktop"
+
+permissions:
+  contents: read
+
+jobs:
+  generate-baselines:
+    name: Generate baselines
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: write # for upload-artifact, same as ci.yml's e2e-tests job
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Install Playwright browsers (chromium only - matches the projects this workflow targets by default)
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@46f7f98c7f948ad727d22c1e67fab04c223a0520 # v3.0.0
+        with:
+          version: "2.115.0"
+
+      - name: supabase start (disposable local stack)
+        run: supabase start
+
+      # See ci.yml's identical step for why: the Next.js app itself needs
+      # these to build/run, pointing at the disposable stack just started.
+      - name: Export local Supabase connection details for the app build
+        run: |
+          set -euo pipefail
+          STATUS_JSON="$(supabase status --output json)"
+          {
+            echo "SUPABASE_URL=$(echo "$STATUS_JSON" | jq -r '.API_URL')"
+            echo "SUPABASE_SERVICE_ROLE_KEY=$(echo "$STATUS_JSON" | jq -r '.SERVICE_ROLE_KEY')"
+            echo "NEXT_PUBLIC_SUPABASE_URL=$(echo "$STATUS_JSON" | jq -r '.API_URL')"
+            echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$(echo "$STATUS_JSON" | jq -r '.ANON_KEY')"
+            echo "SITE_URL=http://127.0.0.1:3417"
+          } >> "$GITHUB_ENV"
+
+      - name: Generate/update snapshots
+        working-directory: web
+        env:
+          # github.event.inputs.* is only populated for workflow_dispatch -
+          # empty (falls back to the same default) for the temporary
+          # pull_request trigger.
+          PROJECTS_INPUT: ${{ github.event.inputs.projects || 'unauthenticated chromium-desktop' }}
+        run: |
+          set -euo pipefail
+          PROJECT_ARGS=""
+          for p in $PROJECTS_INPUT; do
+            PROJECT_ARGS="$PROJECT_ARGS --project=$p"
+          done
+          # PROJECT_ARGS is deliberately unquoted below - it holds several
+          # space-separated --project=<name> flags that must be re-split
+          # into individual argv entries, not passed as one string.
+          # shellcheck disable=SC2086
+          npx playwright test $PROJECT_ARGS --update-snapshots
+
+      - name: Upload snapshot baselines
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-visual-baselines-linux
+          path: web/e2e/**/*-snapshots/**
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload Playwright report (for debugging a failed generation run)
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: playwright-report-baseline-gen
+          path: web/playwright-report/
+          retention-days: 7
+
+      - name: supabase stop
+        if: always()
+        run: supabase stop --no-backup

@@ -10,6 +10,7 @@ import {
   computeAllocationActual,
   computeBudgetAlerts,
   computeElapsedFraction,
+  daysBetweenDateKeys,
 } from "./budget-math";
 import { findTransferCandidates, TransferCandidateTransaction } from "./transfer-detection";
 import { lastNCompleteMonthKeys } from "./budget-math";
@@ -54,11 +55,20 @@ export type TransactionRow = {
 const TRANSACTION_COLUMNS =
   "id, transaction_type, direction, status, currency, amount_rwf, fee_rwf, net_effect_rwf, principal_effect_rwf, fee_effect_rwf, balance_after_rwf, counterparty_name, counterparty_reference, occurred_at, category, subcategory, category_source, category_confidence, category_decision_status, suggested_category, suggested_subcategory, settlement_state, affects_balance";
 
-export async function getCurrentBalance(): Promise<number | null> {
+export type CurrentBalance = {
+  amountRwf: number;
+  /** occurred_at of the transaction this balance is derived from - the
+   *  natural "as of" freshness signal (master prompt §7/§11.4): this
+   *  balance is only ever as current as the most recent transaction
+   *  MoMo has reported, not a live account-level query. */
+  asOfIso: string;
+};
+
+export async function getCurrentBalance(): Promise<CurrentBalance | null> {
   const supabase = await supabaseSession();
   const { data, error } = await supabase
     .from("transactions")
-    .select("balance_after_rwf")
+    .select("balance_after_rwf, occurred_at")
     .not("balance_after_rwf", "is", null)
     .order("occurred_at", { ascending: false })
     .order("created_at", { ascending: false })
@@ -70,7 +80,9 @@ export async function getCurrentBalance(): Promise<number | null> {
     return null;
   }
 
-  return data?.balance_after_rwf ?? null;
+  if (!data) return null;
+
+  return { amountRwf: data.balance_after_rwf, asOfIso: data.occurred_at };
 }
 
 export type TodayTotals = {
@@ -750,6 +762,172 @@ export async function getBudgetActuals(
     elapsedFraction,
     alerts,
   };
+}
+
+export type DashboardBudgetSummary = {
+  budgetId: string;
+  budgetName: string;
+  totalTargetMinor: number;
+  totalActualMinor: number;
+  remainingMinor: number;
+  percentUsed: number | null;
+  /** The single worst allocation status across the budget, in the same
+   *  severity order allocationStatus() itself defines - a dashboard
+   *  summary card shows one status, not five, so this picks the one that
+   *  most needs the user's attention rather than an arbitrary first
+   *  allocation. */
+  worstStatus: AllocationStatus;
+  daysRemainingInPeriod: number | null;
+  periodEnd: string;
+  actionableAlertCount: number;
+};
+
+const STATUS_SEVERITY: Record<AllocationStatus, number> = {
+  insufficient_data: 0,
+  healthy: 1,
+  watch: 2,
+  at_risk: 3,
+  exceeded: 4,
+};
+
+/**
+ * A single-card summary of the caller's one active budget, for the Home
+ * dashboard - reuses getBudgets/getBudgetById/getBudgetActuals verbatim
+ * (the per-allocation math itself is never reimplemented here, only
+ * summed/maxed across allocations) rather than a separate dashboard-only
+ * computation. Returns null when there is no active budget - the Home
+ * page simply omits the card rather than showing an empty-state box for
+ * a legitimate, common state (see master prompt §8.2/§11.2).
+ */
+export async function getDashboardBudgetSummary(): Promise<DashboardBudgetSummary | null> {
+  const budgets = await getBudgets();
+  const active = budgets.find((b) => b.status === "active");
+  if (!active) return null;
+
+  const withAllocations = await getBudgetById(active.id);
+  if (!withAllocations) return null;
+
+  const actuals = await getBudgetActuals(withAllocations);
+
+  const totalTargetMinor = actuals.allocations.reduce((sum, a) => sum + a.targetMinor, 0);
+  const totalActualMinor = actuals.allocations.reduce((sum, a) => sum + a.actualMinor, 0);
+  const worstStatus = actuals.allocations.reduce<AllocationStatus>(
+    (worst, a) => (STATUS_SEVERITY[a.status] > STATUS_SEVERITY[worst] ? a.status : worst),
+    "insufficient_data",
+  );
+  const actionableAlertCount = actuals.alerts.filter(
+    (alert) => alert.severity === "warning" || alert.severity === "critical",
+  ).length;
+
+  const todayKey = kigaliDateKey(new Date().toISOString());
+  const daysRemainingInPeriod = todayKey <= withAllocations.period_end
+    ? Math.max(0, daysBetweenDateKeys(todayKey, withAllocations.period_end))
+    : null;
+
+  return {
+    budgetId: withAllocations.id,
+    budgetName: withAllocations.name,
+    totalTargetMinor,
+    totalActualMinor,
+    remainingMinor: totalTargetMinor - totalActualMinor,
+    percentUsed: totalTargetMinor > 0 ? (totalActualMinor / totalTargetMinor) * 100 : null,
+    worstStatus,
+    daysRemainingInPeriod,
+    periodEnd: withAllocations.period_end,
+    actionableAlertCount,
+  };
+}
+
+// ===========================================================================
+// Home dashboard "attention items" - concise, actionable states surfaced
+// only from data this codebase already computes reliably elsewhere
+// (review queue, learned-suggestion detection, budget alerts,
+// ingestion-connection activity). See master prompt §8.3: no new
+// detection logic is introduced here.
+//
+// Duplicate/suspicious-transaction detection and failed-import tracking
+// are deliberately left out - there is no existing reliable signal for
+// either (momo_messages, where a real 'failed' processing_status
+// already exists, has no workspace scoping at all and grants
+// `authenticated` zero access by design - service_role only - so
+// exposing it here would need new schema/RLS work, not just a query).
+// "Stale account data" DOES have a real, already-workspace-scoped,
+// already-authenticated-readable signal - ingestion_connections.
+// last_used_at (see getIngestionConnections) - so that one is
+// implemented below, conservatively: only an ACTIVE connection that has
+// NEVER received anything and was created more than a day ago (not "no
+// activity in N days", which would false-positive on a genuinely
+// low-transaction-volume user - master prompt §8.3's explicit "do not
+// generate false urgency").
+// ===========================================================================
+
+export type AttentionItem = {
+  id: string;
+  label: string;
+  count: number;
+  href: string;
+};
+
+const STALE_CONNECTION_GRACE_PERIOD_MS = 24 * 60 * 60 * 1000;
+
+export async function getAttentionItems(): Promise<AttentionItem[]> {
+  const [reviewQueueCount, learnedSuggestionCount, budgetSummary, connections] = await Promise.all([
+    getReviewQueueCount(),
+    getLearnedPolicySuggestionCount(),
+    getDashboardBudgetSummary(),
+    getIngestionConnections(),
+  ]);
+
+  const staleConnectionCount = connections.filter((connection) => {
+    if (connection.status !== "active" || connection.last_used_at !== null) return false;
+    return Date.now() - new Date(connection.created_at).getTime() > STALE_CONNECTION_GRACE_PERIOD_MS;
+  }).length;
+
+  const items: AttentionItem[] = [];
+
+  if (reviewQueueCount > 0) {
+    items.push({
+      id: "review-queue",
+      label: reviewQueueCount === 1 ? "Transaction needs review" : "Transactions need review",
+      count: reviewQueueCount,
+      href: "/transactions/review",
+    });
+  }
+
+  if (learnedSuggestionCount > 0) {
+    items.push({
+      id: "learned-suggestions",
+      label: learnedSuggestionCount === 1
+        ? "Categorization rule suggested"
+        : "Categorization rules suggested",
+      count: learnedSuggestionCount,
+      href: "/categories/rules/suggestions",
+    });
+  }
+
+  if (budgetSummary && budgetSummary.actionableAlertCount > 0) {
+    items.push({
+      id: "budget-alerts",
+      label: budgetSummary.actionableAlertCount === 1
+        ? "Budget category needs attention"
+        : "Budget categories need attention",
+      count: budgetSummary.actionableAlertCount,
+      href: `/budgets/${budgetSummary.budgetId}`,
+    });
+  }
+
+  if (staleConnectionCount > 0) {
+    items.push({
+      id: "stale-connections",
+      label: staleConnectionCount === 1
+        ? "Connection hasn't sent any data yet"
+        : "Connections haven't sent any data yet",
+      count: staleConnectionCount,
+      href: "/settings/connections",
+    });
+  }
+
+  return items;
 }
 
 // ===========================================================================
@@ -1624,4 +1802,70 @@ export async function getReportPreferences(): Promise<ReportPreferencesRow | nul
   }
 
   return data;
+}
+
+// ===========================================================================
+// Phase L: application-shell UI preferences (navigation order, balance/
+// dashboard display-privacy, one-time notices). Session-scoped (RLS-
+// enforced) like everything else in this file - see
+// supabase/migrations/20260904000000_phase_l_ui_preferences.sql.
+// ===========================================================================
+
+import { normalizeNavOrder, type NavKey } from "./navigation";
+
+export type UiPreferencesRow = {
+  navOrder: NavKey[];
+  hideBalance: boolean;
+  privacyMode: boolean;
+  reportsRelocationNoticeDismissed: boolean;
+};
+
+const UI_PREFERENCES_COLUMNS =
+  "nav_order, hide_balance, privacy_mode, reports_relocation_notice_dismissed";
+
+/**
+ * The caller's own shell/navigation/privacy preferences in their active
+ * workspace, or a safe all-default value if they've never set any, the
+ * lookup fails, or there is no session - callers should never need to
+ * null-check this the way getReportPreferences' callers do, since an
+ * application shell must always have *some* nav order/privacy state to
+ * render with on first paint (see master prompt §6.4/§11.1 on avoiding a
+ * flash of sensitive content and blocking navigation on preference load).
+ */
+export async function getUiPreferences(): Promise<UiPreferencesRow> {
+  const fallback: UiPreferencesRow = {
+    navOrder: normalizeNavOrder(undefined),
+    hideBalance: false,
+    privacyMode: false,
+    reportsRelocationNoticeDismissed: false,
+  };
+
+  const supabase = await supabaseSession();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const workspaceId = await getActiveWorkspaceId();
+
+  if (!user || !workspaceId) return fallback;
+
+  const { data, error } = await supabase
+    .from("ui_preferences")
+    .select(UI_PREFERENCES_COLUMNS)
+    .eq("workspace_id", workspaceId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (error) {
+    console.error("getUiPreferences failed:", error.message);
+    return fallback;
+  }
+
+  if (!data) return fallback;
+
+  return {
+    navOrder: normalizeNavOrder(data.nav_order),
+    hideBalance: data.hide_balance,
+    privacyMode: data.privacy_mode,
+    reportsRelocationNoticeDismissed: data.reports_relocation_notice_dismissed,
+  };
 }
