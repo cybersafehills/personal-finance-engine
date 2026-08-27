@@ -72,17 +72,31 @@ export default async function UssdDirectoryPage({
 
       {networks.length > 0 && (
         <section className="mb-5">
-          <h2 className="mb-1 text-sm font-semibold text-text-secondary">Payment networks</h2>
-          <ul>
+          <h2 className="mb-2 text-sm font-semibold text-text-secondary">Payment networks</h2>
+          <ul className="flex flex-col gap-2">
             {networks.map((n) => (
-              <li key={n.slug} className="border-b border-border-subtle py-3 last:border-b-0">
-                <Link href={`/pay/networks/${n.slug}`} className="flex items-center gap-2">
-                  <span className="font-medium text-text-primary">{n.canonical_name}</span>
-                  <Badge variant="neutral">network</Badge>
+              <li key={n.slug}>
+                <Link
+                  href={`/pay/networks/${n.slug}`}
+                  className="flex items-center gap-3 rounded-control border border-border-subtle bg-surface px-4 py-3 transition-colors hover:border-accent hover:bg-background active:bg-background"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-semibold text-text-primary">{n.canonical_name}</span>
+                      <Badge variant="accent">Network</Badge>
+                    </div>
+                    <p className="mt-0.5 text-xs text-text-muted">
+                      Interoperable transfers between banks and mobile wallets — open to find a
+                      verified route.
+                    </p>
+                  </div>
+                  <span
+                    aria-hidden="true"
+                    className="shrink-0 text-lg font-medium text-accent"
+                  >
+                    →
+                  </span>
                 </Link>
-                <p className="mt-0.5 text-xs text-text-muted">
-                  Interoperable transfers between banks and mobile wallets — find a verified route.
-                </p>
               </li>
             ))}
           </ul>
