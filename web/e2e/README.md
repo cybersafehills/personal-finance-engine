@@ -78,5 +78,10 @@ difference fails the build like any other regression test.
   persistence, and optimistic-update rollback on a failed save.
 - `accessibility.spec.ts` - automated axe scans (serious/critical only) plus
   manual touch-target/zoom checks, scoped to the pages this task changed.
+- `responsive-matrix.spec.ts` - the full §19 breakpoint matrix (320 through
+  1920) against the authenticated Home dashboard, plus prefers-reduced-
+  motion/forced-colors emulation - see `unauthenticated.spec.ts` for the
+  pre-auth (login page) equivalent, kept in a separate file so each set
+  of tests runs in the right project.
 - `visual.spec.ts` - screenshot baselines for the dashboard (empty/hidden-
   balance/privacy-mode states) and the new Settings pages.

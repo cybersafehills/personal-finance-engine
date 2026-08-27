@@ -52,3 +52,39 @@ test("login page - visual regression (mobile viewport)", { tag: "@visual" }, asy
   await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
   await expect(page).toHaveScreenshot("login-mobile.png", { fullPage: true });
 });
+
+async function hasNoHorizontalOverflow(page: import("@playwright/test").Page) {
+  return page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
+}
+
+// Master prompt §19's responsive test matrix, automated, for the pre-auth
+// shell - see responsive-matrix.spec.ts for the authenticated equivalent
+// (kept in a separate file so its tests run in the right project - see
+// that file's own comment).
+const BREAKPOINTS = [
+  { name: "small mobile", width: 320, height: 720 },
+  { name: "mobile (iPhone-ish)", width: 375, height: 812 },
+  { name: "mobile (390)", width: 390, height: 844 },
+  { name: "large mobile", width: 428, height: 926 },
+  { name: "tablet portrait", width: 768, height: 1024 },
+  { name: "tablet landscape", width: 1024, height: 768 },
+  { name: "laptop", width: 1280, height: 800 },
+  { name: "desktop", width: 1440, height: 900 },
+  { name: "wide desktop", width: 1920, height: 1080 },
+];
+
+for (const bp of BREAKPOINTS) {
+  test(`login page has no horizontal overflow at ${bp.name} (${bp.width}x${bp.height})`, async ({ page }) => {
+    await page.setViewportSize({ width: bp.width, height: bp.height });
+    await page.goto("/login");
+    await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
+    expect(await hasNoHorizontalOverflow(page), `horizontal overflow at ${bp.width}px`).toBe(true);
+  });
+}
+
+test("login page renders correctly with prefers-reduced-motion and forced-colors", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce", forcedColors: "active" });
+  await page.goto("/login");
+  await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
+  expect(await hasNoHorizontalOverflow(page)).toBe(true);
+});

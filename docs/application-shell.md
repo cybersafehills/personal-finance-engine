@@ -144,10 +144,30 @@ the balance eye toggle); the profile menu supports Escape-to-close with
 focus returned to its trigger, and click-outside; nav reordering has a
 fully keyboard-accessible path (focus a Move up/down button, press Enter)
 with no drag-and-drop-only mechanism, plus an `aria-live` announcement per
-move. **Not** covered by this task: a full manual screen-reader pass,
-high-contrast/forced-colors mode, or `prefers-reduced-motion` audit across
-the whole app (the shell's own transitions are already minimal -
-`transition-colors` only, no motion to reduce).
+move.
+
+**Responsive matrix and motion/contrast preferences**
+(`web/e2e/responsive-matrix.spec.ts`, plus the equivalent pre-auth tests
+appended to `unauthenticated.spec.ts`) automate master prompt §19's full
+breakpoint list - 320/375/390/428 (mobile), tablet portrait (768) and
+landscape (1024), laptop (1280), desktop (1440), and wide desktop
+(1920) - asserting no horizontal overflow and that the shell's key
+controls (Reports icon, profile menu, active nav item) stay reachable at
+every one. Also emulates `prefers-reduced-motion: reduce` and
+`forced-colors: active` and confirms the shell still renders with every
+control's accessible name intact. `app/globals.css` now disables all
+transitions/animations globally under `prefers-reduced-motion: reduce`
+(near-zero duration, not literal 0s, so nothing waiting on
+`transitionend` hangs) rather than requiring every individual
+`transition-*` utility class to opt in one by one.
+
+**Still not covered** by this task: a full manual screen-reader pass
+(the automated axe/keyboard/breakpoint coverage above is necessary but
+not sufficient - screen-reader phrasing and flow still want a real
+listen-through), and real-device forced-colors/high-contrast visual
+verification (the emulated Playwright checks confirm the shell doesn't
+break and controls stay nameable, not that every color choice is
+genuinely legible under an OS high-contrast theme).
 
 ## Analytics and monitoring
 
