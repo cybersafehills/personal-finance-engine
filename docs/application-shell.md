@@ -243,6 +243,39 @@ on them. Adding that is a real, separate infrastructure decision for
 whoever operates this project, not something to bolt on silently as a
 side effect of this feature.
 
+## Personalization and settings - what's deliberately not built
+
+Master prompt §12 is explicit: **"Do not add settings that have no
+implemented effect."** Several personalization options it lists were
+evaluated and deliberately not built, because building the *setting*
+without the *effect* would violate that rule directly:
+
+- **Theme (light/dark/system)** - this app has no dark palette at all
+  today (`app/globals.css` defines exactly one set of color tokens). A
+  toggle that doesn't actually change anything is worse than no toggle;
+  building a real one means designing and contrast-checking a second
+  full palette across every component, which is a real, separate design
+  effort, not a settings-page addition.
+- **Default currency, date format, budget period start day** -
+  `profiles.preferred_currency`/`timezone`/`locale` columns already
+  exist (Phase B), but nothing in this codebase currently *reads* them -
+  every amount is hardcoded RWF-formatted (`lib/format.ts`), every
+  budget's period is fixed at creation, not derived from a recurring
+  "start day" preference. Exposing a settings form for columns nothing
+  consults would be exactly the no-effect setting §12 prohibits. Real
+  multi-currency/date-format support is a cross-cutting change to the
+  formatting and budget-math layers, not a form.
+- **Transaction density (compact/comfortable)** - the one item here that
+  *could* have a clean, real, small effect (row padding/spacing in
+  `TransactionItem`), but doing it properly means a consistent decision
+  across both the dashboard preview and the full Transactions page, a
+  new stored preference, and a settings control - a reasonably-scoped
+  follow-up, not attempted in this pass given how much ground this task
+  already covers.
+
+None of these are silently dropped - they're evaluated and explicitly
+deferred, with the reasoning above, rather than half-built.
+
 ## Feature flags and rollout
 
 **No feature flag gates this work.** The one existing flag-like pattern
