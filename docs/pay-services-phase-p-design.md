@@ -1,6 +1,6 @@
 # Pay & Services — Phase P: Payment Networks, Access Routes & Granular Directory Permissions
 
-**Status:** P1 implemented on this branch (migration + seed + migration-test coverage; `run_migration_tests.sh` → 146 passed / 0 failed). P2–P4 not started.
+**Status:** P1 + P2 implemented on this branch. P1 = migration + seed + `run_migration_tests.sh` "Phase P" block (146 passed / 0 failed). P2 = the `/admin/directory` admin UI (`next build` clean, `tsc` clean, `eslint` clean). P3–P4 not started.
 **Branch:** `feat/pay-services-phase-p-payment-networks`
 **Builds on:** Phase M (USSD directory), ADR 0001 (non-custodial), ADR 0002/0003 (payment lifecycle & reconciliation).
 **Source brief:** `OneLedger_USSD_Directory_eKash_Administration_Implementation_Prompt.md`.

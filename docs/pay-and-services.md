@@ -326,13 +326,41 @@ See `docs/pay-services-phase-p-design.md` and
 as four staged PRs; **PR 1 (schema + permissions + RPCs + seed) is the
 DB foundation — no UI yet.**
 
-### Where each piece lives (P1)
+### Where each piece lives (P1 — schema)
 
 | Concern | Location |
 |---|---|
 | Schema, RLS, `has_directory_permission()`, admin RPCs | `supabase/migrations/20260909000000_phase_p_payment_networks.sql` |
 | Verified eKash network-level seed (+ 2 draft institution examples) | `supabase/migrations/20260909000100_phase_p_payment_networks_seed.sql` |
 | Migration/RLS/permission/state-machine tests | `run_migration_tests.sh` ("Phase P" block) |
+
+### Where each piece lives (P2 — admin UI)
+
+| Concern | Location |
+|---|---|
+| App-side permission mirror (`getDirectoryAccess` / `assertDirectoryPermission`) | `web/lib/pay/directory-perms.ts` (+ client-safe `directory-permission-list.ts`) |
+| Admin reads (dashboard, lists, edit detail, evidence, versions) | `web/lib/directory/admin-queries.ts` |
+| Grant-management reads (needs `auth.users` → service role, platform-admin only) | `web/lib/directory/permissions-admin.ts` |
+| Server actions wrapping every RPC | `web/app/admin/directory/actions.ts` |
+| Directory Management dashboard + queues | `web/app/admin/directory/page.tsx` |
+| Payment Networks (list / new / edit + operators + network fees/limits + aliases + evidence + versions) | `web/app/admin/directory/networks/**`, `web/components/directory/PaymentNetworkForm.tsx`, `NetworkExtrasPanel.tsx` |
+| Institutions & Providers + participation (list / new / edit) | `web/app/admin/directory/institutions/**`, `web/components/directory/ParticipationForm.tsx` |
+| Access Routes (list / new / edit + flows + menu steps + fees + limits) | `web/app/admin/directory/routes/**`, `web/components/directory/AccessRouteForm.tsx` |
+| Sources & Authorities (regulators, operators, verification sources) | `web/app/admin/directory/sources/page.tsx`, `web/components/directory/ReferenceEntityForms.tsx` |
+| Verification evidence panel (attach/detach, private) | `web/components/directory/EvidencePanel.tsx` |
+| Evidence file download (signed URL, re-checks `directory.view_evidence`) | `web/app/api/admin/directory/evidence/[id]/route.ts` |
+| `directory.*` grant admin (platform-admin only) | `web/app/admin/directory/permissions/page.tsx`, `web/components/directory/PermissionGrantsPanel.tsx` |
+| Shared publication state control | `web/components/directory/DirectoryStateControls.tsx` |
+| UI authorization-gate e2e | `web/e2e/admin-directory.spec.ts` |
+
+Reached at **`/admin/directory`** (linked from the Phase M `/admin/ussd`
+page). A holder of any `directory.*` grant — or a platform admin — sees
+the read-only surface; each action button is shown only when the caller
+holds the matching permission, and the RPC re-checks server-side. RPC
+behaviour (state machine, PIN-parameter rejection, evidence visibility,
+maker–checker) is covered by the `run_migration_tests.sh` "Phase P"
+block; the Playwright spec only guards the UI gate (the e2e user is not
+an admin), matching how `/admin/ussd` is covered.
 
 ### Data model (P1)
 
