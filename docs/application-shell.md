@@ -148,6 +148,48 @@ high-contrast/forced-colors mode, or `prefers-reduced-motion` audit across
 the whole app (the shell's own transitions are already minimal -
 `transition-colors` only, no motion to reduce).
 
+## Analytics and monitoring
+
+**No product-analytics system exists anywhere in this codebase** (no
+PostHog/Segment/Amplitude/similar - confirmed by searching the whole
+`web/` tree). Master prompt §16 is explicit that this work must use
+existing analytics/monitoring infrastructure and must not introduce a
+separate system solely for it - so no event tracking (Reports opened,
+nav order saved, privacy mode toggled, etc.) was added. Wiring events
+into a system that doesn't exist would just be dead code; if a real
+analytics provider is ever added, `PrivacyProvider`'s toggle handlers and
+the two settings actions files (`appearance/actions.ts`,
+`privacy/actions.ts`) are the natural, already-centralized call sites for
+the events §16.1 lists.
+
+What **does** exist and was extended:
+
+- **`app/global-error.tsx`** (new) - Next.js's own root-layout error
+  boundary. `app/error.tsx` only ever covered page segments, never
+  `app/layout.tsx` itself, which is where the shell (`AppShell`, both
+  navs, the profile menu, `PrivacyProvider`) actually renders - a bug
+  there had no recovery UI at all before this. Same restrained,
+  no-internal-detail tone as `error.tsx`; logs only the JS `Error` object
+  to `console.error`, never a preference, balance, or transaction value.
+- **`console.error` logging** on every Supabase call in the preference
+  read/write path (`getUiPreferences`, and both settings actions files'
+  `upsertUiPreferences` helpers) - already this codebase's established
+  pattern (`lib/queries.ts`'s other `getX failed: ...` calls), extended
+  to the new code rather than introduced fresh. Logs the Postgres error
+  message/detail/hint/code only - never the payload that triggered it,
+  so a failed save is diagnosable without ever logging a nav order,
+  balance-visibility flag, or anything user-entered.
+
+What is **not** covered, honestly: there is no dashboard or alerting on
+error *rates* (preference-API failure rate, hydration mismatches,
+layout-shift regressions, etc.) - that requires an actual observability
+backend (Sentry, Vercel Observability, Datadog, ...), and none is wired
+into this project today. `console.error` calls are visible in Vercel's
+own function logs for ad hoc debugging, but nothing aggregates or alerts
+on them. Adding that is a real, separate infrastructure decision for
+whoever operates this project, not something to bolt on silently as a
+side effect of this feature.
+
 ## Testing
 
 - **Unit** (`web/lib/navigation_test.ts`, `deno test web/lib`): nav-order
