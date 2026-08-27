@@ -78,17 +78,23 @@ export function AppShell({
         <header className="sticky top-0 z-10 border-b border-border-subtle bg-surface/95 backdrop-blur">
           <div className="mx-auto flex max-w-3xl items-center justify-between gap-3 px-4 py-2.5 sm:px-6 lg:max-w-5xl lg:px-8">
             <Link href="/" aria-label="OneLedger home" className="shrink-0">
-              <OneLedgerLogo variant="mark" height={28} decorative className="sm:hidden" />
-              <OneLedgerLogo height={32} decorative className="hidden sm:block" />
+              <OneLedgerLogo variant="mark" height={28} decorative className="lg:hidden" />
+              <OneLedgerLogo height={32} decorative className="hidden lg:block" />
             </Link>
 
             {/* Desktop/tablet primary nav lives inline in the header, to
                 the left of the account controls, rather than as a second
                 stacked bar - compact icon+label pills, ordered per the
-                caller's saved preference. */}
+                caller's saved preference. Kicks in at lg: (1024px), not
+                sm: (640px) - 5 full-text-label pills plus the logo and
+                header icons don't fit in the 640-1023px range (a real
+                overflow bug caught by e2e/responsive-matrix.spec.ts's
+                tablet-portrait/768px case), and lg: is already where the
+                dashboard's own two-column grid switches, so the two
+                breakpoints stay in sync. */}
             <nav
               aria-label="Primary"
-              className="hidden flex-1 items-center justify-center gap-1 sm:flex"
+              className="hidden flex-1 items-center justify-center gap-1 lg:flex"
             >
               {navItems.map(({ href, label }) => {
                 const active = isActive(pathname, href);
@@ -132,14 +138,16 @@ export function AppShell({
         {children}
       </main>
 
-      {/* Mobile: persistent bottom navigation with icon + label, honoring
-          the iPhone home-indicator safe area. Same five destinations, same
-          order, as the desktop header nav above - never a second
-          independent navigation definition. Absent on auth pages. */}
+      {/* Mobile/tablet: persistent bottom navigation with icon + label,
+          honoring the iPhone home-indicator safe area. Same five
+          destinations, same order, as the desktop header nav above -
+          never a second independent navigation definition. Visible below
+          lg: (1024px) - see the header nav's own comment for why that
+          threshold, not sm:. Absent on auth pages. */}
       {userEmail && (
         <nav
           aria-label="Primary"
-          className="fixed inset-x-0 bottom-0 z-10 border-t border-border-subtle bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden"
+          className="fixed inset-x-0 bottom-0 z-10 border-t border-border-subtle bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden"
         >
           <div className="mx-auto flex max-w-3xl items-stretch justify-around">
             {navItems.map(({ href, label, Icon }) => {

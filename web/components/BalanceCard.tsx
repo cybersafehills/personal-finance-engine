@@ -1,10 +1,19 @@
 "use client";
 
-import { formatRwf } from "../lib/format";
+import { formatRwf, dateGroupLabel, formatTime } from "../lib/format";
 import { EyeIcon, EyeOffIcon } from "./icons";
 import { usePrivacy } from "./PrivacyProvider";
 
-export function BalanceCard({ balanceRwf }: { balanceRwf: number | null }) {
+export function BalanceCard({
+  balanceRwf,
+  asOfIso,
+}: {
+  balanceRwf: number | null;
+  /** occurred_at of the transaction this balance is derived from - null
+   *  when there's no transaction history yet (a legitimate empty state,
+   *  not unavailable data - see lib/queries.ts's getCurrentBalance). */
+  asOfIso: string | null;
+}) {
   const {
     isBalanceMasked,
     balanceHiddenByPrivacyMode,
@@ -53,7 +62,17 @@ export function BalanceCard({ balanceRwf }: { balanceRwf: number | null }) {
             ? formatRwf(balanceRwf)
             : "—"}
       </p>
-      <p className="mt-1 text-sm text-accent-foreground/70">MTN Mobile Money</p>
+      <div className="mt-1 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+        <p className="text-sm text-accent-foreground/70">MTN Mobile Money</p>
+        {/* Freshness, not an amount - never masked, and never implied to
+            be "live": this balance is only ever as current as the most
+            recent transaction MoMo has reported (master prompt §7/§11.4). */}
+        {asOfIso && (
+          <p className="text-xs text-accent-foreground/60">
+            Updated {dateGroupLabel(asOfIso)}, {formatTime(asOfIso)}
+          </p>
+        )}
+      </div>
     </section>
   );
 }

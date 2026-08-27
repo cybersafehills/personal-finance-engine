@@ -119,19 +119,51 @@ everywhere. When neither budget status nor an attention item exists (a
 new or quiet account), the main column expands to the full grid width
 instead of leaving a permanently blank third column.
 
+The desktop header nav (and the mobile bottom nav it swaps with) switches
+at the same `lg:` (1024px) breakpoint as this grid, not the smaller
+`sm:` (640px) it used before - 5 full-text-label pills plus the logo and
+header icons don't fit in the 640-1023px range (a real overflow bug
+caught by `e2e/responsive-matrix.spec.ts`'s tablet-portrait/768px case
+and fixed in `AppShell.tsx`).
+
+`getCurrentBalance()` returns the balance alongside the `occurred_at` of
+the transaction it came from - the Current Balance card shows this as an
+unobtrusive "Updated <when>" line (master prompt §7/§11.4's data-
+freshness ask). This balance is only ever as current as the most recent
+transaction MoMo has reported, never a live account query - the label
+makes that explicit rather than implying real-time accuracy. No manual
+refresh affordance exists: there is no user-triggered sync mechanism to
+invoke (ingestion is automatic, via forwarded SMS), so one would have no
+real effect - master prompt §7 itself only asks for a refresh control
+"if meaningful."
+
 Budget-status and attention-items cards are both **omitted entirely**
 (not rendered as an empty-state box) when there's nothing to show - a
 quiet dashboard on a quiet day is the correct state, not a broken one.
 Attention items currently cover uncategorized/needs-review transactions,
-pending learned-categorization-rule suggestions, and budget allocations
-in `warning`/`critical` status - each backed by an existing, already-
-reliable query (`getReviewQueueCount`, `getLearnedPolicySuggestionCount`,
-the active budget's own alerts). Duplicate/suspicious-transaction
-detection, failed-import tracking, and stale-account-data detection are
-**not** implemented - there is no reliable signal for any of them yet in
-this codebase, and inventing one solely to populate this card was
-explicitly out of scope; the query has a documented seam
-(`getAttentionItems` in `lib/queries.ts`) for adding one later.
+pending learned-categorization-rule suggestions, budget allocations in
+`warning`/`critical` status, and stale ingestion connections - each
+backed by an existing, already-reliable query (`getReviewQueueCount`,
+`getLearnedPolicySuggestionCount`, the active budget's own alerts,
+`getIngestionConnections`). The stale-connection check is deliberately
+conservative: only an *active* connection that has *never* received
+anything and was created more than 24 hours ago - never "no activity in
+N days" for a connection that has worked before, which would false-
+positive on a genuinely low-transaction-volume user (master prompt
+§8.3's explicit "do not generate false urgency").
+
+Duplicate/suspicious-transaction detection and failed-import tracking
+are **not** implemented - there is no reliable signal for either yet.
+Investigated and deliberately not built: `momo_messages` does have a
+real `'failed'` `processing_status`, but that table has no workspace
+scoping at all and grants `authenticated` zero access by design
+(`service_role` only) - surfacing it here would mean new schema/RLS
+work (workspace-scoping the table or building a new authorized
+aggregate), not just a query, which is exactly the "invent new business
+logic solely to populate this component" this section is meant to
+avoid. `getAttentionItems` in `lib/queries.ts` has a documented seam for
+adding either later, once/if that schema work happens for its own
+reasons.
 
 ## Accessibility
 

@@ -49,7 +49,7 @@ export default async function HomePage() {
     // sync) and only the visual position changes.
     <div className="flex flex-col gap-5 lg:grid lg:grid-cols-3 lg:items-start lg:gap-5">
       <div className={`lg:col-start-1 ${mainColumnSpan}`}>
-        <BalanceCard balanceRwf={balance} />
+        <BalanceCard balanceRwf={balance?.amountRwf ?? null} asOfIso={balance?.asOfIso ?? null} />
       </div>
 
       <section

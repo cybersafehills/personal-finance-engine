@@ -55,11 +55,20 @@ export type TransactionRow = {
 const TRANSACTION_COLUMNS =
   "id, transaction_type, direction, status, currency, amount_rwf, fee_rwf, net_effect_rwf, principal_effect_rwf, fee_effect_rwf, balance_after_rwf, counterparty_name, counterparty_reference, occurred_at, category, subcategory, category_source, category_confidence, category_decision_status, suggested_category, suggested_subcategory, settlement_state, affects_balance";
 
-export async function getCurrentBalance(): Promise<number | null> {
+export type CurrentBalance = {
+  amountRwf: number;
+  /** occurred_at of the transaction this balance is derived from - the
+   *  natural "as of" freshness signal (master prompt §7/§11.4): this
+   *  balance is only ever as current as the most recent transaction
+   *  MoMo has reported, not a live account-level query. */
+  asOfIso: string;
+};
+
+export async function getCurrentBalance(): Promise<CurrentBalance | null> {
   const supabase = await supabaseSession();
   const { data, error } = await supabase
     .from("transactions")
-    .select("balance_after_rwf")
+    .select("balance_after_rwf, occurred_at")
     .not("balance_after_rwf", "is", null)
     .order("occurred_at", { ascending: false })
     .order("created_at", { ascending: false })
@@ -71,7 +80,9 @@ export async function getCurrentBalance(): Promise<number | null> {
     return null;
   }
 
-  return data?.balance_after_rwf ?? null;
+  if (!data) return null;
+
+  return { amountRwf: data.balance_after_rwf, asOfIso: data.occurred_at };
 }
 
 export type TodayTotals = {
@@ -830,12 +841,24 @@ export async function getDashboardBudgetSummary(): Promise<DashboardBudgetSummar
 // ===========================================================================
 // Home dashboard "attention items" - concise, actionable states surfaced
 // only from data this codebase already computes reliably elsewhere
-// (review queue, learned-suggestion detection, budget alerts). See master
-// prompt §8.3: no new detection logic is introduced here. Duplicate/
-// suspicious-transaction detection, failed-import tracking, and stale-
-// account-data detection are deliberately left out - there is no
-// existing reliable signal for them yet - and are documented as future
-// extension points rather than guessed at.
+// (review queue, learned-suggestion detection, budget alerts,
+// ingestion-connection activity). See master prompt §8.3: no new
+// detection logic is introduced here.
+//
+// Duplicate/suspicious-transaction detection and failed-import tracking
+// are deliberately left out - there is no existing reliable signal for
+// either (momo_messages, where a real 'failed' processing_status
+// already exists, has no workspace scoping at all and grants
+// `authenticated` zero access by design - service_role only - so
+// exposing it here would need new schema/RLS work, not just a query).
+// "Stale account data" DOES have a real, already-workspace-scoped,
+// already-authenticated-readable signal - ingestion_connections.
+// last_used_at (see getIngestionConnections) - so that one is
+// implemented below, conservatively: only an ACTIVE connection that has
+// NEVER received anything and was created more than a day ago (not "no
+// activity in N days", which would false-positive on a genuinely
+// low-transaction-volume user - master prompt §8.3's explicit "do not
+// generate false urgency").
 // ===========================================================================
 
 export type AttentionItem = {
@@ -845,12 +868,20 @@ export type AttentionItem = {
   href: string;
 };
 
+const STALE_CONNECTION_GRACE_PERIOD_MS = 24 * 60 * 60 * 1000;
+
 export async function getAttentionItems(): Promise<AttentionItem[]> {
-  const [reviewQueueCount, learnedSuggestionCount, budgetSummary] = await Promise.all([
+  const [reviewQueueCount, learnedSuggestionCount, budgetSummary, connections] = await Promise.all([
     getReviewQueueCount(),
     getLearnedPolicySuggestionCount(),
     getDashboardBudgetSummary(),
+    getIngestionConnections(),
   ]);
+
+  const staleConnectionCount = connections.filter((connection) => {
+    if (connection.status !== "active" || connection.last_used_at !== null) return false;
+    return Date.now() - new Date(connection.created_at).getTime() > STALE_CONNECTION_GRACE_PERIOD_MS;
+  }).length;
 
   const items: AttentionItem[] = [];
 
@@ -882,6 +913,17 @@ export async function getAttentionItems(): Promise<AttentionItem[]> {
         : "Budget categories need attention",
       count: budgetSummary.actionableAlertCount,
       href: `/budgets/${budgetSummary.budgetId}`,
+    });
+  }
+
+  if (staleConnectionCount > 0) {
+    items.push({
+      id: "stale-connections",
+      label: staleConnectionCount === 1
+        ? "Connection hasn't sent any data yet"
+        : "Connections haven't sent any data yet",
+      count: staleConnectionCount,
+      href: "/settings/connections",
     });
   }
 
