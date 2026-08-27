@@ -59,7 +59,9 @@ export function NavOrderForm({ initialOrder }: { initialOrder: NavKey[] }) {
         <p className="text-sm font-medium text-text-primary">Arrange navigation</p>
         <p className="mt-0.5 text-sm text-text-muted">
           Choose the order of your primary navigation. Home always stays first. This
-          order applies on every device you sign in on.
+          order applies to the navigation bar on tablet and desktop, on every device
+          you sign in on. On phones the bottom bar is a fixed five — Home,
+          Transactions, Pay, Budgets, and More.
         </p>
       </div>
 

@@ -36,18 +36,30 @@ silently broke every preference save in production - see "Incidents" below).
 
 ## Navigation
 
-Primary navigation is always exactly 5 destinations: **Home**, fixed first
-and never movable, followed by **Transactions, Categories, Budgets,
-Settings** in whatever order the user has saved. Reports was deliberately
-removed from this list - it's reachable from the header's document icon
-(`ReportsButton`, "Open reports") on every screen, and from a "Reports"
-entry in Settings (distinct from "Daily reports", which configures
-scheduled generation, not navigation to the report list itself).
+Two renderings, deliberately **not** the same list:
 
-The same `navOrder` value drives both the desktop header nav and the
-mobile bottom nav - one array, two renderings, never two independent
-navigation definitions to keep in sync (`AppShell.tsx`'s
-`useOrderedNavItems`).
+- **Tablet / desktop header nav (`>= lg`)** - exactly 5 destinations:
+  **Home**, fixed first and never movable, followed by **Transactions,
+  Categories, Budgets, Settings** in whatever order the user has saved.
+  Driven by `navOrder` (`AppShell.tsx`'s `useOrderedNavItems`).
+- **Phone bottom bar (`< lg`)** - a **fixed** five: `Home ·
+  Transactions · [Pay] · Budgets · More`, with the elevated **Pay**
+  action dead-centre (two destinations either side), matching the master
+  prompt's `Home / Accounts / Pay / Activity / More` responsive pattern.
+  The slots have fixed roles, so this bar is **not** reordered by
+  `navOrder`. **Categories, Reports, and Settings** live in the **More**
+  bottom sheet (`components/MoreSheet.tsx`) here, alongside a Pay &
+  Services group (USSD directory, Payment activity, Reconciliation,
+  Trusted recipients, Templates) when those flags are on. `MoreSheet`
+  reuses `PayLauncher`'s modal mechanics (Esc/backdrop close, focus trap,
+  focus restore, scroll lock, `role="dialog"`). `lib/navigation.ts`
+  exports `MOBILE_BAR_KEYS` and `MORE_MENU_PREFIXES` (the routes that mark
+  "More" active).
+
+Reports was deliberately removed from primary navigation - it's reachable
+from the header's document icon (`ReportsButton`, "Open reports") on every
+screen, from a "Reports" entry in Settings (distinct from "Daily
+reports"), and, on phones, from the More sheet.
 
 **Validation** (`lib/navigation.ts`, mirrored by a database CHECK
 constraint) accepts nothing but an exact permutation of `transactions`,
@@ -77,10 +89,10 @@ authenticated app - **not** a sixth navigation destination and **not** a
 member of `MOVABLE_NAV_KEYS`: it opens the Pay & Services launcher and
 never navigates or executes anything.
 
-- **Mobile / tablet (`< lg`)**: an elevated circular action nested in the
-  centre of the fixed bottom nav, between the 2nd and 3rd destinations,
-  with a visible "Pay" text label (never icon-only), a >=44px target,
-  safe-area-aware, and a restrained pressed state (no pulsing).
+- **Mobile / tablet (`< lg`)**: an elevated circular action **dead-centre**
+  of the fixed 5-slot bottom bar (`Home · Transactions · [Pay] · Budgets ·
+  More`), with a visible "Pay" text label (never icon-only), a >=44px
+  target, safe-area-aware, and a restrained pressed state (no pulsing).
 - **Desktop (`>= lg`)**: a labelled pill button in the header, immediately
   left of the Reports icon.
 

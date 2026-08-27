@@ -30,6 +30,17 @@ export const NAV_ITEM_META: Record<NavKey, { href: string; label: string }> = {
   settings: { href: "/settings", label: "Settings" },
 };
 
+// The PHONE bottom bar is a fixed five - Home, two curated destinations,
+// the elevated Pay action dead-centre, and More - matching the master
+// prompt's "Home / Accounts / Pay / Activity / More" responsive pattern.
+// It is deliberately NOT driven by nav_order: those slots have fixed
+// roles. nav_order still orders the tablet/desktop header nav
+// (useOrderedNavItems in AppShell).
+export const MOBILE_BAR_KEYS: readonly NavKey[] = ["transactions", "budgets"];
+
+// Routes that mark the "More" bottom-nav item as the active destination.
+export const MORE_MENU_PREFIXES = ["/categories", "/reports", "/settings"] as const;
+
 function isNavKey(value: unknown): value is NavKey {
   return (
     typeof value === "string" &&
