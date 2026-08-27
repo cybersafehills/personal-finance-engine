@@ -12,6 +12,12 @@ import { E2E_USER } from "./test-users";
 // e2e/auth.setup.ts) to stand in for the SMS ingestion pipeline - it
 // seeds a matching `transactions` row and invokes the reconcile RPC that
 // ingest-momo would call.
+//
+// Every row this spec creates is torn down in afterEach - the shared e2e
+// database is expected empty by later specs (visual.spec.ts's "Home
+// dashboard (empty state)" asserts "No transactions yet").
+
+const E2E_PARSER_VERSION = "e2e-recon";
 
 function admin(): SupabaseClient {
   let url = process.env.E2E_SUPABASE_URL;
@@ -69,7 +75,7 @@ async function seedMatchingTransaction(
       fee_rwf: 0,
       counterparty_reference: opts.msisdn,
       occurred_at: new Date().toISOString(),
-      parser_version: "e2e",
+      parser_version: E2E_PARSER_VERSION,
     })
     .select("id")
     .single();
@@ -101,6 +107,22 @@ async function prepareAndHandOff(page: import("@playwright/test").Page, phone: s
   await expect(page.getByText("Awaiting verification", { exact: true })).toBeVisible();
   return intentId;
 }
+
+test.afterEach(async () => {
+  const db = admin();
+  const ws = await activeWorkspaceId(db);
+  // Deleting the seeded transactions cascades payment_reconciliations
+  // (FK on delete cascade). Then drop the intents this spec linked /
+  // conflicted, and the orphaned momo_messages. Later specs (visual.spec
+  // "Home dashboard (empty state)") expect an empty ledger.
+  await db.from("transactions").delete().eq("parser_version", E2E_PARSER_VERSION);
+  await db
+    .from("payment_intents")
+    .delete()
+    .eq("workspace_id", ws)
+    .or("linked_transaction_id.not.is.null,state.eq.requires_reconciliation");
+  await db.from("momo_messages").delete().eq("raw_message", "e2e-recon seed");
+});
 
 test("an ingested transaction reconciled in apply mode links + verifies the intent", async ({
   page,

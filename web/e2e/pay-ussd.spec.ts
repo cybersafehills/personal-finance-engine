@@ -46,6 +46,9 @@ test("search filters the directory and a code opens its detail page", async ({ p
 
   const search = page.getByLabel("Search services");
   await search.fill("MoMo");
+  // Let the debounced search write to the URL and settle before clicking
+  // through - otherwise a late router.replace can race the navigation.
+  await expect(page).toHaveURL(/[?&]q=MoMo/);
   await expect(page.getByRole("link", { name: /MTN MoMo main menu/ })).toBeVisible();
 
   await page.getByRole("link", { name: /MTN MoMo main menu/ }).click();
