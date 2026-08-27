@@ -1,5 +1,6 @@
 "use client";
 
+import { Fragment } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { OneLedgerLogo } from "./brand/OneLedgerLogo";
@@ -7,6 +8,8 @@ import { GearIcon, HomeIcon, ListIcon, PieIcon, TargetIcon } from "./icons";
 import { LiveDataSync } from "./LiveDataSync";
 import { ProfileMenu } from "./ProfileMenu";
 import { PrivacyProvider } from "./PrivacyProvider";
+import { PayProvider } from "./pay/PayProvider";
+import { PayTrigger } from "./pay/PayTrigger";
 import { ReportsButton } from "./ReportsButton";
 import { ReportsRelocationNotice } from "./ReportsRelocationNotice";
 import { NAV_ITEM_META, type NavKey } from "../lib/navigation";
@@ -51,6 +54,7 @@ export function AppShell({
   hideBalance,
   privacyMode,
   reportsRelocationNoticeDismissed,
+  payEnabled,
 }: {
   children: React.ReactNode;
   userEmail: string | null;
@@ -60,6 +64,7 @@ export function AppShell({
   hideBalance: boolean;
   privacyMode: boolean;
   reportsRelocationNoticeDismissed: boolean;
+  payEnabled: boolean;
 }) {
   const pathname = usePathname();
   const navItems = useOrderedNavItems(navOrder);
@@ -115,7 +120,8 @@ export function AppShell({
               })}
             </nav>
 
-            <div className="flex shrink-0 items-center gap-1">
+            <div className="flex shrink-0 items-center gap-1.5">
+              {payEnabled && <PayTrigger variant="desktop" />}
               <ReportsButton />
               <ProfileMenu
                 userEmail={userEmail}
@@ -150,22 +156,28 @@ export function AppShell({
           className="fixed inset-x-0 bottom-0 z-10 border-t border-border-subtle bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden"
         >
           <div className="mx-auto flex max-w-3xl items-stretch justify-around">
-            {navItems.map(({ href, label, Icon }) => {
+            {navItems.map(({ href, label, Icon }, index) => {
               const active = isActive(pathname, href);
               return (
-                <Link
-                  key={href}
-                  href={href}
-                  aria-current={active ? "page" : undefined}
-                  className="flex min-w-16 flex-1 flex-col items-center gap-0.5 px-2 py-2.5 text-[11px] font-medium"
-                >
-                  <Icon
-                    className={`h-6 w-6 ${active ? "text-accent" : "text-text-muted"}`}
-                  />
-                  <span className={active ? "text-accent" : "text-text-muted"}>
-                    {label}
-                  </span>
-                </Link>
+                <Fragment key={href}>
+                  {/* The elevated centre Pay action nests between the
+                      second and third destinations. It is a peer of the
+                      nav links, not a sixth destination - it opens the
+                      launcher, never navigates. */}
+                  {payEnabled && index === 2 && <PayTrigger variant="mobile" />}
+                  <Link
+                    href={href}
+                    aria-current={active ? "page" : undefined}
+                    className="flex min-w-16 flex-1 flex-col items-center gap-0.5 px-2 py-2.5 text-[11px] font-medium"
+                  >
+                    <Icon
+                      className={`h-6 w-6 ${active ? "text-accent" : "text-text-muted"}`}
+                    />
+                    <span className={active ? "text-accent" : "text-text-muted"}>
+                      {label}
+                    </span>
+                  </Link>
+                </Fragment>
               );
             })}
           </div>
@@ -176,7 +188,7 @@ export function AppShell({
 
   return (
     <PrivacyProvider initialHideBalance={hideBalance} privacyMode={privacyMode}>
-      {shell}
+      <PayProvider enabled={Boolean(userEmail) && payEnabled}>{shell}</PayProvider>
     </PrivacyProvider>
   );
 }

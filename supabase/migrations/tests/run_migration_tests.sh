@@ -553,7 +553,13 @@ echo "=== privilege/RLS regression check ==="
 RLS_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_class where relnamespace='public'::regnamespace and relkind='r' and relrowsecurity;")"
 TABLE_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_class where relnamespace='public'::regnamespace and relkind='r';")"
 TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' order by relname) from pg_class where relnamespace='public'::regnamespace and relkind='r' and not relrowsecurity;")"
-if [ "$TABLE_COUNT" = "28" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Phase M (20260906000000) adds 9 more directory tables, all RLS-enabled
+# (service_providers, service_codes, service_code_parameters,
+# service_code_steps, service_code_versions,
+# service_directory_audit_events, service_code_reports,
+# service_favourites, service_recent_usage) - 37 tables, 36 with RLS, the
+# same one intentional gap.
+if [ "$TABLE_COUNT" = "37" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -595,11 +601,17 @@ fi
 # today. Asserting the exact count (not just "some") forces this test to
 # be updated - a deliberate review point - if any future migration ever
 # widens authenticated's table-level access.
+# Phase M (20260906000000) adds 14 more: service_providers/service_codes/
+# service_code_parameters/service_code_steps/service_code_versions/
+# service_directory_audit_events (select only = 6), service_code_reports
+# (select, insert = 2 - the UPDATE is column-scoped and does not appear
+# here as a table grant), service_favourites and service_recent_usage
+# (select, insert, delete = 6). 55 + 14 = 69.
 AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and grantee = 'authenticated';")"
-if [ "$AUTHENTICATED_GRANT_COUNT" = "55" ]; then
-  pass "authenticated holds exactly the 55 table grants expected, no more"
+if [ "$AUTHENTICATED_GRANT_COUNT" = "69" ]; then
+  pass "authenticated holds exactly the 69 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 55 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 69 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -642,16 +654,23 @@ fi
 # on is_valid_nav_order() (the ui_preferences_nav_order_shape CHECK
 # constraint's helper function - not SECURITY DEFINER, so it runs with
 # the calling role's own privileges and needs its own explicit grant like
-# every other authenticated-callable function here) = 15 total. Every
+# every other authenticated-callable function here) = 15 total before
+# Phase M. Phase M (20260906000000) adds 4 more: is_platform_admin (the
+# Pay & Services admin RLS primitive) plus the three admin RPCs
+# (admin_upsert_service_code, admin_set_service_code_state,
+# admin_resolve_service_code_report). Its two trigger functions
+# (enforce_service_code_report_rate_limit, trim_service_recent_usage) are
+# `revoke all from public` with no authenticated grant - they run as the
+# table owner from the trigger, never called directly. = 19 total. Every
 # other existing function (set_updated_at, handle_new_user,
 # policy_matches_transaction - SQL-only, no grant needed since it's only
 # ever called from within another SECURITY DEFINER function) remains
 # authenticated-inaccessible.
 AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname = 'authenticated' where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "15" ]; then
-  pass "authenticated holds EXECUTE on exactly the 15 functions expected, no more"
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "19" ]; then
+  pass "authenticated holds EXECUTE on exactly the 19 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 15 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 19 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -1811,6 +1830,122 @@ if [ "$SERVICE_ROLE_SEES_ARTIFACT" = "1" ]; then
   pass "Phase K RLS: service_role can read report_artifacts, unaffected by RLS"
 else
   fail "Phase K RLS: service_role could not see the report_artifacts row - service_role should bypass RLS entirely"
+fi
+
+# ===========================================================================
+# Phase M: USSD directory. Non-admin visibility is limited to published
+# rows; the admin RPCs are is_platform_admin()-gated; the publication
+# state machine rejects illegal jumps; the report insert is rate-limited;
+# favourites are per-user; and the seed migration is idempotent.
+# Reuses pfe_rls (USER_A/USER_B/WORKSPACE_A already set up above).
+# ===========================================================================
+echo "=== Phase M: USSD directory ==="
+
+USER_ADMIN="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('ussd-admin@example.com') returning id;" | head -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  update public.profiles set is_platform_admin = true where id = '$USER_ADMIN';
+  insert into public.service_providers (id, slug, display_name, kind)
+  values ('11111111-1111-4111-8111-111111111111', 'test-mno', 'Test MNO', 'mno');
+  insert into public.service_codes (id, provider_id, slug, category, display_name_en, ussd_template, state)
+  values
+    ('22222222-2222-4222-8222-222222222222', '11111111-1111-4111-8111-111111111111', 'pub-code', 'mobile_money', 'Published code', '*111#', 'published'),
+    ('33333333-3333-4333-8333-333333333333', '11111111-1111-4111-8111-111111111111', 'draft-code', 'mobile_money', 'Draft code', '*112#', 'draft');
+" >/dev/null
+
+# Non-admin sees the published row but not the draft.
+M_PUB="$(as_user "$USER_A" "select count(*) from public.service_codes where slug = 'pub-code';")"
+M_DRAFT="$(as_user "$USER_A" "select count(*) from public.service_codes where slug = 'draft-code';")"
+if [ "$M_PUB" = "1" ] && [ "$M_DRAFT" = "0" ]; then
+  pass "Phase M: a non-admin sees published service codes but not drafts (RLS)"
+else
+  fail "Phase M: non-admin directory visibility wrong (published=$M_PUB draft=$M_DRAFT, expected 1/0)"
+fi
+
+# Admin sees both.
+M_ADMIN_DRAFT="$(as_user "$USER_ADMIN" "select count(*) from public.service_codes where slug = 'draft-code';")"
+if [ "$M_ADMIN_DRAFT" = "1" ]; then
+  pass "Phase M: a platform admin sees unpublished service codes"
+else
+  fail "Phase M: platform admin could not see the draft code (got $M_ADMIN_DRAFT)"
+fi
+
+# Non-admin cannot call the admin RPCs.
+if as_user "$USER_A" "select public.admin_set_service_code_state('33333333-3333-4333-8333-333333333333', 'pending_review', null);" >/dev/null 2>$ARTIFACT_DIR/pfe_m_rpc.log; then
+  fail "Phase M: a non-admin was allowed to call admin_set_service_code_state - authorization gap"
+else
+  pass "Phase M: admin_set_service_code_state refuses a non-admin caller"
+fi
+rm -f $ARTIFACT_DIR/pfe_m_rpc.log
+
+# The publication state machine rejects draft -> published directly.
+if as_user "$USER_ADMIN" "select public.admin_set_service_code_state('33333333-3333-4333-8333-333333333333', 'published', 'skip review');" >/dev/null 2>$ARTIFACT_DIR/pfe_m_sm.log; then
+  fail "Phase M: draft -> published was allowed, skipping pending_review"
+else
+  pass "Phase M: the publication state machine rejects draft -> published"
+fi
+rm -f $ARTIFACT_DIR/pfe_m_sm.log
+
+# ... but draft -> pending_review -> published works, and writes version snapshots.
+as_user "$USER_ADMIN" "select public.admin_set_service_code_state('33333333-3333-4333-8333-333333333333', 'pending_review', null);" >/dev/null
+as_user "$USER_ADMIN" "select public.admin_set_service_code_state('33333333-3333-4333-8333-333333333333', 'published', null);" >/dev/null
+M_NOW_PUB="$(psql -d pfe_rls -t -A -c "select state from public.service_codes where slug = 'draft-code';")"
+M_VERSIONS="$(psql -d pfe_rls -t -A -c "select count(*) from public.service_code_versions where service_code_id = '33333333-3333-4333-8333-333333333333';")"
+if [ "$M_NOW_PUB" = "published" ] && [ "$M_VERSIONS" -ge "2" ]; then
+  pass "Phase M: draft -> pending_review -> published succeeds and records version snapshots"
+else
+  fail "Phase M: staged publish failed (state=$M_NOW_PUB versions=$M_VERSIONS)"
+fi
+
+# admin_upsert_service_code from a non-admin is rejected; from an admin it
+# creates a code + a v1 snapshot + an audit row.
+if as_user "$USER_A" "select public.admin_upsert_service_code('{\"provider_id\":\"11111111-1111-4111-8111-111111111111\",\"slug\":\"forged\",\"category\":\"other\",\"display_name_en\":\"x\",\"ussd_template\":\"*9#\"}'::jsonb);" >/dev/null 2>$ARTIFACT_DIR/pfe_m_up.log; then
+  fail "Phase M: a non-admin created a service code via admin_upsert_service_code"
+else
+  pass "Phase M: admin_upsert_service_code refuses a non-admin caller"
+fi
+rm -f $ARTIFACT_DIR/pfe_m_up.log
+NEW_CODE_ID="$(as_user "$USER_ADMIN" "select public.admin_upsert_service_code('{\"provider_id\":\"11111111-1111-4111-8111-111111111111\",\"slug\":\"admin-made\",\"category\":\"other\",\"display_name_en\":\"Admin made\",\"ussd_template\":\"*9#\",\"change_reason\":\"initial\"}'::jsonb);")"
+M_AUDIT="$(psql -d pfe_rls -t -A -c "select count(*) from public.service_directory_audit_events where service_code_id = '$NEW_CODE_ID' and action = 'service_code.create';")"
+if [ -n "$NEW_CODE_ID" ] && [ "$M_AUDIT" = "1" ]; then
+  pass "Phase M: an admin upsert creates the code and writes an audit event"
+else
+  fail "Phase M: admin upsert did not record an audit event (id=$NEW_CODE_ID audit=$M_AUDIT)"
+fi
+
+# Report insert rate limit: the 6th open report from one user in an hour fails.
+M_RL_OK=1
+for i in 1 2 3 4 5; do
+  as_user "$USER_B" "insert into public.service_code_reports (service_code_id, reporter_user_id, report_type) values ('22222222-2222-4222-8222-222222222222', '$USER_B', 'other');" >/dev/null 2>&1 || M_RL_OK=0
+done
+if as_user "$USER_B" "insert into public.service_code_reports (service_code_id, reporter_user_id, report_type) values ('22222222-2222-4222-8222-222222222222', '$USER_B', 'other');" >/dev/null 2>$ARTIFACT_DIR/pfe_m_rl.log; then
+  fail "Phase M: a 6th open report in an hour was accepted - rate limit not enforced"
+elif [ "$M_RL_OK" = "1" ]; then
+  pass "Phase M: service_code_reports insert is rate-limited to 5 open per user per hour"
+else
+  fail "Phase M: one of the first 5 reports was unexpectedly rejected"
+fi
+rm -f $ARTIFACT_DIR/pfe_m_rl.log
+
+# Favourites are per-user.
+as_user "$USER_A" "insert into public.service_favourites (user_id, service_code_id) values ('$USER_A', '22222222-2222-4222-8222-222222222222');" >/dev/null
+M_FAV_A="$(as_user "$USER_A" "select count(*) from public.service_favourites;")"
+M_FAV_B="$(as_user "$USER_B" "select count(*) from public.service_favourites;")"
+if [ "$M_FAV_A" = "1" ] && [ "$M_FAV_B" = "0" ]; then
+  pass "Phase M: User B cannot see User A's service favourites"
+else
+  fail "Phase M: favourites are not per-user (A sees $M_FAV_A, B sees $M_FAV_B)"
+fi
+
+# The seed migration is idempotent.
+SEED_FILE="$MIGRATIONS_DIR/20260906000100_phase_m_ussd_seed.sql"
+M_SEED_BEFORE="$(psql -d pfe_rls -t -A -c "select count(*) from public.service_codes;")"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -f "$SEED_FILE" >/dev/null 2>&1
+M_SEED_AFTER="$(psql -d pfe_rls -t -A -c "select count(*) from public.service_codes;")"
+if [ "$M_SEED_BEFORE" = "$M_SEED_AFTER" ]; then
+  pass "Phase M: re-running the USSD seed migration inserts nothing new (idempotent)"
+else
+  fail "Phase M: seed migration is not idempotent ($M_SEED_BEFORE -> $M_SEED_AFTER service codes)"
 fi
 
 echo ""

@@ -1,0 +1,243 @@
+"use client";
+
+import { useEffect, useId, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { messages } from "../../lib/ussd/messages";
+import {
+  getLauncherSnapshot,
+  type LauncherSnapshot,
+} from "../../app/pay/actions";
+import { PayIcon, StarIcon } from "../icons";
+
+const t = messages().pay;
+
+const PRIMARY_ACTIONS: { key: keyof typeof t.primary; label: string }[] = [
+  { key: "person", label: t.primary.person },
+  { key: "merchant", label: t.primary.merchant },
+  { key: "bill", label: t.primary.bill },
+  { key: "electricity", label: t.primary.electricity },
+  { key: "airtime", label: t.primary.airtime },
+  { key: "government", label: t.primary.government },
+];
+
+function focusable(container: HTMLElement): HTMLElement[] {
+  return Array.from(
+    container.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    ),
+  ).filter((el) => el.offsetParent !== null || el === document.activeElement);
+}
+
+/**
+ * The Pay & Services launcher. Mobile: a bottom sheet. Desktop/tablet: a
+ * centred dialog. Full modal semantics - focus trap, Esc + browser-back
+ * to close, focus restored to the trigger, background scroll locked.
+ *
+ * Phase 1: the payment actions are visibly deferred (disabled + a
+ * "coming later" hint - never a fake success). The only live path is
+ * "Open USSD directory". One tap never executes a financial action.
+ *
+ * The panel is a child that only mounts while `open`, so its data /
+ * focus state resets cleanly on every open without any in-effect reset.
+ */
+export function PayLauncher({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
+  if (!open) return null;
+  return <LauncherPanel onClose={onClose} />;
+}
+
+function LauncherPanel({ onClose }: { onClose: () => void }) {
+  const router = useRouter();
+  const panelRef = useRef<HTMLDivElement>(null);
+  const previouslyFocused = useRef<HTMLElement | null>(null);
+  const titleId = useId();
+  const [snapshot, setSnapshot] = useState<LauncherSnapshot | null>(null);
+  const [, startLoad] = useTransition();
+
+  useEffect(() => {
+    startLoad(() => {
+      getLauncherSnapshot()
+        .then((s) => setSnapshot(s))
+        .catch(() => setSnapshot({ favourites: [], recent: [] }));
+    });
+
+    previouslyFocused.current = document.activeElement as HTMLElement | null;
+    const { body } = document;
+    const prevOverflow = body.style.overflow;
+    body.style.overflow = "hidden";
+
+    window.history.pushState({ payLauncher: true }, "");
+    const onPopState = () => onClose();
+    window.addEventListener("popstate", onPopState);
+
+    const raf = requestAnimationFrame(() => {
+      const nodes = panelRef.current ? focusable(panelRef.current) : [];
+      (nodes[0] ?? panelRef.current)?.focus();
+    });
+
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("popstate", onPopState);
+      body.style.overflow = prevOverflow;
+      previouslyFocused.current?.focus?.();
+    };
+    // onClose is stable (useCallback in PayProvider)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function onKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      onClose();
+      return;
+    }
+    if (e.key !== "Tab" || !panelRef.current) return;
+    const nodes = focusable(panelRef.current);
+    if (nodes.length === 0) return;
+    const first = nodes[0];
+    const last = nodes[nodes.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+
+  function go(href: string) {
+    onClose();
+    router.push(href);
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-end justify-center sm:items-center"
+      role="presentation"
+    >
+      <button
+        type="button"
+        aria-hidden="true"
+        tabIndex={-1}
+        onClick={onClose}
+        className="absolute inset-0 cursor-default bg-black/40"
+      />
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        onKeyDown={onKeyDown}
+        className="relative z-10 w-full max-w-lg rounded-t-card border border-border-subtle bg-surface p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-lg outline-none sm:rounded-card sm:pb-5"
+      >
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-accent text-accent-foreground">
+              <PayIcon className="h-5 w-5" />
+            </span>
+            <div>
+              <h2 id={titleId} className="text-base font-semibold text-text-primary">
+                {t.launcherTitle}
+              </h2>
+              <p className="text-xs text-text-muted">{t.launcherSubtitle}</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={t.close}
+            className="rounded-control px-2 py-1 text-sm font-medium text-text-secondary hover:bg-background"
+          >
+            {t.close}
+          </button>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          {PRIMARY_ACTIONS.map((a) => (
+            <button
+              key={a.key}
+              type="button"
+              disabled
+              aria-disabled="true"
+              title={t.comingSoon}
+              className="flex flex-col items-start gap-1 rounded-control border border-border-subtle bg-background px-3 py-2.5 text-left opacity-60"
+            >
+              <span className="text-sm font-medium text-text-secondary">{a.label}</span>
+              <span className="text-[11px] text-text-muted">{t.comingSoon}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-3 border-t border-border-subtle pt-3">
+          <button
+            type="button"
+            onClick={() => go("/pay/ussd")}
+            className="flex w-full items-center justify-between rounded-control bg-accent px-3 py-2.5 text-sm font-semibold text-accent-foreground"
+          >
+            {t.secondary.ussd}
+            <span aria-hidden="true">→</span>
+          </button>
+        </div>
+
+        {snapshot && snapshot.favourites.length > 0 && (
+          <LauncherList
+            heading={t.favourites}
+            entries={snapshot.favourites}
+            onPick={(slug) => go(`/pay/ussd/${slug}`)}
+            starred
+          />
+        )}
+        {snapshot && snapshot.recent.length > 0 && (
+          <LauncherList
+            heading={t.recent}
+            entries={snapshot.recent}
+            onPick={(slug) => go(`/pay/ussd/${slug}`)}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function LauncherList({
+  heading,
+  entries,
+  onPick,
+  starred = false,
+}: {
+  heading: string;
+  entries: LauncherSnapshot["favourites"];
+  onPick: (slug: string) => void;
+  starred?: boolean;
+}) {
+  return (
+    <div className="mt-3 border-t border-border-subtle pt-3">
+      <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-text-muted">
+        {heading}
+      </p>
+      <ul className="flex flex-col">
+        {entries.map((e) => (
+          <li key={e.slug}>
+            <button
+              type="button"
+              onClick={() => onPick(e.slug)}
+              className="flex w-full items-center gap-2 rounded-control px-2 py-2 text-left hover:bg-background"
+            >
+              {starred && <StarIcon filled className="h-4 w-4 text-accent" />}
+              <span className="flex-1 truncate text-sm text-text-primary">{e.name}</span>
+              <span className="shrink-0 font-mono text-xs text-text-muted">
+                {e.ussd_template}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}

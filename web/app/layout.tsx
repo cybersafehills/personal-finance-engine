@@ -4,6 +4,7 @@ import { AppShell } from "../components/AppShell";
 import { supabaseSession } from "../lib/supabase-session-server";
 import { getActiveWorkspaceId, getUiPreferences, getUserWorkspaces } from "../lib/queries";
 import { DEFAULT_NAV_ORDER } from "../lib/navigation";
+import { isPayServicesEnabled } from "../lib/pay/gate";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -61,6 +62,12 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
         },
       ];
 
+  // Server-authoritative: the global Pay action only renders where the
+  // feature is on for this user's workspace (env flag + optional
+  // allowlist, see lib/pay/gate.ts). Every Pay/USSD action re-checks
+  // this independently - the flag is not merely a hidden button.
+  const payEnabled = Boolean(user) && isPayServicesEnabled(activeWorkspaceId);
+
   return (
     <html lang="en" className={`${geistSans.variable} h-full antialiased`}>
       <body className="min-h-full bg-background font-sans text-text-primary">
@@ -72,6 +79,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           hideBalance={uiPreferences.hideBalance}
           privacyMode={uiPreferences.privacyMode}
           reportsRelocationNoticeDismissed={uiPreferences.reportsRelocationNoticeDismissed}
+          payEnabled={payEnabled}
         >
           {children}
         </AppShell>
