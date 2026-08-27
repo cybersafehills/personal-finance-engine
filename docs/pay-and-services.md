@@ -362,6 +362,30 @@ maker–checker) is covered by the `run_migration_tests.sh` "Phase P"
 block; the Playwright spec only guards the UI gate (the e2e user is not
 an admin), matching how `/admin/ussd` is covered.
 
+### Where each piece lives (P3 — public eKash experience)
+
+| Concern | Location |
+|---|---|
+| Route favourites / recent / reports on an `access_route` (not just a `service_code`) | `supabase/migrations/20260909000200_phase_p_route_favourites.sql` |
+| RLS-scoped public reads (network overview, route finder, route result, network search by alias) | `web/lib/directory/public-queries.ts` (+ client-safe `public-types.ts`) |
+| Fee / limit phrasing (`none` / `unknown` / `varies by institution` / `published maximum`) | `web/lib/directory/format.ts` |
+| Per-user actions (favourite / usage / report a route) | `web/app/pay/networks/actions.ts` |
+| Network overview page | `web/app/pay/networks/[slug]/page.tsx`, `web/components/directory/public/NetworkOverview.tsx` |
+| Route finder (guided, URL-driven) + results | `web/app/pay/networks/[slug]/routes/page.tsx`, `web/components/directory/public/RouteFinder.tsx` |
+| Route result (verified code / entry point, ordered steps, fees, limits, verification source, copy/dial, save, report) | `web/app/pay/networks/[slug]/routes/[routeId]/page.tsx`, `web/components/directory/public/RouteResultPanel.tsx` |
+| Directory search surfaces the network (canonical + `eCash` / `RSwitch` aliases) | `web/app/pay/ussd/page.tsx` (new "Payment networks" section) |
+| UI chrome strings | `web/lib/ussd/messages.ts` (`network` block) |
+| e2e | `web/e2e/pay-networks.spec.ts` |
+
+The route result reuses the Phase 1 capability layer: a linked
+**non-parameterised** USSD code gets **Copy** + **Open phone dialer**
+(mobile) or **Copy** + written steps (desktop); a **parameterised** code
+or an approved entry-point label is shown as guidance to complete on the
+user's own phone — never auto-dialled, never with a PIN. When no verified
+route exists for the chosen combination the finder shows an honest empty
+state ("OneLedger hasn't verified… we won't guess") rather than inventing
+instructions; the "Suggest route information" intake is P4.
+
 ### Data model (P1)
 
 `payment_networks` (own 6-state publication lifecycle), `regulatory_authorities`
