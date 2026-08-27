@@ -82,7 +82,12 @@ test("a user can favourite a code and it appears in the Favourites section", asy
   await page.goto("/pay/ussd/mtn-momo-menu");
   const star = page.getByRole("button", { name: /Add .* to favourites/ });
   await star.click();
-  await expect(page.getByRole("button", { name: /Remove .* from favourites/ })).toBeVisible();
+  // Wait for the server action to actually settle (the button is
+  // disabled while the transition is pending) before navigating - the
+  // list page server-renders from the DB.
+  const unstar = page.getByRole("button", { name: /Remove .* from favourites/ });
+  await expect(unstar).toBeVisible();
+  await expect(unstar).toBeEnabled();
 
   await page.goto("/pay/ussd");
   await expect(
@@ -91,7 +96,9 @@ test("a user can favourite a code and it appears in the Favourites section", asy
 
   // Clean up so re-runs start from a known state.
   await page.goto("/pay/ussd/mtn-momo-menu");
-  await page.getByRole("button", { name: /Remove .* from favourites/ }).click();
+  const cleanup = page.getByRole("button", { name: /Remove .* from favourites/ });
+  await cleanup.click();
+  await expect(page.getByRole("button", { name: /Add .* to favourites/ })).toBeEnabled();
 });
 
 test("reporting an incorrect code confirms receipt", async ({ page }) => {

@@ -41,8 +41,15 @@ export function DirectoryControls({
   }
 
   useEffect(() => {
+    // No-op when the term already matches the URL (initial mount, or a
+    // value we just wrote) - avoids a redundant navigation.
+    if (term.trim() === (params.get("q") ?? "")) return;
     if (debounce.current) clearTimeout(debounce.current);
     debounce.current = setTimeout(() => {
+      // If the user has since navigated into a code's detail page (or
+      // anywhere off the list), don't yank them back with a stale search
+      // write.
+      if (window.location.pathname !== pathname) return;
       apply({ q: term.trim() });
     }, 250);
     return () => {
