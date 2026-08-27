@@ -8,15 +8,28 @@ then faded out to reveal the real destination.
 
 | File | Role |
 | --- | --- |
-| `web/components/brand/BrandSplashScreen.tsx` | The overlay + its `opening -> exiting -> complete` state machine and all timers. Client component; header comment is the authoritative spec. |
-| `web/app/globals.css` | `.oneledger-splash` base layout, the entrance `@keyframes`, and the reduced-motion variant. In the app's one render-blocking stylesheet so the white field paints before hydration. |
-| `web/app/layout.tsx` | Mounts `<BrandSplashScreen>` as the first child of `<body>`, above `<AppShell>`. Reads the `oneledger_splash_off` cookie. |
+| `web/components/brand/BrandSplashScreen.tsx` | The overlay + its `opening -> exiting -> complete` state machine and all timers. Client component; header comment is the authoritative spec. Also exports `SPLASH_CRITICAL_CSS`. |
+| `web/app/layout.tsx` | Hoists `SPLASH_CRITICAL_CSS` into `<head>` via a `<style precedence>` tag, then mounts `<BrandSplashScreen>` as the first child of `<body>`, above `<AppShell>`. Reads the `oneledger_splash_off` cookie. |
+| `web/app/globals.css` | Only the app-wide `prefers-reduced-motion` rule (which also covers the splash). The splash's own CSS is **not** here — see below. |
+
+### Why the CSS is inlined, not in `globals.css`
+
+`globals.css` ships as a separate render-blocking `<link>` stylesheet. On a
+slow connection the splash markup — and its CSS animation clock — can start
+before that file arrives, which showed up in production as a blank/black
+first frame, a collapsed `0×0` overlay, and a logo that had already
+finished animating before anything painted. `SPLASH_CRITICAL_CSS` is
+inlined in `<head>` (literal `#ffffff`, no custom properties) so it applies
+on the first frame.
 
 ## Readiness & timing
 
-The splash exits when **both** the minimum visible time has elapsed **and**
-the shell has hydrated (implicit: the exit timer is armed from a
-post-hydration `useEffect`). A hard cap fires unconditionally.
+Two timers, both measured from **navigation start** (`performance.now()`),
+whichever fires first wins: `MIN_VISIBLE_MS` and the `HARD_CAP_MS` cap.
+Because the splash paints on the first frame, "time since navigation" is an
+honest measure of how long it has been visible. If hydration itself takes
+longer than `MIN_VISIBLE_MS`, the splash has already been on screen that
+whole time and exits promptly.
 
 | | Normal | Reduced motion |
 | --- | --- | --- |

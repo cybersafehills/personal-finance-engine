@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { cookies } from "next/headers";
 import { Geist } from "next/font/google";
 import { AppShell } from "../components/AppShell";
-import { BrandSplashScreen } from "../components/brand/BrandSplashScreen";
+import { BrandSplashScreen, SPLASH_CRITICAL_CSS } from "../components/brand/BrandSplashScreen";
 import { supabaseSession } from "../lib/supabase-session-server";
 import { getActiveWorkspaceId, getUiPreferences, getUserWorkspaces } from "../lib/queries";
 import { DEFAULT_NAV_ORDER } from "../lib/navigation";
@@ -81,6 +81,15 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${geistSans.variable} h-full antialiased`}>
       <body className="min-h-full bg-background font-sans text-text-primary">
+        {/* Critical opening-screen CSS, hoisted into <head> by React so it
+            applies on the first frame - it must not wait for the app's
+            main (render-blocking) stylesheet, which on a slow connection
+            arrives after the splash markup has already been parsed. */}
+        <style
+          href="oneledger-splash-critical"
+          precedence="high"
+          dangerouslySetInnerHTML={{ __html: SPLASH_CRITICAL_CSS }}
+        />
         {/* First child of <body>: in the initial SSR HTML so a white field
             + centred logo paint before hydration, with the app mounting
             behind it. Removes itself from the DOM once it finishes.  */}
