@@ -438,7 +438,7 @@ additive migration(s) → stacked PRs → migration-test block → e2e.
 | Phase | Master prompt | Scope | User-visible? |
 |---|---|---|---|
 | **Q** — Foundation ✅ *migration written* | 1 | `kind='household'` + `create_household_workspace`; `financial_sources`, `source_space_links`, `raw_financial_events`, `can_view_source_in_space()` / `is_financial_source_visible()` / `owns_financial_source()`; nullable `transactions` provenance/attribution cols; `space_activity` / `space_audit_events` / `space_member_notification_prefs` / `workspace_categories` tables; **RLS refactor for `household`** (Phase C ledger loosening reverted for this kind via the source-visibility gate); backfill migration; indexes | No |
-| **R** — Security & authz | 2 | RBAC capability table + RPC guards; invitation-security hardening review (reuse Phase C token model); audit-write RPCs; **security test suite** (cross-Space reads, forged `workspace_id`, source peeking, post-removal access, stale invite, role escalation, AI scope, service-role bypass) before any collaboration UI ships | No |
+| **R** — Security & authz ✅ *migration written* | 2 | capability layer (`space_role_has_capability` matrix + `space_member_capability_grants` + `has_space_capability()` primitive + `grant`/`revoke_space_capability` RPCs); audit-write primitives (`record_space_activity` / `record_space_audit_event`); `workspace_invites.accepted_by`; `accept_workspace_invite` / `set_member_role` / `remove_member` / `create_household_workspace` re-issued to write audit + activity rows; **14-assertion security test block** (capability matrix, grant/revoke, audit visibility, invite re-use/revoke rejection, post-removal access revocation, last-owner guard, internal-helper lockdown, service-role bypass) | No |
 | **S** — Shared ledger | 3 | Household creation + onboarding; upgraded Space switcher; invites/members UI for households; per-source visibility UI ("How should this account be used?"); transaction Space allocation + `reallocate_transaction`; provenance detail view; attribution (`shared`/`member`/`split`/`unassigned`) + review-queue reasons; optional `/spaces/{id}/…` routes | Yes |
 | **T** — Financial planning | 4 | Space-aware category scope; rule `scope_type` + deterministic precedence + explainability; shared budgets (space/category/member scopes) reusing `budget-math.ts`; threshold state-transition alerts (no per-txn spam); shared goals as first-class Space resources; per-member notification prefs | Yes |
 | **U** — Ingestion & reconciliation | 5 | `raw_financial_events` cutover for `ingest-momo` + SMS path; source routing (`is_default_target`); dedupe confidence engine + auto-merge + review cards; **statement (CSV/PDF) reconciliation** vs ledger + import summary; device management UX (rename / pause / reconnect / remove, history preserved) | Yes |
@@ -475,6 +475,38 @@ Migration-test coverage: `run_migration_tests.sh` gains an 11-assertion
 forging rejection, link-pause revocation, personal-workspace regression
 guard, service_role bypass); privilege counters move to 67 tables / 114
 `authenticated` table grants / 52 `authenticated` function grants.
+
+### Phase R — as built (migration `20260912000000`)
+
+Chose a **hardcoded `IMMUTABLE` matrix function** (`space_role_has_capability`)
+over a seeded capability table — smaller, deterministic, matches
+`is_workspace_member`'s style, and the master prompt explicitly defers
+"complex custom roles". Per-member exceptions (e.g. "let this Member edit
+budgets") are the one extension point: additive-only rows in
+`space_member_capability_grants`, written exclusively through
+`grant_space_capability` / `revoke_space_capability` (both `members.manage`-
+gated). `has_space_capability(workspace, capability)` is the primitive
+Phase S/T RPC guards will compose with; **it is not yet wired into any
+budget/goal/rule flow — RLS stays the live control until Phase T.**
+
+`record_space_activity` / `record_space_audit_event` are internal
+(`revoke all from public`, no `authenticated` grant) — invoked only from
+other `SECURITY DEFINER` RPCs, which run as the table owner and so bypass
+the append-only tables' RLS. `accept_workspace_invite`, `set_member_role`,
+`remove_member`, and `create_household_workspace` were re-issued
+(`CREATE OR REPLACE`, signatures/grants unchanged) to call them.
+`workspace_invites.accepted_by` records the bearer-token redeemer — the
+audit compensation for the deliberately email-agnostic acceptance model.
+`remove_member` also deletes the departing member's capability grants.
+
+Migration-test coverage: 14-assertion "Phase R" block — capability matrix,
+grant/revoke + audit, `space_audit_events` owner/admin-only visibility,
+`space_activity` member visibility, internal-helper lockdown,
+`accepted_by` + join audit, re-used / revoked token rejection,
+post-removal access revocation + `member.removed` audit, last-owner guard
+survival, `member.role_changed` audit, service-role bypass. Privilege
+counters move to 68 tables / 115 `authenticated` table grants / 55
+`authenticated` function grants.
 
 ---
 
