@@ -39,8 +39,8 @@ export default async function RouteResultPage({
       <PageHeader
         title={route.display_name_en}
         subtitle={`${route.provider_name}${route.network ? ` · ${route.network.canonical_name}` : ""}`}
-        backHref={`/pay/networks/${slug}/routes`}
-        backLabel={messages().network.routeFinderTitle}
+        backHref={`/pay/networks/${slug}`}
+        backLabel={route.network?.canonical_name ?? messages().ussd.title}
       />
       <RouteResultPanel route={route} favourited={favIds.has(route.id)} />
     </div>
