@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
+import { cookies } from "next/headers";
 import { Geist } from "next/font/google";
 import { AppShell } from "../components/AppShell";
+import { BrandSplashScreen } from "../components/brand/BrandSplashScreen";
 import { supabaseSession } from "../lib/supabase-session-server";
 import { getActiveWorkspaceId, getUiPreferences, getUserWorkspaces } from "../lib/queries";
 import { DEFAULT_NAV_ORDER } from "../lib/navigation";
@@ -38,6 +40,13 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
     data: { user },
   } = await supabase.auth.getUser();
 
+  // Documented kill switch for the branded opening screen. Also how the
+  // e2e suite opts out globally so the splash never interferes with the
+  // hundreds of existing navigation / visual specs (see e2e/fixtures.ts);
+  // e2e/brand-splash.spec.ts clears the cookie to test the real feature.
+  const splashDisabled =
+    (await cookies()).get("oneledger_splash_off")?.value === "1";
+
   // Fetched once here, in the root layout, and threaded down as props -
   // never re-fetched separately by the header, mobile nav, desktop nav,
   // or dashboard components (master prompt §18's "single source of
@@ -72,6 +81,10 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${geistSans.variable} h-full antialiased`}>
       <body className="min-h-full bg-background font-sans text-text-primary">
+        {/* First child of <body>: in the initial SSR HTML so a white field
+            + centred logo paint before hydration, with the app mounting
+            behind it. Removes itself from the DOM once it finishes.  */}
+        <BrandSplashScreen disabled={splashDisabled} />
         <AppShell
           userEmail={user?.email ?? null}
           workspaces={workspaces}

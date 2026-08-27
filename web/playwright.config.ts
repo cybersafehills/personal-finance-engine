@@ -74,7 +74,7 @@ export default defineConfig({
     // available.
     {
       name: "unauthenticated",
-      testMatch: /unauthenticated\.spec\.ts/,
+      testMatch: /(unauthenticated|brand-splash)\.spec\.ts/,
       use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 900 } },
     },
 
@@ -85,7 +85,7 @@ export default defineConfig({
     // not apply the saved session on its own.
     {
       name: "chromium-desktop",
-      testIgnore: /unauthenticated\.spec\.ts/,
+      testIgnore: /(unauthenticated|brand-splash)\.spec\.ts/,
       use: {
         ...devices["Desktop Chrome"],
         viewport: { width: 1280, height: 900 },
@@ -98,7 +98,7 @@ export default defineConfig({
     // not just a narrow viewport).
     {
       name: "chrome-android",
-      testIgnore: /unauthenticated\.spec\.ts/,
+      testIgnore: /(unauthenticated|brand-splash)\.spec\.ts/,
       use: { ...devices["Pixel 7"], storageState: AUTH_STORAGE_STATE_PATH },
       dependencies: ["setup"],
     },
@@ -106,7 +106,7 @@ export default defineConfig({
     // Safari on macOS.
     {
       name: "webkit-desktop",
-      testIgnore: /unauthenticated\.spec\.ts/,
+      testIgnore: /(unauthenticated|brand-splash)\.spec\.ts/,
       use: {
         ...devices["Desktop Safari"],
         viewport: { width: 1280, height: 900 },
@@ -118,7 +118,7 @@ export default defineConfig({
     // Mobile Safari (iPhone) - safe-area insets, dynamic toolbar quirks.
     {
       name: "mobile-safari",
-      testIgnore: /unauthenticated\.spec\.ts/,
+      testIgnore: /(unauthenticated|brand-splash)\.spec\.ts/,
       use: { ...devices["iPhone 14"], storageState: AUTH_STORAGE_STATE_PATH },
       dependencies: ["setup"],
     },
