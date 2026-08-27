@@ -2294,13 +2294,25 @@ USER_PADMIN="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values (
 USER_PCREATOR="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('dir-creator@example.com') returning id;" | head -1)"
 psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; update public.profiles set is_platform_admin = true where id = '$USER_PADMIN';" >/dev/null
 
-# A plain user sees the published eKash network but not the draft participation.
+# A plain user sees the published eKash network, and sees only PUBLISHED
+# participation - a fresh draft participation is invisible to them. The
+# 20260909000400 seed publishes the campaign bank routes, so eKash now has
+# published participation; this test creates its own draft to isolate the
+# RLS behaviour.
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.institution_network_participation (provider_id, payment_network_id, participant_role, state)
+  values ('$P_PROVIDER', '$P_EKASH', 'bank', 'draft')
+  on conflict do nothing;
+" >/dev/null
 P_NET="$(as_user "$USER_A" "select count(*) from public.payment_networks where slug = 'ekash';")"
-P_PART="$(as_user "$USER_A" "select count(*) from public.institution_network_participation where payment_network_id = '$P_EKASH';")"
-if [ "$P_NET" = "1" ] && [ "$P_PART" = "0" ]; then
-  pass "Phase P: a non-admin sees the published eKash network but not its draft participation rows (RLS)"
+P_PART_USER="$(as_user "$USER_A" "select count(*) from public.institution_network_participation where payment_network_id = '$P_EKASH';")"
+P_PART_PUB="$(psql -d pfe_rls -t -A -c "select count(*) from public.institution_network_participation where payment_network_id = '$P_EKASH' and state = 'published' and effective_from <= now() and (effective_to is null or effective_to > now());")"
+P_PART_DRAFT_SEEN="$(as_user "$USER_A" "select count(*) from public.institution_network_participation where payment_network_id = '$P_EKASH' and provider_id = '$P_PROVIDER' and state = 'draft';")"
+if [ "$P_NET" = "1" ] && [ "$P_PART_USER" = "$P_PART_PUB" ] && [ "$P_PART_DRAFT_SEEN" = "0" ]; then
+  pass "Phase P: a non-admin sees the published eKash network + only its published participation, never a draft (RLS)"
 else
-  fail "Phase P: non-admin network visibility wrong (network=$P_NET participation=$P_PART, expected 1/0)"
+  fail "Phase P: non-admin network visibility wrong (network=$P_NET user_part=$P_PART_USER published=$P_PART_PUB draft_seen=$P_PART_DRAFT_SEEN)"
 fi
 
 # has_directory_permission is false for a plain user, true after a grant.
