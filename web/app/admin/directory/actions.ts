@@ -10,7 +10,10 @@ import {
   type DirectoryPermission,
 } from "../../../lib/pay/directory-perms";
 import { resolveUserIdByEmail } from "../../../lib/directory/permissions-admin";
-import { assertPayServicesEnabled, FeatureDisabledError } from "../../../lib/pay/gate";
+import {
+  assertDirectoryAdminEnabled,
+  FeatureDisabledError,
+} from "../../../lib/pay/gate";
 
 export type ActionResult = { ok: true; id?: string } | { ok: false; error: string };
 
@@ -50,7 +53,7 @@ async function runRpc(
   revalidate: string[],
 ): Promise<ActionResult> {
   try {
-    assertPayServicesEnabled(await getActiveWorkspaceId());
+    assertDirectoryAdminEnabled(await getActiveWorkspaceId());
     if (perm) await assertDirectoryPermission(perm);
     else await assertDirectoryAdmin();
 
@@ -207,6 +210,21 @@ export async function detachEvidence(id: string, reason: string): Promise<Action
   );
 }
 
+// --- user suggestions (moderation) -------------------------------
+
+export async function resolveSuggestion(
+  id: string,
+  status: string,
+  note: string,
+): Promise<ActionResult> {
+  return runRpc(
+    "admin_resolve_directory_suggestion",
+    { p_id: id, p_status: status, p_note: note.trim() || null },
+    "directory.resolve_reports",
+    [`${BASE}/suggestions`, BASE],
+  );
+}
+
 // --- directory.* permission grants (platform-admin only) ----------
 
 export async function grantDirectoryPermission(
@@ -214,7 +232,7 @@ export async function grantDirectoryPermission(
   permission: string,
 ): Promise<ActionResult> {
   try {
-    assertPayServicesEnabled(await getActiveWorkspaceId());
+    assertDirectoryAdminEnabled(await getActiveWorkspaceId());
     const userId = await resolveUserIdByEmail(email.trim());
     if (!userId) return { ok: false, error: `No user found with email ${email.trim()}.` };
     const supabase = await supabaseSession();
@@ -236,7 +254,7 @@ export async function revokeDirectoryPermission(
   permission: string,
 ): Promise<ActionResult> {
   try {
-    assertPayServicesEnabled(await getActiveWorkspaceId());
+    assertDirectoryAdminEnabled(await getActiveWorkspaceId());
     const supabase = await supabaseSession();
     const { error } = await supabase.rpc("admin_revoke_directory_permission", {
       p_user: userId,

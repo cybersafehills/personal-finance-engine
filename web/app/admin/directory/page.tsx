@@ -34,6 +34,7 @@ export default async function DirectoryAdminHome() {
         <SubNav href="/admin/directory/networks" label="Payment Networks" />
         <SubNav href="/admin/directory/institutions" label="Institutions & Providers" />
         <SubNav href="/admin/directory/routes" label="Access Routes" />
+        <SubNav href="/admin/directory/suggestions" label="Suggestions & Reports" />
         <SubNav href="/admin/directory/sources" label="Sources & Authorities" />
         <SubNav href="/admin/ussd" label="USSD Codes" />
         {access.isPlatformAdmin && (

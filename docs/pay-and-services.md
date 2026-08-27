@@ -384,7 +384,46 @@ or an approved entry-point label is shown as guidance to complete on the
 user's own phone — never auto-dialled, never with a PIN. When no verified
 route exists for the chosen combination the finder shows an honest empty
 state ("OneLedger hasn't verified… we won't guess") rather than inventing
-instructions; the "Suggest route information" intake is P4.
+instructions.
+
+### Where each piece lives (P4 — suggestions, jobs, flags)
+
+| Concern | Location |
+|---|---|
+| `directory_suggestions` table + rate-limit trigger + `admin_resolve_directory_suggestion` RPC | `supabase/migrations/20260909000300_phase_p_directory_suggestions.sql` |
+| Migration tests | `run_migration_tests.sh` "Phase P" block (suggestion cases; counters 97→99 grants / 47→48 fns / 59→60 RLS tables) |
+| User suggestion intake (`/pay/suggest`) | `web/app/pay/suggest/**`, `web/components/directory/SuggestForm.tsx` |
+| Moderation queue + repeated-report aggregation | `web/app/admin/directory/suggestions/page.tsx`, `web/components/directory/SuggestionModerationPanel.tsx`, `web/lib/directory/suggestions.ts` |
+| Verification-freshness sweep (read-only — never unpublishes) | `web/app/api/cron/directory-verification-sweep/route.ts`; pg_cron activation `supabase/scheduling/activate_directory_verification_sweep.sql` (manual, deferred) |
+| Privacy-conscious event sink (PII-stripping, no provider wired) | `web/lib/directory/analytics.ts` (+ `_test.ts`) |
+| Feature flags | `web/lib/pay/gate.ts` — `PAYMENT_NETWORKS_ENABLED`, `DIRECTORY_ADMIN_ENABLED` (on unless `"false"`), `DIRECTORY_SUGGESTIONS_ENABLED` (**opt-in**, off unless `"true"`) |
+
+**Suggestions never auto-publish.** A submission is a `directory_suggestions`
+row (rate-limited to ≤5 open per user per rolling hour, reporter-scoped
+RLS, a cheap client + server guard against PIN/OTP/account numbers in the
+body). Its status is only ever advanced by
+`admin_resolve_directory_suggestion` (`directory.resolve_reports`-gated),
+which records who/when/why, can link the record + version it fed into,
+and writes an audit event — it publishes nothing itself. Repeated reports
+are surfaced as a **visibility signal** (count of open reports per entry),
+explicitly *not* treated as verification.
+
+**The sweep is read-only.** `/api/cron/directory-verification-sweep`
+counts review-due published entries + entries with ≥3 unresolved reports,
+writes one `directory.verification_sweep` audit row when there's a
+signal, and returns the digest. It **never unpublishes** — the admin
+decides. Not yet scheduled (same manual pg_cron pattern as the other
+cron routes). Cache refresh after a publication-state change is handled
+inline by the admin actions' `revalidatePath` calls.
+
+**Analytics.** No analytics provider is wired in this codebase;
+`service_recent_usage` (schema-constrained to no PII) is the durable
+code/route usage store. `lib/directory/analytics.ts` is the single sink a
+provider would attach to, and it hard-strips forbidden keys
+(phone/account/meter/merchant/amount/reference/pin/otp/…) and
+identifier-shaped string values before anything could leave the process
+(`analytics_test.ts` covers the redaction). Wired at directory search and
+route-finder-no-result (server) and suggestion-submitted (action).
 
 ### Data model (P1)
 

@@ -570,7 +570,9 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # route_menu_steps, route_fees, route_limits, directory_sources,
 # directory_evidence, directory_aliases, directory_versions) - 59 tables,
 # 58 with RLS, the same one intentional gap.
-if [ "$TABLE_COUNT" = "59" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Phase P (20260909000300) adds directory_suggestions (RLS enabled) - 60
+# tables, 59 with RLS.
+if [ "$TABLE_COUNT" = "60" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -632,11 +634,14 @@ fi
 # holders; the file bytes are served separately via a signed URL). = 15.
 # 82 + 15 = 97. Every directory-content table stays SELECT-only for
 # authenticated - all writes go through the SECURITY DEFINER admin RPCs.
+# Phase P (20260909000300) adds directory_suggestions (select, insert = 2)
+# - the moderation status is only ever advanced by
+# admin_resolve_directory_suggestion, so no update grant here. 97 + 2 = 99.
 AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and grantee = 'authenticated';")"
-if [ "$AUTHENTICATED_GRANT_COUNT" = "97" ]; then
-  pass "authenticated holds exactly the 97 table grants expected, no more"
+if [ "$AUTHENTICATED_GRANT_COUNT" = "99" ]; then
+  pass "authenticated holds exactly the 99 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 97 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 99 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -722,12 +727,15 @@ fi
 # grant - they run as owner from within a SECURITY DEFINER caller or a
 # trigger. The re-issued Phase M RPCs (admin_upsert_service_code etc.)
 # keep their existing grants (CREATE OR REPLACE preserves privileges).
-# = 47 total.
+# = 47 total. Phase P (20260909000300) adds
+# admin_resolve_directory_suggestion; its
+# enforce_directory_suggestion_rate_limit trigger function is
+# `revoke all from public`. = 48 total.
 AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname = 'authenticated' where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "47" ]; then
-  pass "authenticated holds EXECUTE on exactly the 47 functions expected, no more"
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "48" ]; then
+  pass "authenticated holds EXECUTE on exactly the 48 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 47 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 48 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -2384,6 +2392,50 @@ if [ "$P_SEED_BEFORE" = "$P_SEED_AFTER" ]; then
   pass "Phase P: re-running the payment-network seed inserts nothing new (idempotent)"
 else
   fail "Phase P: seed migration is not idempotent ($P_SEED_BEFORE -> $P_SEED_AFTER payment networks)"
+fi
+
+# --- directory_suggestions (P4): moderation-only, rate-limited, reporter-scoped.
+S_R1="$(as_user "$USER_B" "insert into public.directory_suggestions (suggester_user_id, suggestion_type, body) values ('$USER_B', 'new_service', 'add code X') returning id;")"
+if [ -n "$S_R1" ]; then
+  pass "Phase P: a user can submit a directory suggestion"
+else
+  fail "Phase P: directory_suggestions insert failed for the suggester"
+fi
+
+S_RL_OK=1
+for i in 2 3 4 5; do
+  as_user "$USER_B" "insert into public.directory_suggestions (suggester_user_id, suggestion_type, body) values ('$USER_B', 'other', 'more $i');" >/dev/null 2>&1 || S_RL_OK=0
+done
+if as_user "$USER_B" "insert into public.directory_suggestions (suggester_user_id, suggestion_type, body) values ('$USER_B', 'other', 'sixth');" >/dev/null 2>$ARTIFACT_DIR/pfe_p_sugg_rl.log; then
+  fail "Phase P: a 6th open suggestion in an hour was accepted - rate limit not enforced"
+elif [ "$S_RL_OK" = "1" ]; then
+  pass "Phase P: directory_suggestions insert is rate-limited to 5 open per user per hour"
+else
+  fail "Phase P: one of the first 5 suggestions was unexpectedly rejected"
+fi
+rm -f $ARTIFACT_DIR/pfe_p_sugg_rl.log
+
+S_SEE_A="$(as_user "$USER_A" "select count(*) from public.directory_suggestions;")"
+if [ "$S_SEE_A" = "0" ]; then
+  pass "Phase P: a user cannot see another user's directory suggestions (RLS)"
+else
+  fail "Phase P: directory_suggestions are not reporter-scoped (User A sees $S_SEE_A)"
+fi
+
+if as_user "$USER_B" "select public.admin_resolve_directory_suggestion('$S_R1', 'accepted', 'ok', null, null);" >/dev/null 2>$ARTIFACT_DIR/pfe_p_sugg_res.log; then
+  fail "Phase P: a non-admin resolved a directory suggestion - authorization gap"
+else
+  pass "Phase P: admin_resolve_directory_suggestion refuses a caller without directory.resolve_reports"
+fi
+rm -f $ARTIFACT_DIR/pfe_p_sugg_res.log
+
+as_user "$USER_PADMIN" "select public.admin_resolve_directory_suggestion('$S_R1', 'accepted', 'linked to a new draft', null, null);" >/dev/null
+S_STATUS="$(psql -d pfe_rls -t -A -c "select status from public.directory_suggestions where id = '$S_R1';")"
+S_AUDIT="$(psql -d pfe_rls -t -A -c "select count(*) from public.service_directory_audit_events where subject_type = 'directory_suggestion' and subject_id = '$S_R1';")"
+if [ "$S_STATUS" = "accepted" ] && [ "$S_AUDIT" = "1" ]; then
+  pass "Phase P: an admin resolves a suggestion and it writes an audit event (never an auto-publish)"
+else
+  fail "Phase P: suggestion resolution wrong (status=$S_STATUS audit=$S_AUDIT)"
 fi
 
 echo ""

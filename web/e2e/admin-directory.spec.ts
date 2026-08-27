@@ -20,6 +20,7 @@ const GUARDED = [
   "/admin/directory/routes",
   "/admin/directory/routes/new",
   "/admin/directory/sources",
+  "/admin/directory/suggestions",
   "/admin/directory/permissions",
 ];
 

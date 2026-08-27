@@ -18,6 +18,7 @@ import {
   getPublishedNetworks,
   searchPaymentNetworks,
 } from "../../../lib/directory/public-queries";
+import { trackDirectoryEvent } from "../../../lib/directory/analytics";
 
 export const dynamic = "force-dynamic";
 
@@ -55,6 +56,13 @@ export default async function UssdDirectoryPage({
     getRecentServices(6),
     query ? searchPaymentNetworks(query) : getPublishedNetworks(),
   ]);
+
+  if (query) {
+    trackDirectoryEvent("directory_search", {
+      q: query,
+      results: codes.length + networks.length,
+    });
+  }
 
   return (
     <div>

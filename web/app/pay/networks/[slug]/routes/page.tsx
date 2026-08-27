@@ -5,7 +5,10 @@ import { EmptyState } from "../../../../../components/EmptyState";
 import { Badge } from "../../../../../components/Badge";
 import { RouteFinder } from "../../../../../components/directory/public/RouteFinder";
 import { getActiveWorkspaceId } from "../../../../../lib/queries";
-import { isUssdDirectoryEnabled } from "../../../../../lib/pay/gate";
+import {
+  isPaymentNetworksEnabled,
+  isDirectorySuggestionsEnabled,
+} from "../../../../../lib/pay/gate";
 import { messages } from "../../../../../lib/ussd/messages";
 import {
   getPublicNetworkBySlug,
@@ -13,6 +16,7 @@ import {
   findRoutes,
   FLOW_LABELS,
 } from "../../../../../lib/directory/public-queries";
+import { trackDirectoryEvent } from "../../../../../lib/directory/analytics";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +30,7 @@ export default async function NetworkRouteFinderPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const workspaceId = await getActiveWorkspaceId();
-  if (!isUssdDirectoryEnabled(workspaceId)) {
+  if (!isPaymentNetworksEnabled(workspaceId)) {
     return (
       <div>
         <PageHeader title={t.routeFinderTitle} backHref="/pay/ussd" backLabel={messages().ussd.title} />
@@ -52,6 +56,15 @@ export default async function NetworkRouteFinderPage({
     findRoutes({ networkSlug: slug, sourceProviderId: from, flowType: flow, channel }),
   ]);
 
+  if (routes.length === 0) {
+    trackDirectoryEvent("route_finder_no_result", {
+      network: slug,
+      has_source: Boolean(from),
+      flow,
+      channel,
+    });
+  }
+
   return (
     <div>
       <PageHeader
@@ -66,9 +79,18 @@ export default async function NetworkRouteFinderPage({
       <section>
         <h2 className="mb-2 text-sm font-semibold text-text-secondary">{t.resultsHeading}</h2>
         {routes.length === 0 ? (
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col items-center gap-3">
             <EmptyState title={t.noRoutesTitle} description={t.noRoutesBody} />
-            <p className="text-center text-xs text-text-muted">{t.suggestRouteComingSoon}</p>
+            {isDirectorySuggestionsEnabled(workspaceId) ? (
+              <Link
+                href={`/pay/suggest?type=new_route&network=${slug}`}
+                className="min-h-11 rounded-control border border-border-subtle bg-surface px-4 py-2.5 text-sm font-medium text-text-primary"
+              >
+                {t.suggestRoute}
+              </Link>
+            ) : (
+              <p className="text-center text-xs text-text-muted">{t.suggestRouteComingSoon}</p>
+            )}
           </div>
         ) : (
           <ul>

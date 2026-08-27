@@ -3,7 +3,7 @@ import { PageHeader } from "../../../../../../components/PageHeader";
 import { EmptyState } from "../../../../../../components/EmptyState";
 import { RouteResultPanel } from "../../../../../../components/directory/public/RouteResultPanel";
 import { getActiveWorkspaceId } from "../../../../../../lib/queries";
-import { isUssdDirectoryEnabled } from "../../../../../../lib/pay/gate";
+import { isPaymentNetworksEnabled } from "../../../../../../lib/pay/gate";
 import { messages } from "../../../../../../lib/ussd/messages";
 import { getRouteResult, getRouteFavouriteIds } from "../../../../../../lib/directory/public-queries";
 
@@ -15,7 +15,7 @@ export default async function RouteResultPage({
   params: Promise<{ slug: string; routeId: string }>;
 }) {
   const workspaceId = await getActiveWorkspaceId();
-  if (!isUssdDirectoryEnabled(workspaceId)) {
+  if (!isPaymentNetworksEnabled(workspaceId)) {
     return (
       <div>
         <PageHeader title="Route" backHref="/pay/ussd" backLabel={messages().ussd.title} />

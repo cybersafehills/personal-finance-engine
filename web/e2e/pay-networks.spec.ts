@@ -45,6 +45,12 @@ test("the route finder shows an honest empty state when no route is verified", a
   await expect(page.getByText(/won't guess/i)).toBeVisible();
 });
 
+test("the suggest page is closed until DIRECTORY_SUGGESTIONS_ENABLED is set", async ({ page }) => {
+  // The suite runs with the flag unset (opt-in, off by default).
+  await page.goto("/pay/suggest");
+  await expect(page.getByText("Suggestions aren't open yet")).toBeVisible();
+});
+
 test("the eKash network page has no automatic accessibility violations", async ({ page }) => {
   await page.goto("/pay/networks/ekash");
   const results = await new AxeBuilder({ page })

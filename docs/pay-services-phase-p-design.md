@@ -1,6 +1,11 @@
 # Pay & Services — Phase P: Payment Networks, Access Routes & Granular Directory Permissions
 
-**Status:** P1 + P2 + P3 implemented on this branch. P1 = migration + seed + `run_migration_tests.sh` "Phase P" block (146 passed / 0 failed). P2 = the `/admin/directory` admin UI. P3 = public eKash network page + route finder + route result + alias search, plus `20260909000200_phase_p_route_favourites.sql` (favourite/recent/report an `access_route`). `next build` / `tsc` / `eslint` clean. P4 not started.
+**Status:** P1–P4 implemented on this branch (all four staged PRs). `run_migration_tests.sh` → **151 passed / 0 failed**; `next build` / `tsc` / `eslint` / `deno test` clean.
+
+- **P1** — migration + seed + "Phase P" migration-test block.
+- **P2** — the `/admin/directory` admin UI.
+- **P3** — public eKash network page + route finder + route result + alias search; `20260909000200` (favourite/recent/report an `access_route`).
+- **P4** — `directory_suggestions` + moderation queue (`/admin/directory/suggestions`), the `/pay/suggest` intake (opt-in flag), the read-only verification-freshness sweep cron + deferred pg_cron activation, the PII-stripping analytics sink, and the `PAYMENT_NETWORKS_ENABLED` / `DIRECTORY_ADMIN_ENABLED` / `DIRECTORY_SUGGESTIONS_ENABLED` flags.
 **Branch:** `feat/pay-services-phase-p-payment-networks`
 **Builds on:** Phase M (USSD directory), ADR 0001 (non-custodial), ADR 0002/0003 (payment lifecycle & reconciliation).
 **Source brief:** `OneLedger_USSD_Directory_eKash_Administration_Implementation_Prompt.md`.

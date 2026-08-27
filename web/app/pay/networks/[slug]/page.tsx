@@ -4,7 +4,7 @@ import { PageHeader } from "../../../../components/PageHeader";
 import { EmptyState } from "../../../../components/EmptyState";
 import { NetworkOverview } from "../../../../components/directory/public/NetworkOverview";
 import { getActiveWorkspaceId } from "../../../../lib/queries";
-import { isUssdDirectoryEnabled } from "../../../../lib/pay/gate";
+import { isPaymentNetworksEnabled } from "../../../../lib/pay/gate";
 import { messages } from "../../../../lib/ussd/messages";
 import { getPublicNetworkBySlug, findRoutes } from "../../../../lib/directory/public-queries";
 
@@ -24,7 +24,7 @@ export default async function PaymentNetworkPage({
   params: Promise<{ slug: string }>;
 }) {
   const workspaceId = await getActiveWorkspaceId();
-  if (!isUssdDirectoryEnabled(workspaceId)) {
+  if (!isPaymentNetworksEnabled(workspaceId)) {
     return (
       <div>
         <PageHeader title="Payment network" backHref="/pay/ussd" backLabel={messages().ussd.title} />
