@@ -7,6 +7,7 @@ import { isAssistedPayEnabled } from "../../../lib/pay/gate";
 import {
   getPaymentIntent,
   getTrustedRecipients,
+  getUnlinkedRecentTransactions,
   isSessionFresh,
 } from "../../../lib/pay/intents";
 import { getServiceCodeById } from "../../../lib/ussd/queries";
@@ -35,15 +36,21 @@ export default async function PaymentIntentPage({
   const { id } = await params;
   const result = await getPaymentIntent(id);
   if (!result) notFound();
-  const { intent, events } = result;
+  const { intent, events, reconciliations, linkedTransaction } = result;
 
-  const [accounts, budgets, recipients, serviceCode, sessionFresh] = await Promise.all([
-    getAccounts(),
-    getBudgets(),
-    getTrustedRecipients(),
-    intent.service_code_id ? getServiceCodeById(intent.service_code_id) : Promise.resolve(null),
-    isSessionFresh(),
-  ]);
+  const needsLinkPicker =
+    !intent.linked_transaction_id &&
+    ["initiated", "awaiting_verification", "requires_reconciliation"].includes(intent.state);
+
+  const [accounts, budgets, recipients, serviceCode, sessionFresh, unlinkedTransactions] =
+    await Promise.all([
+      getAccounts(),
+      getBudgets(),
+      getTrustedRecipients(),
+      intent.service_code_id ? getServiceCodeById(intent.service_code_id) : Promise.resolve(null),
+      isSessionFresh(),
+      needsLinkPicker ? getUnlinkedRecentTransactions(id) : Promise.resolve([]),
+    ]);
 
   const sourceAccountName =
     accounts.find((a) => a.id === intent.source_account_id)?.name ?? null;
@@ -81,6 +88,31 @@ export default async function PaymentIntentPage({
         sourceAccountName={sourceAccountName}
         budgetName={budgetName}
         trustStatus={trust?.trust_status ?? null}
+        reconciliations={reconciliations.map((r) => ({
+          id: r.id,
+          transaction_id: r.transaction_id,
+          match_method: r.match_method,
+          status: r.status,
+          applied_at: r.applied_at,
+          matched_on: r.matched_on,
+        }))}
+        linkedTransaction={
+          linkedTransaction
+            ? {
+                id: linkedTransaction.id,
+                occurred_at: linkedTransaction.occurred_at,
+                amount_rwf: linkedTransaction.amount_rwf,
+                fee_rwf: linkedTransaction.fee_rwf,
+                counterparty_name: linkedTransaction.counterparty_name,
+              }
+            : null
+        }
+        unlinkedTransactions={unlinkedTransactions.map((tx) => ({
+          id: tx.id,
+          occurred_at: tx.occurred_at,
+          amount_rwf: tx.amount_rwf,
+          counterparty_name: tx.counterparty_name,
+        }))}
       />
 
       <section className="mt-8">

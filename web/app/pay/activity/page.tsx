@@ -45,7 +45,10 @@ export default async function PaymentActivityPage() {
         backHref="/"
         backLabel="Home"
         action={
-          <div className="flex gap-3 text-sm">
+          <div className="flex flex-wrap gap-3 text-sm">
+            <Link href="/pay/reconciliation" className="font-medium text-accent">
+              {t.recon.title}
+            </Link>
             <Link href="/pay/recipients" className="font-medium text-accent">
               {t.recipientsTitle}
             </Link>

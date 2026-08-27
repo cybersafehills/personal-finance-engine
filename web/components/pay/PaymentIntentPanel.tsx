@@ -15,17 +15,21 @@ import {
   type ParamSpec,
 } from "../../lib/ussd/capability";
 import {
+  describeMatchedOn,
   statusDescription,
   statusLabel,
   statusTone,
   type IntentStatusInput,
 } from "../../lib/pay/state";
 import {
+  applyReconciliation,
   cancelIntent,
+  linkPaymentManually,
   manuallyConfirm,
   markIntentFailed,
   payAgain,
   recordHandoff,
+  rejectReconciliation,
 } from "../../app/pay/assisted-actions";
 
 const t = messages().pay.assisted;
@@ -46,6 +50,7 @@ export type PanelIntent = IntentStatusInput & {
   note: string | null;
   category: string | null;
   handoff_method: string;
+  linked_transaction_id: string | null;
 };
 
 export type PanelServiceCode = {
@@ -77,6 +82,30 @@ const TYPE_LABEL: Record<string, string> = {
   government: "Government services",
 };
 
+export type PanelReconciliation = {
+  id: string;
+  transaction_id: string;
+  match_method: string;
+  status: string;
+  applied_at: string | null;
+  matched_on: Record<string, unknown>;
+};
+
+export type PanelLinkedTxn = {
+  id: string;
+  occurred_at: string;
+  amount_rwf: number;
+  fee_rwf: number;
+  counterparty_name: string | null;
+};
+
+export type PanelUnlinkedTxn = {
+  id: string;
+  occurred_at: string;
+  amount_rwf: number;
+  counterparty_name: string | null;
+};
+
 export function PaymentIntentPanel({
   intent,
   serviceCode,
@@ -84,6 +113,9 @@ export function PaymentIntentPanel({
   sourceAccountName,
   budgetName,
   trustStatus,
+  reconciliations,
+  linkedTransaction,
+  unlinkedTransactions,
 }: {
   intent: PanelIntent;
   serviceCode: PanelServiceCode | null;
@@ -91,6 +123,9 @@ export function PaymentIntentPanel({
   sourceAccountName: string | null;
   budgetName: string | null;
   trustStatus: "saved" | "trusted_by_user" | null;
+  reconciliations: PanelReconciliation[];
+  linkedTransaction: PanelLinkedTxn | null;
+  unlinkedTransactions: PanelUnlinkedTxn[];
 }) {
   const router = useRouter();
   const [capability, setCapability] = useState<DialerCapability>({
@@ -209,6 +244,16 @@ export function PaymentIntentPanel({
         <Badge variant={TONE_VARIANT[tone]}>{label}</Badge>
         <span className="text-xs text-text-muted">{statusDescription(intent)}</span>
       </div>
+
+      <ReconciliationSection
+        intentId={intent.id}
+        intentState={intent.state}
+        currency={intent.currency}
+        linkedTransaction={linkedTransaction}
+        reconciliations={reconciliations}
+        unlinkedTransactions={unlinkedTransactions}
+        onDone={() => router.refresh()}
+      />
 
       {/* Review block */}
       <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
@@ -402,5 +447,173 @@ export function PaymentIntentPanel({
         </p>
       )}
     </div>
+  );
+}
+
+function fmtRwf(n: number, currency: string): string {
+  const major = currency === "RWF" ? n : n / 100;
+  return `${major.toLocaleString()} ${currency}`;
+}
+
+function ReconciliationSection({
+  intentId,
+  intentState,
+  currency,
+  linkedTransaction,
+  reconciliations,
+  unlinkedTransactions,
+  onDone,
+}: {
+  intentId: string;
+  intentState: string;
+  currency: string;
+  linkedTransaction: PanelLinkedTxn | null;
+  reconciliations: PanelReconciliation[];
+  unlinkedTransactions: PanelUnlinkedTxn[];
+  onDone: () => void;
+}) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [showManual, setShowManual] = useState(false);
+
+  async function run(name: string, fn: () => Promise<{ ok: boolean; error?: string }>) {
+    setBusy(name);
+    setError(null);
+    const res = await fn();
+    setBusy(null);
+    if (!res.ok) {
+      setError(res.error ?? "Something went wrong.");
+      return;
+    }
+    onDone();
+  }
+
+  // Already linked - show the evidence.
+  if (linkedTransaction) {
+    const recon = reconciliations.find((r) => r.status === "linked");
+    return (
+      <section className="rounded-card border border-border-subtle p-3">
+        <p className="text-sm font-semibold text-text-primary">{t.recon.linkedHeading}</p>
+        <p className="mt-1 text-sm text-text-secondary">
+          {linkedTransaction.counterparty_name ?? "Transaction"} ·{" "}
+          {fmtRwf(linkedTransaction.amount_rwf + linkedTransaction.fee_rwf, currency)} ·{" "}
+          {new Date(linkedTransaction.occurred_at).toLocaleString()}
+        </p>
+        {recon && (
+          <p className="mt-0.5 text-xs text-text-muted">{describeMatchedOn(recon.matched_on)}</p>
+        )}
+        <Link
+          href={`/transactions/${linkedTransaction.id}`}
+          className="mt-1 inline-block text-xs font-medium text-accent hover:underline"
+        >
+          {t.recon.viewTransaction}
+        </Link>
+      </section>
+    );
+  }
+
+  const likely = reconciliations.find(
+    (r) => r.status === "linked" && r.applied_at === null,
+  );
+  const conflicts = reconciliations.filter((r) => r.status === "conflict");
+  const showManualOption =
+    intentState === "requires_reconciliation" ||
+    intentState === "awaiting_verification" ||
+    intentState === "initiated";
+
+  if (!likely && conflicts.length === 0 && !showManualOption) return null;
+
+  return (
+    <section className="flex flex-col gap-3 rounded-card border border-border-subtle p-3">
+      {likely && (
+        <div>
+          <p className="text-sm font-semibold text-text-primary">{t.recon.likelyHeading}</p>
+          <p className="mt-1 text-sm text-text-secondary">{t.recon.likelyBody}</p>
+          <div className="mt-2 flex gap-2">
+            <button
+              type="button"
+              onClick={() => run("apply", () => applyReconciliation(likely.id))}
+              disabled={busy !== null}
+              className="min-h-11 rounded-control bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground disabled:opacity-50"
+            >
+              {busy === "apply" ? "…" : t.recon.apply}
+            </button>
+            <button
+              type="button"
+              onClick={() => run("reject", () => rejectReconciliation(likely.id, "not this one"))}
+              disabled={busy !== null}
+              className="min-h-11 rounded-control px-4 py-2 text-sm font-medium text-text-secondary hover:bg-background disabled:opacity-50"
+            >
+              {t.recon.reject}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {conflicts.length > 0 && (
+        <div>
+          <p className="text-sm font-semibold text-attention">{t.recon.conflictHeading}</p>
+          <p className="mt-1 text-sm text-text-secondary">
+            Resolve this on the{" "}
+            <Link href="/pay/reconciliation" className="font-medium text-accent underline">
+              {t.recon.title}
+            </Link>{" "}
+            screen.
+          </p>
+        </div>
+      )}
+
+      {showManualOption && (
+        <div>
+          {!showManual ? (
+            <button
+              type="button"
+              onClick={() => setShowManual(true)}
+              className="text-sm font-medium text-accent hover:underline"
+            >
+              {t.recon.manualLinkCta}
+            </button>
+          ) : (
+            <div>
+              <p className="text-sm text-text-secondary">{t.recon.manualLinkBody}</p>
+              {unlinkedTransactions.length === 0 ? (
+                <p className="mt-1 text-xs text-text-muted">{t.recon.noWindowTxns}</p>
+              ) : (
+                <ul className="mt-2 flex flex-col gap-1">
+                  {unlinkedTransactions.map((tx) => (
+                    <li key={tx.id}>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          run(`link-${tx.id}`, () =>
+                            linkPaymentManually(intentId, tx.id, "manual link"),
+                          )
+                        }
+                        disabled={busy !== null}
+                        className="flex w-full items-center justify-between gap-2 rounded-control border border-border-subtle px-3 py-2 text-left text-sm hover:border-accent disabled:opacity-50"
+                      >
+                        <span className="text-text-primary">
+                          {tx.counterparty_name ?? "Transaction"}
+                        </span>
+                        <span className="text-text-muted">
+                          {fmtRwf(tx.amount_rwf, currency)} ·{" "}
+                          {new Date(tx.occurred_at).toLocaleDateString()}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {error && (
+        <p className="text-xs text-attention" role="status">
+          {error}
+        </p>
+      )}
+    </section>
   );
 }

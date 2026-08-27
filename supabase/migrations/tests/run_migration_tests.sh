@@ -678,12 +678,19 @@ fi
 # function. = 25 total. Every other existing function (set_updated_at,
 # handle_new_user, policy_matches_transaction - SQL-only, no grant needed
 # since it's only ever called from within another SECURITY DEFINER
-# function) remains authenticated-inaccessible.
+# function) remains authenticated-inaccessible. Phase O (20260908000000)
+# adds 4 authenticated-callable: normalize_rw_msisdn (the app's
+# manual-link preview uses it), apply_payment_reconciliation,
+# reject_payment_reconciliation, link_payment_manually. Its
+# service_role-only functions (system_transition_payment_intent,
+# apply_reconciliation_effects, reconciliation_candidate_intents,
+# reconcile_transaction_with_payment_intents, reconcile_payment_intent)
+# are `revoke ... from authenticated`. = 29 total.
 AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname = 'authenticated' where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "25" ]; then
-  pass "authenticated holds EXECUTE on exactly the 25 functions expected, no more"
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "29" ]; then
+  pass "authenticated holds EXECUTE on exactly the 29 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 25 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 29 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -2064,6 +2071,166 @@ if [ "$N_SR" = "1" ]; then
   pass "Phase N: service_role reads payment intents unaffected by RLS"
 else
   fail "Phase N: service_role could not read the intent (got $N_SR)"
+fi
+
+# ===========================================================================
+# Phase O: SMS-to-intent reconciliation. Deterministic linking (never a
+# second ledger row), observe vs apply mode, ambiguity -> conflict, the
+# category lands as a review-queue suggestion and never overwrites a
+# stronger decision, and the user-facing resolution RPCs are member-gated.
+# Reuses pfe_rls (USER_A/USER_B/WORKSPACE_A, account d1).
+# ===========================================================================
+echo "=== Phase O: SMS reconciliation ==="
+
+# Helper: insert an outgoing RWF success transaction that matches a given
+# msisdn/amount, at `now()`, in WORKSPACE_A on account d1.
+O_MK_TXN() {
+  # $1 = txn uuid, $2 = counterparty ref (phone), $3 = amount, [$4 = category_source, $5 = decision_status, $6 = category]
+  local cat_sql="null"
+  local src_sql="null"
+  local ds="${5:-uncategorized}"
+  [ -n "${6:-}" ] && cat_sql="'$6'"
+  [ -n "${4:-}" ] && src_sql="'$4'"
+  psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+    set role service_role;
+    with m as (
+      insert into public.momo_messages (id, raw_message, processing_status)
+      values (gen_random_uuid(), 'seed-O', 'processed')
+      returning id
+    )
+    insert into public.transactions
+      (id, momo_message_id, account_id, workspace_id, source, transaction_type, direction, status,
+       currency, amount_rwf, fee_rwf, counterparty_reference, occurred_at, parser_version,
+       category, category_source, category_decision_status)
+    select '$1', m.id, '00000000-0000-0000-0000-0000000000d1', '$WORKSPACE_A', 'mtn_momo', 'send_money', 'out', 'success',
+           'RWF', $3, 0, '$2', now(), 'test', $cat_sql, $src_sql, '$ds'
+    from m;
+  " >/dev/null
+}
+
+# --- apply mode: a single deterministic match links + verifies + suggests a category
+O_INTENT1="$(as_user "$USER_A" "select (public.create_payment_intent('{\"workspace_id\":\"$WORKSPACE_A\",\"idempotency_key\":\"O-1\",\"payment_type\":\"pay_person\",\"amount_minor\":5000,\"recipient_kind\":\"phone\",\"recipient_name\":\"Mum\",\"recipient_msisdn_normalized\":\"250788111333\",\"category\":\"Transport\"}'::jsonb)->>'id');")"
+as_user "$USER_A" "select public.transition_payment_intent('$O_INTENT1', 'initiated', null, '{}'::jsonb);" >/dev/null
+as_user "$USER_A" "select public.transition_payment_intent('$O_INTENT1', 'awaiting_verification', null, '{}'::jsonb);" >/dev/null
+O_TXN1="00000000-0000-0000-0000-00000000f001"
+O_MK_TXN "$O_TXN1" "0788111333" 5000
+O_R1="$(psql -d pfe_rls -t -A -c "set role service_role; select public.reconcile_transaction_with_payment_intents('$O_TXN1', 'apply');" | tail -1)"
+O_STATE1="$(psql -d pfe_rls -t -A -c "select state || '|' || (verified_at is not null)::text || '|' || coalesce(linked_transaction_id::text,'null') from public.payment_intents where id = '$O_INTENT1';")"
+O_CAT1="$(psql -d pfe_rls -t -A -c "select coalesce(suggested_category,'-') || '|' || category_decision_status from public.transactions where id = '$O_TXN1';")"
+O_HIST1="$(psql -d pfe_rls -t -A -c "select count(*) from public.transaction_category_history where transaction_id = '$O_TXN1' and new_category_source = 'system' and new_decision_status = 'suggested';")"
+if echo "$O_R1" | grep -q '"status": "linked"' \
+   && [ "$O_STATE1" = "successful|true|$O_TXN1" ] \
+   && [ "$O_CAT1" = "Transport|suggested" ] \
+   && [ "$O_HIST1" = "1" ]; then
+  pass "Phase O: apply-mode single match links + verifies the intent and suggests its category (no ledger insert)"
+else
+  fail "Phase O: apply-mode link wrong (r=$O_R1 state=$O_STATE1 cat=$O_CAT1 hist=$O_HIST1)"
+fi
+
+# No second ledger row was created.
+O_TXN_COUNT="$(psql -d pfe_rls -t -A -c "select count(*) from public.transactions where workspace_id = '$WORKSPACE_A' and counterparty_reference = '0788111333';")"
+if [ "$O_TXN_COUNT" = "1" ]; then
+  pass "Phase O: reconciliation never creates a second transaction row"
+else
+  fail "Phase O: expected exactly 1 matching transaction, found $O_TXN_COUNT"
+fi
+
+# Re-running on the same transaction is a no-op.
+O_R1B="$(psql -d pfe_rls -t -A -c "set role service_role; select public.reconcile_transaction_with_payment_intents('$O_TXN1', 'apply');" | tail -1)"
+O_RECON_COUNT="$(psql -d pfe_rls -t -A -c "select count(*) from public.payment_reconciliations where transaction_id = '$O_TXN1' and status = 'linked';")"
+if echo "$O_R1B" | grep -q 'already_linked' && [ "$O_RECON_COUNT" = "1" ]; then
+  pass "Phase O: re-reconciling a linked transaction is a no-op (idempotent)"
+else
+  fail "Phase O: second reconcile call was not a no-op (r=$O_R1B count=$O_RECON_COUNT)"
+fi
+
+# --- observe mode: records the candidate but does not mutate the intent
+O_INTENT2="$(as_user "$USER_A" "select (public.create_payment_intent('{\"workspace_id\":\"$WORKSPACE_A\",\"idempotency_key\":\"O-2\",\"payment_type\":\"pay_person\",\"amount_minor\":7000,\"recipient_kind\":\"phone\",\"recipient_name\":\"Bro\",\"recipient_msisdn_normalized\":\"250788222444\"}'::jsonb)->>'id');")"
+as_user "$USER_A" "select public.transition_payment_intent('$O_INTENT2', 'initiated', null, '{}'::jsonb);" >/dev/null
+as_user "$USER_A" "select public.transition_payment_intent('$O_INTENT2', 'awaiting_verification', null, '{}'::jsonb);" >/dev/null
+O_TXN2="00000000-0000-0000-0000-00000000f002"
+O_MK_TXN "$O_TXN2" "0788222444" 7000
+psql -d pfe_rls -t -A -c "set role service_role; select public.reconcile_transaction_with_payment_intents('$O_TXN2', 'observe');" >/dev/null
+O_OBS="$(psql -d pfe_rls -t -A -c "select r.status || '|' || (r.applied_at is null)::text || '|' || i.state from public.payment_reconciliations r join public.payment_intents i on i.id = r.payment_intent_id where r.transaction_id = '$O_TXN2';")"
+if [ "$O_OBS" = "linked|true|awaiting_verification" ]; then
+  pass "Phase O: observe mode records a linked candidate (applied_at NULL) without changing the intent"
+else
+  fail "Phase O: observe mode mutated state or wrong row ($O_OBS)"
+fi
+
+# apply_payment_reconciliation promotes the observed row.
+O_RECON2="$(psql -d pfe_rls -t -A -c "select id from public.payment_reconciliations where transaction_id = '$O_TXN2';")"
+as_user "$USER_A" "select public.apply_payment_reconciliation('$O_RECON2');" >/dev/null
+O_OBS2="$(psql -d pfe_rls -t -A -c "select (r.applied_at is not null)::text || '|' || i.state || '|' || (i.verified_at is not null)::text from public.payment_reconciliations r join public.payment_intents i on i.id = r.payment_intent_id where r.id = '$O_RECON2';")"
+if [ "$O_OBS2" = "true|successful|true" ]; then
+  pass "Phase O: apply_payment_reconciliation promotes an observed match to applied + verified"
+else
+  fail "Phase O: apply_payment_reconciliation did not promote correctly ($O_OBS2)"
+fi
+
+# A non-member cannot apply/reject another workspace's reconciliation.
+if as_user "$USER_B" "select public.apply_payment_reconciliation('$O_RECON2');" >/dev/null 2>$ARTIFACT_DIR/pfe_o_auth.log; then
+  fail "Phase O: User B applied User A's reconciliation - authorization gap"
+else
+  pass "Phase O: apply_payment_reconciliation refuses a non-member"
+fi
+rm -f $ARTIFACT_DIR/pfe_o_auth.log
+
+# authenticated cannot EXECUTE the service_role-only matchers.
+if as_user "$USER_A" "select public.reconcile_transaction_with_payment_intents('$O_TXN1', 'apply');" >/dev/null 2>$ARTIFACT_DIR/pfe_o_exec.log; then
+  fail "Phase O: authenticated was able to call reconcile_transaction_with_payment_intents"
+else
+  pass "Phase O: reconcile_transaction_with_payment_intents is not authenticated-callable"
+fi
+rm -f $ARTIFACT_DIR/pfe_o_exec.log
+if as_user "$USER_A" "select public.system_transition_payment_intent('$O_INTENT1', 'reversed', null, '{}'::jsonb);" >/dev/null 2>$ARTIFACT_DIR/pfe_o_exec2.log; then
+  fail "Phase O: authenticated was able to call system_transition_payment_intent"
+else
+  pass "Phase O: system_transition_payment_intent is not authenticated-callable"
+fi
+rm -f $ARTIFACT_DIR/pfe_o_exec2.log
+
+# --- ambiguity -> conflict, never a guess
+O_INTENT3A="$(as_user "$USER_A" "select (public.create_payment_intent('{\"workspace_id\":\"$WORKSPACE_A\",\"idempotency_key\":\"O-3a\",\"payment_type\":\"pay_person\",\"amount_minor\":9000,\"recipient_kind\":\"phone\",\"recipient_name\":\"X\",\"recipient_msisdn_normalized\":\"250788333555\"}'::jsonb)->>'id');")"
+O_INTENT3B="$(as_user "$USER_A" "select (public.create_payment_intent('{\"workspace_id\":\"$WORKSPACE_A\",\"idempotency_key\":\"O-3b\",\"payment_type\":\"pay_person\",\"amount_minor\":9000,\"recipient_kind\":\"phone\",\"recipient_name\":\"Y\",\"recipient_msisdn_normalized\":\"250788333555\"}'::jsonb)->>'id');")"
+for iid in "$O_INTENT3A" "$O_INTENT3B"; do
+  as_user "$USER_A" "select public.transition_payment_intent('$iid', 'initiated', null, '{}'::jsonb);" >/dev/null
+  as_user "$USER_A" "select public.transition_payment_intent('$iid', 'awaiting_verification', null, '{}'::jsonb);" >/dev/null
+done
+O_TXN3="00000000-0000-0000-0000-00000000f003"
+O_MK_TXN "$O_TXN3" "0788333555" 9000
+O_R3="$(psql -d pfe_rls -t -A -c "set role service_role; select public.reconcile_transaction_with_payment_intents('$O_TXN3', 'apply');" | tail -1)"
+O_CONFLICTS="$(psql -d pfe_rls -t -A -c "select count(*) from public.payment_reconciliations where transaction_id = '$O_TXN3' and status = 'conflict';")"
+O_REQ="$(psql -d pfe_rls -t -A -c "select count(*) from public.payment_intents where id in ('$O_INTENT3A','$O_INTENT3B') and state = 'requires_reconciliation';")"
+O_NOLINK="$(psql -d pfe_rls -t -A -c "select count(*) from public.payment_reconciliations where transaction_id = '$O_TXN3' and status = 'linked';")"
+if echo "$O_R3" | grep -q '"status": "conflict"' && [ "$O_CONFLICTS" = "2" ] && [ "$O_REQ" = "2" ] && [ "$O_NOLINK" = "0" ]; then
+  pass "Phase O: two candidate intents -> conflict rows + both requires_reconciliation, nothing linked"
+else
+  fail "Phase O: ambiguity not handled as a conflict (r=$O_R3 conflicts=$O_CONFLICTS req=$O_REQ linked=$O_NOLINK)"
+fi
+
+# --- a stronger existing category decision is never overwritten
+O_INTENT4="$(as_user "$USER_A" "select (public.create_payment_intent('{\"workspace_id\":\"$WORKSPACE_A\",\"idempotency_key\":\"O-4\",\"payment_type\":\"pay_person\",\"amount_minor\":4000,\"recipient_kind\":\"phone\",\"recipient_name\":\"Z\",\"recipient_msisdn_normalized\":\"250788444666\",\"category\":\"Gifts\"}'::jsonb)->>'id');")"
+as_user "$USER_A" "select public.transition_payment_intent('$O_INTENT4', 'initiated', null, '{}'::jsonb);" >/dev/null
+as_user "$USER_A" "select public.transition_payment_intent('$O_INTENT4', 'awaiting_verification', null, '{}'::jsonb);" >/dev/null
+O_TXN4="00000000-0000-0000-0000-00000000f004"
+O_MK_TXN "$O_TXN4" "0788444666" 4000 "manual" "confirmed" "Groceries"
+psql -d pfe_rls -t -A -c "set role service_role; select public.reconcile_transaction_with_payment_intents('$O_TXN4', 'apply');" >/dev/null
+O_CAT4="$(psql -d pfe_rls -t -A -c "select category || '|' || category_decision_status || '|' || coalesce(suggested_category,'-') from public.transactions where id = '$O_TXN4';")"
+if [ "$O_CAT4" = "Groceries|confirmed|-" ]; then
+  pass "Phase O: a confirmed/manual transaction category is not overwritten by reconciliation"
+else
+  fail "Phase O: reconciliation overwrote a stronger category decision ($O_CAT4)"
+fi
+
+# --- no match: wrong amount
+O_TXN5="00000000-0000-0000-0000-00000000f005"
+O_MK_TXN "$O_TXN5" "0788111333" 1234
+O_R5="$(psql -d pfe_rls -t -A -c "set role service_role; select public.reconcile_transaction_with_payment_intents('$O_TXN5', 'apply');" | tail -1)"
+if echo "$O_R5" | grep -q '"status": "no_match"'; then
+  pass "Phase O: an amount mismatch produces no match and writes nothing"
+else
+  fail "Phase O: amount mismatch was not a clean no_match ($O_R5)"
 fi
 
 echo ""

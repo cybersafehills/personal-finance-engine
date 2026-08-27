@@ -102,11 +102,34 @@ export async function getPaymentActivity(opts: {
   return ((data ?? []) as unknown as PaymentIntentRow[]).map(withLazyExpiry);
 }
 
+export type ReconciliationRow = {
+  id: string;
+  transaction_id: string;
+  match_method: "deterministic" | "manual" | "probabilistic";
+  status: "linked" | "conflict" | "rejected";
+  applied_at: string | null;
+  matched_on: Record<string, unknown>;
+  rejected_reason: string | null;
+  created_at: string;
+};
+
+export type LinkedTransactionSummary = {
+  id: string;
+  occurred_at: string;
+  amount_rwf: number;
+  fee_rwf: number;
+  counterparty_name: string | null;
+  external_transaction_id: string | null;
+  category: string | null;
+};
+
 export async function getPaymentIntent(id: string): Promise<
   | {
       intent: PaymentIntentRow;
       events: PaymentEventRow[];
       attempts: PaymentAttemptRow[];
+      reconciliations: ReconciliationRow[];
+      linkedTransaction: LinkedTransactionSummary | null;
     }
   | null
 > {
@@ -116,7 +139,8 @@ export async function getPaymentIntent(id: string): Promise<
     .select(
       `${INTENT_COLUMNS},
        events:payment_events(id, event_type, from_state, to_state, actor_type, reason, created_at),
-       attempts:payment_attempts(id, attempt_no, handoff_method, capability_outcome, started_at)`,
+       attempts:payment_attempts(id, attempt_no, handoff_method, capability_outcome, started_at),
+       reconciliations:payment_reconciliations(id, transaction_id, match_method, status, applied_at, matched_on, rejected_reason, created_at)`,
     )
     .eq("id", id)
     .maybeSingle();
@@ -132,11 +156,138 @@ export async function getPaymentIntent(id: string): Promise<
   const attempts = ((row.attempts as PaymentAttemptRow[]) ?? []).sort(
     (a, b) => a.attempt_no - b.attempt_no,
   );
+  const reconciliations = ((row.reconciliations as ReconciliationRow[]) ?? []).sort(
+    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+  );
+  const intent = withLazyExpiry(row as unknown as PaymentIntentRow);
+
+  let linkedTransaction: LinkedTransactionSummary | null = null;
+  if (intent.linked_transaction_id) {
+    const { data: txn } = await supabase
+      .from("transactions")
+      .select(
+        "id, occurred_at, amount_rwf, fee_rwf, counterparty_name, external_transaction_id, category",
+      )
+      .eq("id", intent.linked_transaction_id)
+      .maybeSingle();
+    linkedTransaction = (txn as LinkedTransactionSummary | null) ?? null;
+  }
+
+  return { intent, events, attempts, reconciliations, linkedTransaction };
+}
+
+/**
+ * The workspace's open reconciliation work: observed-but-unapplied
+ * `linked` candidates, `conflict` rows, and `requires_reconciliation`
+ * intents — each with enough context to resolve.
+ */
+export async function getReconciliationQueue(): Promise<{
+  candidates: (ReconciliationRow & {
+    intent: { id: string; recipient_name: string | null; amount_minor: number; currency: string };
+    transaction: LinkedTransactionSummary | null;
+  })[];
+  requiresReconciliation: PaymentIntentRow[];
+}> {
+  const supabase = await supabaseSession();
+
+  const [reconRes, intentsRes] = await Promise.all([
+    supabase
+      .from("payment_reconciliations")
+      .select(
+        `id, transaction_id, match_method, status, applied_at, matched_on, rejected_reason, created_at,
+         intent:payment_intents(id, recipient_name, amount_minor, currency)`,
+      )
+      .in("status", ["linked", "conflict"])
+      .is("applied_at", null)
+      .order("created_at", { ascending: false })
+      .limit(100),
+    supabase
+      .from("payment_intents")
+      .select(INTENT_COLUMNS)
+      .eq("state", "requires_reconciliation")
+      .order("created_at", { ascending: false })
+      .limit(100),
+  ]);
+
+  const txnIds = Array.from(
+    new Set(((reconRes.data ?? []) as { transaction_id: string }[]).map((r) => r.transaction_id)),
+  );
+  const txnById = new Map<string, LinkedTransactionSummary>();
+  if (txnIds.length > 0) {
+    const { data: txns } = await supabase
+      .from("transactions")
+      .select(
+        "id, occurred_at, amount_rwf, fee_rwf, counterparty_name, external_transaction_id, category",
+      )
+      .in("id", txnIds);
+    for (const t of (txns ?? []) as LinkedTransactionSummary[]) txnById.set(t.id, t);
+  }
+
+  const candidates = ((reconRes.data ?? []) as Record<string, unknown>[]).map((r) => ({
+    ...(r as unknown as ReconciliationRow),
+    intent: r.intent as {
+      id: string;
+      recipient_name: string | null;
+      amount_minor: number;
+      currency: string;
+    },
+    transaction: txnById.get(r.transaction_id as string) ?? null,
+  }));
+
   return {
-    intent: withLazyExpiry(row as unknown as PaymentIntentRow),
-    events,
-    attempts,
+    candidates,
+    requiresReconciliation: (intentsRes.data ?? []) as unknown as PaymentIntentRow[],
   };
+}
+
+/** Outgoing RWF transactions in the intent's window not already linked —
+ *  the manual-link picker. */
+export async function getUnlinkedRecentTransactions(
+  intentId: string,
+): Promise<LinkedTransactionSummary[]> {
+  const supabase = await supabaseSession();
+  const { data: intent } = await supabase
+    .from("payment_intents")
+    .select("created_at, expires_at, amount_minor")
+    .eq("id", intentId)
+    .maybeSingle();
+  if (!intent) return [];
+
+  const from = new Date(new Date(intent.created_at).getTime() - 10 * 60 * 1000).toISOString();
+  const to =
+    intent.expires_at ??
+    new Date(new Date(intent.created_at).getTime() + 24 * 60 * 60 * 1000).toISOString();
+
+  const { data, error } = await supabase
+    .from("transactions")
+    .select(
+      "id, occurred_at, amount_rwf, fee_rwf, counterparty_name, external_transaction_id, category",
+    )
+    .eq("direction", "out")
+    .eq("status", "success")
+    .eq("currency", "RWF")
+    .gte("occurred_at", from)
+    .lte("occurred_at", to)
+    .order("occurred_at", { ascending: false })
+    .limit(25);
+  if (error) return [];
+  return (data ?? []) as LinkedTransactionSummary[];
+}
+
+/** For /transactions/[id]: the payment intent this transaction was
+ *  linked from, if any. */
+export async function getPaymentLinkForTransaction(
+  transactionId: string,
+): Promise<{ intentId: string; status: string } | null> {
+  const supabase = await supabaseSession();
+  const { data } = await supabase
+    .from("payment_reconciliations")
+    .select("payment_intent_id, status")
+    .eq("transaction_id", transactionId)
+    .eq("status", "linked")
+    .maybeSingle();
+  if (!data) return null;
+  return { intentId: data.payment_intent_id as string, status: data.status as string };
 }
 
 export type TrustedRecipientRow = {
