@@ -437,7 +437,7 @@ additive migration(s) → stacked PRs → migration-test block → e2e.
 
 | Phase | Master prompt | Scope | User-visible? |
 |---|---|---|---|
-| **Q** — Foundation | 1 | `kind='household'` + `create_household_workspace`; `financial_sources`, `source_space_links`, `raw_financial_events`, `can_view_source_in_space()`; nullable `transactions` provenance/attribution cols; `space_activity` / `space_audit_events` / `space_member_notification_prefs` / `workspace_categories` tables; **RLS refactor for `household`** (revert Phase C loosening for this kind); backfill+constrain migration; indexes | No |
+| **Q** — Foundation ✅ *migration written* | 1 | `kind='household'` + `create_household_workspace`; `financial_sources`, `source_space_links`, `raw_financial_events`, `can_view_source_in_space()` / `is_financial_source_visible()` / `owns_financial_source()`; nullable `transactions` provenance/attribution cols; `space_activity` / `space_audit_events` / `space_member_notification_prefs` / `workspace_categories` tables; **RLS refactor for `household`** (Phase C ledger loosening reverted for this kind via the source-visibility gate); backfill migration; indexes | No |
 | **R** — Security & authz | 2 | RBAC capability table + RPC guards; invitation-security hardening review (reuse Phase C token model); audit-write RPCs; **security test suite** (cross-Space reads, forged `workspace_id`, source peeking, post-removal access, stale invite, role escalation, AI scope, service-role bypass) before any collaboration UI ships | No |
 | **S** — Shared ledger | 3 | Household creation + onboarding; upgraded Space switcher; invites/members UI for households; per-source visibility UI ("How should this account be used?"); transaction Space allocation + `reallocate_transaction`; provenance detail view; attribution (`shared`/`member`/`split`/`unassigned`) + review-queue reasons; optional `/spaces/{id}/…` routes | Yes |
 | **T** — Financial planning | 4 | Space-aware category scope; rule `scope_type` + deterministic precedence + explainability; shared budgets (space/category/member scopes) reusing `budget-math.ts`; threshold state-transition alerts (no per-txn spam); shared goals as first-class Space resources; per-member notification prefs | Yes |
@@ -448,6 +448,33 @@ additive migration(s) → stacked PRs → migration-test block → e2e.
 Feature flag: reuse the existing flag mechanism (Phase P shipped feature
 flags). Migration compatibility must hold even with the Household UI flag
 off.
+
+### Phase Q — as built (migrations `20260910000000` + `20260911000000`)
+
+Two deviations from the plan above, both to stay non-breaking:
+
+1. **`accounts.financial_source_id` / `transactions.financial_source_id`
+   are left nullable.** The backfill populates both to completeness for
+   every row that exists today, but the app's own account-creation and
+   ingestion write paths do not set the column yet; a `NOT NULL` now
+   would break them. Phase S (account creation through the source model)
+   and Phase U (ingestion cutover) add the respective constraints once
+   every writer populates the column. A NULL is harmless for
+   personal/organization workspaces — `can_view_source_in_space()`
+   collapses to `is_workspace_member()` there.
+2. **`financial_sources_select_visible` leads with a bare
+   `owner_user_id = auth.uid()` before the `is_financial_source_visible()`
+   call.** `INSERT ... RETURNING` re-checks the SELECT policy against the
+   just-inserted row, and a STABLE SECURITY DEFINER function cannot see
+   that row mid-statement — the function-only form made every
+   `insert ... returning id` by the owner fail RLS.
+
+Migration-test coverage: `run_migration_tests.sh` gains an 11-assertion
+"Phase Q" block (household creation, source-ownership isolation, the
+"joining shares nothing" hard rule, explicit-allocation visibility, share
+forging rejection, link-pause revocation, personal-workspace regression
+guard, service_role bypass); privilege counters move to 67 tables / 114
+`authenticated` table grants / 52 `authenticated` function grants.
 
 ---
 
