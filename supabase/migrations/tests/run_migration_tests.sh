@@ -563,7 +563,16 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # payment_templates, payment_intents, payment_attempts, payment_events,
 # payment_reconciliations, payment_audit_events) - 44 tables, 43 with RLS,
 # the same one intentional gap.
-if [ "$TABLE_COUNT" = "44" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Phase P (20260909000000) adds 15 more, all RLS-enabled
+# (directory_role_grants, regulatory_authorities, service_operators,
+# payment_networks, payment_network_operators,
+# institution_network_participation, access_routes, route_supported_flows,
+# route_menu_steps, route_fees, route_limits, directory_sources,
+# directory_evidence, directory_aliases, directory_versions) - 59 tables,
+# 58 with RLS, the same one intentional gap.
+# Phase P (20260909000300) adds directory_suggestions (RLS enabled) - 60
+# tables, 59 with RLS.
+if [ "$TABLE_COUNT" = "60" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -615,11 +624,24 @@ fi
 # update, delete = 8), payment_intents / payment_attempts /
 # payment_events / payment_reconciliations / payment_audit_events (select
 # only = 5). 69 + 13 = 82.
+# Phase P (20260909000000) adds 15 more: 14 select-only grants
+# (directory_role_grants, regulatory_authorities, service_operators,
+# payment_networks, payment_network_operators,
+# institution_network_participation, access_routes, route_supported_flows,
+# route_menu_steps, route_fees, route_limits, directory_sources,
+# directory_aliases, directory_versions) plus directory_evidence
+# (select only - metadata is RLS-gated to directory.view_evidence
+# holders; the file bytes are served separately via a signed URL). = 15.
+# 82 + 15 = 97. Every directory-content table stays SELECT-only for
+# authenticated - all writes go through the SECURITY DEFINER admin RPCs.
+# Phase P (20260909000300) adds directory_suggestions (select, insert = 2)
+# - the moderation status is only ever advanced by
+# admin_resolve_directory_suggestion, so no update grant here. 97 + 2 = 99.
 AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and grantee = 'authenticated';")"
-if [ "$AUTHENTICATED_GRANT_COUNT" = "82" ]; then
-  pass "authenticated holds exactly the 82 table grants expected, no more"
+if [ "$AUTHENTICATED_GRANT_COUNT" = "99" ]; then
+  pass "authenticated holds exactly the 99 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 82 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 99 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -686,11 +708,34 @@ fi
 # apply_reconciliation_effects, reconciliation_candidate_intents,
 # reconcile_transaction_with_payment_intents, reconcile_payment_intent)
 # are `revoke ... from authenticated`. = 29 total.
+# Phase P (20260909000000) adds 18 authenticated-callable functions: the
+# authorization primitive has_directory_permission; the alias helper
+# normalize_directory_alias; the two bootstrap RPCs
+# admin_grant_directory_permission / admin_revoke_directory_permission;
+# the upserts admin_upsert_regulatory_authority /
+# admin_upsert_service_operator / admin_upsert_payment_network /
+# admin_upsert_network_operator / admin_upsert_institution_participation /
+# admin_upsert_access_route / admin_upsert_network_fee /
+# admin_upsert_network_limit / admin_upsert_directory_source /
+# admin_attach_directory_evidence / admin_detach_directory_evidence; and
+# the three state RPCs admin_set_payment_network_state /
+# admin_set_participation_state / admin_set_access_route_state. The
+# internal helpers (directory_transition_allowed,
+# directory_transition_permission, record_directory_version,
+# record_directory_audit) and the directory_aliases_set_normalized
+# trigger function are `revoke all from public` with no authenticated
+# grant - they run as owner from within a SECURITY DEFINER caller or a
+# trigger. The re-issued Phase M RPCs (admin_upsert_service_code etc.)
+# keep their existing grants (CREATE OR REPLACE preserves privileges).
+# = 47 total. Phase P (20260909000300) adds
+# admin_resolve_directory_suggestion; its
+# enforce_directory_suggestion_rate_limit trigger function is
+# `revoke all from public`. = 48 total.
 AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname = 'authenticated' where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "29" ]; then
-  pass "authenticated holds EXECUTE on exactly the 29 functions expected, no more"
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "48" ]; then
+  pass "authenticated holds EXECUTE on exactly the 48 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 29 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 48 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -2231,6 +2276,166 @@ if echo "$O_R5" | grep -q '"status": "no_match"'; then
   pass "Phase O: an amount mismatch produces no match and writes nothing"
 else
   fail "Phase O: amount mismatch was not a clean no_match ($O_R5)"
+fi
+
+# ===========================================================================
+# Phase P: payment networks, access routes, granular directory.* perms.
+# The seeded eKash network is published; its draft participation rows are
+# not visible to non-admins; has_directory_permission() gates the RPCs;
+# per-transition permissions enforce maker-checker; a PIN parameter_key in
+# a menu step is rejected; evidence metadata is RLS-gated; alias
+# normalisation dedupes; the seed is idempotent. Reuses pfe_rls.
+# ===========================================================================
+echo "=== Phase P: payment networks & directory permissions ==="
+
+P_EKASH="d0000000-0000-4000-8000-0000000000d3"
+P_PROVIDER="11111111-1111-4111-8111-111111111111"   # created in the Phase M block
+USER_PADMIN="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('dir-admin@example.com') returning id;" | head -1)"
+USER_PCREATOR="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('dir-creator@example.com') returning id;" | head -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; update public.profiles set is_platform_admin = true where id = '$USER_PADMIN';" >/dev/null
+
+# A plain user sees the published eKash network but not the draft participation.
+P_NET="$(as_user "$USER_A" "select count(*) from public.payment_networks where slug = 'ekash';")"
+P_PART="$(as_user "$USER_A" "select count(*) from public.institution_network_participation where payment_network_id = '$P_EKASH';")"
+if [ "$P_NET" = "1" ] && [ "$P_PART" = "0" ]; then
+  pass "Phase P: a non-admin sees the published eKash network but not its draft participation rows (RLS)"
+else
+  fail "Phase P: non-admin network visibility wrong (network=$P_NET participation=$P_PART, expected 1/0)"
+fi
+
+# has_directory_permission is false for a plain user, true after a grant.
+P_HASBEFORE="$(as_user "$USER_PCREATOR" "select public.has_directory_permission('directory.create');")"
+# Grant the authoring permissions (create/edit/submit) but NOT publish -
+# this is the maker-checker split the publish test below depends on.
+as_user "$USER_PADMIN" "select public.admin_grant_directory_permission('$USER_PCREATOR', 'directory.create', null);" >/dev/null
+as_user "$USER_PADMIN" "select public.admin_grant_directory_permission('$USER_PCREATOR', 'directory.edit_draft', null);" >/dev/null
+as_user "$USER_PADMIN" "select public.admin_grant_directory_permission('$USER_PCREATOR', 'directory.submit_review', null);" >/dev/null
+P_HASAFTER="$(as_user "$USER_PCREATOR" "select public.has_directory_permission('directory.create');")"
+if [ "$P_HASBEFORE" = "f" ] && [ "$P_HASAFTER" = "t" ]; then
+  pass "Phase P: has_directory_permission flips false -> true after admin_grant_directory_permission"
+else
+  fail "Phase P: permission grant did not take effect (before=$P_HASBEFORE after=$P_HASAFTER)"
+fi
+
+# A user with no directory permission cannot create a network at all.
+if as_user "$USER_B" "select public.admin_upsert_payment_network('{\"slug\":\"forged-net\",\"canonical_name\":\"x\",\"display_name_en\":\"x\",\"entity_type\":\"other\"}'::jsonb);" >/dev/null 2>$ARTIFACT_DIR/pfe_p_forge.log; then
+  fail "Phase P: a user without directory.create created a payment network"
+else
+  pass "Phase P: admin_upsert_payment_network refuses a caller without directory.create"
+fi
+rm -f $ARTIFACT_DIR/pfe_p_forge.log
+
+# An author (create/edit/submit) can draft and submit for review, but NOT publish.
+P_NEWNET="$(as_user "$USER_PCREATOR" "select public.admin_upsert_payment_network('{\"slug\":\"testnet\",\"canonical_name\":\"TestNet\",\"display_name_en\":\"TestNet\",\"entity_type\":\"other\",\"change_reason\":\"initial\"}'::jsonb);")"
+as_user "$USER_PCREATOR" "select public.admin_set_payment_network_state('$P_NEWNET', 'pending_review', null);" >/dev/null
+if as_user "$USER_PCREATOR" "select public.admin_set_payment_network_state('$P_NEWNET', 'published', null);" >/dev/null 2>$ARTIFACT_DIR/pfe_p_pub.log; then
+  fail "Phase P: an author without directory.publish published a network (maker-checker not enforced)"
+else
+  pass "Phase P: publishing requires directory.publish, not just the authoring permissions (maker-checker)"
+fi
+rm -f $ARTIFACT_DIR/pfe_p_pub.log
+
+# The state machine rejects draft -> published directly (even for a platform admin).
+P_NEWNET2="$(as_user "$USER_PADMIN" "select public.admin_upsert_payment_network('{\"slug\":\"testnet2\",\"canonical_name\":\"TestNet2\",\"display_name_en\":\"TestNet2\",\"entity_type\":\"other\"}'::jsonb);")"
+if as_user "$USER_PADMIN" "select public.admin_set_payment_network_state('$P_NEWNET2', 'published', 'skip');" >/dev/null 2>$ARTIFACT_DIR/pfe_p_sm.log; then
+  fail "Phase P: draft -> published was allowed, skipping pending_review"
+else
+  pass "Phase P: the network state machine rejects draft -> published"
+fi
+rm -f $ARTIFACT_DIR/pfe_p_sm.log
+
+# draft -> pending_review -> published works for a platform admin and writes version snapshots.
+as_user "$USER_PADMIN" "select public.admin_set_payment_network_state('$P_NEWNET2', 'pending_review', null);" >/dev/null
+as_user "$USER_PADMIN" "select public.admin_set_payment_network_state('$P_NEWNET2', 'published', null);" >/dev/null
+P_NOWSTATE="$(psql -d pfe_rls -t -A -c "select state from public.payment_networks where id = '$P_NEWNET2';")"
+P_VERSIONS="$(psql -d pfe_rls -t -A -c "select count(*) from public.directory_versions where subject_type = 'payment_network' and subject_id = '$P_NEWNET2';")"
+if [ "$P_NOWSTATE" = "published" ] && [ "$P_VERSIONS" -ge "2" ]; then
+  pass "Phase P: draft -> pending_review -> published succeeds and records directory_versions snapshots"
+else
+  fail "Phase P: staged network publish failed (state=$P_NOWSTATE versions=$P_VERSIONS)"
+fi
+
+# A menu step whose parameter_key names a secret is rejected outright.
+if as_user "$USER_PADMIN" "select public.admin_upsert_access_route('{\"slug\":\"bad-route\",\"provider_id\":\"$P_PROVIDER\",\"channel\":\"ussd\",\"display_name_en\":\"Bad route\",\"approved_entry_point_en\":\"*000#\",\"menu_steps\":[{\"instruction_en\":\"Enter your PIN\",\"parameter_key\":\"pin\"}]}'::jsonb);" >/dev/null 2>$ARTIFACT_DIR/pfe_p_pin.log; then
+  fail "Phase P: an access-route menu step with parameter_key='pin' was accepted (ADR 0001 violation)"
+else
+  pass "Phase P: admin_upsert_access_route rejects a PIN/OTP/secret parameter_key in a menu step"
+fi
+rm -f $ARTIFACT_DIR/pfe_p_pin.log
+
+# Evidence metadata is visible to a directory.view_evidence holder only.
+P_SRC="$(as_user "$USER_PADMIN" "select public.admin_upsert_directory_source('{\"organization\":\"Test Bank\",\"classification\":\"official_financial_institution\"}'::jsonb);")"
+as_user "$USER_PADMIN" "select public.admin_attach_directory_evidence(('{\"source_id\":\"'||'$P_SRC'||'\",\"subject_type\":\"payment_network\",\"subject_id\":\"$P_EKASH\",\"internal_note\":\"seen it\"}')::jsonb);" >/dev/null
+P_EV_PLAIN="$(as_user "$USER_A" "select count(*) from public.directory_evidence;")"
+P_EV_ADMIN="$(as_user "$USER_PADMIN" "select count(*) from public.directory_evidence;")"
+if [ "$P_EV_PLAIN" = "0" ] && [ "$P_EV_ADMIN" -ge "1" ]; then
+  pass "Phase P: directory_evidence metadata is hidden from a user without directory.view_evidence"
+else
+  fail "Phase P: directory_evidence visibility wrong (plain=$P_EV_PLAIN admin=$P_EV_ADMIN)"
+fi
+
+# Alias normalisation + seed dedupe.
+P_NORM="$(psql -d pfe_rls -t -A -c "select public.normalize_directory_alias('e-Kash!');")"
+P_ALIASES="$(psql -d pfe_rls -t -A -c "select count(*) from public.directory_aliases where subject_type = 'payment_network' and subject_id = '$P_EKASH';")"
+if [ "$P_NORM" = "ekash" ] && [ "$P_ALIASES" = "3" ]; then
+  pass "Phase P: alias normalisation collapses 'e-Kash!' -> 'ekash' and the seed dedupes to 3 distinct aliases"
+else
+  fail "Phase P: alias handling wrong (normalised='$P_NORM' distinct aliases=$P_ALIASES, expected ekash/3)"
+fi
+
+# The Phase P seed is idempotent.
+P_SEED_FILE="$MIGRATIONS_DIR/20260909000100_phase_p_payment_networks_seed.sql"
+P_SEED_BEFORE="$(psql -d pfe_rls -t -A -c "select count(*) from public.payment_networks;")"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -f "$P_SEED_FILE" >/dev/null 2>&1
+P_SEED_AFTER="$(psql -d pfe_rls -t -A -c "select count(*) from public.payment_networks;")"
+if [ "$P_SEED_BEFORE" = "$P_SEED_AFTER" ]; then
+  pass "Phase P: re-running the payment-network seed inserts nothing new (idempotent)"
+else
+  fail "Phase P: seed migration is not idempotent ($P_SEED_BEFORE -> $P_SEED_AFTER payment networks)"
+fi
+
+# --- directory_suggestions (P4): moderation-only, rate-limited, reporter-scoped.
+S_R1="$(as_user "$USER_B" "insert into public.directory_suggestions (suggester_user_id, suggestion_type, body) values ('$USER_B', 'new_service', 'add code X') returning id;")"
+if [ -n "$S_R1" ]; then
+  pass "Phase P: a user can submit a directory suggestion"
+else
+  fail "Phase P: directory_suggestions insert failed for the suggester"
+fi
+
+S_RL_OK=1
+for i in 2 3 4 5; do
+  as_user "$USER_B" "insert into public.directory_suggestions (suggester_user_id, suggestion_type, body) values ('$USER_B', 'other', 'more $i');" >/dev/null 2>&1 || S_RL_OK=0
+done
+if as_user "$USER_B" "insert into public.directory_suggestions (suggester_user_id, suggestion_type, body) values ('$USER_B', 'other', 'sixth');" >/dev/null 2>$ARTIFACT_DIR/pfe_p_sugg_rl.log; then
+  fail "Phase P: a 6th open suggestion in an hour was accepted - rate limit not enforced"
+elif [ "$S_RL_OK" = "1" ]; then
+  pass "Phase P: directory_suggestions insert is rate-limited to 5 open per user per hour"
+else
+  fail "Phase P: one of the first 5 suggestions was unexpectedly rejected"
+fi
+rm -f $ARTIFACT_DIR/pfe_p_sugg_rl.log
+
+S_SEE_A="$(as_user "$USER_A" "select count(*) from public.directory_suggestions;")"
+if [ "$S_SEE_A" = "0" ]; then
+  pass "Phase P: a user cannot see another user's directory suggestions (RLS)"
+else
+  fail "Phase P: directory_suggestions are not reporter-scoped (User A sees $S_SEE_A)"
+fi
+
+if as_user "$USER_B" "select public.admin_resolve_directory_suggestion('$S_R1', 'accepted', 'ok', null, null);" >/dev/null 2>$ARTIFACT_DIR/pfe_p_sugg_res.log; then
+  fail "Phase P: a non-admin resolved a directory suggestion - authorization gap"
+else
+  pass "Phase P: admin_resolve_directory_suggestion refuses a caller without directory.resolve_reports"
+fi
+rm -f $ARTIFACT_DIR/pfe_p_sugg_res.log
+
+as_user "$USER_PADMIN" "select public.admin_resolve_directory_suggestion('$S_R1', 'accepted', 'linked to a new draft', null, null);" >/dev/null
+S_STATUS="$(psql -d pfe_rls -t -A -c "select status from public.directory_suggestions where id = '$S_R1';")"
+S_AUDIT="$(psql -d pfe_rls -t -A -c "select count(*) from public.service_directory_audit_events where subject_type = 'directory_suggestion' and subject_id = '$S_R1';")"
+if [ "$S_STATUS" = "accepted" ] && [ "$S_AUDIT" = "1" ]; then
+  pass "Phase P: an admin resolves a suggestion and it writes an audit event (never an auto-publish)"
+else
+  fail "Phase P: suggestion resolution wrong (status=$S_STATUS audit=$S_AUDIT)"
 fi
 
 echo ""

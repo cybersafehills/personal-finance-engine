@@ -317,6 +317,161 @@ Idempotent: a second reconcile call for the same transaction is a no-op
 lets the user link the right ledger row directly (`match_method='manual'`,
 applied immediately).
 
+## Phase P — Payment networks, access routes & directory permissions
+
+Extends the Phase 1 directory to represent an **interoperable payment
+network** (eKash) and adds a **granular `directory.*` permission system**.
+See `docs/pay-services-phase-p-design.md` and
+`docs/adr/0004-payment-networks-and-directory-permissions.md`. Delivered
+as four staged PRs; **PR 1 (schema + permissions + RPCs + seed) is the
+DB foundation — no UI yet.**
+
+### Where each piece lives (P1 — schema)
+
+| Concern | Location |
+|---|---|
+| Schema, RLS, `has_directory_permission()`, admin RPCs | `supabase/migrations/20260909000000_phase_p_payment_networks.sql` |
+| Verified eKash network-level seed (+ 2 draft institution examples) | `supabase/migrations/20260909000100_phase_p_payment_networks_seed.sql` |
+| Migration/RLS/permission/state-machine tests | `run_migration_tests.sh` ("Phase P" block) |
+
+### Where each piece lives (P2 — admin UI)
+
+| Concern | Location |
+|---|---|
+| App-side permission mirror (`getDirectoryAccess` / `assertDirectoryPermission`) | `web/lib/pay/directory-perms.ts` (+ client-safe `directory-permission-list.ts`) |
+| Admin reads (dashboard, lists, edit detail, evidence, versions) | `web/lib/directory/admin-queries.ts` |
+| Grant-management reads (needs `auth.users` → service role, platform-admin only) | `web/lib/directory/permissions-admin.ts` |
+| Server actions wrapping every RPC | `web/app/admin/directory/actions.ts` |
+| Directory Management dashboard + queues | `web/app/admin/directory/page.tsx` |
+| Payment Networks (list / new / edit + operators + network fees/limits + aliases + evidence + versions) | `web/app/admin/directory/networks/**`, `web/components/directory/PaymentNetworkForm.tsx`, `NetworkExtrasPanel.tsx` |
+| Institutions & Providers + participation (list / new / edit) | `web/app/admin/directory/institutions/**`, `web/components/directory/ParticipationForm.tsx` |
+| Access Routes (list / new / edit + flows + menu steps + fees + limits) | `web/app/admin/directory/routes/**`, `web/components/directory/AccessRouteForm.tsx` |
+| Sources & Authorities (regulators, operators, verification sources) | `web/app/admin/directory/sources/page.tsx`, `web/components/directory/ReferenceEntityForms.tsx` |
+| Verification evidence panel (attach/detach, private) | `web/components/directory/EvidencePanel.tsx` |
+| Evidence file download (signed URL, re-checks `directory.view_evidence`) | `web/app/api/admin/directory/evidence/[id]/route.ts` |
+| `directory.*` grant admin (platform-admin only) | `web/app/admin/directory/permissions/page.tsx`, `web/components/directory/PermissionGrantsPanel.tsx` |
+| Shared publication state control | `web/components/directory/DirectoryStateControls.tsx` |
+| UI authorization-gate e2e | `web/e2e/admin-directory.spec.ts` |
+
+Reached at **`/admin/directory`** (linked from the Phase M `/admin/ussd`
+page). A holder of any `directory.*` grant — or a platform admin — sees
+the read-only surface; each action button is shown only when the caller
+holds the matching permission, and the RPC re-checks server-side. RPC
+behaviour (state machine, PIN-parameter rejection, evidence visibility,
+maker–checker) is covered by the `run_migration_tests.sh` "Phase P"
+block; the Playwright spec only guards the UI gate (the e2e user is not
+an admin), matching how `/admin/ussd` is covered.
+
+### Where each piece lives (P3 — public eKash experience)
+
+| Concern | Location |
+|---|---|
+| Route favourites / recent / reports on an `access_route` (not just a `service_code`) | `supabase/migrations/20260909000200_phase_p_route_favourites.sql` |
+| RLS-scoped public reads (network overview, route finder, route result, network search by alias) | `web/lib/directory/public-queries.ts` (+ client-safe `public-types.ts`) |
+| Fee / limit phrasing (`none` / `unknown` / `varies by institution` / `published maximum`) | `web/lib/directory/format.ts` |
+| Per-user actions (favourite / usage / report a route) | `web/app/pay/networks/actions.ts` |
+| Network overview page | `web/app/pay/networks/[slug]/page.tsx`, `web/components/directory/public/NetworkOverview.tsx` |
+| Route finder (guided, URL-driven) + results | `web/app/pay/networks/[slug]/routes/page.tsx`, `web/components/directory/public/RouteFinder.tsx` |
+| Route result (verified code / entry point, ordered steps, fees, limits, verification source, copy/dial, save, report) | `web/app/pay/networks/[slug]/routes/[routeId]/page.tsx`, `web/components/directory/public/RouteResultPanel.tsx` |
+| Directory search surfaces the network (canonical + `eCash` / `RSwitch` aliases) | `web/app/pay/ussd/page.tsx` (new "Payment networks" section) |
+| UI chrome strings | `web/lib/ussd/messages.ts` (`network` block) |
+| e2e | `web/e2e/pay-networks.spec.ts` |
+
+The route result reuses the Phase 1 capability layer: a linked
+**non-parameterised** USSD code gets **Copy** + **Open phone dialer**
+(mobile) or **Copy** + written steps (desktop); a **parameterised** code
+or an approved entry-point label is shown as guidance to complete on the
+user's own phone — never auto-dialled, never with a PIN. When no verified
+route exists for the chosen combination the finder shows an honest empty
+state ("OneLedger hasn't verified… we won't guess") rather than inventing
+instructions.
+
+### Where each piece lives (P4 — suggestions, jobs, flags)
+
+| Concern | Location |
+|---|---|
+| `directory_suggestions` table + rate-limit trigger + `admin_resolve_directory_suggestion` RPC | `supabase/migrations/20260909000300_phase_p_directory_suggestions.sql` |
+| Migration tests | `run_migration_tests.sh` "Phase P" block (suggestion cases; counters 97→99 grants / 47→48 fns / 59→60 RLS tables) |
+| User suggestion intake (`/pay/suggest`) | `web/app/pay/suggest/**`, `web/components/directory/SuggestForm.tsx` |
+| Moderation queue + repeated-report aggregation | `web/app/admin/directory/suggestions/page.tsx`, `web/components/directory/SuggestionModerationPanel.tsx`, `web/lib/directory/suggestions.ts` |
+| Verification-freshness sweep (read-only — never unpublishes) | `web/app/api/cron/directory-verification-sweep/route.ts`; pg_cron activation `supabase/scheduling/activate_directory_verification_sweep.sql` (manual, deferred) |
+| Privacy-conscious event sink (PII-stripping, no provider wired) | `web/lib/directory/analytics.ts` (+ `_test.ts`) |
+| Feature flags | `web/lib/pay/gate.ts` — `PAYMENT_NETWORKS_ENABLED`, `DIRECTORY_ADMIN_ENABLED` (on unless `"false"`), `DIRECTORY_SUGGESTIONS_ENABLED` (**opt-in**, off unless `"true"`) |
+
+**Suggestions never auto-publish.** A submission is a `directory_suggestions`
+row (rate-limited to ≤5 open per user per rolling hour, reporter-scoped
+RLS, a cheap client + server guard against PIN/OTP/account numbers in the
+body). Its status is only ever advanced by
+`admin_resolve_directory_suggestion` (`directory.resolve_reports`-gated),
+which records who/when/why, can link the record + version it fed into,
+and writes an audit event — it publishes nothing itself. Repeated reports
+are surfaced as a **visibility signal** (count of open reports per entry),
+explicitly *not* treated as verification.
+
+**The sweep is read-only.** `/api/cron/directory-verification-sweep`
+counts review-due published entries + entries with ≥3 unresolved reports,
+writes one `directory.verification_sweep` audit row when there's a
+signal, and returns the digest. It **never unpublishes** — the admin
+decides. Not yet scheduled (same manual pg_cron pattern as the other
+cron routes). Cache refresh after a publication-state change is handled
+inline by the admin actions' `revalidatePath` calls.
+
+**Analytics.** No analytics provider is wired in this codebase;
+`service_recent_usage` (schema-constrained to no PII) is the durable
+code/route usage store. `lib/directory/analytics.ts` is the single sink a
+provider would attach to, and it hard-strips forbidden keys
+(phone/account/meter/merchant/amount/reference/pin/otp/…) and
+identifier-shaped string values before anything could leave the process
+(`analytics_test.ts` covers the redaction). Wired at directory search and
+route-finder-no-result (server) and suggestion-submitted (action).
+
+### Data model (P1)
+
+`payment_networks` (own 6-state publication lifecycle), `regulatory_authorities`
+("regulated by"), `service_operators` + `payment_network_operators`
+(versioned "operated by"), `institution_network_participation` (versioned,
+per-institution, independently verified), `access_routes` (institution-
+specific, channel-typed, may reference a `service_codes` USSD entry) with
+`route_supported_flows` / `route_menu_steps` / `route_fees` / `route_limits`
+(fees & limits carry a `scope = network | institution`; institution rows
+override network rows in the read layer; `fee_type` distinguishes
+`none` / `unknown` / `varies_by_institution` / `published_maximum`),
+`directory_sources` + `directory_evidence` (private `directory-evidence`
+Storage bucket, no `authenticated` file-byte access — signed URL only),
+`directory_aliases` (search-normalised alternate spellings),
+`directory_versions` (generic append-only history), `directory_role_grants`
+(the 14 `directory.*` permissions).
+
+### Permissions & maker–checker (P1)
+
+`has_directory_permission(perm)` is the authorization primitive for every
+Phase P RLS policy and admin RPC. **`is_platform_admin()` implies all 14
+`directory.*` permissions** (Platform Owner fallback) — so the current
+single-operator setup, the Phase M seed, and the Phase M tests are
+behaviourally unchanged. The state-transition RPCs check a **different**
+permission per transition (`draft→pending_review` = `directory.submit_review`;
+`pending_review→published` = `directory.review` **and** `directory.publish`),
+so narrowing grants later enforces maker–checker with no schema change.
+The Phase M RPCs are re-issued with `has_directory_permission()` guards.
+
+### Seed & the verification gap (P1)
+
+The eKash **network-level** record is seeded `state='published'`,
+`verified_at` set, with provenance (`official_source_label =
+'RSwitch Ltd - official system-operator publication'`) — canonical name,
+`entity_type='interoperable_network'`, BNR as regulator, RSwitch as
+current system operator, the RWF 20 **published-maximum** fee
+(`route_fees.fee_type='published_maximum'`), the RWF 10,000,000
+**published-maximum** per-transaction capacity
+(`route_limits.is_published_maximum`), the 14 July 2026 full-
+interoperability date, and `eKash` / `eCash` / `RSwitch` aliases.
+**No `access_routes` or `route_menu_steps` are seeded** — the RSwitch
+notice contains no bank USSD codes or menu option numbers, and the brief
+(§5) forbids inventing them; they are added per institution with separate
+verified evidence. Bank of Kigali and MTN Rwanda participation rows are
+seeded `state='draft'`, `verified_at IS NULL` purely to give the P2/P3
+UI realistic "not yet verified" rows.
+
 ## Support troubleshooting
 
 - **"Dialing isn't available on this device."** Expected on desktop and

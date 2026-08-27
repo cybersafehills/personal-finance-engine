@@ -44,6 +44,13 @@ export default async function AdminUssdPage() {
         }
       />
 
+      <p className="mb-4 text-sm text-text-muted">
+        Payment networks, institutions, and access routes:{" "}
+        <Link href="/admin/directory" className="font-medium text-accent">
+          Directory Management
+        </Link>
+      </p>
+
       <section className="mb-6">
         <h2 className="mb-2 text-sm font-semibold text-text-secondary">{t.queueTitle}</h2>
         <div className="grid gap-2 sm:grid-cols-3">

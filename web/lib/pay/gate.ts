@@ -43,6 +43,57 @@ export function isUssdDirectoryEnabled(workspaceId: string | null): boolean {
   );
 }
 
+// --- Phase P: payment networks + directory admin + suggestions -----------
+//
+//   PAYMENT_NETWORKS_ENABLED    - the public eKash network pages + route
+//                                 finder + route result (/pay/networks/**)
+//                                 and their favourite/report actions.
+//                                 On unless exactly "false".
+//   DIRECTORY_ADMIN_ENABLED     - the /admin/directory surface + every
+//                                 directory admin RPC action wrapper.
+//                                 On unless exactly "false".
+//   DIRECTORY_SUGGESTIONS_ENABLED - user "suggest a code / route" intake.
+//                                 OFF unless exactly "true" (opt-in - it
+//                                 ships behind moderation tooling being
+//                                 operational, master prompt rollout
+//                                 step 6, same convention as
+//                                 SMS_RECONCILIATION_ENABLED).
+
+export function isPaymentNetworksEnabled(workspaceId: string | null): boolean {
+  return (
+    isUssdDirectoryEnabled(workspaceId) && envEnabled("PAYMENT_NETWORKS_ENABLED")
+  );
+}
+
+export function isDirectoryAdminEnabled(workspaceId: string | null): boolean {
+  return isPayServicesEnabled(workspaceId) && envEnabled("DIRECTORY_ADMIN_ENABLED");
+}
+
+export function isDirectorySuggestionsEnabled(workspaceId: string | null): boolean {
+  return (
+    isUssdDirectoryEnabled(workspaceId) &&
+    process.env.DIRECTORY_SUGGESTIONS_ENABLED === "true"
+  );
+}
+
+export function assertPaymentNetworksEnabled(workspaceId: string | null): void {
+  if (!isPaymentNetworksEnabled(workspaceId)) {
+    throw new FeatureDisabledError("payment_networks");
+  }
+}
+
+export function assertDirectoryAdminEnabled(workspaceId: string | null): void {
+  if (!isDirectoryAdminEnabled(workspaceId)) {
+    throw new FeatureDisabledError("directory_admin");
+  }
+}
+
+export function assertDirectorySuggestionsEnabled(workspaceId: string | null): void {
+  if (!isDirectorySuggestionsEnabled(workspaceId)) {
+    throw new FeatureDisabledError("directory_suggestions");
+  }
+}
+
 // --- Phase 2a: Assisted Quick Pay -----------------------------------------
 
 export function isAssistedPayEnabled(workspaceId: string | null): boolean {

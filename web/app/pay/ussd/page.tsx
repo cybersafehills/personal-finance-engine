@@ -1,5 +1,7 @@
+import Link from "next/link";
 import { PageHeader } from "../../../components/PageHeader";
 import { EmptyState } from "../../../components/EmptyState";
+import { Badge } from "../../../components/Badge";
 import { DirectoryControls } from "../../../components/ussd/DirectoryControls";
 import { ServiceCodeRow } from "../../../components/ussd/ServiceCodeRow";
 import { getActiveWorkspaceId } from "../../../lib/queries";
@@ -12,6 +14,11 @@ import {
   getRecentServices,
   getServiceDirectory,
 } from "../../../lib/ussd/queries";
+import {
+  getPublishedNetworks,
+  searchPaymentNetworks,
+} from "../../../lib/directory/public-queries";
+import { trackDirectoryEvent } from "../../../lib/directory/analytics";
 
 export const dynamic = "force-dynamic";
 
@@ -41,19 +48,46 @@ export default async function UssdDirectoryPage({
   const providerSlug = typeof sp.provider === "string" ? sp.provider : undefined;
   const filtered = Boolean(query || category || providerSlug);
 
-  const [codes, providers, favouriteIds, favourites, recent] = await Promise.all([
+  const [codes, providers, favouriteIds, favourites, recent, networks] = await Promise.all([
     getServiceDirectory({ query, category, providerSlug }),
     getActiveProviders(),
     getFavouriteCodeIds(),
     getFavourites(),
     getRecentServices(6),
+    query ? searchPaymentNetworks(query) : getPublishedNetworks(),
   ]);
+
+  if (query) {
+    trackDirectoryEvent("directory_search", {
+      q: query,
+      results: codes.length + networks.length,
+    });
+  }
 
   return (
     <div>
       <PageHeader title={t.title} subtitle={t.subtitle} backHref="/" backLabel="Home" />
 
       <DirectoryControls providers={providers} />
+
+      {networks.length > 0 && (
+        <section className="mb-5">
+          <h2 className="mb-1 text-sm font-semibold text-text-secondary">Payment networks</h2>
+          <ul>
+            {networks.map((n) => (
+              <li key={n.slug} className="border-b border-border-subtle py-3 last:border-b-0">
+                <Link href={`/pay/networks/${n.slug}`} className="flex items-center gap-2">
+                  <span className="font-medium text-text-primary">{n.canonical_name}</span>
+                  <Badge variant="neutral">network</Badge>
+                </Link>
+                <p className="mt-0.5 text-xs text-text-muted">
+                  Interoperable transfers between banks and mobile wallets — find a verified route.
+                </p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {!filtered && favourites.length > 0 && (
         <section className="mb-5">
