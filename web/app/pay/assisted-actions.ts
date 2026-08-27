@@ -3,13 +3,16 @@
 import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { supabaseSession } from "../../lib/supabase-session-server";
+import { supabaseServer } from "../../lib/supabase-server";
 import { getActiveWorkspaceId } from "../../lib/queries";
 import {
   assertAssistedPayEnabled,
   FeatureDisabledError,
   isPaymentTemplatesEnabled,
+  isSmsReconciliationEnabled,
   isTrustedRecipientsEnabled,
   paymentIntentTtlHours,
+  smsReconciliationMode,
 } from "../../lib/pay/gate";
 import { normalizeRwandaMsisdn, maskMsisdn, guessProvider } from "../../lib/pay/phone";
 import { isSessionFresh } from "../../lib/pay/intents";
@@ -253,7 +256,110 @@ export async function recordHandoff(
       p_evidence: {},
     });
 
+    // Phase 2b: the payment SMS may already have been ingested (the user
+    // dialed, paid, and came back before we got here). Best-effort,
+    // opt-in, non-fatal. Uses the service-role client because the
+    // matcher RPC is service_role-only (system actor) - the single,
+    // isolated place an assisted-pay action reaches for it.
+    if (isSmsReconciliationEnabled(workspaceId)) {
+      try {
+        await supabaseServer().rpc("reconcile_payment_intent", {
+          p_intent_id: id,
+          p_mode: smsReconciliationMode(),
+        });
+      } catch {
+        /* non-fatal */
+      }
+    }
+
     revalidatePath(`/pay/${id}`);
+    revalidatePath("/pay/activity");
+    return { ok: true };
+  } catch (err) {
+    return mapErr(err);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2b: reconciliation resolution
+// ---------------------------------------------------------------------------
+
+export async function applyReconciliation(reconciliationId: string): Promise<PayResult> {
+  try {
+    const { supabase, workspaceId } = await ctx();
+    assertAssistedPayEnabled(workspaceId);
+    const { error } = await supabase.rpc("apply_payment_reconciliation", {
+      p_id: reconciliationId,
+    });
+    if (error) {
+      if (/not_authorized/i.test(error.message)) {
+        return { ok: false, error: "You can't apply this match." };
+      }
+      if (/not_linkable/i.test(error.message)) {
+        return { ok: false, error: "This match can't be applied from its current state." };
+      }
+      return { ok: false, error: "Could not apply the match." };
+    }
+    revalidatePath("/pay/reconciliation");
+    revalidatePath("/pay/activity");
+    return { ok: true };
+  } catch (err) {
+    return mapErr(err);
+  }
+}
+
+export async function rejectReconciliation(
+  reconciliationId: string,
+  reason: string,
+): Promise<PayResult> {
+  try {
+    const { supabase, workspaceId } = await ctx();
+    assertAssistedPayEnabled(workspaceId);
+    const { error } = await supabase.rpc("reject_payment_reconciliation", {
+      p_id: reconciliationId,
+      p_reason: reason.trim().slice(0, 500) || null,
+    });
+    if (error) {
+      if (/not_authorized/i.test(error.message)) {
+        return { ok: false, error: "You can't reject this match." };
+      }
+      return { ok: false, error: "Could not reject the match." };
+    }
+    revalidatePath("/pay/reconciliation");
+    revalidatePath("/pay/activity");
+    return { ok: true };
+  } catch (err) {
+    return mapErr(err);
+  }
+}
+
+export async function linkPaymentManually(
+  intentId: string,
+  transactionId: string,
+  reason: string,
+): Promise<PayResult> {
+  try {
+    const { supabase, workspaceId } = await ctx();
+    assertAssistedPayEnabled(workspaceId);
+    const { error } = await supabase.rpc("link_payment_manually", {
+      p_intent_id: intentId,
+      p_transaction_id: transactionId,
+      p_reason: reason.trim().slice(0, 500) || null,
+    });
+    if (error) {
+      if (/not_authorized/i.test(error.message)) {
+        return { ok: false, error: "You can't link this payment." };
+      }
+      if (/transaction_already_linked/i.test(error.message)) {
+        return { ok: false, error: "That transaction is already linked to another payment." };
+      }
+      if (/not_linkable|cross_workspace/i.test(error.message)) {
+        return { ok: false, error: "This payment can't be linked to that transaction." };
+      }
+      return { ok: false, error: "Could not link the payment." };
+    }
+    revalidatePath(`/pay/${intentId}`);
+    revalidatePath("/pay/reconciliation");
     revalidatePath("/pay/activity");
     return { ok: true };
   } catch (err) {

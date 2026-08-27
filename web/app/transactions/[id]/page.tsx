@@ -7,6 +7,9 @@ import {
 import { formatFullDateTime, formatRwf } from "../../../lib/format";
 import { displayName } from "../../../lib/display-name";
 import { isSupportedCurrency } from "../../../lib/money";
+import { getPaymentLinkForTransaction } from "../../../lib/pay/intents";
+import { messages } from "../../../lib/ussd/messages";
+import Link from "next/link";
 import { MoneyAmount } from "../../../components/MoneyAmount";
 import { Badge } from "../../../components/Badge";
 import { CategoryCorrectionForm } from "../../../components/CategoryCorrectionForm";
@@ -37,6 +40,7 @@ export default async function TransactionDetailPage({
     transaction.principal_effect_rwf !== null &&
     isSupportedCurrency(transaction.currency);
   const splits = canSplit ? await getTransactionSplits(id) : [];
+  const paymentLink = await getPaymentLinkForTransaction(id);
   const categoryHistory = await getCategoryHistory(id);
   const latestDecision = categoryHistory[0] ?? null;
   const transactionEffectMinor = canSplit
@@ -74,6 +78,17 @@ export default async function TransactionDetailPage({
           </div>
         )}
       </section>
+
+      {paymentLink && (
+        <section className="rounded-card border border-border-subtle bg-surface p-3 text-sm">
+          <Link
+            href={`/pay/${paymentLink.intentId}`}
+            className="font-medium text-accent hover:underline"
+          >
+            {messages().pay.assisted.recon.preparedWithPay} →
+          </Link>
+        </section>
+      )}
 
       <section
         aria-label="Transaction details"

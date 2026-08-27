@@ -61,6 +61,18 @@ When more than one policy ties for the best `(priority, specificity)` and they d
 
 The just-completed run can be reverted via `revert_bulk_categorization()`, which protects any row a human has since confirmed or corrected — for an auto/provisional row that means `category_source` is still `'rule'`; for a suggested row (which never gets `category_source` set at all) it means `category_decision_status` is still `'suggested'`. Reverting an older run than the one just completed isn't offered in the UI (the `bulk_operation_id` is only known client-side for the current session) — the data itself remains revertible via the same RPC if that's ever needed.
 
+## Other producers of a `suggested` decision
+
+Besides the policy engine, **Pay & Services Phase 2b** can set
+`suggested_category` on a transaction: when a ledger transaction is
+deterministically linked to a OneLedger Pay payment intent, the intent's
+chosen category lands as a `suggested`/`system` decision
+(`transaction_category_history.engine_version = 'payment-reconciliation@1'`),
+and only when the transaction is still `uncategorized`/`suggested` and not
+`manual` — it never overrides a stronger decision. See
+`docs/pay-and-services.md` (Phase 2b) and
+`docs/adr/0003-sms-reconciliation-and-ledger-integrity.md`.
+
 ## Learned suggestions
 
 Computed on demand, not stored: `detect_learned_policy_suggestions()` groups `transaction_category_history` rows where a human corrected the same counterparty to the same category/subcategory 3+ times, excluding anything already covered by an active policy or already decided (accepted/dismissed) via `learned_policy_suggestion_decisions`. Accepting a suggestion creates an ordinary policy (exact counterparty match, full confidence) — the same table and the same historical-backfill flow as any other policy, no separate machinery.

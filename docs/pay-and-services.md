@@ -245,6 +245,78 @@ review screen. A password-reentry step-up gate is deferred to Phase 3
 | Expiry | Route + lazy UI view now; pg_cron activation deferred to a manual scheduling file (same pattern as the report scheduler). |
 | Feature flags | Env kill-switches + the shared workspace allowlist. |
 
+## Phase 2b — SMS reconciliation & ledger linking
+
+Closes the 2a loop: when the Mobile Money SMS for a handed-off payment is
+ingested and becomes a `transactions` row, **deterministically link that
+row to its intent** and advance the intent to `verified` — **without ever
+creating a second ledger transaction**. See **ADR 0003**.
+
+### Where each piece lives (2b)
+
+| Concern | Location |
+|---|---|
+| Schema (columns on `payment_reconciliations`), matcher RPCs, resolution RPCs | `supabase/migrations/20260908000000_phase_o_sms_reconciliation.sql` |
+| Pure rule reference (unit-tested) | `supabase/functions/_shared/payment-reconciliation.ts` (+ `tests/`) |
+| Ingest hook (best-effort, opt-in, non-fatal) | `supabase/functions/ingest-momo/index.ts` (after "MARK RAW MESSAGE AS PROCESSED") |
+| On-handoff match | `web/app/pay/assisted-actions.ts#recordHandoff` (service-role client, gated) |
+| Retry cron | `web/app/api/cron/reconcile-pending-payments/route.ts`; pg_cron `supabase/scheduling/activate_payment_reconciliation.sql` (manual, deferred) |
+| Gating | `web/lib/pay/gate.ts` (`isSmsReconciliationEnabled` — **opt-in**, `smsReconciliationMode`) |
+| Reads + queue + manual-link picker | `web/lib/pay/intents.ts` |
+| Resolution actions | `web/app/pay/assisted-actions.ts` (`applyReconciliation` / `rejectReconciliation` / `linkPaymentManually`) |
+| UI | `web/components/pay/PaymentIntentPanel.tsx` (linked / likely-match / manual-link sections), `web/app/pay/reconciliation/**`, the "Prepared with OneLedger Pay" note on `web/app/transactions/[id]/page.tsx` |
+| e2e | `web/e2e/pay-reconciliation.spec.ts` |
+
+### Reconciliation priority ladder
+
+1. Authenticated provider status + reference *(Phase 3)*
+2. Verified provider callback + independent confirmation *(Phase 3)*
+3. **Deterministic SMS receipt match** *(this phase)*
+4. User manual confirmation — explicitly labelled "Manually confirmed", `verified_at` NULL *(2a)*
+5. Probabilistic suggestion requiring review *(not built — deterministic only)*
+
+### Deterministic match (all must hold)
+
+workspace · `direction='out'` + `status='success'` + `currency='RWF'` ·
+`amount_minor == amount_rwf` · normalized recipient MSISDN
+(`normalize_rw_msisdn`) · provider ↔ `transactions.source` ·
+`occurred_at ∈ [intent.created_at − 10min, coalesce(intent.expires_at,
++24h)]` · the intent is `initiated`/`awaiting_verification` and unlinked ·
+the transaction has no existing `linked` reconciliation.
+
+- **1 candidate →** `payment_reconciliations` row `status='linked'`. In
+  `apply` mode: intent → `successful`, `linked_transaction_id` +
+  `verified_at` set, category applied as a **review-queue suggestion**
+  (never over an `auto`/`provisional`/`confirmed`/`manual` decision). In
+  `observe` mode: the row is written with `applied_at IS NULL` and
+  nothing else changes.
+- **≥ 2 candidates →** one `status='conflict'` row per candidate; in
+  `apply` mode each intent → `requires_reconciliation`. Never a guess.
+- **0 →** nothing written.
+
+Idempotent: a second reconcile call for the same transaction is a no-op
+(`already_linked`); the partial-unique indexes on `payment_reconciliations`
+(`one linked intent`, `one linked txn`) are the backstop.
+
+### Rollout: observe → apply
+
+1. Set `SMS_RECONCILIATION_ENABLED=true` + `SMS_RECONCILIATION_MODE=observe`
+   in Vercel prod **and** as Supabase edge-function secrets
+   (`supabase secrets set …`).
+2. Watch `/pay/reconciliation` — every deterministic match shows as a
+   likely-match candidate. Confirm accuracy on real traffic.
+3. Flip `SMS_RECONCILIATION_MODE=apply` (both places). Matches now link +
+   verify automatically; the retry cron
+   (`activate_payment_reconciliation.sql`) can be activated.
+
+### Conflict / manual resolution
+
+`/pay/reconciliation` lists unapplied candidates (Apply / Reject) and
+`requires_reconciliation` intents. On a single intent's `/pay/[id]`, a
+**"Link an existing transaction"** picker (`getUnlinkedRecentTransactions`)
+lets the user link the right ledger row directly (`match_method='manual'`,
+applied immediately).
+
 ## Support troubleshooting
 
 - **"Dialing isn't available on this device."** Expected on desktop and

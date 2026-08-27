@@ -628,6 +628,48 @@ Deno.serve(async (req: Request) => {
     }
 
     // ========================================================
+    // PAY & SERVICES: SMS-TO-INTENT RECONCILIATION (Phase 2b)
+    // ========================================================
+    //
+    // Best-effort, non-fatal, and OFF unless SMS_RECONCILIATION_ENABLED
+    // is explicitly "true" (opt-in - unlike the always-on Pay flags).
+    // Deterministically links this just-ingested transaction to a
+    // handed-off Assisted Quick Pay intent, if one matches. It NEVER
+    // creates another transaction row (the row above is the only one);
+    // ambiguity routes the intent to requires_reconciliation, never a
+    // guess. The authoritative logic is the SECURITY DEFINER RPC
+    // reconcile_transaction_with_payment_intents() (migration
+    // 20260908000000); this call is just the trigger. A failure here
+    // must never fail a request that already successfully ingested.
+
+    if (Deno.env.get("SMS_RECONCILIATION_ENABLED") === "true") {
+      const reconMode = Deno.env.get("SMS_RECONCILIATION_MODE") === "apply"
+        ? "apply"
+        : "observe";
+      try {
+        const { data: reconResult, error: reconError } = await supabase.rpc(
+          "reconcile_transaction_with_payment_intents",
+          { p_transaction_id: insertedTransaction.id, p_mode: reconMode },
+        );
+        if (reconError) {
+          console.error("Payment reconciliation error (non-fatal):", reconError);
+        } else {
+          console.log(JSON.stringify({
+            event: "payment_reconciliation",
+            transaction_id: insertedTransaction.id,
+            mode: reconMode,
+            result: reconResult,
+          }));
+        }
+      } catch (reconException) {
+        console.error(
+          "Payment reconciliation threw (non-fatal):",
+          reconException,
+        );
+      }
+    }
+
+    // ========================================================
     // RECORD CONNECTION ACTIVITY
     // ========================================================
     //

@@ -61,6 +61,24 @@ export function isTrustedRecipientsEnabled(workspaceId: string | null): boolean 
   );
 }
 
+// SMS-to-intent reconciliation (Phase 2b). OPT-IN: unlike every other
+// Pay flag (on unless "false"), this is off unless explicitly "true" —
+// it's a new, ledger-adjacent capability that ships behind an accuracy
+// review (master prompt rollout steps 4-5).
+export function isSmsReconciliationEnabled(workspaceId: string | null): boolean {
+  return (
+    isAssistedPayEnabled(workspaceId) &&
+    process.env.SMS_RECONCILIATION_ENABLED === "true" &&
+    workspaceAllowed(workspaceId)
+  );
+}
+
+/** "observe" (default — record candidate links for accuracy review, don't
+ *  mutate the intent/ledger) or "apply" (link + verify automatically). */
+export function smsReconciliationMode(): "observe" | "apply" {
+  return process.env.SMS_RECONCILIATION_MODE === "apply" ? "apply" : "observe";
+}
+
 /** Draft-intent TTL, in hours. Default 24. */
 export function paymentIntentTtlHours(): number {
   const raw = Number(process.env.PAYMENT_INTENT_TTL_HOURS);

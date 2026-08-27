@@ -107,6 +107,19 @@ export function statusTone(intent: IntentStatusInput): StatusTone {
   return "neutral";
 }
 
+/** Human phrase for a payment_reconciliations.matched_on jsonb blob. */
+export function describeMatchedOn(matchedOn: Record<string, unknown> | null | undefined): string {
+  if (!matchedOn) return "";
+  if (matchedOn.manual) return "you linked this manually";
+  const parts: string[] = [];
+  if (matchedOn.amount) parts.push("amount");
+  if (matchedOn.msisdn) parts.push("phone number");
+  if (matchedOn.time_window) parts.push("time");
+  if (parts.length === 0) return "";
+  const last = parts.pop()!;
+  return `matched on ${parts.length ? parts.join(", ") + " and " : ""}${last}`;
+}
+
 /** A short, honest sentence describing what the status means. */
 export function statusDescription(intent: IntentStatusInput): string {
   switch (statusLabel(intent)) {
