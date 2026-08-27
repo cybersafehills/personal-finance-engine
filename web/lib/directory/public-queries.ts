@@ -103,40 +103,57 @@ export async function searchPaymentNetworks(
 
   // Match on the network's own name OR any of its published aliases,
   // normalised the same way the alias trigger normalises them.
+  // directory_aliases.subject_id is polymorphic (no FK), so it can't be
+  // PostgREST-embedded - resolve the ids, then fetch the networks.
   const normalized = term.toLowerCase().replace(/[^a-z0-9]/g, "");
   const safe = term.replace(/[%,()]/g, " ").trim();
 
-  const [byName, byAlias] = await Promise.all([
-    safe
-      ? supabase
-          .from("payment_networks")
-          .select("slug, canonical_name, display_name_en")
-          .or(`canonical_name.ilike.%${safe}%,display_name_en.ilike.%${safe}%`)
-          .limit(10)
-      : Promise.resolve({ data: [] as Record<string, unknown>[] }),
-    normalized
-      ? supabase
-          .from("directory_aliases")
-          .select("subject_id, subject_type, network:payment_networks(slug, canonical_name, display_name_en)")
-          .eq("subject_type", "payment_network")
-          .ilike("normalized_alias", `%${normalized}%`)
-          .limit(10)
-      : Promise.resolve({ data: [] as Record<string, unknown>[] }),
-  ]);
-
   const out = new Map<string, { slug: string; canonical_name: string; display_name_en: string }>();
-  for (const n of (byName.data ?? []) as {
-    slug: string;
-    canonical_name: string;
-    display_name_en: string;
-  }[]) {
-    out.set(n.slug, n);
+  const NETWORK_COLS = "slug, canonical_name, display_name_en";
+
+  if (safe) {
+    const { data } = await supabase
+      .from("payment_networks")
+      .select(NETWORK_COLS)
+      .or(`canonical_name.ilike.%${safe}%,display_name_en.ilike.%${safe}%`)
+      .limit(10);
+    for (const n of (data ?? []) as {
+      slug: string;
+      canonical_name: string;
+      display_name_en: string;
+    }[]) {
+      out.set(n.slug, n);
+    }
   }
-  for (const row of (byAlias.data ?? []) as {
-    network: { slug: string; canonical_name: string; display_name_en: string } | null;
-  }[]) {
-    if (row.network) out.set(row.network.slug, row.network);
+
+  if (normalized) {
+    const { data: aliasRows } = await supabase
+      .from("directory_aliases")
+      .select("subject_id")
+      .eq("subject_type", "payment_network")
+      .ilike("normalized_alias", `%${normalized}%`)
+      .limit(20);
+    const ids = [
+      ...new Set(
+        ((aliasRows ?? []) as { subject_id: string }[]).map((r) => r.subject_id),
+      ),
+    ];
+    if (ids.length > 0) {
+      const { data } = await supabase
+        .from("payment_networks")
+        .select(NETWORK_COLS)
+        .in("id", ids)
+        .limit(10);
+      for (const n of (data ?? []) as {
+        slug: string;
+        canonical_name: string;
+        display_name_en: string;
+      }[]) {
+        out.set(n.slug, n);
+      }
+    }
   }
+
   return [...out.values()];
 }
 

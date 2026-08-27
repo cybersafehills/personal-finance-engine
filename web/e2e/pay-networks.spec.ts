@@ -28,9 +28,10 @@ test("the eKash network page shows operator, regulator, and the published maximu
 }) => {
   await page.goto("/pay/networks/ekash");
   await expect(page.getByRole("heading", { name: "eKash" })).toBeVisible();
-  await expect(page.getByText("RSwitch Ltd")).toBeVisible();
-  await expect(page.getByText("National Bank of Rwanda")).toBeVisible();
-  await expect(page.getByText(/published maximum/i)).toBeVisible();
+  // "RSwitch Ltd" appears both in the operators list and the source label.
+  await expect(page.getByText("RSwitch Ltd").first()).toBeVisible();
+  await expect(page.getByText("National Bank of Rwanda").first()).toBeVisible();
+  await expect(page.getByText(/published maximum/i).first()).toBeVisible();
   // Non-custodial custody note is present.
   await expect(page.getByText(/funds remain in the customer/i)).toBeVisible();
 });
