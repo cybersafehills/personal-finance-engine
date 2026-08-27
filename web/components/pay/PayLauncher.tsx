@@ -1,13 +1,27 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, useTransition } from "react";
+import {
+  Suspense,
+  lazy,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import { useRouter } from "next/navigation";
 import { messages } from "../../lib/ussd/messages";
 import {
   getLauncherSnapshot,
   type LauncherSnapshot,
 } from "../../app/pay/actions";
-import { CloseIcon, PayIcon, StarIcon } from "../icons";
+import { trackScanEvent } from "../../lib/pay/scan-analytics";
+import { CloseIcon, PayIcon, QrScanIcon, StarIcon } from "../icons";
+
+// Scanner-only code (camera + future QR decoder) is split out of the
+// initial bundle - it loads on the first "Scan to pay" tap, never on
+// app start or on the sheet merely opening.
+const ScanToPay = lazy(() => import("./ScanToPay"));
 
 const t = messages().pay;
 
@@ -44,21 +58,31 @@ export function PayLauncher({
   open,
   onClose,
   assistedEnabled,
+  scanEnabled,
 }: {
   open: boolean;
   onClose: () => void;
   assistedEnabled: boolean;
+  scanEnabled: boolean;
 }) {
   if (!open) return null;
-  return <LauncherPanel onClose={onClose} assistedEnabled={assistedEnabled} />;
+  return (
+    <LauncherPanel
+      onClose={onClose}
+      assistedEnabled={assistedEnabled}
+      scanEnabled={scanEnabled}
+    />
+  );
 }
 
 function LauncherPanel({
   onClose,
   assistedEnabled,
+  scanEnabled,
 }: {
   onClose: () => void;
   assistedEnabled: boolean;
+  scanEnabled: boolean;
 }) {
   const router = useRouter();
   const panelRef = useRef<HTMLDivElement>(null);

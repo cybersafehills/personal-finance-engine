@@ -26,6 +26,26 @@ custody (see `docs/adr/0001-non-custodial-boundary.md`).
 | UI chrome strings (translation-ready) | `web/lib/ussd/messages.ts` |
 | e2e | `web/e2e/pay-ussd.spec.ts` |
 
+## Launcher shell UX
+
+`web/components/pay/PayLauncher.tsx` is a bottom sheet on mobile and a
+centred dialog on desktop. Full modal semantics: focus moves into the
+panel on open, Tab is trapped, background scroll is locked, and focus is
+restored to the trigger on close.
+
+The panel is a three-part column - static header, a single
+`overflow-y-auto` content region, and a **pinned footer** that stays put
+while the content scrolls. The footer holds the one closing control: a
+centred X + "Close" (`aria-label` "Close Pay & Services", `min-h-11`,
+`focus-visible` ring) with `env(safe-area-inset-bottom)` padding so it
+clears the home indicator. There is deliberately no separate header close
+action - long favourites / recent lists must never push the way out
+off-screen.
+
+Every dismissal path - the footer control, the dimmed overlay, `Esc`,
+and a navigation that closes the sheet - runs through one guarded
+`requestClose()` so a double activation can't fire `onClose` twice.
+
 ## Data model
 
 Global (not workspace-scoped) directory content, plus per-user tables:

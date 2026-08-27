@@ -6,7 +6,11 @@ import { BrandSplashScreen, SPLASH_CRITICAL_CSS } from "../components/brand/Bran
 import { supabaseSession } from "../lib/supabase-session-server";
 import { getActiveWorkspaceId, getUiPreferences, getUserWorkspaces } from "../lib/queries";
 import { DEFAULT_NAV_ORDER } from "../lib/navigation";
-import { isAssistedPayEnabled, isPayServicesEnabled } from "../lib/pay/gate";
+import {
+  isAssistedPayEnabled,
+  isPayServicesEnabled,
+  isScanToPayEnabled,
+} from "../lib/pay/gate";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -77,6 +81,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   // this independently - the flag is not merely a hidden button.
   const payEnabled = Boolean(user) && isPayServicesEnabled(activeWorkspaceId);
   const assistedPayEnabled = payEnabled && isAssistedPayEnabled(activeWorkspaceId);
+  const scanToPayEnabled = payEnabled && isScanToPayEnabled(activeWorkspaceId);
 
   return (
     <html lang="en" className={`${geistSans.variable} h-full antialiased`}>
@@ -104,6 +109,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           reportsRelocationNoticeDismissed={uiPreferences.reportsRelocationNoticeDismissed}
           payEnabled={payEnabled}
           assistedPayEnabled={assistedPayEnabled}
+          scanToPayEnabled={scanToPayEnabled}
         >
           {children}
         </AppShell>

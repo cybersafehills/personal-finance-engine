@@ -14,6 +14,9 @@ type PayContextValue = {
   /** Assisted Quick Pay (Phase 2a) is on - the launcher's payment
    *  actions are live rather than "coming later". */
   assistedEnabled: boolean;
+  /** Scan to pay (Phase R1) is on - the launcher shows the "Scan to pay"
+   *  entry and its camera scanner. */
+  scanEnabled: boolean;
   open: boolean;
   openPay: () => void;
   closePay: () => void;
@@ -29,6 +32,7 @@ export function usePay(): PayContextValue {
     return {
       enabled: false,
       assistedEnabled: false,
+      scanEnabled: false,
       open: false,
       openPay: () => {},
       closePay: () => {},
@@ -47,10 +51,12 @@ export function usePay(): PayContextValue {
 export function PayProvider({
   enabled,
   assistedEnabled,
+  scanEnabled,
   children,
 }: {
   enabled: boolean;
   assistedEnabled: boolean;
+  scanEnabled: boolean;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -62,15 +68,20 @@ export function PayProvider({
   const closePay = useCallback(() => setOpen(false), []);
 
   const value = useMemo(
-    () => ({ enabled, assistedEnabled, open, openPay, closePay }),
-    [enabled, assistedEnabled, open, openPay, closePay],
+    () => ({ enabled, assistedEnabled, scanEnabled, open, openPay, closePay }),
+    [enabled, assistedEnabled, scanEnabled, open, openPay, closePay],
   );
 
   return (
     <PayContext.Provider value={value}>
       {children}
       {enabled && (
-        <PayLauncher open={open} onClose={closePay} assistedEnabled={assistedEnabled} />
+        <PayLauncher
+          open={open}
+          onClose={closePay}
+          assistedEnabled={assistedEnabled}
+          scanEnabled={scanEnabled}
+        />
       )}
     </PayContext.Provider>
   );

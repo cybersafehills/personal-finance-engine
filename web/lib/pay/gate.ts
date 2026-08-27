@@ -130,6 +130,30 @@ export function smsReconciliationMode(): "observe" | "apply" {
   return process.env.SMS_RECONCILIATION_MODE === "apply" ? "apply" : "observe";
 }
 
+// --- Phase R1: Scan to pay (QR payment scanner) -------------------------
+//
+//   SCAN_TO_PAY_ENABLED - the "Scan to pay" launcher entry + camera
+//                         scanner. OPT-IN: off unless exactly "true",
+//                         the same convention as SMS_RECONCILIATION_ENABLED
+//                         (a new payment route that ships in stages —
+//                         R1 is the camera shell only: no QR decoding,
+//                         no payload parsing, no external handoff). The
+//                         workspace allowlist still applies for a staged
+//                         internal beta.
+export function isScanToPayEnabled(workspaceId: string | null): boolean {
+  return (
+    isPayServicesEnabled(workspaceId) &&
+    process.env.SCAN_TO_PAY_ENABLED === "true" &&
+    workspaceAllowed(workspaceId)
+  );
+}
+
+export function assertScanToPayEnabled(workspaceId: string | null): void {
+  if (!isScanToPayEnabled(workspaceId)) {
+    throw new FeatureDisabledError("scan_to_pay");
+  }
+}
+
 /** Draft-intent TTL, in hours. Default 24. */
 export function paymentIntentTtlHours(): number {
   const raw = Number(process.env.PAYMENT_INTENT_TTL_HOURS);

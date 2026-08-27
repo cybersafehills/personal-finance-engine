@@ -86,6 +86,7 @@ export function AppShell({
   reportsRelocationNoticeDismissed,
   payEnabled,
   assistedPayEnabled,
+  scanToPayEnabled,
 }: {
   children: React.ReactNode;
   userEmail: string | null;
@@ -97,6 +98,7 @@ export function AppShell({
   reportsRelocationNoticeDismissed: boolean;
   payEnabled: boolean;
   assistedPayEnabled: boolean;
+  scanToPayEnabled: boolean;
 }) {
   const pathname = usePathname();
   const navItems = useOrderedNavItems(navOrder);
@@ -238,6 +240,7 @@ export function AppShell({
       <PayProvider
         enabled={Boolean(userEmail) && payEnabled}
         assistedEnabled={Boolean(userEmail) && assistedPayEnabled}
+        scanEnabled={Boolean(userEmail) && scanToPayEnabled}
       >
         {shell}
       </PayProvider>
