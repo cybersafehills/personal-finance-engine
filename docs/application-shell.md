@@ -32,6 +32,7 @@ silently broke every preference save in production - see "Incidents" below).
 | Home dashboard layout (mobile stack / desktop 2-col grid) | `web/app/page.tsx` |
 | e2e/visual-regression/accessibility suite | `web/e2e/**`, see `web/e2e/README.md` |
 | CI (required gate + baseline maintenance) | `.github/workflows/ci.yml`'s `e2e-tests` job, `.github/workflows/generate-e2e-baselines.yml` |
+| Production rollout / post-deployment smoke tests | `docs/app-shell-rollout-runbook.md` |
 
 ## Navigation
 
