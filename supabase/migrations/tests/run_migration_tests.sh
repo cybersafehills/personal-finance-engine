@@ -559,7 +559,11 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # service_directory_audit_events, service_code_reports,
 # service_favourites, service_recent_usage) - 37 tables, 36 with RLS, the
 # same one intentional gap.
-if [ "$TABLE_COUNT" = "37" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Phase N (20260907000000) adds 7 more, all RLS-enabled (trusted_recipients,
+# payment_templates, payment_intents, payment_attempts, payment_events,
+# payment_reconciliations, payment_audit_events) - 44 tables, 43 with RLS,
+# the same one intentional gap.
+if [ "$TABLE_COUNT" = "44" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -606,12 +610,16 @@ fi
 # service_directory_audit_events (select only = 6), service_code_reports
 # (select, insert = 2 - the UPDATE is column-scoped and does not appear
 # here as a table grant), service_favourites and service_recent_usage
-# (select, insert, delete = 6). 55 + 14 = 69.
+# (select, insert, delete = 6). 55 + 14 = 69. Phase N (20260907000000)
+# adds 13 more: trusted_recipients + payment_templates (select, insert,
+# update, delete = 8), payment_intents / payment_attempts /
+# payment_events / payment_reconciliations / payment_audit_events (select
+# only = 5). 69 + 13 = 82.
 AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and grantee = 'authenticated';")"
-if [ "$AUTHENTICATED_GRANT_COUNT" = "69" ]; then
-  pass "authenticated holds exactly the 69 table grants expected, no more"
+if [ "$AUTHENTICATED_GRANT_COUNT" = "82" ]; then
+  pass "authenticated holds exactly the 82 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 69 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 82 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -661,16 +669,21 @@ fi
 # admin_resolve_service_code_report). Its two trigger functions
 # (enforce_service_code_report_rate_limit, trim_service_recent_usage) are
 # `revoke all from public` with no authenticated grant - they run as the
-# table owner from the trigger, never called directly. = 19 total. Every
-# other existing function (set_updated_at, handle_new_user,
-# policy_matches_transaction - SQL-only, no grant needed since it's only
-# ever called from within another SECURITY DEFINER function) remains
-# authenticated-inaccessible.
+# table owner from the trigger, never called directly. = 19 total before
+# Phase N. Phase N (20260907000000) adds 6: payment_intent_transition_allowed,
+# create_payment_intent, update_draft_payment_intent,
+# transition_payment_intent, record_payment_attempt,
+# manually_confirm_payment. expire_stale_payment_intents is service_role-
+# only; enforce_no_payment_secret is a `revoke all from public` trigger
+# function. = 25 total. Every other existing function (set_updated_at,
+# handle_new_user, policy_matches_transaction - SQL-only, no grant needed
+# since it's only ever called from within another SECURITY DEFINER
+# function) remains authenticated-inaccessible.
 AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname = 'authenticated' where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "19" ]; then
-  pass "authenticated holds EXECUTE on exactly the 19 functions expected, no more"
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "25" ]; then
+  pass "authenticated holds EXECUTE on exactly the 25 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 19 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 25 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -1946,6 +1959,111 @@ if [ "$M_SEED_BEFORE" = "$M_SEED_AFTER" ]; then
   pass "Phase M: re-running the USSD seed migration inserts nothing new (idempotent)"
 else
   fail "Phase M: seed migration is not idempotent ($M_SEED_BEFORE -> $M_SEED_AFTER service codes)"
+fi
+
+# ===========================================================================
+# Phase N: payment-intent orchestration. Idempotency-key dedupe, the
+# server-enforced state machine, manual-confirm != verified, lazy expiry,
+# the no-secret template trigger, and per-workspace RLS on intents /
+# recipients / templates. Reuses pfe_rls (USER_A/USER_B/WORKSPACE_A/_B).
+# ===========================================================================
+echo "=== Phase N: payment-intent orchestration ==="
+
+N_MK_PAYLOAD() {
+  # $1 = workspace, $2 = idempotency key (may be empty)
+  echo "{\"workspace_id\":\"$1\",\"idempotency_key\":\"$2\",\"payment_type\":\"pay_person\",\"amount_minor\":5000,\"recipient_kind\":\"phone\",\"recipient_name\":\"Test\",\"recipient_msisdn_normalized\":\"250781234567\"}"
+}
+
+# create_payment_intent is idempotent on (workspace_id, idempotency_key).
+N_R1="$(as_user "$USER_A" "select public.create_payment_intent('$(N_MK_PAYLOAD "$WORKSPACE_A" "key-abc")'::jsonb);")"
+N_R2="$(as_user "$USER_A" "select public.create_payment_intent('$(N_MK_PAYLOAD "$WORKSPACE_A" "key-abc")'::jsonb);")"
+N_INTENT_ID="$(psql -d pfe_rls -t -A -c "select id from public.payment_intents where workspace_id = '$WORKSPACE_A' and idempotency_key = 'key-abc';")"
+N_INTENT_COUNT="$(psql -d pfe_rls -t -A -c "select count(*) from public.payment_intents where workspace_id = '$WORKSPACE_A' and idempotency_key = 'key-abc';")"
+if [ "$N_INTENT_COUNT" = "1" ] && echo "$N_R2" | grep -q '"existed": true'; then
+  pass "Phase N: create_payment_intent is idempotent on the idempotency key (2 calls -> 1 row, second returns existed:true)"
+else
+  fail "Phase N: idempotency-key dedupe failed (rows=$N_INTENT_COUNT r2=$N_R2)"
+fi
+
+# A member of another workspace cannot create an intent there, nor read A's.
+if as_user "$USER_B" "select public.create_payment_intent('$(N_MK_PAYLOAD "$WORKSPACE_A" "forged")'::jsonb);" >/dev/null 2>$ARTIFACT_DIR/pfe_n_forge.log; then
+  fail "Phase N: User B created a payment intent in User A's workspace - authorization gap"
+else
+  pass "Phase N: create_payment_intent refuses a non-member workspace_id"
+fi
+rm -f $ARTIFACT_DIR/pfe_n_forge.log
+N_B_SEES="$(as_user "$USER_B" "select count(*) from public.payment_intents where id = '$N_INTENT_ID';")"
+if [ "$N_B_SEES" = "0" ]; then
+  pass "Phase N: User B cannot read User A's payment intent (RLS)"
+else
+  fail "Phase N: User B read User A's payment intent (got $N_B_SEES)"
+fi
+
+# The state machine rejects an illegal jump.
+if as_user "$USER_A" "select public.transition_payment_intent('$N_INTENT_ID', 'successful', null, '{}'::jsonb);" >/dev/null 2>$ARTIFACT_DIR/pfe_n_sm.log; then
+  fail "Phase N: draft -> successful was allowed via transition_payment_intent"
+else
+  pass "Phase N: the payment-intent state machine rejects draft -> successful"
+fi
+rm -f $ARTIFACT_DIR/pfe_n_sm.log
+
+# draft -> initiated -> awaiting_verification works and logs events.
+as_user "$USER_A" "select public.transition_payment_intent('$N_INTENT_ID', 'initiated', null, '{}'::jsonb);" >/dev/null
+as_user "$USER_A" "select public.transition_payment_intent('$N_INTENT_ID', 'awaiting_verification', null, '{}'::jsonb);" >/dev/null
+N_STATE="$(psql -d pfe_rls -t -A -c "select state from public.payment_intents where id = '$N_INTENT_ID';")"
+N_EVENTS="$(psql -d pfe_rls -t -A -c "select count(*) from public.payment_events where payment_intent_id = '$N_INTENT_ID';")"
+if [ "$N_STATE" = "awaiting_verification" ] && [ "$N_EVENTS" -ge "3" ]; then
+  pass "Phase N: draft -> initiated -> awaiting_verification succeeds and writes lifecycle events"
+else
+  fail "Phase N: staged transition failed (state=$N_STATE events=$N_EVENTS)"
+fi
+
+# manually_confirm_payment reaches 'successful' but leaves verified_at NULL.
+as_user "$USER_A" "select public.manually_confirm_payment('$N_INTENT_ID', 'confirmed on my phone');" >/dev/null
+N_CONF="$(psql -d pfe_rls -t -A -c "select state || '|' || coalesce(verified_at::text,'null') || '|' || (manually_confirmed_at is not null)::text from public.payment_intents where id = '$N_INTENT_ID';")"
+if [ "$N_CONF" = "successful|null|true" ]; then
+  pass "Phase N: manual confirmation reaches 'successful' with verified_at still NULL (not a verified check)"
+else
+  fail "Phase N: manual confirmation stamped the wrong fields ($N_CONF)"
+fi
+
+# expire_stale_payment_intents only touches past-due non-terminal intents.
+N_EXP_ID="$(as_user "$USER_A" "select (public.create_payment_intent('$(N_MK_PAYLOAD "$WORKSPACE_A" "to-expire")'::jsonb)->>'id');")"
+as_user "$USER_A" "select public.transition_payment_intent('$N_EXP_ID', 'initiated', null, '{}'::jsonb);" >/dev/null
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "update public.payment_intents set expires_at = now() - interval '1 hour' where id = '$N_EXP_ID';" >/dev/null
+N_EXPIRED_N="$(psql -d pfe_rls -t -A -c "set role service_role; select public.expire_stale_payment_intents(now());" | tail -1)"
+N_EXP_STATE="$(psql -d pfe_rls -t -A -c "select state from public.payment_intents where id = '$N_EXP_ID';")"
+N_CONF_STATE="$(psql -d pfe_rls -t -A -c "select state from public.payment_intents where id = '$N_INTENT_ID';")"
+if [ "$N_EXP_STATE" = "expired" ] && [ "$N_CONF_STATE" = "successful" ] && [ "$N_EXPIRED_N" -ge "1" ]; then
+  pass "Phase N: expire_stale_payment_intents expires the past-due intent and leaves terminal ones alone"
+else
+  fail "Phase N: expiry sweep wrong (expired=$N_EXP_STATE terminal=$N_CONF_STATE n=$N_EXPIRED_N)"
+fi
+
+# The no-secret trigger blocks a template carrying a PIN.
+if as_user "$USER_A" "insert into public.payment_templates (workspace_id, name, payment_type, recipient_snapshot) values ('$WORKSPACE_A', 'Bad', 'pay_person', '{\"pin\":\"1234\"}'::jsonb);" >/dev/null 2>$ARTIFACT_DIR/pfe_n_pin.log; then
+  fail "Phase N: a payment_templates row carrying a pin key was accepted"
+else
+  pass "Phase N: enforce_no_payment_secret rejects a template recipient_snapshot containing a pin"
+fi
+rm -f $ARTIFACT_DIR/pfe_n_pin.log
+
+# Trusted recipients + templates are per-workspace.
+as_user "$USER_A" "insert into public.trusted_recipients (workspace_id, display_name, kind, normalized_msisdn) values ('$WORKSPACE_A', 'Mum', 'phone', '250788111222');" >/dev/null
+N_TR_A="$(as_user "$USER_A" "select count(*) from public.trusted_recipients;")"
+N_TR_B="$(as_user "$USER_B" "select count(*) from public.trusted_recipients;")"
+if [ "$N_TR_A" = "1" ] && [ "$N_TR_B" = "0" ]; then
+  pass "Phase N: User B cannot see User A's trusted recipients"
+else
+  fail "Phase N: trusted recipients not workspace-isolated (A=$N_TR_A B=$N_TR_B)"
+fi
+
+# service_role is unaffected by every policy above.
+N_SR="$(psql -d pfe_rls -t -A -c "set role service_role; select count(*) from public.payment_intents where id = '$N_INTENT_ID';" | tail -1)"
+if [ "$N_SR" = "1" ]; then
+  pass "Phase N: service_role reads payment intents unaffected by RLS"
+else
+  fail "Phase N: service_role could not read the intent (got $N_SR)"
 fi
 
 echo ""

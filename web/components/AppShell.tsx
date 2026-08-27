@@ -55,6 +55,7 @@ export function AppShell({
   privacyMode,
   reportsRelocationNoticeDismissed,
   payEnabled,
+  assistedPayEnabled,
 }: {
   children: React.ReactNode;
   userEmail: string | null;
@@ -65,6 +66,7 @@ export function AppShell({
   privacyMode: boolean;
   reportsRelocationNoticeDismissed: boolean;
   payEnabled: boolean;
+  assistedPayEnabled: boolean;
 }) {
   const pathname = usePathname();
   const navItems = useOrderedNavItems(navOrder);
@@ -188,7 +190,12 @@ export function AppShell({
 
   return (
     <PrivacyProvider initialHideBalance={hideBalance} privacyMode={privacyMode}>
-      <PayProvider enabled={Boolean(userEmail) && payEnabled}>{shell}</PayProvider>
+      <PayProvider
+        enabled={Boolean(userEmail) && payEnabled}
+        assistedEnabled={Boolean(userEmail) && assistedPayEnabled}
+      >
+        {shell}
+      </PayProvider>
     </PrivacyProvider>
   );
 }

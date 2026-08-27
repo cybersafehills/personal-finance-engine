@@ -43,6 +43,38 @@ export function isUssdDirectoryEnabled(workspaceId: string | null): boolean {
   );
 }
 
+// --- Phase 2a: Assisted Quick Pay -----------------------------------------
+
+export function isAssistedPayEnabled(workspaceId: string | null): boolean {
+  return isPayServicesEnabled(workspaceId) && envEnabled("ASSISTED_PAY_ENABLED");
+}
+
+export function isPaymentTemplatesEnabled(workspaceId: string | null): boolean {
+  return (
+    isAssistedPayEnabled(workspaceId) && envEnabled("PAYMENT_TEMPLATES_ENABLED")
+  );
+}
+
+export function isTrustedRecipientsEnabled(workspaceId: string | null): boolean {
+  return (
+    isAssistedPayEnabled(workspaceId) && envEnabled("TRUSTED_RECIPIENTS_ENABLED")
+  );
+}
+
+/** Draft-intent TTL, in hours. Default 24. */
+export function paymentIntentTtlHours(): number {
+  const raw = Number(process.env.PAYMENT_INTENT_TTL_HOURS);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 24;
+}
+
+/** How recent a session must be (minutes) before we stop showing the
+ *  "your session is a while old" soft notice on the review screen.
+ *  Default 60. Phase 2a never blocks on this — it's advisory only. */
+export function paymentSessionFreshnessMinutes(): number {
+  const raw = Number(process.env.PAYMENT_SESSION_FRESHNESS_MINUTES);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 60;
+}
+
 /** Thrown by the assert* helpers; server actions map it to a
  *  `{ ok: false, error }` and pages to a not-found / disabled state. */
 export class FeatureDisabledError extends Error {
@@ -61,5 +93,11 @@ export function assertPayServicesEnabled(workspaceId: string | null): void {
 export function assertUssdDirectoryEnabled(workspaceId: string | null): void {
   if (!isUssdDirectoryEnabled(workspaceId)) {
     throw new FeatureDisabledError("ussd_directory");
+  }
+}
+
+export function assertAssistedPayEnabled(workspaceId: string | null): void {
+  if (!isAssistedPayEnabled(workspaceId)) {
+    throw new FeatureDisabledError("assisted_pay");
   }
 }

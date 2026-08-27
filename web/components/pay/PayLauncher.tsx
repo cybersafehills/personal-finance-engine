@@ -11,13 +11,13 @@ import { PayIcon, StarIcon } from "../icons";
 
 const t = messages().pay;
 
-const PRIMARY_ACTIONS: { key: keyof typeof t.primary; label: string }[] = [
-  { key: "person", label: t.primary.person },
-  { key: "merchant", label: t.primary.merchant },
-  { key: "bill", label: t.primary.bill },
-  { key: "electricity", label: t.primary.electricity },
-  { key: "airtime", label: t.primary.airtime },
-  { key: "government", label: t.primary.government },
+const PRIMARY_ACTIONS: { type: string; label: string }[] = [
+  { type: "pay_person", label: t.primary.person },
+  { type: "pay_merchant", label: t.primary.merchant },
+  { type: "pay_bill", label: t.primary.bill },
+  { type: "buy_electricity", label: t.primary.electricity },
+  { type: "buy_airtime", label: t.primary.airtime },
+  { type: "government", label: t.primary.government },
 ];
 
 function focusable(container: HTMLElement): HTMLElement[] {
@@ -43,15 +43,23 @@ function focusable(container: HTMLElement): HTMLElement[] {
 export function PayLauncher({
   open,
   onClose,
+  assistedEnabled,
 }: {
   open: boolean;
   onClose: () => void;
+  assistedEnabled: boolean;
 }) {
   if (!open) return null;
-  return <LauncherPanel onClose={onClose} />;
+  return <LauncherPanel onClose={onClose} assistedEnabled={assistedEnabled} />;
 }
 
-function LauncherPanel({ onClose }: { onClose: () => void }) {
+function LauncherPanel({
+  onClose,
+  assistedEnabled,
+}: {
+  onClose: () => void;
+  assistedEnabled: boolean;
+}) {
   const router = useRouter();
   const panelRef = useRef<HTMLDivElement>(null);
   const previouslyFocused = useRef<HTMLElement | null>(null);
@@ -154,22 +162,33 @@ function LauncherPanel({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="grid grid-cols-2 gap-2">
-          {PRIMARY_ACTIONS.map((a) => (
-            <button
-              key={a.key}
-              type="button"
-              disabled
-              aria-disabled="true"
-              title={t.comingSoon}
-              className="flex flex-col items-start gap-1 rounded-control border border-border-subtle bg-background px-3 py-2.5 text-left opacity-60"
-            >
-              <span className="text-sm font-medium text-text-secondary">{a.label}</span>
-              <span className="text-[11px] text-text-muted">{t.comingSoon}</span>
-            </button>
-          ))}
+          {PRIMARY_ACTIONS.map((a) =>
+            assistedEnabled ? (
+              <button
+                key={a.type}
+                type="button"
+                onClick={() => go(`/pay/new/${a.type}`)}
+                className="flex flex-col items-start gap-1 rounded-control border border-border-subtle bg-background px-3 py-2.5 text-left hover:border-accent"
+              >
+                <span className="text-sm font-medium text-text-primary">{a.label}</span>
+              </button>
+            ) : (
+              <button
+                key={a.type}
+                type="button"
+                disabled
+                aria-disabled="true"
+                title={t.comingSoon}
+                className="flex flex-col items-start gap-1 rounded-control border border-border-subtle bg-background px-3 py-2.5 text-left opacity-60"
+              >
+                <span className="text-sm font-medium text-text-secondary">{a.label}</span>
+                <span className="text-[11px] text-text-muted">{t.comingSoon}</span>
+              </button>
+            ),
+          )}
         </div>
 
-        <div className="mt-3 border-t border-border-subtle pt-3">
+        <div className="mt-3 flex flex-col gap-2 border-t border-border-subtle pt-3">
           <button
             type="button"
             onClick={() => go("/pay/ussd")}
@@ -178,6 +197,24 @@ function LauncherPanel({ onClose }: { onClose: () => void }) {
             {t.secondary.ussd}
             <span aria-hidden="true">→</span>
           </button>
+          {assistedEnabled && (
+            <div className="flex gap-2 text-sm">
+              <button
+                type="button"
+                onClick={() => go("/pay/activity")}
+                className="flex-1 rounded-control border border-border-subtle px-3 py-2 font-medium text-text-secondary hover:bg-background"
+              >
+                {t.secondary.activity}
+              </button>
+              <button
+                type="button"
+                onClick={() => go("/pay/templates")}
+                className="flex-1 rounded-control border border-border-subtle px-3 py-2 font-medium text-text-secondary hover:bg-background"
+              >
+                {t.secondary.template}
+              </button>
+            </div>
+          )}
         </div>
 
         {snapshot && snapshot.favourites.length > 0 && (
