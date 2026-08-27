@@ -103,6 +103,29 @@ test("respects prefers-reduced-motion: static logo, still clears", async ({ page
   await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
 });
 
+test("critical CSS is inlined in <head> and sizes the overlay on the first frame", async ({
+  page,
+}) => {
+  // Regression guard: if the splash's positioning/sizing rules ship only
+  // in the app's async render-blocking stylesheet, a slow load paints a
+  // blank frame and a collapsed 0x0 overlay before it arrives. They must
+  // be in an inline <head> <style>.
+  const res = await page.goto("/login", { waitUntil: "commit" });
+  const html = (await res!.text()).split("</head>")[0];
+  expect(html).toContain("<style");
+  expect(html).toMatch(/\.oneledger-splash\s*\{[^}]*position:\s*fixed/);
+  expect(html).toContain("@keyframes oneledger-splash-logo-in");
+
+  // And it actually takes effect: the overlay fills the viewport, never
+  // shrink-wraps its logo.
+  const splash = page.locator(SPLASH);
+  await expect(splash).toBeVisible();
+  const box = (await splash.boundingBox())!;
+  const vp = page.viewportSize()!;
+  expect(box.width).toBeGreaterThanOrEqual(vp.width - 1);
+  expect(box.height).toBeGreaterThanOrEqual(vp.height - 1);
+});
+
 test("no horizontal overflow or scrollbar while the splash is up", async ({ page }) => {
   await page.goto("/login", { waitUntil: "domcontentloaded" });
   await expect(page.locator(SPLASH)).toBeVisible();
