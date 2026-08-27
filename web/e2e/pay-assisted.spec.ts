@@ -33,8 +33,8 @@ test("the review screen is honest: non-custodial notice, provider fee, no succes
   await expect(page.getByText(/OneLedger never asks for your Mobile Money or banking PIN/)).toBeVisible();
   await expect(page.getByText(/provider will show the final fee/i)).toBeVisible();
   // A brand-new intent is a Draft - never a check / success colour.
-  await expect(page.getByText("Draft")).toBeVisible();
-  await expect(page.getByText(/Verified/)).toHaveCount(0);
+  await expect(page.getByText("Draft", { exact: true })).toBeVisible();
+  await expect(page.getByText("Verified", { exact: true })).toHaveCount(0);
 });
 
 test("desktop hand-off offers Copy + QR, not a dialer, and moves the intent to awaiting verification", async ({
@@ -79,7 +79,7 @@ test("Pay again creates a fresh editable draft with a new id", async ({ page, co
   await page.getByRole("button", { name: "Pay again" }).click();
   await expect(page).toHaveURL(/\/pay\/[0-9a-f-]{36}$/);
   expect(page.url()).not.toBe(firstUrl);
-  await expect(page.getByText("Draft")).toBeVisible();
+  await expect(page.getByText("Draft", { exact: true })).toBeVisible();
 });
 
 test("a trusted recipient can be saved", async ({ page }) => {
