@@ -190,6 +190,35 @@ on them. Adding that is a real, separate infrastructure decision for
 whoever operates this project, not something to bolt on silently as a
 side effect of this feature.
 
+## Feature flags and rollout
+
+**No feature flag gates this work.** The one existing flag-like pattern
+in this codebase - `REPORT_GENERATION_ENABLED`/
+`REPORT_EMAIL_DELIVERY_ENABLED` (`lib/report-generation.ts`,
+`lib/report-delivery.ts`) - is an operational kill switch justified by a
+real external side effect: reports send real emails, and the switch
+exists specifically to pause that without deleting any data. Nothing in
+this shell/navigation/privacy/dashboard work has an equivalent external
+effect to pause; a bug here is a broken UI, not an outbound email or a
+data-mutating background job.
+
+Master prompt §17 itself allows skipping flags when "the current release
+process does not require [them] and the change can be safely deployed
+through preview and staging" - which is exactly this project's process
+(Vercel preview → production, gated by this PR's own CI: Deno, migration/
+RLS tests, and the e2e/accessibility/visual-regression suite). Building a
+flag here would also mean keeping the *entire prior shell implementation*
+alive side-by-side just to toggle back to it - real, ongoing duplication
+for a rollback path that a plain `git revert` (or redeploying the prior
+Vercel production build) already covers at no extra cost, since this
+change replaces the old shell rather than running alongside it.
+
+The one already-shipped migration in this body of work
+(`ui_preferences`) is additive-only and independently covered by its own
+rollback story - see "Incidents" above and the migration files'
+comments - which is a database-schema concern this section deliberately
+doesn't duplicate.
+
 ## Testing
 
 - **Unit** (`web/lib/navigation_test.ts`, `deno test web/lib`): nav-order
