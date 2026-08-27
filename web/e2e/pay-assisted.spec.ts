@@ -48,7 +48,7 @@ test("desktop hand-off offers Copy + QR, not a dialer, and moves the intent to a
   await expect(page.getByRole("button", { name: /Show QR/ })).toBeVisible();
 
   await page.getByRole("button", { name: "Copy code" }).click();
-  await expect(page.getByText("Awaiting verification")).toBeVisible();
+  await expect(page.getByText("Awaiting verification", { exact: true })).toBeVisible();
 });
 
 test("manual confirmation is labelled 'Manually confirmed', never a verified success", async ({
@@ -58,7 +58,7 @@ test("manual confirmation is labelled 'Manually confirmed', never a verified suc
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await prepareAPersonPayment(page);
   await page.getByRole("button", { name: "Copy code" }).click();
-  await expect(page.getByText("Awaiting verification")).toBeVisible();
+  await expect(page.getByText("Awaiting verification", { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "I've confirmed this with my provider" }).click();
   await expect(page.getByText("Manually confirmed")).toBeVisible();
@@ -77,8 +77,9 @@ test("Pay again creates a fresh editable draft with a new id", async ({ page, co
   await expect(page.getByText("Manually confirmed")).toBeVisible();
 
   await page.getByRole("button", { name: "Pay again" }).click();
-  await expect(page).toHaveURL(/\/pay\/[0-9a-f-]{36}$/);
-  expect(page.url()).not.toBe(firstUrl);
+  // A brand-new intent id - wait for the URL to actually change off the
+  // original before asserting anything about the new draft.
+  await expect(page).toHaveURL((url) => /\/pay\/[0-9a-f-]{36}$/.test(url.href) && url.href !== firstUrl);
   await expect(page.getByText("Draft", { exact: true })).toBeVisible();
 });
 
