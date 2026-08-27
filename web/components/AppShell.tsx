@@ -1,18 +1,23 @@
 "use client";
 
-import { Fragment } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { OneLedgerLogo } from "./brand/OneLedgerLogo";
-import { GearIcon, HomeIcon, ListIcon, PieIcon, TargetIcon } from "./icons";
+import { GearIcon, HomeIcon, ListIcon, MoreIcon, PieIcon, TargetIcon } from "./icons";
 import { LiveDataSync } from "./LiveDataSync";
+import { MoreSheet } from "./MoreSheet";
 import { ProfileMenu } from "./ProfileMenu";
 import { PrivacyProvider } from "./PrivacyProvider";
 import { PayProvider } from "./pay/PayProvider";
 import { PayTrigger } from "./pay/PayTrigger";
 import { ReportsButton } from "./ReportsButton";
 import { ReportsRelocationNotice } from "./ReportsRelocationNotice";
-import { NAV_ITEM_META, type NavKey } from "../lib/navigation";
+import {
+  MORE_MENU_PREFIXES,
+  NAV_ITEM_META,
+  type NavKey,
+} from "../lib/navigation";
 import type { WorkspaceSummary } from "../lib/queries";
 
 const NAV_ICONS: Record<NavKey, (props: { className?: string }) => React.JSX.Element> = {
@@ -45,6 +50,31 @@ function useOrderedNavItems(navOrder: NavKey[]) {
   ];
 }
 
+/** One icon+label item in the phone bottom bar. */
+function BottomNavLink({
+  href,
+  label,
+  Icon,
+  pathname,
+}: {
+  href: string;
+  label: string;
+  Icon: (props: { className?: string }) => React.JSX.Element;
+  pathname: string;
+}) {
+  const active = isActive(pathname, href);
+  return (
+    <Link
+      href={href}
+      aria-current={active ? "page" : undefined}
+      className="flex min-w-16 flex-1 flex-col items-center gap-0.5 px-2 py-2.5 text-[11px] font-medium"
+    >
+      <Icon className={`h-6 w-6 ${active ? "text-accent" : "text-text-muted"}`} />
+      <span className={active ? "text-accent" : "text-text-muted"}>{label}</span>
+    </Link>
+  );
+}
+
 export function AppShell({
   children,
   userEmail,
@@ -70,6 +100,8 @@ export function AppShell({
 }) {
   const pathname = usePathname();
   const navItems = useOrderedNavItems(navOrder);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreActive = MORE_MENU_PREFIXES.some((p) => isActive(pathname, p));
 
   const shell = (
     <div className="flex min-h-full flex-col">
@@ -146,44 +178,57 @@ export function AppShell({
         {children}
       </main>
 
-      {/* Mobile/tablet: persistent bottom navigation with icon + label,
-          honoring the iPhone home-indicator safe area. Same five
-          destinations, same order, as the desktop header nav above -
-          never a second independent navigation definition. Visible below
-          lg: (1024px) - see the header nav's own comment for why that
-          threshold, not sm:. Absent on auth pages. */}
+      {/* Phone/tablet: a FIXED five-slot bottom bar - Home, Transactions,
+          the elevated Pay action dead-centre, Budgets, and More - matching
+          the master prompt's "Home / Accounts / Pay / Activity / More"
+          responsive pattern. This is deliberately NOT the same list as the
+          desktop header nav (which shows all four nav_order destinations
+          inline): the phone bar's slots have fixed roles, and Categories /
+          Reports / Settings live in the More sheet here. Visible below lg:
+          (1024px). Absent on auth pages. */}
       {userEmail && (
-        <nav
-          aria-label="Primary"
-          className="fixed inset-x-0 bottom-0 z-10 border-t border-border-subtle bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden"
-        >
-          <div className="mx-auto flex max-w-3xl items-stretch justify-around">
-            {navItems.map(({ href, label, Icon }, index) => {
-              const active = isActive(pathname, href);
-              return (
-                <Fragment key={href}>
-                  {/* The elevated centre Pay action nests between the
-                      second and third destinations. It is a peer of the
-                      nav links, not a sixth destination - it opens the
-                      launcher, never navigates. */}
-                  {payEnabled && index === 2 && <PayTrigger variant="mobile" />}
-                  <Link
-                    href={href}
-                    aria-current={active ? "page" : undefined}
-                    className="flex min-w-16 flex-1 flex-col items-center gap-0.5 px-2 py-2.5 text-[11px] font-medium"
-                  >
-                    <Icon
-                      className={`h-6 w-6 ${active ? "text-accent" : "text-text-muted"}`}
-                    />
-                    <span className={active ? "text-accent" : "text-text-muted"}>
-                      {label}
-                    </span>
-                  </Link>
-                </Fragment>
-              );
-            })}
-          </div>
-        </nav>
+        <>
+          <nav
+            aria-label="Primary"
+            className="fixed inset-x-0 bottom-0 z-10 border-t border-border-subtle bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden"
+          >
+            <div className="mx-auto flex max-w-3xl items-stretch justify-around">
+              <BottomNavLink href="/" label="Home" Icon={HomeIcon} pathname={pathname} />
+              <BottomNavLink
+                href="/transactions"
+                label="Transactions"
+                Icon={ListIcon}
+                pathname={pathname}
+              />
+              {payEnabled && <PayTrigger variant="mobile" />}
+              <BottomNavLink
+                href="/budgets"
+                label="Budgets"
+                Icon={TargetIcon}
+                pathname={pathname}
+              />
+              <button
+                type="button"
+                onClick={() => setMoreOpen(true)}
+                aria-haspopup="dialog"
+                aria-expanded={moreOpen}
+                aria-current={moreActive ? "page" : undefined}
+                className="flex min-w-16 flex-1 flex-col items-center gap-0.5 px-2 py-2.5 text-[11px] font-medium"
+              >
+                <MoreIcon
+                  className={`h-6 w-6 ${moreActive ? "text-accent" : "text-text-muted"}`}
+                />
+                <span className={moreActive ? "text-accent" : "text-text-muted"}>More</span>
+              </button>
+            </div>
+          </nav>
+          <MoreSheet
+            open={moreOpen}
+            onClose={() => setMoreOpen(false)}
+            payEnabled={payEnabled}
+            assistedPayEnabled={assistedPayEnabled}
+          />
+        </>
       )}
     </div>
   );

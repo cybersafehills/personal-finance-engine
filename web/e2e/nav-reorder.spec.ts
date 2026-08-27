@@ -7,8 +7,12 @@ import type { Page } from "@playwright/test";
 // is identical either way), applied identically to whichever nav is
 // visible, and restore-default.
 
+// The reorder preference drives the tablet/desktop HEADER nav. The phone
+// bottom bar is a fixed five (Home / Transactions / Pay / Budgets / More)
+// and is intentionally not reorderable, so these assertions target the
+// header nav explicitly.
 async function primaryNavLabels(page: Page): Promise<string[]> {
-  const nav = page.getByRole("navigation", { name: "Primary" }).first();
+  const nav = page.locator("header").getByRole("navigation", { name: "Primary" });
   return nav.getByRole("link").allTextContents();
 }
 

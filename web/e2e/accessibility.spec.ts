@@ -34,6 +34,22 @@ test("every primary nav destination and the Reports button have accessible names
   await expect(page.getByLabel("Open reports")).toHaveAccessibleName("Open reports");
 });
 
+test("the phone More sheet has no serious/critical accessibility violations", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page
+    .locator('nav[aria-label="Primary"].fixed')
+    .getByRole("button", { name: "More" })
+    .click();
+  await expect(page.getByRole("dialog", { name: "More" })).toBeVisible();
+
+  const results = await new AxeBuilder({ page }).analyze();
+  const seriousOrWorse = results.violations.filter(
+    (v) => v.impact === "serious" || v.impact === "critical",
+  );
+  expect(seriousOrWorse, JSON.stringify(seriousOrWorse, null, 2)).toEqual([]);
+});
+
 test("200% zoom does not clip or overlap the header or primary nav", async ({ page }) => {
   await page.goto("/");
   // Emulate 200% browser zoom by halving the viewport (master prompt §13/§19).
