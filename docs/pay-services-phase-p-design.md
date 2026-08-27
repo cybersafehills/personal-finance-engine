@@ -1,6 +1,6 @@
 # Pay & Services — Phase P: Payment Networks, Access Routes & Granular Directory Permissions
 
-**Status:** design for review (no code yet on this branch beyond this doc + ADR 0004 draft).
+**Status:** P1 implemented on this branch (migration + seed + migration-test coverage; `run_migration_tests.sh` → 146 passed / 0 failed). P2–P4 not started.
 **Branch:** `feat/pay-services-phase-p-payment-networks`
 **Builds on:** Phase M (USSD directory), ADR 0001 (non-custodial), ADR 0002/0003 (payment lifecycle & reconciliation).
 **Source brief:** `OneLedger_USSD_Directory_eKash_Administration_Implementation_Prompt.md`.
@@ -371,8 +371,8 @@ The `docs/pay-and-services.md` "Seed data & the verification gap" section gets a
 
 - Chain applies cleanly to an empty DB, twice, deterministically (existing A–I harness picks the new migrations up automatically).
 - **Privilege counters updated** (the fragile hard-coded assertions):
-  - `authenticated` table-grant count `82 → 82 + N` where `N` = `select`-only grants on the new public-readable tables (`regulatory_authorities`, `service_operators`, `payment_networks`, `payment_network_operators`, `institution_network_participation`, `access_routes`, `route_supported_flows`, `route_menu_steps`, `route_fees`, `route_limits`, `directory_sources`, `directory_aliases`, `directory_versions`, `directory_role_grants` = **14 select**; `directory_evidence` = **0**). Expected: **96**. The comment arithmetic block is extended in the same style as the Phase M/N notes.
-  - `authenticated` function-EXECUTE count `29 → 29 + M`. `M` = `has_directory_permission` + `normalize_directory_alias` + the RPCs in §4.1/§4.2 that are `authenticated`-callable (≈ 20). Exact number pinned when the migration is written; the comment block explains each, like the existing one. Trigger functions (`enforce_*_rate_limit`, `set_updated_at` reuse) stay `revoke all from public`.
+  - `authenticated` table-grant count **`82 → 97`**: `select`-only grants on the 14 new public-readable tables (`directory_role_grants`, `regulatory_authorities`, `service_operators`, `payment_networks`, `payment_network_operators`, `institution_network_participation`, `access_routes`, `route_supported_flows`, `route_menu_steps`, `route_fees`, `route_limits`, `directory_sources`, `directory_aliases`, `directory_versions`) **plus** `directory_evidence` `select` (metadata only — RLS-gated to `directory.view_evidence`; the file bytes are served via a signed URL). = 15. The comment arithmetic block is extended in the Phase M/N/O style.
+  - `authenticated` function-EXECUTE count **`29 → 47`**: `has_directory_permission`, `normalize_directory_alias`, the 2 bootstrap RPCs, the 11 upserts (`admin_upsert_regulatory_authority` / `_service_operator` / `_payment_network` / `_network_operator` / `_institution_participation` / `_access_route` / `_network_fee` / `_network_limit` / `_directory_source` / `admin_attach_directory_evidence` / `admin_detach_directory_evidence`), and the 3 state RPCs = 18. Internal helpers (`directory_transition_allowed`, `directory_transition_permission`, `record_directory_version`, `record_directory_audit`) and the `directory_aliases_set_normalized` trigger stay `revoke all from public`.
 - New behavioural assertions (Phase P block):
   1. a plain user sees the published eKash network but **not** the draft BK/MTN participation rows;
   2. `has_directory_permission('directory.create')` is false for a plain user, true after `admin_grant_directory_permission`;

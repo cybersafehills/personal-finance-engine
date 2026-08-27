@@ -317,6 +317,70 @@ Idempotent: a second reconcile call for the same transaction is a no-op
 lets the user link the right ledger row directly (`match_method='manual'`,
 applied immediately).
 
+## Phase P — Payment networks, access routes & directory permissions
+
+Extends the Phase 1 directory to represent an **interoperable payment
+network** (eKash) and adds a **granular `directory.*` permission system**.
+See `docs/pay-services-phase-p-design.md` and
+`docs/adr/0004-payment-networks-and-directory-permissions.md`. Delivered
+as four staged PRs; **PR 1 (schema + permissions + RPCs + seed) is the
+DB foundation — no UI yet.**
+
+### Where each piece lives (P1)
+
+| Concern | Location |
+|---|---|
+| Schema, RLS, `has_directory_permission()`, admin RPCs | `supabase/migrations/20260909000000_phase_p_payment_networks.sql` |
+| Verified eKash network-level seed (+ 2 draft institution examples) | `supabase/migrations/20260909000100_phase_p_payment_networks_seed.sql` |
+| Migration/RLS/permission/state-machine tests | `run_migration_tests.sh` ("Phase P" block) |
+
+### Data model (P1)
+
+`payment_networks` (own 6-state publication lifecycle), `regulatory_authorities`
+("regulated by"), `service_operators` + `payment_network_operators`
+(versioned "operated by"), `institution_network_participation` (versioned,
+per-institution, independently verified), `access_routes` (institution-
+specific, channel-typed, may reference a `service_codes` USSD entry) with
+`route_supported_flows` / `route_menu_steps` / `route_fees` / `route_limits`
+(fees & limits carry a `scope = network | institution`; institution rows
+override network rows in the read layer; `fee_type` distinguishes
+`none` / `unknown` / `varies_by_institution` / `published_maximum`),
+`directory_sources` + `directory_evidence` (private `directory-evidence`
+Storage bucket, no `authenticated` file-byte access — signed URL only),
+`directory_aliases` (search-normalised alternate spellings),
+`directory_versions` (generic append-only history), `directory_role_grants`
+(the 14 `directory.*` permissions).
+
+### Permissions & maker–checker (P1)
+
+`has_directory_permission(perm)` is the authorization primitive for every
+Phase P RLS policy and admin RPC. **`is_platform_admin()` implies all 14
+`directory.*` permissions** (Platform Owner fallback) — so the current
+single-operator setup, the Phase M seed, and the Phase M tests are
+behaviourally unchanged. The state-transition RPCs check a **different**
+permission per transition (`draft→pending_review` = `directory.submit_review`;
+`pending_review→published` = `directory.review` **and** `directory.publish`),
+so narrowing grants later enforces maker–checker with no schema change.
+The Phase M RPCs are re-issued with `has_directory_permission()` guards.
+
+### Seed & the verification gap (P1)
+
+The eKash **network-level** record is seeded `state='published'`,
+`verified_at` set, with provenance (`official_source_label =
+'RSwitch Ltd - official system-operator publication'`) — canonical name,
+`entity_type='interoperable_network'`, BNR as regulator, RSwitch as
+current system operator, the RWF 20 **published-maximum** fee
+(`route_fees.fee_type='published_maximum'`), the RWF 10,000,000
+**published-maximum** per-transaction capacity
+(`route_limits.is_published_maximum`), the 14 July 2026 full-
+interoperability date, and `eKash` / `eCash` / `RSwitch` aliases.
+**No `access_routes` or `route_menu_steps` are seeded** — the RSwitch
+notice contains no bank USSD codes or menu option numbers, and the brief
+(§5) forbids inventing them; they are added per institution with separate
+verified evidence. Bank of Kigali and MTN Rwanda participation rows are
+seeded `state='draft'`, `verified_at IS NULL` purely to give the P2/P3
+UI realistic "not yet verified" rows.
+
 ## Support troubleshooting
 
 - **"Dialing isn't available on this device."** Expected on desktop and
