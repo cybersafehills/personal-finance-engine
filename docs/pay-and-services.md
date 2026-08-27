@@ -157,6 +157,94 @@ finished directory.
 | QR desktop→phone hand-off | Deferred. Phase 1 desktop path is Copy code + written steps. |
 | Down migrations | The repo has no down-migration convention; the migration is written to be reviewable and its objects are all `DROP`-able (`drop table ... cascade` for the 9 tables, `drop function` for the 6 functions, `alter table public.profiles drop column is_platform_admin`). |
 
+## Phase 2a — Assisted Quick Pay
+
+Makes the launcher's six payment actions real. **Still non-custodial**
+(ADR 0001): an assisted flow *prepares and hands off* an instruction and
+tracks the attempt — it never initiates a provider payment, never writes
+the `transactions` ledger, never stores a PIN/OTP/secret. Delivered as
+**2a** only; **2b** (SMS-to-intent reconciliation + ledger linking) is a
+follow-up — the `payment_reconciliations` table already ships (schema
+only) so 2b is purely additive.
+
+### Where each piece lives (2a)
+
+| Concern | Location |
+|---|---|
+| Schema, RLS, state-machine RPCs | `supabase/migrations/20260907000000_phase_n_payment_orchestration.sql` |
+| Migration tests | `run_migration_tests.sh` ("Phase N" block) |
+| Phone normalize / mask / provider-guess | `web/lib/pay/phone.ts` (+ `_test.ts`) |
+| Intent state machine + honest status vocabulary | `web/lib/pay/state.ts` (+ `_test.ts`) |
+| Minimal QR encoder (byte mode, auto version) | `web/lib/pay/qr.ts` (+ `_test.ts`), rendered by `web/components/pay/PaymentQr.tsx` |
+| RLS-scoped reads + `isSessionFresh()` + lazy expiry | `web/lib/pay/intents.ts` |
+| Gating | `web/lib/pay/gate.ts` (`isAssistedPayEnabled` / `isPaymentTemplatesEnabled` / `isTrustedRecipientsEnabled`) |
+| Server actions | `web/app/pay/assisted-actions.ts` |
+| Draft form / review+status / activity / recipients / templates | `web/app/pay/new/[type]/**`, `web/app/pay/[id]/**`, `web/app/pay/activity/**`, `web/app/pay/recipients/**`, `web/app/pay/templates/**` + `web/components/pay/*` |
+| Stale-intent expiry cron | `web/app/api/cron/expire-payment-intents/route.ts`; pg_cron activation `supabase/scheduling/activate_payment_intent_expiry.sql` (manual, deferred) |
+| e2e | `web/e2e/pay-assisted.spec.ts` |
+
+### Data model (2a)
+
+`trusted_recipients`, `payment_templates` (with an `enforce_no_payment_secret`
+trigger that rejects any `recipient_snapshot` key in
+`pin/otp/password/secret/credential`), `payment_intents` (unique
+`(workspace_id, idempotency_key)`), `payment_attempts` (method + capability
+outcome only — no msisdn/amount/filled USSD), `payment_events`
+(append-only lifecycle log), `payment_reconciliations` (**schema only**,
+2b), `payment_audit_events` (config-change trail). All workspace-scoped,
+RLS via `is_workspace_member()`. Intents + their child rows are
+**read-only** to `authenticated`; every write goes through a
+`SECURITY DEFINER` RPC.
+
+### Intent lifecycle & the "manually confirmed ≠ verified" principle
+
+See **ADR 0002**. `successful` is unreachable by a plain user transition.
+In 2a it is reached only via **`manually_confirm_payment`**, which stamps
+`manually_confirmed_at` and leaves `verified_at` NULL — the UI shows
+**"Manually confirmed"** with a neutral tone. `verified_at` (and a green
+"Verified") comes only from 2b reconciliation.
+
+| `state` (+ flags) | Label | Tone |
+|---|---|---|
+| `draft` | Draft | neutral |
+| `initiated` / `awaiting_verification` | Awaiting verification | neutral |
+| `successful` + `manually_confirmed_at` | **Manually confirmed** | **neutral** |
+| `successful` + `verified_at` (2b) | Verified | positive |
+| `failed` / `reversed` / `expired` / `requires_reconciliation` | (that word) | attention |
+| `cancelled` | Cancelled | neutral |
+
+### Hand-off
+
+The review screen (`/pay/[id]`) reuses the Phase 1 capability layer. When
+the intent links a published `service_code` (send-money codes resolved
+server-side by provider + `intent='send_money'`), it fills the template
+client-side from the stored msisdn (local `07…` form) + amount — the
+filled string is never persisted (only the `<kind>`-redacted template is).
+Mobile → **Open phone dialer**; desktop → **Copy code** + **Show QR**
+(inline SVG, no network, `currentColor`, theme-aware — encodes a phone
+number + amount, never a PIN). Every gesture records a `payment_attempt`
+and moves the intent to `awaiting_verification`. A standing notice states
+that authorization happens with the provider and OneLedger never asks for
+the PIN.
+
+### Session freshness
+
+`isSessionFresh()` compares the Supabase session's issued-at against
+`PAYMENT_SESSION_FRESHNESS_MINUTES` (default 60). Phase 2a **never
+blocks** on it — a stale session only shows an advisory notice on the
+review screen. A password-reentry step-up gate is deferred to Phase 3
+(where real provider initiation lands).
+
+### Decisions & deviations (2a)
+
+| Area | Decision |
+|---|---|
+| Scope | 2a only. SMS reconciliation / ledger linking / `payment_reconciliations` population / the ingest-momo hook / provider adapters / real initiation / `processing`/`verified`/`reversed` transitions are 2b or later. |
+| Step-up auth | Session-freshness **soft notice** only; no password re-entry (Phase 3). |
+| QR hand-off | **Included** (per product-owner decision) — a from-scratch, dependency-free encoder (`web/lib/pay/qr.ts`). Structurally unit-tested; a real-phone scan is part of manual verification. Copy is always the primary path. |
+| Expiry | Route + lazy UI view now; pg_cron activation deferred to a manual scheduling file (same pattern as the report scheduler). |
+| Feature flags | Env kill-switches + the shared workspace allowlist. |
+
 ## Support troubleshooting
 
 - **"Dialing isn't available on this device."** Expected on desktop and

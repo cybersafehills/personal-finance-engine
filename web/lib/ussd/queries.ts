@@ -116,21 +116,61 @@ export async function getServiceDirectory(
   return (data ?? []) as unknown as ServiceCodeListItem[];
 }
 
+// No `replacement:service_codes!...(slug)` embed - PostgREST cannot
+// resolve a self-referential FK embed on this table ("Could not find a
+// relationship between 'service_codes' and 'service_codes'"). The
+// replacement slug is fetched with a second query in the shape helper.
+const DETAIL_SELECT = `${LIST_COLUMNS}, description_en, description_rw, official_source_url, official_source_label, review_due_at, effective_to, risk_text, caution_text, replacement_code_id, version,
+       parameters:service_code_parameters(key, label_en, label_rw, kind, required, position, format_regex, format_hint_en, format_hint_rw, min_length, max_length),
+       steps:service_code_steps(position, instruction_en, instruction_rw)`;
+
+async function resolveReplacementSlug(
+  supabase: Awaited<ReturnType<typeof supabaseSession>>,
+  replacementCodeId: unknown,
+): Promise<string | null> {
+  if (!replacementCodeId) return null;
+  const { data } = await supabase
+    .from("service_codes")
+    .select("slug")
+    .eq("id", replacementCodeId as string)
+    .maybeSingle();
+  return (data as { slug: string } | null)?.slug ?? null;
+}
+
+function sortChildren(row: Record<string, unknown>) {
+  return {
+    parameters: ((row.parameters as ServiceCodeParameterRow[]) ?? []).sort(
+      (a, b) => a.position - b.position,
+    ),
+    steps: ((row.steps as ServiceCodeStepRow[]) ?? []).sort(
+      (a, b) => a.position - b.position,
+    ),
+  };
+}
+
+export async function getServiceCodeById(id: string): Promise<ServiceCodeDetail | null> {
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("service_codes")
+    .select(DETAIL_SELECT)
+    .eq("id", id)
+    .maybeSingle();
+  if (error || !data) return null;
+  const row = data as Record<string, unknown>;
+  return {
+    ...(row as unknown as ServiceCodeDetail),
+    replacement_slug: await resolveReplacementSlug(supabase, row.replacement_code_id),
+    ...sortChildren(row),
+  };
+}
+
 export async function getServiceCodeBySlug(
   slug: string,
 ): Promise<ServiceCodeDetail | null> {
   const supabase = await supabaseSession();
-  // NOTE: no `replacement:service_codes!...(slug)` embed here - PostgREST
-  // cannot resolve a self-referential FK embed on this table ("Could not
-  // find a relationship between 'service_codes' and 'service_codes'"), so
-  // the replacement slug is fetched with a second query below.
   const { data, error } = await supabase
     .from("service_codes")
-    .select(
-      `${LIST_COLUMNS}, description_en, description_rw, official_source_url, official_source_label, review_due_at, effective_to, risk_text, caution_text, replacement_code_id, version,
-       parameters:service_code_parameters(key, label_en, label_rw, kind, required, position, format_regex, format_hint_en, format_hint_rw, min_length, max_length),
-       steps:service_code_steps(position, instruction_en, instruction_rw)`,
-    )
+    .select(DETAIL_SELECT)
     .eq("slug", slug)
     .maybeSingle();
 
@@ -141,28 +181,10 @@ export async function getServiceCodeBySlug(
   if (!data) return null;
 
   const row = data as Record<string, unknown>;
-  const parameters = ((row.parameters as ServiceCodeParameterRow[]) ?? []).sort(
-    (a, b) => a.position - b.position,
-  );
-  const steps = ((row.steps as ServiceCodeStepRow[]) ?? []).sort(
-    (a, b) => a.position - b.position,
-  );
-
-  let replacementSlug: string | null = null;
-  if (row.replacement_code_id) {
-    const { data: repl } = await supabase
-      .from("service_codes")
-      .select("slug")
-      .eq("id", row.replacement_code_id as string)
-      .maybeSingle();
-    replacementSlug = (repl as { slug: string } | null)?.slug ?? null;
-  }
-
   return {
     ...(row as unknown as ServiceCodeDetail),
-    replacement_slug: replacementSlug,
-    parameters,
-    steps,
+    replacement_slug: await resolveReplacementSlug(supabase, row.replacement_code_id),
+    ...sortChildren(row),
   };
 }
 
@@ -234,6 +256,43 @@ export async function getRecentServices(limit = 6): Promise<RecentListItem[]> {
     if (out.length >= limit) break;
   }
   return out;
+}
+
+/**
+ * The published send-money-style code for a provider, if the directory
+ * has one - used to give an Assisted Quick Pay draft a real USSD
+ * template to hand off with. Matched by provider slug + intent.
+ */
+export async function getServiceCodeForPayment(
+  providerNetwork: "mtn" | "airtel" | null,
+  intent: string,
+): Promise<ServiceCodeDetail | null> {
+  if (!providerNetwork) return null;
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("service_codes")
+    .select(
+      `${LIST_COLUMNS}, description_en, description_rw, official_source_url, official_source_label, review_due_at, effective_to, risk_text, caution_text, replacement_code_id, version,
+       parameters:service_code_parameters(key, label_en, label_rw, kind, required, position, format_regex, format_hint_en, format_hint_rw, min_length, max_length),
+       steps:service_code_steps(position, instruction_en, instruction_rw)`,
+    )
+    .eq("intent", intent)
+    .contains("supported_networks", [providerNetwork])
+    .limit(1)
+    .maybeSingle();
+
+  if (error || !data) return null;
+  const row = data as Record<string, unknown>;
+  return {
+    ...(row as unknown as ServiceCodeDetail),
+    replacement_slug: null,
+    parameters: ((row.parameters as ServiceCodeDetail["parameters"]) ?? []).sort(
+      (a, b) => a.position - b.position,
+    ),
+    steps: ((row.steps as ServiceCodeDetail["steps"]) ?? []).sort(
+      (a, b) => a.position - b.position,
+    ),
+  };
 }
 
 export async function getActiveProviders(): Promise<ProviderRow[]> {

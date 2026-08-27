@@ -25,10 +25,7 @@ test("the global Pay action opens the launcher and is fully keyboard-dismissable
   await payButton.click();
   const dialog = page.getByRole("dialog", { name: "Pay & Services" });
   await expect(dialog).toBeVisible();
-
-  // The payment actions are deferred, not faked.
-  await expect(dialog.getByText("Coming in a later update").first()).toBeVisible();
-  await expect(dialog.getByRole("button", { name: /Pay a person/ })).toBeDisabled();
+  await expect(dialog.getByRole("button", { name: "Open USSD directory" })).toBeVisible();
 
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();

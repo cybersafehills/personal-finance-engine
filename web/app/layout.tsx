@@ -4,7 +4,7 @@ import { AppShell } from "../components/AppShell";
 import { supabaseSession } from "../lib/supabase-session-server";
 import { getActiveWorkspaceId, getUiPreferences, getUserWorkspaces } from "../lib/queries";
 import { DEFAULT_NAV_ORDER } from "../lib/navigation";
-import { isPayServicesEnabled } from "../lib/pay/gate";
+import { isAssistedPayEnabled, isPayServicesEnabled } from "../lib/pay/gate";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -67,6 +67,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   // allowlist, see lib/pay/gate.ts). Every Pay/USSD action re-checks
   // this independently - the flag is not merely a hidden button.
   const payEnabled = Boolean(user) && isPayServicesEnabled(activeWorkspaceId);
+  const assistedPayEnabled = payEnabled && isAssistedPayEnabled(activeWorkspaceId);
 
   return (
     <html lang="en" className={`${geistSans.variable} h-full antialiased`}>
@@ -80,6 +81,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           privacyMode={uiPreferences.privacyMode}
           reportsRelocationNoticeDismissed={uiPreferences.reportsRelocationNoticeDismissed}
           payEnabled={payEnabled}
+          assistedPayEnabled={assistedPayEnabled}
         >
           {children}
         </AppShell>
