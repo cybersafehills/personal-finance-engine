@@ -17,6 +17,21 @@ export const test = base.extend({
   // Next.js/React-linted project. Playwright doesn't care what this
   // parameter is called; only its position (second) matters.
   page: async ({ page }, runWithPage) => {
+    // Opt every spec out of the branded app-opening screen
+    // (components/brand/BrandSplashScreen.tsx) by default: a ~1.2s
+    // full-viewport overlay on the first load of each test would race
+    // clicks and disturb visual baselines across the whole suite. The
+    // splash gets its own dedicated coverage in brand-splash.spec.ts,
+    // which clears this cookie to exercise the real thing.
+    await page.context().addCookies([
+      {
+        name: "oneledger_splash_off",
+        value: "1",
+        domain: "127.0.0.1",
+        path: "/",
+      },
+    ]);
+
     page.on("console", (msg) => {
       if (msg.type() === "error") {
         console.log(`[browser console.error] ${msg.text()}`);
