@@ -86,8 +86,7 @@ export default async function UssdDirectoryPage({
                       <Badge variant="accent">Network</Badge>
                     </div>
                     <p className="mt-0.5 text-xs text-text-muted">
-                      Interoperable transfers between banks and mobile wallets — open to find a
-                      verified route.
+                      Move money between a bank account and a Mobile Money wallet.
                     </p>
                   </div>
                   <span

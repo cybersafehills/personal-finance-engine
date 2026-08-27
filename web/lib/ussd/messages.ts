@@ -161,6 +161,9 @@ const en = {
   },
   network: {
     findRoute: "Find a route",
+    summary:
+      "Move money between a bank account and a Mobile Money wallet using the channel you already have. OneLedger doesn't hold your money or process the payment — you dial and confirm on your own phone.",
+    aboutToggle: "About eKash — operator, fees & limits",
     overviewHeading: "About this network",
     purposesHeading: "What you can do",
     operatorHeading: "Operator and regulator",
@@ -169,14 +172,14 @@ const en = {
     aliasHeading: "Also known as",
     routeFinderTitle: "Route finder",
     routeFinderIntro:
-      "Pick where the money starts and where it's going. OneLedger only shows routes it has verified.",
-    sourceLabel: "Where the money starts",
-    anySource: "Any institution or wallet",
+      "Pick your bank or wallet to get the verified code and the steps. OneLedger only shows routes it has checked.",
+    sourceLabel: "Your bank or wallet",
+    anySource: "Show all",
     flowLabel: "What you're doing",
     anyFlow: "Any purpose",
-    channelLabel: "Preferred channel",
+    channelLabel: "How you'll do it",
     anyChannel: "Any channel",
-    resultsHeading: "Verified routes",
+    resultsHeading: "Choose your bank or wallet",
     noRoutesTitle: "No verified route yet",
     noRoutesBody:
       "OneLedger hasn't verified the institution-specific instructions for this combination. We won't guess — check back, or ask the institution directly.",
