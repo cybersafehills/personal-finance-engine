@@ -98,7 +98,7 @@ async function prepareAndHandOff(page: import("@playwright/test").Page, phone: s
   await expect(page).toHaveURL(/\/pay\/([0-9a-f-]{36})$/);
   const intentId = page.url().split("/").pop()!;
   await page.getByRole("button", { name: "Copy code" }).click();
-  await expect(page.getByText("Awaiting verification")).toBeVisible();
+  await expect(page.getByText("Awaiting verification", { exact: true })).toBeVisible();
   return intentId;
 }
 
@@ -119,7 +119,7 @@ test("an ingested transaction reconciled in apply mode links + verifies the inte
   expect((reconResult as { status: string }).status).toBe("linked");
 
   await page.goto(`/pay/${intentId}`);
-  await expect(page.getByText("Verified")).toBeVisible();
+  await expect(page.getByText("Verified", { exact: true })).toBeVisible();
   await expect(page.getByText("Linked payment")).toBeVisible();
   await page.getByRole("link", { name: "View transaction" }).click();
   await expect(page).toHaveURL(new RegExp(`/transactions/${txnId}$`));
@@ -140,7 +140,7 @@ test("manual link: the user picks a ledger transaction and the intent becomes Ve
   await page.goto(`/pay/${intentId}`);
   await page.getByRole("button", { name: "Link an existing transaction" }).click();
   await page.getByRole("button", { name: /RWF/ }).first().click();
-  await expect(page.getByText("Verified")).toBeVisible();
+  await expect(page.getByText("Verified", { exact: true })).toBeVisible();
   await expect(page.getByText("Linked payment")).toBeVisible();
 });
 
