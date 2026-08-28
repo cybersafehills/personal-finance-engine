@@ -585,7 +585,11 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # (deny-by-default, like momo_messages) - it is NOT a second exception.
 # Phase R (20260912000000) adds space_member_capability_grants (RLS
 # enabled, SELECT-only for authenticated) - 68 tables, 67 with RLS.
-if [ "$TABLE_COUNT" = "68" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Bills & Expenses Phase 1 (20260914000000) adds 4, all RLS-enabled
+# (bill_documents, bill_document_artifacts, bill_processing_events,
+# bill_processing_policies) - 72 tables, 71 with RLS, the same one
+# intentional gap.
+if [ "$TABLE_COUNT" = "72" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -662,11 +666,15 @@ fi
 # Phase R (20260912000000) adds space_member_capability_grants (select
 # only - mutated exclusively by grant_space_capability /
 # revoke_space_capability). 114 + 1 = 115.
+# Bills & Expenses Phase 1 (20260914000000) adds 5: bill_documents (select),
+# bill_document_artifacts (select), bill_processing_events (select) - every
+# write goes through a SECURITY DEFINER RPC or the service role - and
+# bill_processing_policies (select, update). 115 + 5 = 120.
 AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and grantee = 'authenticated';")"
-if [ "$AUTHENTICATED_GRANT_COUNT" = "115" ]; then
-  pass "authenticated holds exactly the 115 table grants expected, no more"
+if [ "$AUTHENTICATED_GRANT_COUNT" = "120" ]; then
+  pass "authenticated holds exactly the 120 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 115 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 120 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -772,11 +780,21 @@ fi
 # re-issued RPCs (accept_workspace_invite, set_member_role, remove_member,
 # create_household_workspace) keep their existing grants (CREATE OR REPLACE
 # preserves privileges). = 55 total.
+# Bills & Expenses Phase 1 (20260914000000) adds 4 authenticated-callable
+# functions: create_bill_document, transition_bill_document,
+# record_bill_original_download, and get_or_create_bill_processing_policy.
+# Its internal helpers record_bill_event and enforce_bill_original_immutable
+# are `revoke all from public` with no authenticated grant; the pure matrix
+# bill_document_transition_allowed has no grant of its own (called only
+# from transition_bill_document, mirroring space_role_has_capability). The
+# three re-issued Spaces functions (space_role_has_capability,
+# grant_space_capability, revoke_space_capability) keep their existing
+# grants. = 59 total.
 AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname = 'authenticated' where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "55" ]; then
-  pass "authenticated holds EXECUTE on exactly the 55 functions expected, no more"
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "59" ]; then
+  pass "authenticated holds EXECUTE on exactly the 59 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 55 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 59 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -2770,6 +2788,133 @@ if [ "$R_SERVICE_AUDIT" -ge "1" ]; then
   pass "Phase R: service_role reads space_audit_events unaffected by RLS"
 else
   fail "Phase R: service_role could not read space_audit_events (got $R_SERVICE_AUDIT)"
+fi
+
+# ===========================================================================
+# Bills & Expenses Phase 1 (20260914000000): lifecycle CHECK, per-workspace
+# checksum uniqueness, transition matrix + capability gating, the
+# record_bill_event lockdown, original-artifact immutability, and
+# cross-workspace RLS isolation. Reuses the pfe_rls database + USER_A /
+# USER_B set up for the RLS block above (BILL_WS_A is resolved below).
+# ===========================================================================
+echo "=== Bills Phase 1: intake, lifecycle, audit, isolation ==="
+
+BILL_CHK_A="$(printf 'a%.0s' $(seq 1 64))"
+# USER_A's personal workspace specifically (they also own the Phase Q
+# household) - owner of a personal Space holds every bill.* capability.
+BILL_WS_A="$(psql -d pfe_rls -t -A -c "select w.id from public.workspaces w join public.workspace_memberships m on m.workspace_id = w.id where m.user_id = '$USER_A' and w.kind = 'personal' and m.status = 'active' limit 1;")"
+
+# The two Storage buckets exist.
+BILL_BUCKETS="$(psql -d pfe_rls -t -A -c "select count(*) from storage.buckets where id in ('bill-documents','bill-derivatives') and public = false;")"
+if [ "$BILL_BUCKETS" = "2" ]; then
+  pass "Bills Phase 1: both private Storage buckets exist (bill-documents, bill-derivatives)"
+else
+  fail "Bills Phase 1: expected 2 private bill buckets, found $BILL_BUCKETS"
+fi
+
+# The lifecycle CHECK rejects an unknown status (service_role insert).
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.bill_documents (workspace_id, status, original_filename, sanitized_filename, storage_key, mime_type, byte_size, checksum_sha256)
+  values ('$BILL_WS_A', 'not_a_real_state', 'x.pdf', 'x.pdf', '$BILL_WS_A/z.pdf', 'application/pdf', 10, '$BILL_CHK_A');
+" >/dev/null 2>&1; then
+  fail "Bills Phase 1: bill_documents accepted an unknown lifecycle status"
+else
+  pass "Bills Phase 1: bill_documents rejects an unknown lifecycle status"
+fi
+
+# create_bill_document as USER_A (owner of their personal workspace, so it
+# holds every bill.* capability via the matrix) succeeds and returns ok.
+BILL_CREATE="$(as_user "$USER_A" "select (public.create_bill_document(jsonb_build_object(
+  'workspace_id', '$BILL_WS_A',
+  'original_filename', 'invoice.pdf',
+  'sanitized_filename', 'invoice.pdf',
+  'storage_key', '$BILL_WS_A/${BILL_CHK_A}.pdf',
+  'mime_type', 'application/pdf',
+  'byte_size', 2048,
+  'page_count', 1,
+  'checksum_sha256', '$BILL_CHK_A'
+)))->>'ok';")"
+BILL_ID="$(as_user "$USER_A" "select id from public.bill_documents where checksum_sha256 = '$BILL_CHK_A';")"
+if [ "$BILL_CREATE" = "true" ] && [ -n "$BILL_ID" ]; then
+  pass "Bills Phase 1: create_bill_document records the document for a member holding bill.upload"
+else
+  fail "Bills Phase 1: create_bill_document did not succeed (ok=$BILL_CREATE id=$BILL_ID)"
+fi
+
+# It also wrote the immutable original artifact and a processing event.
+BILL_ORIG_ARTIFACT="$(psql -d pfe_rls -t -A -c "select count(*) from public.bill_document_artifacts where bill_document_id = '$BILL_ID' and kind = 'original';")"
+BILL_RECEIVED_EVENT="$(psql -d pfe_rls -t -A -c "select count(*) from public.bill_processing_events where bill_document_id = '$BILL_ID' and event_type = 'document_received';")"
+BILL_AUDIT_EVENT="$(psql -d pfe_rls -t -A -c "select count(*) from public.space_audit_events where workspace_id = '$BILL_WS_A' and event_type = 'bill.uploaded' and resource_id = '$BILL_ID';")"
+if [ "$BILL_ORIG_ARTIFACT" = "1" ] && [ "$BILL_RECEIVED_EVENT" = "1" ] && [ "$BILL_AUDIT_EVENT" = "1" ]; then
+  pass "Bills Phase 1: create_bill_document writes the original artifact + a processing event + a space audit event"
+else
+  fail "Bills Phase 1: expected original=1 received_event=1 audit=1, got $BILL_ORIG_ARTIFACT / $BILL_RECEIVED_EVENT / $BILL_AUDIT_EVENT"
+fi
+
+# A byte-identical re-upload is a surfaced duplicate, not a second row or a raw error.
+BILL_DUP="$(as_user "$USER_A" "select (public.create_bill_document(jsonb_build_object(
+  'workspace_id', '$BILL_WS_A',
+  'original_filename', 'invoice-again.pdf',
+  'sanitized_filename', 'invoice-again.pdf',
+  'storage_key', '$BILL_WS_A/${BILL_CHK_A}.pdf',
+  'mime_type', 'application/pdf',
+  'byte_size', 2048,
+  'checksum_sha256', '$BILL_CHK_A'
+)))->>'error';")"
+BILL_ROW_COUNT="$(psql -d pfe_rls -t -A -c "select count(*) from public.bill_documents where checksum_sha256 = '$BILL_CHK_A';")"
+if [ "$BILL_DUP" = "duplicate_document" ] && [ "$BILL_ROW_COUNT" = "1" ]; then
+  pass "Bills Phase 1: a byte-identical re-upload returns duplicate_document and does not create a second row"
+else
+  fail "Bills Phase 1: duplicate handling wrong (error=$BILL_DUP rows=$BILL_ROW_COUNT)"
+fi
+
+# transition_bill_document: stored -> needs_review is allowed; a same-state
+# call no-ops; an invalid hop returns { ok:false } rather than raising.
+BILL_T1="$(as_user "$USER_A" "select (public.transition_bill_document('$BILL_ID', 'needs_review'))->>'status';")"
+BILL_T2="$(as_user "$USER_A" "select (public.transition_bill_document('$BILL_ID', 'needs_review'))->>'changed';")"
+BILL_T3="$(as_user "$USER_A" "select (public.transition_bill_document('$BILL_ID', 'posted'))->>'error';")"
+if [ "$BILL_T1" = "needs_review" ] && [ "$BILL_T2" = "false" ] && [ "$BILL_T3" = "invalid_transition" ]; then
+  pass "Bills Phase 1: transition_bill_document enforces the lifecycle matrix and no-ops a repeat"
+else
+  fail "Bills Phase 1: transition matrix wrong (t1=$BILL_T1 t2=$BILL_T2 t3=$BILL_T3)"
+fi
+
+# record_bill_event is not callable by an authenticated user directly.
+if as_user "$USER_A" "select public.record_bill_event('$BILL_ID', '$BILL_WS_A', 'user', 'x');" >/dev/null 2>$ARTIFACT_DIR/pfe_bill_evt.log; then
+  fail "Bills Phase 1: record_bill_event was callable by an authenticated user"
+else
+  pass "Bills Phase 1: record_bill_event is not authenticated-callable"
+fi
+rm -f $ARTIFACT_DIR/pfe_bill_evt.log
+
+# The stored original artifact cannot be updated or deleted (service_role).
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "update public.bill_document_artifacts set mime_type = 'image/png' where bill_document_id = '$BILL_ID' and kind = 'original';" >/dev/null 2>&1; then
+  fail "Bills Phase 1: a kind=original artifact was updatable"
+else
+  pass "Bills Phase 1: a kind=original artifact cannot be updated"
+fi
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "delete from public.bill_document_artifacts where bill_document_id = '$BILL_ID' and kind = 'original';" >/dev/null 2>&1; then
+  fail "Bills Phase 1: a kind=original artifact was deletable"
+else
+  pass "Bills Phase 1: a kind=original artifact cannot be deleted"
+fi
+
+# Cross-workspace RLS: USER_B cannot see USER_A's bill document.
+BILL_B_SEES="$(as_user "$USER_B" "select count(*) from public.bill_documents where id = '$BILL_ID';")"
+if [ "$BILL_B_SEES" = "0" ]; then
+  pass "Bills Phase 1: a non-member cannot read another workspace's bill document"
+else
+  fail "Bills Phase 1: RLS isolation breach - USER_B read USER_A's bill document"
+fi
+
+# The capability matrix places bill.* where Phase 1 intends.
+BILL_CAP1="$(psql -d pfe_rls -t -A -c "select public.space_role_has_capability('household', 'member', 'bill.upload');")"
+BILL_CAP2="$(psql -d pfe_rls -t -A -c "select public.space_role_has_capability('household', 'member', 'bill.approve');")"
+BILL_CAP3="$(psql -d pfe_rls -t -A -c "select public.space_role_has_capability('household', 'admin', 'bill.approve');")"
+if [ "$BILL_CAP1" = "t" ] && [ "$BILL_CAP2" = "f" ] && [ "$BILL_CAP3" = "t" ]; then
+  pass "Bills Phase 1: capability matrix - member has bill.upload not bill.approve; admin has bill.approve"
+else
+  fail "Bills Phase 1: capability matrix wrong (member.upload=$BILL_CAP1 member.approve=$BILL_CAP2 admin.approve=$BILL_CAP3)"
 fi
 
 echo ""

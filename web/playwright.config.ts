@@ -59,7 +59,11 @@ export default defineConfig({
     url: BASE_URL,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
-    env: { PORT: String(PORT) },
+    // BILLS_ENABLED turns on the Bills & Expenses surface for
+    // bills-intake.spec.ts. It is inert for every other spec (nothing
+    // else routes to /bills), and its dark default elsewhere is covered
+    // by that spec's "flag off" assumption note.
+    env: { PORT: String(PORT), BILLS_ENABLED: "true" },
   },
 
   projects: [
