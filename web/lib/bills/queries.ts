@@ -305,3 +305,74 @@ export async function getCurrentBillExtraction(
     lineItems: (lineItems ?? []) as BillLineItemRow[],
   };
 }
+
+// --- Phase 3: validation read side ---------------------------------
+
+export type BillValidationRow = {
+  id: string;
+  status: "succeeded" | "failed";
+  ruleset_version: string;
+  blocking_count: number;
+  warning_count: number;
+  info_count: number;
+  error: Record<string, unknown> | null;
+  created_at: string;
+};
+
+export type BillValidationFindingRow = {
+  id: string;
+  rule_id: string;
+  severity: "info" | "warning" | "blocking" | "possible_duplicate" | "needs_specialist";
+  title: string;
+  detail: string;
+  affected_fields: string[];
+  blocks_approval: boolean;
+  suggested_action: string | null;
+};
+
+export type BillValidationBundle = {
+  validation: BillValidationRow | null;
+  findings: BillValidationFindingRow[];
+};
+
+const SEVERITY_ORDER: Record<string, number> = {
+  blocking: 0,
+  needs_specialist: 1,
+  possible_duplicate: 2,
+  warning: 3,
+  info: 4,
+};
+
+export async function getCurrentBillValidation(
+  billDocumentId: string,
+): Promise<BillValidationBundle> {
+  const supabase = await supabaseSession();
+
+  const { data: validation, error } = await supabase
+    .from("bill_validations")
+    .select(
+      "id, status, ruleset_version, blocking_count, warning_count, info_count, error, created_at",
+    )
+    .eq("bill_document_id", billDocumentId)
+    .eq("is_current", true)
+    .maybeSingle();
+
+  if (error) {
+    console.error("getCurrentBillValidation failed:", error.message);
+    return { validation: null, findings: [] };
+  }
+  if (!validation) return { validation: null, findings: [] };
+
+  const { data: findings } = await supabase
+    .from("bill_validation_findings")
+    .select(
+      "id, rule_id, severity, title, detail, affected_fields, blocks_approval, suggested_action",
+    )
+    .eq("validation_id", validation.id);
+
+  const sorted = ((findings ?? []) as BillValidationFindingRow[]).sort(
+    (a, b) => (SEVERITY_ORDER[a.severity] ?? 9) - (SEVERITY_ORDER[b.severity] ?? 9),
+  );
+
+  return { validation: validation as BillValidationRow, findings: sorted };
+}

@@ -165,11 +165,16 @@ isolation on `bill_documents`; then **Bills & Expenses Phase 2** -
 document` being `service_role`-only, a full worker round-trip
 (`queued -> ... -> extracting -> record -> needs_review` with `doc_class`,
 fields and line items), `is_current` supersession, `retry_bill_extraction`,
-and cross-workspace RLS on the three extraction tables). The privilege-
-regression counts (public table count, `authenticated` table-grant count,
-`authenticated` function-EXECUTE count) are asserted exactly and must be
-updated in lock-step with any migration that adds a table, an
-`authenticated` grant, or an `authenticated`-callable function.
+and cross-workspace RLS on the three extraction tables; then **Bills &
+Expenses Phase 3** - `20260924000000`: `record_bill_validation` being
+`service_role`-only, a validation run inserting findings + tallying
+severities + advancing `validating -> needs_review`, `is_current`
+supersession, and cross-workspace RLS on `bill_validations` /
+`bill_validation_findings`). The privilege-regression counts (public
+table count, `authenticated` table-grant count, `authenticated`
+function-EXECUTE count) are asserted exactly and must be updated in
+lock-step with any migration that adds a table, an `authenticated` grant,
+or an `authenticated`-callable function.
 
 Run it with:
 

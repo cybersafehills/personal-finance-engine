@@ -5,6 +5,7 @@ import { BillStatusBadge } from "../../../components/bills/BillStatusBadge";
 import { BillProcessingTimeline } from "../../../components/bills/BillProcessingTimeline";
 import { BillArchiveButton } from "../../../components/bills/BillArchiveButton";
 import { BillExtractedFields } from "../../../components/bills/BillExtractedFields";
+import { BillValidationFindings } from "../../../components/bills/BillValidationFindings";
 import { BillRetryButton } from "../../../components/bills/BillRetryButton";
 import { isBillsEnabled, isBillsExtractionEnabled } from "../../../lib/bills/gate";
 import {
@@ -12,6 +13,7 @@ import {
   getBillDocumentById,
   getBillProcessingEvents,
   getCurrentBillExtraction,
+  getCurrentBillValidation,
 } from "../../../lib/bills/queries";
 import { formatFullDateTime } from "../../../lib/format";
 
@@ -52,6 +54,7 @@ export default async function BillDetailPage({
 
   const extractionEnabled = isBillsExtractionEnabled(workspaceId);
   const bundle = extractionEnabled ? await getCurrentBillExtraction(id) : null;
+  const validation = extractionEnabled ? await getCurrentBillValidation(id) : null;
   const canRetry =
     permissions.canReview &&
     (doc.status === "processing_failed" || bundle?.extraction?.status === "failed");
@@ -123,6 +126,16 @@ export default async function BillDetailPage({
             extraction={bundle?.extraction ?? null}
             fields={bundle?.fields ?? []}
             lineItems={bundle?.lineItems ?? []}
+          />
+        </section>
+      )}
+
+      {extractionEnabled && (
+        <section className="flex flex-col gap-3">
+          <h2 className="text-sm font-semibold text-text-secondary">Checks</h2>
+          <BillValidationFindings
+            validation={validation?.validation ?? null}
+            findings={validation?.findings ?? []}
           />
         </section>
       )}

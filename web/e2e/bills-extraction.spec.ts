@@ -61,6 +61,12 @@ test.describe("Bills & Expenses - Phase 2 extraction", () => {
     // Line items table rendered.
     await expect(page.getByRole("table", { name: "Extracted line items" })).toBeVisible();
 
+    // The deterministic Checks section ran in the same tick. The mock
+    // invoice is self-consistent (120,000 + 21,600 = 141,600; line totals
+    // sum to the subtotal; dates in the past), so it has no findings.
+    await expect(page.getByRole("heading", { name: "Checks" })).toBeVisible();
+    await expect(page.getByText(/No issues found by the automated checks/)).toBeVisible();
+
     // No serious/critical a11y violations on the populated detail page.
     const results = await new AxeBuilder({ page }).analyze();
     const bad = results.violations.filter(
