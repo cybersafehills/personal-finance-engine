@@ -1114,6 +1114,51 @@ complete (PR6 backend + PR6b web).
 
 ---
 
+## 11n. Phase U PR7 — as built (migration `20260925000000`, backend)
+
+Generic-CSV **statement import** — the write path. The web layer (PR7b)
+parses the CSV and maps its columns; this is the RPC it calls. Format
+decision (2026-08-28): **generic CSV with a column-mapping step** (no
+per-bank parsers, no PDF); matching **reuses the Phase U fingerprint**.
+
+- **Migration** — `transactions.source` CHECK widened with `'statement'`;
+  `transactions_momo_message_required_unless_manual` re-issued to also
+  exempt `source = 'statement'` (a statement line has no SMS, like a
+  manual entry).
+- **`import_statement_transactions(p_financial_source_id, p_rows jsonb)`**
+  — `SECURITY DEFINER`, `authenticated` + `service_role`. `p_rows` is a
+  JSON array of `{occurred_at, amount_minor, direction, counterparty?,
+  external_ref?}` (already normalized by the mapping UI). The caller must
+  **own** the source (`owns_financial_source`); the target workspace is
+  the one the source's linked account belongs to. Per line:
+  - compute the fingerprint with the source's **provider** as
+    `p_source` (so a MoMo statement line and its SMS twin hash alike);
+  - a deterministic `payload_hash` (source + minute + amount + direction +
+    counterparty + ref) makes re-importing the same file a no-op
+    (`raw_financial_events.payload_hash` UNIQUE → line counted `skipped`);
+  - write a `raw_financial_events` row (`channel = 'statement'`) and a
+    `source = 'statement'` transaction — settled accounting effect
+    (`principal_effect_rwf` signed by direction, `fee = 0`,
+    `effect_reason = 'statement_import'`), `dedupe_fingerprint` set, and
+    `dedupe_state = 'possible_duplicate'` **iff** a non-merged transaction
+    with that fingerprint already exists in the Space (→ the PR3 review
+    queue; **never auto-merged**), else `'unique'`;
+  - invalid lines (bad/blank date, negative amount, unknown direction) are
+    `skipped`, never fatal.
+  Returns `{ created, flagged_possible_duplicate, skipped }`. Audited
+  `statement.imported` on the Space.
+
+`authenticated` function count → **72**. No new table / table-grant.
+5-assertion "Phase U PR7" migration block (per-line create + evidence link
++ fingerprint flag + skip + audit; accounting-constraint validity;
+re-import no-op; non-owner refusal). Full suite: **237 passed / 0 failed**.
+
+Still deferred: **PR7b (web)** — the CSV upload + column-mapping + preview
++ confirm flow calling `import_statement_transactions`, with an import
+summary and a link into the duplicate-review queue.
+
+---
+
 ## 11o. Phase U PR7b — as built (web)
 
 The upload/mapping/preview flow that calls `import_statement_transactions`
