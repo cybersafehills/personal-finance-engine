@@ -812,11 +812,13 @@ fi
 # ingestion-only (service_role grant, no authenticated). = 69.
 # Phase U PR3 (20260922000000) adds space_duplicate_review (the review
 # feed) and dismiss_possible_duplicate ("not a duplicate"). = 71.
+# Phase U PR7 (20260925000000) adds import_statement_transactions (the
+# generic-CSV statement import write path). = 72.
 AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname = 'authenticated' where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "71" ]; then
-  pass "authenticated holds EXECUTE on exactly the 71 functions expected, no more"
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "72" ]; then
+  pass "authenticated holds EXECUTE on exactly the 72 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 71 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 72 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -3490,6 +3492,70 @@ else
   fail "Phase U PR4: resuming a paused connection did not take (got $U_PR4_RESUMED)"
 fi
 rm -f $ARTIFACT_DIR/pfe_u_pr4.log
+
+# ===========================================================================
+# Phase U PR7: generic-CSV statement import (import_statement_transactions).
+# Reuses pfe_rls: USER_A owns U_SRC (mtn_momo, masked_identifier NULL) ->
+# U_ACCT -> WORKSPACE_A; USER_B is not the owner.
+# ===========================================================================
+echo "=== Phase U PR7: statement import ==="
+
+# An existing ledger transaction whose fingerprint one statement line will
+# collide with. Fingerprint computed exactly as the RPC will (provider
+# 'mtn_momo', empty masked id, RWF, minute-rounded).
+STMT_FP="$(psql -d pfe_rls -t -A -c "set role service_role; select public.compute_transaction_fingerprint('mtn_momo', '', 7500, 'RWF', 'out', 'STMT MATCH CP', '2026-08-20T14:30:00Z'::timestamptz);" | tail -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.transactions (id, source, financial_source_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version, counterparty_name, dedupe_fingerprint)
+  values ('00000000-0000-0000-0000-000000000770', 'manual', '$U_SRC', '$U_ACCT', '$WORKSPACE_A', 'merchant_payment', 'out', 'success', 7500, 0, '2026-08-20T14:30:00Z', 'test', 'STMT MATCH CP', '$STMT_FP');
+" >/dev/null
+
+STMT_JSON='[{"occurred_at":"2026-08-20T14:30:00Z","amount_minor":7500,"direction":"out","counterparty":"STMT MATCH CP"},{"occurred_at":"2026-08-21T09:00:00Z","amount_minor":3200,"direction":"in","counterparty":"STMT NEW CP","external_ref":"REF-NEW-1"},{"occurred_at":"2026-08-22T00:00:00Z","amount_minor":-50,"direction":"out","counterparty":"BAD ROW"}]'
+
+STMT_SQL_1=$(cat <<SQL
+with r as (select public.import_statement_transactions('$U_SRC', '$STMT_JSON'::jsonb) as j)
+select (j->>'created')||','||(j->>'flagged_possible_duplicate')||','||(j->>'skipped') from r;
+SQL
+)
+STMT_RESULT_1="$(as_user "$USER_A" "$STMT_SQL_1")"
+STMT_ROWS="$(psql -d pfe_rls -t -A -c "select count(*) from public.transactions where financial_source_id = '$U_SRC' and source = 'statement';")"
+STMT_DUP="$(psql -d pfe_rls -t -A -c "select count(*) from public.transactions where financial_source_id = '$U_SRC' and source = 'statement' and dedupe_state = 'possible_duplicate';")"
+STMT_EVENTS="$(psql -d pfe_rls -t -A -c "select count(*) from public.raw_financial_events e join public.transactions t on t.id = e.canonical_transaction_id where e.channel = 'statement' and t.financial_source_id = '$U_SRC';")"
+STMT_AUDIT="$(psql -d pfe_rls -t -A -c "select count(*) from public.space_audit_events where workspace_id = '$WORKSPACE_A' and event_type = 'statement.imported' and resource_id = '$U_SRC';")"
+if [ "$STMT_RESULT_1" = "2,1,1" ] && [ "$STMT_ROWS" = "2" ] && [ "$STMT_DUP" = "1" ] && [ "$STMT_EVENTS" = "2" ] && [ "$STMT_AUDIT" = "1" ]; then
+  pass "Phase U PR7: import creates a transaction + linked statement evidence per valid line, flags the fingerprint match as possible_duplicate, skips the invalid line, and audits the import"
+else
+  fail "Phase U PR7: import wrong (result=$STMT_RESULT_1 rows=$STMT_ROWS dup=$STMT_DUP events=$STMT_EVENTS audit=$STMT_AUDIT; expected 2,1,1 / 2 / 1 / 2 / 1)"
+fi
+
+# The accounting-effect constraints accepted the statement rows.
+STMT_SETTLED="$(psql -d pfe_rls -t -A -c "select count(*) from public.transactions where financial_source_id = '$U_SRC' and source = 'statement' and settlement_state = 'settled' and affects_balance and effect_reason = 'statement_import';")"
+if [ "$STMT_SETTLED" = "2" ]; then
+  pass "Phase U PR7: imported rows carry a valid settled accounting effect (passes transactions_new_accounting_fields_all_or_nothing + net-effect match)"
+else
+  fail "Phase U PR7: only $STMT_SETTLED/2 imported rows have a complete settled accounting effect"
+fi
+
+# Re-importing the same file is a no-op (payload_hash de-dupe).
+STMT_SQL_2=$(cat <<SQL
+with r as (select public.import_statement_transactions('$U_SRC', '$STMT_JSON'::jsonb) as j)
+select j->>'created' from r;
+SQL
+)
+STMT_RESULT_2="$(as_user "$USER_A" "$STMT_SQL_2")"
+if [ "$STMT_RESULT_2" = "0" ]; then
+  pass "Phase U PR7: re-importing the same statement file creates nothing"
+else
+  fail "Phase U PR7: a re-import created $STMT_RESULT_2 transaction(s) - payload_hash de-dupe failed"
+fi
+
+# A non-owner cannot import into someone else's source.
+if as_user "$USER_B" "select public.import_statement_transactions('$U_SRC', '[]'::jsonb);" >/dev/null 2>$ARTIFACT_DIR/pfe_u_pr7.log; then
+  fail "Phase U PR7: a non-owner imported a statement into another user's source"
+else
+  pass "Phase U PR7: import_statement_transactions refuses a caller who does not own the source"
+fi
+rm -f $ARTIFACT_DIR/pfe_u_pr7.log
 
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="
