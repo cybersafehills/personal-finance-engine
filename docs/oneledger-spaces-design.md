@@ -1331,6 +1331,48 @@ alerts), PR3 (email drainer, dark pending secrets), PR4a/PR4b (report
 
 ---
 
+## 11s. Phase V PR3 — as built (migration `20261003000000` + Edge fn)
+
+The email-outbox drainer. PR1's `enqueue_notification` writes
+`channel = 'email'` rows with `delivered_at = null`; this is the piece
+that actually sends them.
+
+- **`pending_notification_emails(limit)`** / **`mark_notification_emails_delivered(ids[])`**
+  — `service_role`-only. The first joins the outbox to the recipient's
+  `auth.users.email` (which the edge function can't read through
+  PostgREST); the second stamps `delivered_at`. `authenticated` fn count
+  **unchanged (76)**.
+- **`supabase/functions/send-notifications/`** — `Deno.serve` reads a
+  batch (≤50, oldest first), POSTs each to Resend, then acks the ones
+  that sent. **Dark by default**: a clean no-op (returns
+  `{ configured: false, reason }`) unless **both**
+  `NOTIFICATION_EMAIL_ENABLED = "true"` and `RESEND_API_KEY` are set as
+  project secrets — the same opt-in shape as `SCAN_TO_PAY_ENABLED`.
+  `NOTIFICATION_EMAIL_FROM` overrides the sender. A send failure leaves
+  the row pending for the next run (a duplicate send is the accepted
+  failure mode, never a dropped notification). `lib.ts` holds the pure
+  parts (`deliveryConfig`, `buildResendRequest`, `summarize`),
+  unit-tested (`tests/lib_test.ts`, 4 cases).
+- **`config.toml`** gets `[functions.send-notifications]`
+  (`verify_jwt = false`) with the activation steps in a comment. The
+  actual cron is wired in the Dashboard (Edge Functions → Schedules) or
+  via `pg_cron` once enabled — this repo has no in-code scheduler yet.
+- **`ci.yml`** gains `deno check` + `deno test` steps for the new
+  function.
+
+2-assertion "Phase V PR3" migration block (outbox join + batch ack +
+drain, service-role lockdown). Full suite: **250 passed / 0 failed**.
+`deno fmt` / `deno lint` / `deno check send-notifications` / `deno test
+send-notifications` (4) green.
+
+Activation checklist (ops, one-time): set `RESEND_API_KEY` +
+`NOTIFICATION_EMAIL_ENABLED=true` on the project; schedule
+`send-notifications` every ~5 min.
+
+Phase V remaining: **PR4** — Space-scoped scheduled reports.
+
+---
+
 ## 12. Testing strategy (per phase, aggregated here)
 
 - **Unit**: role→capability, `can_view_source_in_space` truth table,

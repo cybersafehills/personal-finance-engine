@@ -423,6 +423,20 @@ deno_version = 2
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 
+# Phase V PR3: the email-outbox drainer. No JWT - it is an internal
+# service invoked on a schedule, never by a browser. It is a clean no-op
+# until BOTH project secrets are set (Dashboard -> Edge Functions ->
+# send-notifications, or `supabase secrets set`):
+#   NOTIFICATION_EMAIL_ENABLED = true
+#   RESEND_API_KEY             = <a Resend API key>
+# Optional: NOTIFICATION_EMAIL_FROM (defaults to a OneLedger sender).
+# Wire the schedule in the Dashboard (Edge Functions -> Schedules, e.g.
+# every 5 minutes) or via pg_cron once that extension is enabled on the
+# project.
+[functions.send-notifications]
+enabled = true
+verify_jwt = false
+
 [analytics]
 enabled = true
 port = 54327
