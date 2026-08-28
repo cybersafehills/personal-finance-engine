@@ -140,6 +140,9 @@ async function fetchSettledTransactions(
     .select(SETTLED_TRANSACTION_COLUMNS)
     .eq("workspace_id", workspaceId)
     .eq("settlement_state", "settled")
+    // Phase V: a transaction merged into its canonical duplicate is kept
+    // for evidence but must never be counted in a report.
+    .neq("dedupe_state", "merged")
     .gte("occurred_at", startUtc.toISOString())
     .lt("occurred_at", endUtc.toISOString());
 
@@ -179,6 +182,7 @@ async function fetchBalanceBefore(
     .select("balance_after_rwf")
     .eq("workspace_id", workspaceId)
     .not("balance_after_rwf", "is", null)
+    .neq("dedupe_state", "merged")
     .lt("occurred_at", beforeUtc.toISOString())
     .order("occurred_at", { ascending: false })
     .order("created_at", { ascending: false })

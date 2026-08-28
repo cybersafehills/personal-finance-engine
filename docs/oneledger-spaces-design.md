@@ -1298,6 +1298,28 @@ non-member refusal). Full suite: **248 passed / 0 failed**. `deno check` /
 
 ---
 
+## 11t. Phase V PR4a — as built (web)
+
+Scheduled reports now exclude `merged` duplicates. **Web only, no
+migration.** `web/lib/report-generation.ts` is the only place the daily
+report reads `transactions` (two queries — settled facts, and the
+opening/closing balance snapshot); both gained
+`.neq("dedupe_state", "merged")`, matching the PR3b aggregation sweep.
+`next build` ✓, `eslint` 0; `report-math` tests unchanged (27/0).
+
+**Deferred — PR4b (household report visibility):** the daily report is
+generated per `(workspace_id, user_id)` but currently includes **every**
+transaction in the workspace, regardless of which member's source it came
+from or whether that source is shared into the Space. Making a household
+member's report show only what they can see needs a `SECURITY DEFINER`
+`visible_source_ids_for_user(workspace, user)` helper (the generator runs
+as `service_role` with no `auth.uid()`, so it can't call
+`can_view_source_in_space` directly) and a decision on the intended
+semantics (per-member-visible vs household-wide report). Flagged for the
+user.
+
+---
+
 ## 12. Testing strategy (per phase, aggregated here)
 
 - **Unit**: role→capability, `can_view_source_in_space` truth table,
