@@ -53,7 +53,7 @@ export default async function UssdDirectoryPage({
     getActiveProviders(),
     getFavouriteCodeIds(),
     getFavourites(),
-    getRecentServices(6),
+    getRecentServices(1),
     query ? searchPaymentNetworks(query) : getPublishedNetworks(),
   ]);
 
