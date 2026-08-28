@@ -1,4 +1,4 @@
-import type { RejectionReason } from "./types";
+import type { RejectionReason } from "./types.ts";
 
 // EMVCo merchant-presented QR (EMV MPM). R2 ships the ADAPTER INTERFACE
 // and enough of a structural + CRC check to RECOGNISE a genuine EMV

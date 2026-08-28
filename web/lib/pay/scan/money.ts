@@ -1,4 +1,4 @@
-import type { ScanAmount } from "./types";
+import type { ScanAmount } from "./types.ts";
 
 // Minor-unit -> display for scanned amounts. Exact integer arithmetic
 // only: split on the decimal exponent, never divide a float. The

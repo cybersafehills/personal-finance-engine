@@ -1,4 +1,4 @@
-import type { RejectionReason } from "./types";
+import type { RejectionReason } from "./types.ts";
 
 // Verified-USSD payload parsing. Turns a `tel:` URI or a bare USSD
 // string into a canonical dial string, then (via matchesTemplate) checks

@@ -1,13 +1,13 @@
-import { classify, rejectionForUnsupported } from "./classify";
-import { normalizeScan } from "./normalize";
-import { maskMerchantId, parseOneLedgerPayload } from "./oneledger";
+import { classify, rejectionForUnsupported } from "./classify.ts";
+import { normalizeScan } from "./normalize.ts";
+import { maskMerchantId, parseOneLedgerPayload } from "./oneledger.ts";
 import {
   checkProviderLink,
   type ProviderLinkAllowEntry,
-} from "./provider-link";
-import { recogniseEmv } from "./emv";
-import { maskDigits } from "./redact";
-import { matchesTemplate, parseUssd } from "./ussd";
+} from "./provider-link.ts";
+import { recogniseEmv } from "./emv.ts";
+import { maskDigits } from "./redact.ts";
+import { matchesTemplate, parseUssd } from "./ussd.ts";
 import {
   MAX_AMOUNT_MINOR,
   type PayloadClass,
@@ -16,7 +16,7 @@ import {
   type ReviewWarning,
   type ScanAmount,
   type ScanResult,
-} from "./types";
+} from "./types.ts";
 
 // The stage-2..8 orchestrator. Pure and injectable: the two lookups that
 // need real-world state - the verified USSD directory and the provider
