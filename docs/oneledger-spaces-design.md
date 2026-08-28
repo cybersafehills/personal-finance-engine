@@ -1192,6 +1192,54 @@ has no remaining deferred items.
 
 ---
 
+## 11p. Phase V PR1 — as built (migration `20261001000000`, backend)
+
+The notification **delivery spine**. Phase T PR1 shipped
+`should_notify(workspace, user, event_key, channel)` with no caller; this
+adds the store it feeds, the enqueue primitive, and wires the two
+clearest producers so there is a real end-to-end path in production.
+Numbered `20261001` to stay clear of a concurrent "bills" feature
+churning September timestamps on its own branch.
+
+- **`notifications` table** — one row per `(user, channel)` that should
+  hear about an event. `channel in ('in_app', 'email')`; `in_app` rows
+  are read in the app (`read_at`), `email` rows are an outbox
+  (`delivered_at` null = unsent). RLS `select`-own for `authenticated`
+  and **nothing else** — every write goes through an RPC. Two partial
+  indexes (per-user unread, pending email).
+- **`enqueue_notification(workspace, user_ids[], exclude_user_id,
+  event_key, title, body, resource_type, resource_id, metadata)`** —
+  internal (`revoke all from public`), called only from other
+  `SECURITY DEFINER` RPCs. `user_ids` null ⇒ every active member;
+  `exclude_user_id` drops one (the actor). Each candidate is gated
+  through `should_notify` **per channel** before a row is written.
+  Returns the count.
+- **`mark_notification_read(id)`** / **`mark_all_notifications_read(workspace?)`**
+  / **`unread_notification_count()`** — the `authenticated` surface, all
+  own-scoped and `in_app`-only.
+- **Producers** — `accept_workspace_invite` and `remove_member` re-issued
+  (`create or replace`, bodies otherwise unchanged) to call
+  `enqueue_notification` for `member.joined` / `member.removed`,
+  excluding the joiner / removed user. Both events are security-notable,
+  so they deliver regardless of preference.
+
+Counters: **72 tables** (`notifications`, RLS on) / **116** authenticated
+table grants (+1 `select`) / **75** authenticated fn (`mark_notification_read`,
+`mark_all_notifications_read`, `unread_notification_count`;
+`enqueue_notification` is internal). 5-assertion "Phase V PR1" migration
+block (join fan-out incl. joiner-exclusion + pending-email row,
+mark-read own-scoping + unread count, removal fan-out, mark-all, internal
+lockdown). Full suite: **245 passed / 0 failed**.
+
+Next in Phase V: **PR1b (web)** — the in-app notification surface (header
+bell + unread count + list + mark-read); **PR2** — the budget
+threshold-crossing producer (`record_budget_threshold_crossing` → a
+`budget.threshold_*` / `budget.exceeded` notification); **PR3** — the
+email outbox drainer (an edge function sending the pending `email` rows
+via Resend); **PR4** — Space-scoped scheduled reports.
+
+---
+
 ## 11q. Phase V PR1b — as built (web)
 
 The in-app notification surface for PR1 (§11p). **Web only, no migration.**
@@ -1216,6 +1264,37 @@ The in-app notification surface for PR1 (§11p). **Web only, no migration.**
 Still ahead in Phase V: **PR2** (budget threshold-crossing producer) ·
 **PR3** (email outbox drainer, Resend) · **PR4** (Space-scoped scheduled
 reports).
+
+---
+
+## 11r. Phase V PR2 — as built (migration `20261002000000` + Deno)
+
+The budget threshold-crossing producer. Phase T PR2 shipped
+`record_budget_threshold_crossing` (one alert per strictly-upward bucket
+crossing) with no caller; this adds one and wires it to notifications.
+
+- **`sweep_budget_thresholds(p_workspace_id)`** — `SECURITY DEFINER`,
+  `authenticated` + `service_role`, member-gated per Space. For every
+  `status = 'active'` budget whose period covers today (workspace
+  timezone): compute a **total** spend % as
+  `100 · Σ settled outflow (this currency + period, excluding `merged`
+  and linked self-transfers) ÷ income_amount_minor`, feed it to
+  `record_budget_threshold_crossing(budget, '__total__', pct)`, and on a
+  non-null (upward-crossing) bucket `enqueue_notification` with
+  `budget.threshold_75` / `budget.threshold_90` / `budget.exceeded`
+  (`watch` / `at_risk` / `exceeded`+`over`). Returns the alert count.
+  Deliberately a coarse total, not the per-allocation
+  `getBudgetActuals()` breakdown.
+- **`ingest-momo`** calls it after each successful transaction insert
+  (best-effort, non-fatal, alongside the existing SMS-reconciliation and
+  `last_used_at` calls) — so a new outflow that tips a budget over a
+  threshold notifies within the same ingest.
+
+`authenticated` function count → **76**. No new table / table-grant.
+3-assertion "Phase V PR2" migration block (90% crossing → one
+`budget.threshold_90`, quiet re-sweep, 100% crossing → `budget.exceeded`,
+non-member refusal). Full suite: **248 passed / 0 failed**. `deno check` /
+`deno test ingest-momo` (78) / `deno fmt` green.
 
 ---
 
