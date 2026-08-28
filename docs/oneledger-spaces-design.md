@@ -1403,6 +1403,29 @@ dark and rolls out internal → beta → GA.
 Phase W remaining: W2 state matrix · W3 onboarding/help · W4 analytics ·
 W5 monitoring · W6 migration validation + security/perf review.
 
+
+---
+
+## 11aa. Phase W PR6 — as built (migration test + doc)
+
+Production-readiness capstone. **No migration, no code change.**
+
+- **`docs/spaces-production-readiness.md`** — rollout sequence
+  (`SPACES_ENABLED` internal → beta → GA), a security review table
+  (every master-prompt concern mapped to its enforcement point and its
+  test), a performance note (idempotent best-effort fan-outs, the new
+  indexes, the report-path cost), and the migration-validation summary.
+- **2 assertions added to `run_migration_tests.sh` ("Phase W PR6")**:
+  (1) a pre-Spaces transaction's `amount` / `fee` / `net_effect` are
+  byte-identical after the full Q→W chain — the Spaces migrations never
+  mutate an existing ledger row; (2) `anon` holds **zero** privilege on
+  any of the 12 tables the Spaces program added.
+
+Full suite: **254 passed / 0 failed**.
+
+**Phase W complete. The OneLedger Spaces program (Phases Q–W) is fully
+built, migrated, and behind a rollout flag.**
+
 ---
 
 ## 12. Testing strategy (per phase, aggregated here)

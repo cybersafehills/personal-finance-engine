@@ -3802,6 +3802,29 @@ else
 fi
 rm -f $ARTIFACT_DIR/pfe_v_pr4b.log
 
+# ===========================================================================
+# Phase W PR6: production-readiness invariants for the Spaces program.
+#   1. The Spaces migrations never mutate an existing ledger row's money
+#      fields (a Phase G transaction is byte-identical after the full
+#      Q->W chain has applied).
+#   2. anon has zero privilege on every table the Spaces program added.
+# ===========================================================================
+echo "=== Phase W PR6: production-readiness invariants ==="
+
+W6_LEDGER="$(psql -d pfe_rls -t -A -c "select amount_rwf || '/' || fee_rwf || '/' || net_effect_rwf from public.transactions where id = '$GTXN1';")"
+if [ "$W6_LEDGER" = "1200/0/-1200" ]; then
+  pass "Phase W PR6: a pre-Spaces transaction's amount / fee / net_effect are unchanged after the full Q->W migration chain"
+else
+  fail "Phase W PR6: a pre-Spaces transaction's money fields drifted (got '$W6_LEDGER', expected '1200/0/-1200')"
+fi
+
+W6_ANON="$(psql -d pfe_rls -t -A -c "select count(*) from information_schema.role_table_grants where grantee = 'anon' and table_schema = 'public' and table_name in ('financial_sources', 'source_space_links', 'raw_financial_events', 'notifications', 'budget_threshold_state', 'transaction_member_attributions', 'goal_participants', 'space_activity', 'space_audit_events', 'space_member_notification_prefs', 'space_member_capability_grants', 'workspace_categories');")"
+if [ "$W6_ANON" = "0" ]; then
+  pass "Phase W PR6: anon holds no privilege on any table the Spaces program added"
+else
+  fail "Phase W PR6: anon holds $W6_ANON grant(s) on a Spaces table - lockdown regression"
+fi
+
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="
 if [ "$FAIL_COUNT" -ne 0 ]; then
