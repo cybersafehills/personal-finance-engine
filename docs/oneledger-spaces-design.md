@@ -439,7 +439,7 @@ additive migration(s) → stacked PRs → migration-test block → e2e.
 |---|---|---|---|
 | **Q** — Foundation ✅ *migration written* | 1 | `kind='household'` + `create_household_workspace`; `financial_sources`, `source_space_links`, `raw_financial_events`, `can_view_source_in_space()` / `is_financial_source_visible()` / `owns_financial_source()`; nullable `transactions` provenance/attribution cols; `space_activity` / `space_audit_events` / `space_member_notification_prefs` / `workspace_categories` tables; **RLS refactor for `household`** (Phase C ledger loosening reverted for this kind via the source-visibility gate); backfill migration; indexes | No |
 | **R** — Security & authz ✅ *migration written* | 2 | capability layer (`space_role_has_capability` matrix + `space_member_capability_grants` + `has_space_capability()` primitive + `grant`/`revoke_space_capability` RPCs); audit-write primitives (`record_space_activity` / `record_space_audit_event`); `workspace_invites.accepted_by`; `accept_workspace_invite` / `set_member_role` / `remove_member` / `create_household_workspace` re-issued to write audit + activity rows; **14-assertion security test block** (capability matrix, grant/revoke, audit visibility, invite re-use/revoke rejection, post-removal access revocation, last-owner guard, internal-helper lockdown, service-role bypass) | No |
-| **S** — Shared ledger | 3 | **PR1 ✅:** `transaction_member_attributions` + the five sharing/attribution/reallocation RPCs. **PR2a ✅:** household creation (`/settings/workspace`), "Shared accounts" (`/settings/sources`). **PR2b ✅:** `space_member_directory` fn; transaction detail gets a "Where this came from" provenance panel + a household "Whose spending" attribution panel (shared / member / split / unassigned) + a needs-attention banner; review queue gets a "Needs attribution" section. **PR2c ✅:** household dashboard block (name header + `HouseholdSpendingCard` — spending-this-month by member, neutral framing) on `/`; upgraded Space switcher (kind-labelled list + "Create a Space" in the account menu, current-Space chip in the header). **PR2d ✅:** household/organization **Admin** can now manage members — `workspace_invites` RLS + `set_member_role` / `remove_member` re-issued from Owner-only to `has_space_capability(_, 'members.manage')`, with anything touching an Owner staying Owner-only and the last-owner guard intact. **PR2e (not started):** `/settings/sources` + attribution Playwright e2e; "available across shared accounts" balance semantics; optional `/spaces/{id}/…` routes | Yes |
+| **S** — Shared ledger | 3 | **PR1 ✅:** `transaction_member_attributions` + the five sharing/attribution/reallocation RPCs. **PR2a ✅:** household creation (`/settings/workspace`), "Shared accounts" (`/settings/sources`). **PR2b ✅:** `space_member_directory` fn; transaction detail gets a "Where this came from" provenance panel + a household "Whose spending" attribution panel (shared / member / split / unassigned) + a needs-attention banner; review queue gets a "Needs attribution" section. **PR2c ✅:** household dashboard block (name header + `HouseholdSpendingCard` — spending-this-month by member, neutral framing) on `/`; upgraded Space switcher (kind-labelled list + "Create a Space" in the account menu, current-Space chip in the header). **PR2d ✅:** household/organization **Admin** can now manage members — `workspace_invites` RLS + `set_member_role` / `remove_member` re-issued from Owner-only to `has_space_capability(_, 'members.manage')`, with anything touching an Owner staying Owner-only and the last-owner guard intact. **PR2e ✅:** `e2e/spaces-household.spec.ts` — single-user Playwright flow (create household → share a source via `/settings/sources` → dashboard household block → resolve an unattributed transaction on `/transactions/[id]`) + a `/settings/sources` a11y check. **Phase S essentially complete.** Deferred to a later refinement: "available across shared accounts" balance semantics; optional `/spaces/{id}/…` routes; a two-user attribution e2e (the suite currently shares one identity) | Yes |
 | **T** — Financial planning | 4 | Space-aware category scope; rule `scope_type` + deterministic precedence + explainability; shared budgets (space/category/member scopes) reusing `budget-math.ts`; threshold state-transition alerts (no per-txn spam); shared goals as first-class Space resources; per-member notification prefs | Yes |
 | **U** — Ingestion & reconciliation | 5 | `raw_financial_events` cutover for `ingest-momo` + SMS path; source routing (`is_default_target`); dedupe confidence engine + auto-merge + review cards; **statement (CSV/PDF) reconciliation** vs ledger + import summary; device management UX (rename / pause / reconnect / remove, history preserved) | Yes |
 | **V** — Reporting & intelligence | 6 | `workspace_id` scope on `report_*`; Household report template + attribution summaries; scheduler recipient filtering (exclude former members); AI Space-scope boundary + Household insights; dashboard projections | Yes |
@@ -655,6 +655,30 @@ No privilege-counter change (re-issues only). Migration-test coverage:
 non-Owner role + audit; Admin cannot promote to Owner; Admin cannot
 remove an Owner; Admin removes a plain member; a plain member still
 cannot; last-owner guard survives). Full suite: 199 passed / 0 failed.
+
+### Phase S PR2e — as built (e2e)
+
+`web/e2e/spaces-household.spec.ts` (runs in the CI `chromium-desktop`
+project against a disposable local Supabase stack, same as every other
+spec). One flow test — the seeded e2e user creates a household, shares a
+seeded `financial_sources` row into it via `/settings/sources`
+("Transactions only"), sees the household dashboard block with an
+`Unassigned` bucket, finds the transaction in the review queue's "Needs
+attribution" section, and resolves it to `Shared` on
+`/transactions/[id]` — plus a `/settings/sources` axe check. Everything
+it creates (source, household, account, transaction) is deleted in
+`afterEach` so the shared DB is left empty for `visual.spec.ts`.
+
+Single-user by necessity (the suite shares one identity), so it covers
+the owner's side of `create_household_workspace` /
+`allocate_source_to_space` / `set_transaction_attribution`. A two-user
+test (co-member visibility, `member` / `split` attribution through the
+UI) needs a second seeded identity and is deferred.
+
+With this, **Phase S is functionally complete** across schema (PR1),
+the settings surfaces (PR2a), transaction provenance/attribution (PR2b),
+the household dashboard + Space switcher (PR2c), Admin member-management
+(PR2d), and e2e (PR2e).
 
 ---
 
