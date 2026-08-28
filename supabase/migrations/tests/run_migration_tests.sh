@@ -580,7 +580,9 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # (deny-by-default, like momo_messages) - it is NOT a second exception.
 # Phase R (20260912000000) adds space_member_capability_grants (RLS
 # enabled, SELECT-only for authenticated) - 68 tables, 67 with RLS.
-if [ "$TABLE_COUNT" = "68" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Phase S (20260913000000) adds transaction_member_attributions (RLS
+# enabled, SELECT-only for authenticated) - 69 tables, 68 with RLS.
+if [ "$TABLE_COUNT" = "69" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -657,11 +659,13 @@ fi
 # Phase R (20260912000000) adds space_member_capability_grants (select
 # only - mutated exclusively by grant_space_capability /
 # revoke_space_capability). 114 + 1 = 115.
+# Phase S (20260913000000) adds transaction_member_attributions (select
+# only - written exclusively by set_transaction_attribution). 115 + 1 = 116.
 AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and grantee = 'authenticated';")"
-if [ "$AUTHENTICATED_GRANT_COUNT" = "115" ]; then
-  pass "authenticated holds exactly the 115 table grants expected, no more"
+if [ "$AUTHENTICATED_GRANT_COUNT" = "116" ]; then
+  pass "authenticated holds exactly the 116 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 115 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 116 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -767,11 +771,17 @@ fi
 # re-issued RPCs (accept_workspace_invite, set_member_role, remove_member,
 # create_household_workspace) keep their existing grants (CREATE OR REPLACE
 # preserves privileges). = 55 total.
+# Phase S (20260913000000) adds 5 authenticated-callable RPCs:
+# set_source_visibility, allocate_source_to_space,
+# set_source_space_link_status, set_transaction_attribution,
+# reallocate_transaction. Its validate_transaction_member_attributions
+# constraint-trigger function is `revoke all from public` (runs as owner
+# from the trigger). = 60 total.
 AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname = 'authenticated' where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "55" ]; then
-  pass "authenticated holds EXECUTE on exactly the 55 functions expected, no more"
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "60" ]; then
+  pass "authenticated holds EXECUTE on exactly the 60 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 55 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 60 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -2765,6 +2775,193 @@ if [ "$R_SERVICE_AUDIT" -ge "1" ]; then
   pass "Phase R: service_role reads space_audit_events unaffected by RLS"
 else
   fail "Phase R: service_role could not read space_audit_events (got $R_SERVICE_AUDIT)"
+fi
+
+# ===========================================================================
+# Phase S: the shared-ledger mutation RPCs - source sharing,
+# per-transaction attribution, and cross-Space reallocation. Continues in
+# pfe_rls on the Phase Q/R household Q_HH (USER_A owner, USER_R admin,
+# USER_B removed), USER_A's source Q_SRC_A (actively shared into Q_HH),
+# and the household transaction ...ab.
+# ===========================================================================
+echo "=== Phase S: shared-ledger mutation RPCs ==="
+
+S_TXN="00000000-0000-0000-0000-0000000000ab"
+S_D3="00000000-0000-0000-0000-0000000000d3"
+
+# --- set_transaction_attribution: member --------------------------------
+
+as_user "$USER_A" "select public.set_transaction_attribution('$S_TXN', 'member', '$USER_R', null);" >/dev/null
+S_MEMBER_OK="$(psql -d pfe_rls -t -A -c "select count(*) from public.transactions where id = '$S_TXN' and attribution_type = 'member' and attributed_user_id = '$USER_R' and allocation_status = 'allocated';")"
+S_ATTR_AUDIT="$(psql -d pfe_rls -t -A -c "select count(*) from public.space_audit_events where workspace_id = '$Q_HH' and event_type = 'transaction.attribution_changed';")"
+if [ "$S_MEMBER_OK" = "1" ] && [ "$S_ATTR_AUDIT" -ge "1" ]; then
+  pass "Phase S: set_transaction_attribution('member') stamps attributed_user_id and writes an audit event"
+else
+  fail "Phase S: member attribution wrong (txn=$S_MEMBER_OK audit=$S_ATTR_AUDIT)"
+fi
+
+# --- set_transaction_attribution: split --------------------------------
+
+as_user "$USER_A" "select public.set_transaction_attribution('$S_TXN', 'split', null, '[{\"user_id\":\"$USER_A\",\"share_bps\":4000},{\"user_id\":\"$USER_R\",\"share_bps\":6000}]'::jsonb);" >/dev/null
+S_SPLIT_ROWS="$(psql -d pfe_rls -t -A -c "select coalesce(sum(share_bps),0) from public.transaction_member_attributions where transaction_id = '$S_TXN';")"
+S_SPLIT_TYPE="$(psql -d pfe_rls -t -A -c "select count(*) from public.transactions where id = '$S_TXN' and attribution_type = 'split' and attributed_user_id is null;")"
+if [ "$S_SPLIT_ROWS" = "10000" ] && [ "$S_SPLIT_TYPE" = "1" ]; then
+  pass "Phase S: set_transaction_attribution('split') writes basis-point rows totalling 10000 and clears attributed_user_id"
+else
+  fail "Phase S: split attribution wrong (bps_total=$S_SPLIT_ROWS type_ok=$S_SPLIT_TYPE)"
+fi
+
+# A split that does not total 10000 is rejected (deferrable trigger).
+if as_user "$USER_A" "select public.set_transaction_attribution('$S_TXN', 'split', null, '[{\"user_id\":\"$USER_A\",\"share_bps\":3000},{\"user_id\":\"$USER_R\",\"share_bps\":6000}]'::jsonb);" >/dev/null 2>$ARTIFACT_DIR/pfe_s_split.log; then
+  fail "Phase S: a split totalling 9000 bps was accepted"
+else
+  pass "Phase S: a member-attribution split that does not total 10000 bps is rejected"
+fi
+rm -f $ARTIFACT_DIR/pfe_s_split.log
+
+# A split naming a non-member (USER_B was removed in Phase R) is rejected.
+if as_user "$USER_A" "select public.set_transaction_attribution('$S_TXN', 'split', null, '[{\"user_id\":\"$USER_A\",\"share_bps\":5000},{\"user_id\":\"$USER_B\",\"share_bps\":5000}]'::jsonb);" >/dev/null 2>$ARTIFACT_DIR/pfe_s_split2.log; then
+  fail "Phase S: a split naming a non-member was accepted"
+else
+  pass "Phase S: a split naming a non-member of the Space is rejected"
+fi
+rm -f $ARTIFACT_DIR/pfe_s_split2.log
+
+# --- unassigned -> shared transitions clear the split rows -----------
+
+as_user "$USER_A" "select public.set_transaction_attribution('$S_TXN', 'unassigned', null, null);" >/dev/null
+as_user "$USER_A" "select public.set_transaction_attribution('$S_TXN', 'shared', null, null);" >/dev/null
+S_SHARED_OK="$(psql -d pfe_rls -t -A -c "select count(*) from public.transactions t where t.id = '$S_TXN' and t.attribution_type = 'shared' and t.attributed_user_id is null;")"
+S_SPLIT_CLEARED="$(psql -d pfe_rls -t -A -c "select count(*) from public.transaction_member_attributions where transaction_id = '$S_TXN';")"
+if [ "$S_SHARED_OK" = "1" ] && [ "$S_SPLIT_CLEARED" = "0" ]; then
+  pass "Phase S: switching a transaction to 'shared' clears any prior member-split rows"
+else
+  fail "Phase S: shared transition wrong (shared_ok=$S_SHARED_OK split_rows_left=$S_SPLIT_CLEARED)"
+fi
+
+# A user who cannot see the transaction cannot attribute it.
+if as_user "$USER_B" "select public.set_transaction_attribution('$S_TXN', 'shared', null, null);" >/dev/null 2>$ARTIFACT_DIR/pfe_s_nonmember.log; then
+  fail "Phase S: a non-member attributed a household transaction"
+else
+  pass "Phase S: set_transaction_attribution refuses a caller who cannot see the transaction"
+fi
+rm -f $ARTIFACT_DIR/pfe_s_nonmember.log
+
+# Attribution is household-only.
+if as_user "$USER_A" "select public.set_transaction_attribution('$S_D3', 'shared', null, null);" >/dev/null 2>$ARTIFACT_DIR/pfe_s_personal.log; then
+  fail "Phase S: attribution was allowed on a personal-workspace transaction"
+else
+  pass "Phase S: set_transaction_attribution refuses a non-household transaction"
+fi
+rm -f $ARTIFACT_DIR/pfe_s_personal.log
+
+# --- allocate_source_to_space -------------------------------------------
+
+S_SRC2="$(as_user "$USER_A" "insert into public.financial_sources (owner_user_id, provider, source_type, display_name, currency) values ('$USER_A', 'bank', 'bank_account', 'Alice BK', 'RWF') returning id;")"
+S_HH2="$(as_user "$USER_A" "select public.create_household_workspace('Second Household');")"
+
+# Accounts for the reallocation fixtures below (transactions.account_id is
+# NOT NULL - Phase B backfill). One per workspace the fixtures touch.
+S_ACCT_HH2="$(psql -d pfe_rls -t -A -c "set role service_role; insert into public.accounts (workspace_id, name, provider, currency, financial_source_id) values ('$S_HH2', 'Alice BK (h2)', 'bank', 'RWF', '$S_SRC2') returning id;" | grep -Eo '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)"
+S_ACCT_A="$(psql -d pfe_rls -t -A -c "set role service_role; insert into public.accounts (workspace_id, name, provider, currency, financial_source_id) values ('$WORKSPACE_A', 'Alice BK (personal)', 'bank', 'RWF', '$S_SRC2') returning id;" | grep -Eo '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)"
+
+as_user "$USER_A" "select public.allocate_source_to_space('$S_SRC2', '$S_HH2', 'share_account', true, now());" >/dev/null
+S_LINK_OK="$(psql -d pfe_rls -t -A -c "select count(*) from public.source_space_links where financial_source_id = '$S_SRC2' and workspace_id = '$S_HH2' and status = 'active' and visibility_mode = 'share_account' and is_default_target;")"
+S_CEILING="$(psql -d pfe_rls -t -A -c "select visibility_mode from public.financial_sources where id = '$S_SRC2';")"
+S_SHARE_ACT="$(psql -d pfe_rls -t -A -c "select count(*) from public.space_activity where workspace_id = '$S_HH2' and kind = 'source.shared';")"
+if [ "$S_LINK_OK" = "1" ] && [ "$S_CEILING" = "share_account" ] && [ "$S_SHARE_ACT" = "1" ]; then
+  pass "Phase S: allocate_source_to_space creates the link, raises the source ceiling, and logs activity"
+else
+  fail "Phase S: allocate_source_to_space wrong (link=$S_LINK_OK ceiling=$S_CEILING activity=$S_SHARE_ACT)"
+fi
+
+# Only the source owner can share it.
+if as_user "$USER_R" "select public.allocate_source_to_space('$S_SRC2', '$S_HH2', 'share_transactions', false, now());" >/dev/null 2>$ARTIFACT_DIR/pfe_s_alloc.log; then
+  fail "Phase S: a non-owner shared a financial source into a Space"
+else
+  pass "Phase S: allocate_source_to_space refuses a non-owner of the source"
+fi
+rm -f $ARTIFACT_DIR/pfe_s_alloc.log
+
+# Per-source sharing is household-only.
+if as_user "$USER_A" "select public.allocate_source_to_space('$S_SRC2', '$WORKSPACE_A', 'share_transactions', false, now());" >/dev/null 2>$ARTIFACT_DIR/pfe_s_alloc2.log; then
+  fail "Phase S: allocate_source_to_space accepted a personal-workspace target"
+else
+  pass "Phase S: allocate_source_to_space refuses a non-household target"
+fi
+rm -f $ARTIFACT_DIR/pfe_s_alloc2.log
+
+# --- set_source_space_link_status -----------------------------------
+
+as_user "$USER_A" "select public.set_source_space_link_status('$S_SRC2', '$S_HH2', 'paused');" >/dev/null
+S_PAUSED="$(psql -d pfe_rls -t -A -c "select status from public.source_space_links where financial_source_id = '$S_SRC2' and workspace_id = '$S_HH2';")"
+as_user "$USER_A" "select public.set_source_space_link_status('$S_SRC2', '$S_HH2', 'active');" >/dev/null
+S_RESUMED="$(psql -d pfe_rls -t -A -c "select status from public.source_space_links where financial_source_id = '$S_SRC2' and workspace_id = '$S_HH2';")"
+if [ "$S_PAUSED" = "paused" ] && [ "$S_RESUMED" = "active" ]; then
+  pass "Phase S: set_source_space_link_status pauses and resumes a share link"
+else
+  fail "Phase S: link status transitions wrong (paused=$S_PAUSED resumed=$S_RESUMED)"
+fi
+
+# --- reallocate_transaction --------------------------------------------
+
+# A transaction backed by S_SRC2, sitting in S_HH2, moves to USER_A's
+# personal workspace (source visible there because USER_A owns it).
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.transactions (id, source, financial_source_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version)
+  values ('00000000-0000-0000-0000-0000000000ac', 'manual', '$S_SRC2', '$S_ACCT_HH2', '$S_HH2', 'merchant_payment', 'out', 'success', 9000, 0, now(), 'test');
+" >/dev/null
+as_user "$USER_A" "select public.reallocate_transaction('00000000-0000-0000-0000-0000000000ac', '$WORKSPACE_A');" >/dev/null
+S_MOVED="$(psql -d pfe_rls -t -A -c "select count(*) from public.transactions where id = '00000000-0000-0000-0000-0000000000ac' and workspace_id = '$WORKSPACE_A' and allocation_status = 'allocated' and attribution_type is null;")"
+S_MOVE_OUT_AUDIT="$(psql -d pfe_rls -t -A -c "select count(*) from public.space_audit_events where workspace_id = '$S_HH2' and event_type = 'transaction.reallocated_out';")"
+if [ "$S_MOVED" = "1" ] && [ "$S_MOVE_OUT_AUDIT" = "1" ]; then
+  pass "Phase S: reallocate_transaction moves a transaction to another Space and audits both sides"
+else
+  fail "Phase S: reallocation wrong (moved=$S_MOVED out_audit=$S_MOVE_OUT_AUDIT)"
+fi
+
+# Reallocation refuses a transaction that carries Space-scoped derived data.
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.transactions (id, source, financial_source_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version) values
+    ('00000000-0000-0000-0000-0000000000ad', 'manual', '$S_SRC2', '$S_ACCT_HH2', '$S_HH2', 'send_money', 'out', 'success', 5000, 0, now(), 'test'),
+    ('00000000-0000-0000-0000-0000000000ae', 'manual', '$S_SRC2', '$S_ACCT_HH2', '$S_HH2', 'money_received', 'in', 'success', 5000, 0, now(), 'test');
+  insert into public.transfer_links (workspace_id, out_transaction_id, in_transaction_id, status)
+  values ('$S_HH2', '00000000-0000-0000-0000-0000000000ad', '00000000-0000-0000-0000-0000000000ae', 'linked');
+" >/dev/null
+if as_user "$USER_A" "select public.reallocate_transaction('00000000-0000-0000-0000-0000000000ad', '$WORKSPACE_A');" >/dev/null 2>$ARTIFACT_DIR/pfe_s_realloc.log; then
+  fail "Phase S: a transaction with a linked transfer was reallocated"
+else
+  pass "Phase S: reallocate_transaction refuses a transaction that has a transfer link / split / goal / payment match"
+fi
+rm -f $ARTIFACT_DIR/pfe_s_realloc.log
+
+# Reallocation into a household refuses a transaction dated before the share began.
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.transactions (id, source, financial_source_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version)
+  values ('00000000-0000-0000-0000-0000000000af', 'manual', '$S_SRC2', '$S_ACCT_A', '$WORKSPACE_A', 'merchant_payment', 'out', 'success', 2500, 0, now() - interval '2 days', 'test');
+" >/dev/null
+if as_user "$USER_A" "select public.reallocate_transaction('00000000-0000-0000-0000-0000000000af', '$S_HH2');" >/dev/null 2>$ARTIFACT_DIR/pfe_s_retro.log; then
+  fail "Phase S: a transaction predating the share link was moved into the household"
+else
+  pass "Phase S: reallocate_transaction enforces the no-retroactive-exposure boundary (effective_from)"
+fi
+rm -f $ARTIFACT_DIR/pfe_s_retro.log
+
+# --- set_source_visibility narrowing cascades ----------------------
+
+# USER_R can currently see the Q_HH transaction (Q_SRC_A shared into Q_HH).
+S_R_BEFORE="$(as_user "$USER_R" "select count(*) from public.transactions where id = '$S_TXN';")"
+as_user "$USER_A" "select public.set_source_visibility('$Q_SRC_A', 'personal_only');" >/dev/null
+S_R_AFTER="$(as_user "$USER_R" "select count(*) from public.transactions where id = '$S_TXN';")"
+S_LINK_REVOKED="$(psql -d pfe_rls -t -A -c "select status from public.source_space_links where financial_source_id = '$Q_SRC_A' and workspace_id = '$Q_HH';")"
+S_CEIL2="$(psql -d pfe_rls -t -A -c "select visibility_mode from public.financial_sources where id = '$Q_SRC_A';")"
+if [ "$S_R_BEFORE" = "1" ] && [ "$S_R_AFTER" = "0" ] && [ "$S_LINK_REVOKED" = "revoked" ] && [ "$S_CEIL2" = "personal_only" ]; then
+  pass "Phase S: set_source_visibility('personal_only') revokes every share link and immediately cuts co-member access"
+else
+  fail "Phase S: visibility narrowing wrong (before=$S_R_BEFORE after=$S_R_AFTER link=$S_LINK_REVOKED ceiling=$S_CEIL2)"
 fi
 
 echo ""

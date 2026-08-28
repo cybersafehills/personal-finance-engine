@@ -439,7 +439,7 @@ additive migration(s) → stacked PRs → migration-test block → e2e.
 |---|---|---|---|
 | **Q** — Foundation ✅ *migration written* | 1 | `kind='household'` + `create_household_workspace`; `financial_sources`, `source_space_links`, `raw_financial_events`, `can_view_source_in_space()` / `is_financial_source_visible()` / `owns_financial_source()`; nullable `transactions` provenance/attribution cols; `space_activity` / `space_audit_events` / `space_member_notification_prefs` / `workspace_categories` tables; **RLS refactor for `household`** (Phase C ledger loosening reverted for this kind via the source-visibility gate); backfill migration; indexes | No |
 | **R** — Security & authz ✅ *migration written* | 2 | capability layer (`space_role_has_capability` matrix + `space_member_capability_grants` + `has_space_capability()` primitive + `grant`/`revoke_space_capability` RPCs); audit-write primitives (`record_space_activity` / `record_space_audit_event`); `workspace_invites.accepted_by`; `accept_workspace_invite` / `set_member_role` / `remove_member` / `create_household_workspace` re-issued to write audit + activity rows; **14-assertion security test block** (capability matrix, grant/revoke, audit visibility, invite re-use/revoke rejection, post-removal access revocation, last-owner guard, internal-helper lockdown, service-role bypass) | No |
-| **S** — Shared ledger | 3 | Household creation + onboarding; upgraded Space switcher; invites/members UI for households; per-source visibility UI ("How should this account be used?"); transaction Space allocation + `reallocate_transaction`; provenance detail view; attribution (`shared`/`member`/`split`/`unassigned`) + review-queue reasons; optional `/spaces/{id}/…` routes | Yes |
+| **S** — Shared ledger | 3 | Split into PR1 (backend) + PR2 (web UI). **PR1 ✅ *migration written*:** `transaction_member_attributions` table + `set_source_visibility` / `allocate_source_to_space` / `set_source_space_link_status` / `set_transaction_attribution` / `reallocate_transaction` RPCs. **PR2 (not started):** household creation + onboarding; upgraded Space switcher; invites/members UI; per-source visibility sheet ("How should this account be used?"); provenance detail view; attribution UI; review-queue `needs_space` / `needs_attribution` reasons; optional `/spaces/{id}/…` routes | Yes |
 | **T** — Financial planning | 4 | Space-aware category scope; rule `scope_type` + deterministic precedence + explainability; shared budgets (space/category/member scopes) reusing `budget-math.ts`; threshold state-transition alerts (no per-txn spam); shared goals as first-class Space resources; per-member notification prefs | Yes |
 | **U** — Ingestion & reconciliation | 5 | `raw_financial_events` cutover for `ingest-momo` + SMS path; source routing (`is_default_target`); dedupe confidence engine + auto-merge + review cards; **statement (CSV/PDF) reconciliation** vs ledger + import summary; device management UX (rename / pause / reconnect / remove, history preserved) | Yes |
 | **V** — Reporting & intelligence | 6 | `workspace_id` scope on `report_*`; Household report template + attribution summaries; scheduler recipient filtering (exclude former members); AI Space-scope boundary + Household insights; dashboard projections | Yes |
@@ -507,6 +507,47 @@ post-removal access revocation + `member.removed` audit, last-owner guard
 survival, `member.role_changed` audit, service-role bypass. Privilege
 counters move to 68 tables / 115 `authenticated` table grants / 55
 `authenticated` function grants.
+
+### Phase S PR1 — as built (migration `20260913000000`)
+
+Backend only — the web UI is PR2. Every RPC is `SECURITY DEFINER` and
+**refuses a non-household target** (personal/organization ledgers keep
+their existing model).
+
+- **`transaction_member_attributions`** — per-member basis-point "who
+  spent this" split for `attribution_type='split'`. Parallel to Phase E's
+  `transaction_splits` (a different axis: budget buckets, not people).
+  Deferrable constraint trigger enforces the set totals exactly 10000 bps
+  when non-empty; a zero total (all rows deleted) is the valid "not
+  split" state. `SELECT`-gated by `can_view_source_in_space`; written only
+  by `set_transaction_attribution`.
+- **`set_source_visibility(source, mode)`** — owner sets the ceiling.
+  Narrowing cascades: `→ personal_only` revokes every active share link
+  (one audit + activity row per affected Space); `→ share_transactions`
+  downgrades any `share_account` link.
+- **`allocate_source_to_space(source, workspace, mode, is_default,
+  effective_from)`** — the "How should this account be used?" action.
+  Owner-only, household-only, member-of-target. Upserts the
+  `source_space_links` row and raises the source's own ceiling to at
+  least `mode` so one call is all the UI needs.
+- **`set_source_space_link_status(source, workspace, status)`** — owner
+  pauses / resumes / revokes one link (Phase Q RLS already keys off
+  `status='active'`, so pause cuts co-member access immediately).
+- **`set_transaction_attribution(txn, type, attributed_user, splits)`** —
+  household-only; needs `transaction.categorize` + source visibility;
+  validates the member / every split participant is an active member;
+  never guesses.
+- **`reallocate_transaction(txn, target_workspace)`** — moves a
+  transaction between Spaces its source is visible in. v1 **refuses** a
+  transaction carrying Space-scoped derived data (budget split, transfer
+  link, goal contribution, payment match — "resolve those first"), and
+  enforces the no-retroactive-exposure boundary (`effective_from`) when
+  moving into a household. Clears attribution and sets
+  `allocation_status='needs_attribution'` on landing in a household.
+
+Migration-test coverage: 15-assertion "Phase S" block. Privilege counters
+move to 69 tables / 116 `authenticated` table grants / 60 `authenticated`
+function grants.
 
 ---
 
