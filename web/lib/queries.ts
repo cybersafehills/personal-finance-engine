@@ -1189,6 +1189,92 @@ export async function getGoalById(id: string): Promise<GoalWithContributions | n
 }
 
 // ===========================================================================
+// Shared goals (Phase T PR3): computed progress + participants.
+// goal_progress() / set_goal_participants() / goal_participants live in
+// supabase/migrations/20260918000000_phase_t_shared_goals.sql.
+// ===========================================================================
+
+export type GoalProgress = {
+  targetMinor: number;
+  currentMinor: number;
+  pctComplete: number;
+  targetDate: string | null;
+  monthsToTarget: number | null;
+  requiredMonthlyMinor: number;
+  recentMonthlyRateMinor: number;
+  projectedCompletionDate: string | null;
+};
+
+export async function getGoalProgress(goalId: string): Promise<GoalProgress | null> {
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase.rpc("goal_progress", {
+    p_goal_id: goalId,
+  });
+  if (error) {
+    console.error("getGoalProgress failed:", error.message);
+    return null;
+  }
+  const row = ((data ?? []) as unknown as Array<{
+    target_minor: number;
+    current_minor: number;
+    pct_complete: number;
+    target_date: string | null;
+    months_to_target: number | null;
+    required_monthly_minor: number;
+    recent_monthly_rate_minor: number;
+    projected_completion_date: string | null;
+  }>)[0];
+  if (!row) return null;
+  return {
+    targetMinor: row.target_minor,
+    currentMinor: row.current_minor,
+    pctComplete: Number(row.pct_complete),
+    targetDate: row.target_date,
+    monthsToTarget: row.months_to_target === null ? null : Number(row.months_to_target),
+    requiredMonthlyMinor: row.required_monthly_minor,
+    recentMonthlyRateMinor: row.recent_monthly_rate_minor,
+    projectedCompletionDate: row.projected_completion_date,
+  };
+}
+
+export type GoalCollaboration = {
+  workspaceId: string;
+  canManage: boolean;
+  members: SpaceMember[];
+  participantUserIds: string[];
+};
+
+/**
+ * The participant list + the member roster + whether the caller can edit
+ * it, for a goal in a shared (non-personal) Space. Returns null for a
+ * personal-Space goal (no collaborators to show).
+ */
+export async function getGoalCollaboration(
+  goalId: string,
+): Promise<GoalCollaboration | null> {
+  const workspace = await getActiveWorkspace();
+  if (!workspace || workspace.kind === "personal") return null;
+
+  const supabase = await supabaseSession();
+  const [{ data: participants }, members] = await Promise.all([
+    supabase
+      .from("goal_participants")
+      .select("user_id")
+      .eq("goal_id", goalId),
+    getSpaceMemberDirectory(workspace.id),
+  ]);
+
+  return {
+    workspaceId: workspace.id,
+    canManage: workspace.role === "owner" || workspace.role === "admin",
+    members,
+    participantUserIds: (
+      (participants ?? []) as unknown as Array<{ user_id: string }>
+    ).map((p) => p.user_id),
+  };
+}
+
+// ===========================================================================
 // Self-transfer detection
 // ===========================================================================
 
