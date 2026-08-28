@@ -114,6 +114,21 @@ Deno.test("pipeline: a valid OneLedger payload with amount -> model", async () =
   assertEquals(r.model.reference, "INV-42");
   assert(r.model.warnings.includes("merchant_unverified"));
   assertEquals(r.model.providerVerified, false);
+  // The route carries the currency even when it also has an amount, so
+  // the R-oneledger hand-off can gate on RWF without re-parsing.
+  assertEquals(r.model.route.kind, "oneledger");
+  if (r.model.route.kind === "oneledger") {
+    assertEquals(r.model.route.currency, "RWF");
+    assertEquals(r.model.route.provider, "mtn_momo");
+  }
+});
+
+Deno.test("pipeline: an amountless OneLedger payload keeps its currency for the amount step", async () => {
+  const r = await parseScan(oneledger({ currency: "USD" }), resolvers);
+  assert(r.ok);
+  assertEquals(r.model.amount, null);
+  assertEquals(r.model.amountEditable, true);
+  if (r.model.route.kind === "oneledger") assertEquals(r.model.route.currency, "USD");
 });
 
 Deno.test("pipeline: an expired OneLedger payload is rejected", async () => {

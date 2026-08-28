@@ -85,15 +85,35 @@ holds — it re-runs `parseScan` with live resolvers and rebuilds
 everything (directory row, captured params, normalized msisdn) from
 `raw`. The client keeps `raw` only to send it here.
 
-### 8. What R3 will act on: verified USSD with an amount
+### 8. What the hand-off will act on
 
 - **verified USSD + amount** → a `payment_intents` draft is created
   (`source = 'qr_scan'`), then the user opens a real `<a href="tel:…">`.
   The dial string is exactly what was scanned; nothing is appended.
 - **verified USSD, no amount** (a menu / balance code) → `info_only`:
   openable, **nothing persisted** — it is navigation, not a payment.
-- **provider_link / oneledger_payment / emv_merchant** → shown, not
-  actionable ("continuing isn't available yet").
+- **OneLedger merchant payment (RWF)** → the payload is mapped onto the
+  network's pay-a-merchant USSD code
+  (`oneledgerProviderToDirectory` → `getServiceCodeForPayment(net,
+  "merchant_payment")`), `fillUssdTemplate`d with the `merchant_id` +
+  amount (payload's, or a `parseUserAmount`-validated one the user
+  types), and then handed off exactly like a USSD scan — a
+  `pay_merchant` `source = 'qr_scan'` intent. The server re-parses `raw`
+  (never a client model); the client only supplies the typed amount, and
+  it is re-validated server-side. A non-RWF payload, an unmapped
+  provider, a non-numeric `merchant_id` (rejected by the USSD
+  `merchant_code` field), or an expired / replayed payload all
+  dead-end in the review.
+  - The seeded MTN pay-merchant code
+    (`20260911000000_scan_merchant_pay_codes.sql`) is **`published` with
+    `verified_at = null`** — same provenance bar as the Phase M
+    `send_money` seeds. The review surfaces "Not officially verified"
+    and the full dial string before the user opens it. Airtel is not
+    seeded until its path is confirmed. Cross-session `nonce` replay
+    is not persisted yet — the payload `expires_at` and the deterministic
+    idempotency key are the current guards.
+- **provider_link / emv_merchant / non-RWF OneLedger** → shown, not
+  actionable.
 
 ### 9. The recorded attempt is provenance, not settlement
 

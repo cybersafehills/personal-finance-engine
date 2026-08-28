@@ -12,9 +12,12 @@ never shown as a completed payment.
 
 - Branch merged; `pnpm`/`npm` build green; `deno test lib/` green.
 - **`supabase/migrations/tests/run_migration_tests.sh` has been run on
-  PostgreSQL 17** and passes (the R3 migration
-  `20260910000000_phase_r3_scan_payment_source.sql` was only
-  smoke-applied on pg16 during development — see its header).
+  PostgreSQL 17** and passes. Two scan migrations were only
+  smoke-applied on pg16 during development (see their headers):
+  `20260910000000_phase_r3_scan_payment_source.sql` (the `source`
+  column + `create_payment_intent` change) and
+  `20260911000000_scan_merchant_pay_codes.sql` (the seeded MTN
+  pay-merchant code).
 - Generated DB/API types regenerated if your pipeline uses them (this
   repo hand-types its queries, so usually nothing to do).
 - The app sets **no** `Content-Security-Policy` or `Permissions-Policy`
@@ -94,6 +97,16 @@ for iOS Safari.
    **"From a scan"** badge, state "Awaiting verification".
 6. Desktop / no-telephony: instead of Open USSD you get **Copy code** +
    a **QR for your phone**; verify the QR encodes the same `tel:` string.
+7. **OneLedger merchant payment (RWF).** Encode
+   `{"v":1,"type":"merchant_payment","provider":"mtn_momo","merchant_id":"123456","currency":"RWF"}`
+   (no amount). Review shows the merchant (masked), "OneLedger can't
+   confirm this merchant's identity", and an **amount field**. Enter
+   `5000` → Prepare → Open USSD → the dialer opens
+   `*182*8*1*123456*5000#` (the seeded *unverified* pay-merchant code —
+   the "Not officially verified" warning is shown). A `"currency":"USD"`
+   payload → "only continue a scanned payment in RWF". A
+   `"provider":"equity"` payload → "no verified USSD path for this
+   provider yet". A `"merchant_id":"KGL-COFFEE"` → same (non-numeric).
 
 ## 5. Payload safety spot-checks
 

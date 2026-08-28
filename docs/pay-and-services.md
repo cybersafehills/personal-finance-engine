@@ -106,9 +106,21 @@ copy — opening the dialer is never shown as a completed payment.
 Desktop / no-telephony falls back to Copy + a locally-rendered QR
 (`PaymentQr`).
 
-**R3 continues verified USSD only.** `provider_link` (allowlist empty),
-`oneledger_payment`, and `emv_merchant` scans show their details and
-"continuing isn't available yet".
+**R3 continues verified USSD, and OneLedger merchant payments (RWF).**
+An `oneledger_payment` scan is mapped onto the mobile-money network's
+**pay-a-merchant USSD code** (`resolveMerchantPayCode` →
+`getServiceCodeForPayment(net, "merchant_payment")`), filled with the
+payload's `merchant_id` + amount (from the payload, or a validated
+amount the user types when the payload omits one — `parseUserAmount`,
+exact minor units, no floats), and then handed off exactly like a USSD
+scan. Non-RWF payloads, a provider with no seeded pay-merchant code, a
+non-numeric `merchant_id`, an expired / replayed payload, or
+`provider_link` / `emv_merchant` still show the details and "continuing
+isn't available". The seeded MTN pay-merchant code
+(`20260911000000_scan_merchant_pay_codes.sql`) is **published but
+unverified** — the review shows the "Not officially verified" warning and
+the full dial string, same as scanning `mtn-momo-send` today. Airtel is
+not seeded (its pay-code path is unconfirmed).
 
 Trust model, supported/unsupported formats, and the client/server split
 are ADR **`docs/adr/0006-qr-scan-payload-trust.md`**. Key points: no
@@ -166,7 +178,8 @@ What R4 *does* change:
 | Scanner UI | `web/components/pay/ScanToPay.tsx` |
 | QR decode (browser) | `web/lib/pay/scan/decode.client.ts` (`BarcodeDetector`) |
 | Payload pipeline (pure) | `web/lib/pay/scan/` — `normalize` · `classify` · `ussd` · `oneledger` · `emv` · `provider-link` · `money` · `redact` · `handoff` · `pipeline` (+ `*_test.ts`) |
-| Server actions | `web/app/pay/scan/actions.ts` — `classifyScannedCode` · `prepareScanHandoff` · `recordScanHandoff`; resolver `web/lib/pay/scan/resolve.server.ts` (`matchUssdInDirectory` via `getServiceDirectory`) |
+| Server actions | `web/app/pay/scan/actions.ts` — `classifyScannedCode` · `prepareScanHandoff` (USSD + OneLedger→USSD) · `recordScanHandoff`; resolvers `web/lib/pay/scan/resolve.server.ts` (`matchUssdInDirectory`, `resolveMerchantPayCode`) |
+| OneLedger→USSD mapping | `oneledgerProviderToDirectory` in `web/lib/pay/scan/handoff.ts`; fill via `fillUssdTemplate`; seeded `mtn-momo-pay-merchant` code in `supabase/migrations/20260911000000_scan_merchant_pay_codes.sql` (published, **unverified**) |
 | Provider-link allowlist | `PROVIDER_LINK_ALLOWLIST` in `web/lib/pay/scan/provider-link.ts` (empty) |
 | Schema | `payment_intents.source` + `create_payment_intent` in `supabase/migrations/20260910000000_phase_r3_scan_payment_source.sql` |
 | Lifecycle-surface gate | `isPaymentIntentSurfaceEnabled` in `web/lib/pay/gate.ts` — guards `/pay/[id]`, `/pay/activity`, `/pay/reconciliation`, and the lifecycle actions |

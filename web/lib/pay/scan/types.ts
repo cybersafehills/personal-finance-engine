@@ -85,7 +85,14 @@ export type ScanRoute =
       directorySlug: string;
     }
   | { kind: "provider_link"; provider: string; url: string }
-  | { kind: "oneledger"; provider: string | null; merchantIdMasked: string };
+  | {
+      kind: "oneledger";
+      provider: string | null;
+      merchantIdMasked: string;
+      /** ISO 4217 from the payload - the review needs it even when the
+       *  payload carries no amount (the user enters one). */
+      currency: string;
+    };
 
 /**
  * The validated, display-ready result of a supported scan. R3 renders

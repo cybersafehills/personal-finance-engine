@@ -1,6 +1,7 @@
 import "server-only";
 
-import { getServiceDirectory } from "../../ussd/queries";
+import { getServiceCodeForPayment, getServiceDirectory } from "../../ussd/queries";
+import type { ServiceCodeDetail } from "../../ussd/queries";
 import { matchesTemplate } from "./ussd";
 import type { UssdDirectoryMatch } from "./pipeline";
 
@@ -44,4 +45,18 @@ export async function matchUssdInDirectory(
   }
 
   return parameterised;
+}
+
+/**
+ * The published pay-a-merchant USSD code for a mobile-money network -
+ * what a OneLedger merchant-payment scan is filled into. Same RLS scope
+ * and same verified-or-not handling as scanning a send-money code
+ * directly (the review surfaces "not officially verified" when
+ * `verified_at` is null). Returns null when the directory has no such
+ * code, in which case the OneLedger hand-off stays unavailable.
+ */
+export async function resolveMerchantPayCode(
+  network: "mtn" | "airtel",
+): Promise<ServiceCodeDetail | null> {
+  return getServiceCodeForPayment(network, "merchant_payment");
 }

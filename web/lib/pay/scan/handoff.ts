@@ -73,6 +73,21 @@ export function ussdPaymentType(
   }
 }
 
+/**
+ * A OneLedger payload's `provider` slug -> the verified USSD directory's
+ * network key. Only mobile-money networks that have a pay-a-merchant
+ * USSD code map; anything else returns null and the hand-off stays
+ * unavailable (the review still shows the details).
+ */
+export function oneledgerProviderToDirectory(
+  slug: string,
+): "mtn" | "airtel" | null {
+  const s = slug.toLowerCase().replace(/[\s_-]/g, "");
+  if (s === "mtn" || s === "mtnmomo" || s === "momo" || s === "mtnrwanda") return "mtn";
+  if (s === "airtel" || s === "airtelmoney" || s === "airtelrwanda") return "airtel";
+  return null;
+}
+
 /** supported_networks / provider label -> payment_intents.provider. */
 export function ussdProvider(
   networks: string[],
@@ -115,6 +130,8 @@ export type ScanIntentPayloadArgs = {
   note: string | null;
   recipientMsisdnNormalized: string | null;
   recipientMsisdnMasked: string | null;
+  /** The merchant / till code, for a pay-merchant intent. */
+  merchantCode: string | null;
   ttlHours: number;
   sessionFresh: boolean | null;
 };
@@ -136,6 +153,7 @@ export function buildScanIntentPayload(
     recipient_kind: recipientKindFor(a.paymentType),
     recipient_msisdn_normalized: a.recipientMsisdnNormalized,
     recipient_msisdn_masked: a.recipientMsisdnMasked,
+    merchant_code: a.merchantCode,
     service_code_id: a.serviceCodeId,
     ussd_string_redacted: a.ussdRedactedTemplate,
     note: a.note,

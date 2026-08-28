@@ -143,6 +143,7 @@ export async function parseScan(
           kind: "oneledger",
           provider: p.payload.provider,
           merchantIdMasked: maskMerchantId(p.payload.merchant_id),
+          currency: p.currency,
         },
         providerLabel: p.payload.provider,
         // v1 carries no signature - the merchant name is unverified.

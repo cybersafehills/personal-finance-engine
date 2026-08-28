@@ -118,7 +118,18 @@ const en = {
           "OneLedger opened the instruction on your device. Authorize it with your provider. OneLedger marks a payment confirmed only when it sees matching evidence — opening the dialer is not proof of payment.",
         viewActivity: "View in payment activity",
         handoffUnavailable:
-          "OneLedger can only continue verified USSD codes from a scan right now. This code isn't one.",
+          "OneLedger can't continue this code from a scan. It has no verified USSD path for this provider yet.",
+        currencyUnsupported:
+          "OneLedger can only continue a scanned payment in RWF right now.",
+        amountLabel: "Amount to pay (RWF)",
+        amountHint: "This code didn't include an amount — enter it, then check it against the merchant.",
+        amountErrors: {
+          required: "Enter an amount.",
+          not_a_number: "Enter a whole RWF amount, digits only.",
+          too_precise: "RWF amounts have no decimals.",
+          not_positive: "Enter an amount greater than zero.",
+          too_large: "That amount is too large.",
+        },
         prepareError:
           "OneLedger couldn't prepare this payment. Try again.",
         featureDisabled:

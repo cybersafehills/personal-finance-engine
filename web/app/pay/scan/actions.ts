@@ -13,18 +13,30 @@ import {
 } from "../../../lib/pay/gate";
 import { isSessionFresh } from "../../../lib/pay/intents";
 import { maskMsisdn, normalizeRwandaMsisdn } from "../../../lib/pay/phone";
+import { buildTelHref, fillUssdTemplate } from "../../../lib/ussd/capability";
+import { parseOneLedgerPayload } from "../../../lib/pay/scan/oneledger";
 import { parseScan } from "../../../lib/pay/scan/pipeline";
 import { PROVIDER_LINK_ALLOWLIST } from "../../../lib/pay/scan/provider-link";
-import { matchUssdInDirectory } from "../../../lib/pay/scan/resolve.server";
+import {
+  matchUssdInDirectory,
+  resolveMerchantPayCode,
+} from "../../../lib/pay/scan/resolve.server";
 import { matchesTemplate, parseUssd } from "../../../lib/pay/scan/ussd";
 import {
   buildScanIntentPayload,
+  oneledgerProviderToDirectory,
   scanTelHref,
   ussdPaymentType,
   ussdProvider,
 } from "../../../lib/pay/scan/handoff";
 import { logScanError, trackScanEvent } from "../../../lib/pay/scan-analytics";
-import type { ScanResult } from "../../../lib/pay/scan/types";
+import {
+  MAX_AMOUNT_MINOR,
+  type ScanAmount,
+  type ScanResult,
+} from "../../../lib/pay/scan/types";
+
+type Sb = Awaited<ReturnType<typeof supabaseSession>>;
 
 // Authoritative server-side handling for "Scan to pay". The browser
 // decodes and can run the same pure pipeline for instant feedback, but
@@ -81,16 +93,33 @@ export type PrepareScanHandoffResult =
   | { status: "info_only"; telHref: string }
   | { status: "feature_disabled" }
   | { status: "unsupported" }
+  // A OneLedger code that carries no amount - the client must re-call
+  // with a validated one.
+  | { status: "amount_required" }
+  // A OneLedger code in a currency no verified USSD code can pay.
+  | { status: "currency_unsupported" }
   | { status: "error" };
 
 /**
- * Re-parse `raw` authoritatively. If it resolves to a verified USSD
- * instruction carrying an amount, create the payment_intents draft and
- * return a `tel:` href for the client to open on the user's gesture. A
- * menu code (no amount) is returned `info_only` - openable, nothing
- * persisted, because it is navigation, not a payment.
+ * Re-parse `raw` authoritatively and prepare an external hand-off.
+ *
+ *  - **verified USSD + amount** -> create a payment_intents draft and
+ *    return a `tel:` href.
+ *  - **verified USSD, no amount** (menu / inquiry) -> `info_only`:
+ *    openable, nothing persisted.
+ *  - **OneLedger merchant payment (RWF)** -> map onto the network's
+ *    pay-a-merchant USSD code, fill it with the merchant id + amount
+ *    (from the payload, or `userAmountMinor` when the payload omits it),
+ *    then behave exactly like the USSD path.
+ *
+ * Never trusts a client-supplied model - everything is re-derived from
+ * `raw`. `userAmountMinor` is the only client input, and it is
+ * re-validated here.
  */
-export async function prepareScanHandoff(raw: string): Promise<PrepareScanHandoffResult> {
+export async function prepareScanHandoff(
+  raw: string,
+  userAmountMinor?: number,
+): Promise<PrepareScanHandoffResult> {
   const workspaceId = await getActiveWorkspaceId();
   if (!isScanToPayEnabled(workspaceId)) return { status: "feature_disabled" };
   if (!workspaceId || typeof raw !== "string" || raw.length === 0 || raw.length > 8192) {
@@ -101,62 +130,167 @@ export async function prepareScanHandoff(raw: string): Promise<PrepareScanHandof
     const result = await parseScan(raw, serverResolvers);
     if (!result.ok) return { status: "unsupported" };
     const model = result.model;
-    if (model.route.kind !== "ussd" || model.route.literal == null) {
-      return { status: "unsupported" };
-    }
-    const dial = model.route.literal;
-    const telHref = scanTelHref(dial);
-
-    // No amount => a menu / inquiry code. Open it, record nothing.
-    if (!model.amount) {
-      trackScanEvent("scan_handoff_prepared", { kind: "info_only" });
-      return { status: "info_only", telHref };
-    }
-
-    // Re-derive the directory row + captured params from the raw string.
-    const parsed = parseUssd(raw);
-    if (!parsed.ok) return { status: "unsupported" };
-    const match = await matchUssdInDirectory(parsed.value.dial);
-    if (!match) return { status: "unsupported" };
-    const captured = matchesTemplate(parsed.value.dial, match.template)?.params ?? {};
-
-    const phoneRaw = captured.phone ?? captured.msisdn ?? captured.recipient ?? null;
-    const normalizedMsisdn = phoneRaw ? normalizeRwandaMsisdn(phoneRaw).normalized : null;
-
     const supabase = await supabaseSession();
-    const payload = buildScanIntentPayload({
-      workspaceId,
-      // Deterministic: the same code + amount within the TTL is the same
-      // intent, not a duplicate (create_payment_intent dedupes on this).
-      idempotencyKey:
-        "qr:" + createHash("sha256").update(`${dial}|${model.amount.minor}`).digest("hex").slice(0, 40),
-      serviceCodeId: match.id,
-      paymentType: ussdPaymentType(match.category, match.intent),
-      provider: ussdProvider(match.networks, match.providerLabel),
-      amountMinor: model.amount.minor,
-      currency: model.amount.currency,
-      ussdRedactedTemplate: match.template,
-      category: match.category,
-      note: null,
-      recipientMsisdnNormalized: normalizedMsisdn,
-      recipientMsisdnMasked: normalizedMsisdn ? maskMsisdn(normalizedMsisdn) : null,
-      ttlHours: paymentIntentTtlHours(),
-      sessionFresh: await isSessionFresh(),
-    });
 
-    const { data, error } = await supabase.rpc("create_payment_intent", { payload });
-    if (error) {
-      logScanError("prepare_handoff", error);
-      return { status: "error" };
+    if (model.route.kind === "ussd" && model.route.literal != null) {
+      return prepareUssdHandoff(raw, model.route.literal, model.amount, workspaceId, supabase);
     }
-    const row = data as { id: string; existed: boolean };
-    trackScanEvent("scan_handoff_prepared", { kind: "payment" });
-    revalidatePath("/pay/activity");
-    return { status: "prepared", intentId: row.id, telHref, existed: row.existed };
+    if (model.route.kind === "oneledger") {
+      return prepareOneLedgerHandoff(
+        raw,
+        model.route.currency,
+        userAmountMinor,
+        workspaceId,
+        supabase,
+      );
+    }
+    return { status: "unsupported" };
   } catch (err) {
     logScanError("prepare_handoff", err);
     return { status: "error" };
   }
+}
+
+async function prepareUssdHandoff(
+  raw: string,
+  dial: string,
+  amount: ScanAmount | null,
+  workspaceId: string,
+  supabase: Sb,
+): Promise<PrepareScanHandoffResult> {
+  const telHref = scanTelHref(dial);
+
+  // No amount => a menu / inquiry code. Open it, record nothing.
+  if (!amount) {
+    trackScanEvent("scan_handoff_prepared", { kind: "info_only" });
+    return { status: "info_only", telHref };
+  }
+
+  const parsed = parseUssd(raw);
+  if (!parsed.ok) return { status: "unsupported" };
+  const match = await matchUssdInDirectory(parsed.value.dial);
+  if (!match) return { status: "unsupported" };
+  const captured = matchesTemplate(parsed.value.dial, match.template)?.params ?? {};
+
+  const phoneRaw = captured.phone ?? captured.msisdn ?? captured.recipient ?? null;
+  const normalizedMsisdn = phoneRaw ? normalizeRwandaMsisdn(phoneRaw).normalized : null;
+
+  const payload = buildScanIntentPayload({
+    workspaceId,
+    idempotencyKey:
+      "qr:" + createHash("sha256").update(`${dial}|${amount.minor}`).digest("hex").slice(0, 40),
+    serviceCodeId: match.id,
+    paymentType: ussdPaymentType(match.category, match.intent),
+    provider: ussdProvider(match.networks, match.providerLabel),
+    amountMinor: amount.minor,
+    currency: amount.currency,
+    ussdRedactedTemplate: match.template,
+    category: match.category,
+    note: null,
+    recipientMsisdnNormalized: normalizedMsisdn,
+    recipientMsisdnMasked: normalizedMsisdn ? maskMsisdn(normalizedMsisdn) : null,
+    merchantCode: null,
+    ttlHours: paymentIntentTtlHours(),
+    sessionFresh: await isSessionFresh(),
+  });
+
+  return createPreparedIntent(supabase, payload, telHref, "payment");
+}
+
+async function prepareOneLedgerHandoff(
+  raw: string,
+  currency: string,
+  userAmountMinor: number | undefined,
+  workspaceId: string,
+  supabase: Sb,
+): Promise<PrepareScanHandoffResult> {
+  // Verified USSD codes pay in RWF only.
+  if (currency !== "RWF") return { status: "currency_unsupported" };
+
+  const parsed = parseOneLedgerPayload(raw, { now: () => Date.now() });
+  if (!parsed.ok) return { status: "unsupported" };
+  const p = parsed.value;
+
+  const amountMinor =
+    p.amountMinor ??
+    (typeof userAmountMinor === "number" ? Math.trunc(userAmountMinor) : null);
+  if (amountMinor == null) return { status: "amount_required" };
+  if (!Number.isInteger(amountMinor) || amountMinor <= 0 || amountMinor >= MAX_AMOUNT_MINOR) {
+    return { status: "unsupported" };
+  }
+
+  const net = oneledgerProviderToDirectory(p.payload.provider);
+  if (!net) return { status: "unsupported" };
+  const code = await resolveMerchantPayCode(net);
+  if (!code) return { status: "unsupported" };
+
+  const fill = fillUssdTemplate(
+    code.ussd_template,
+    { merchant: p.payload.merchant_id, amount: String(amountMinor) },
+    code.parameters.map((pp) => ({
+      key: pp.key,
+      kind: pp.kind,
+      required: pp.required,
+      formatRegex: pp.format_regex,
+      minLength: pp.min_length,
+      maxLength: pp.max_length,
+    })),
+  );
+  if (!fill.ok) {
+    logScanError("prepare_handoff", new Error(`oneledger fill: ${fill.error}`));
+    return { status: "unsupported" };
+  }
+  const telHref = buildTelHref(fill.dial);
+
+  const note =
+    [
+      p.reference ? `Ref ${p.reference}` : null,
+      p.invoiceId ? `Invoice ${p.invoiceId}` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ") || null;
+
+  const payload = buildScanIntentPayload({
+    workspaceId,
+    idempotencyKey:
+      "qr:" +
+      createHash("sha256")
+        .update(`ol|${net}|${p.payload.merchant_id}|${amountMinor}`)
+        .digest("hex")
+        .slice(0, 40),
+    serviceCodeId: code.id,
+    paymentType: "pay_merchant",
+    provider: ussdProvider([net], code.provider?.display_name ?? null),
+    amountMinor,
+    currency: "RWF",
+    ussdRedactedTemplate: code.ussd_template,
+    category: code.category ?? null,
+    note,
+    recipientMsisdnNormalized: null,
+    recipientMsisdnMasked: null,
+    merchantCode: p.payload.merchant_id,
+    ttlHours: paymentIntentTtlHours(),
+    sessionFresh: await isSessionFresh(),
+  });
+
+  return createPreparedIntent(supabase, payload, telHref, "oneledger");
+}
+
+async function createPreparedIntent(
+  supabase: Sb,
+  payload: Record<string, unknown>,
+  telHref: string,
+  kind: "payment" | "oneledger",
+): Promise<PrepareScanHandoffResult> {
+  const { data, error } = await supabase.rpc("create_payment_intent", { payload });
+  if (error) {
+    logScanError("prepare_handoff", error);
+    return { status: "error" };
+  }
+  const row = data as { id: string; existed: boolean };
+  trackScanEvent("scan_handoff_prepared", { kind });
+  revalidatePath("/pay/activity");
+  return { status: "prepared", intentId: row.id, telHref, existed: row.existed };
 }
 
 // --- record hand-off gesture -----------------------------------------

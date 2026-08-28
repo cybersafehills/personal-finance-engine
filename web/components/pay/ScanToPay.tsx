@@ -12,8 +12,8 @@ import {
   isBarcodeDetectorSupported,
 } from "../../lib/pay/scan/decode.client";
 import { formatScanAmount } from "../../lib/pay/scan/money";
-import { scanTelHref } from "../../lib/pay/scan/handoff";
-import { buildTelHref, detectDialerCapability } from "../../lib/ussd/capability";
+import { parseUserAmount } from "../../lib/pay/scan/handoff";
+import { detectDialerCapability } from "../../lib/ussd/capability";
 import {
   classifyScannedCode,
   prepareScanHandoff,
@@ -605,7 +605,7 @@ type HandoffState =
   | { step: "preparing" }
   | { step: "ready"; intentId: string | null; telHref: string }
   | { step: "awaiting"; intentId: string | null }
-  | { step: "unavailable" }
+  | { step: "unavailable"; reason: "route" | "currency" }
   | { step: "error" };
 
 function ScanResultView({
@@ -624,6 +624,8 @@ function ScanResultView({
   const [handoff, setHandoff] = useState<HandoffState>({ step: "review" });
   const [copied, setCopied] = useState(false);
   const [showQr, setShowQr] = useState(false);
+  const [amountInput, setAmountInput] = useState("");
+  const [amountErr, setAmountErr] = useState<string | null>(null);
   const submittingRef = useRef(false);
 
   const AgainAndBack = (
@@ -674,8 +676,14 @@ function ScanResultView({
 
   const m = scan.model;
   const isUssd = m.route.kind === "ussd" && m.route.literal != null;
+  const isOneLedger = m.route.kind === "oneledger";
+  const oneledgerCurrency = m.route.kind === "oneledger" ? m.route.currency : null;
   const dial = m.route.kind === "ussd" ? (m.route.literal ?? null) : null;
   const isMenu = isUssd && !m.amount; // a menu / inquiry code, not a payment
+  // R3+ continues verified USSD, and OneLedger merchant payments in RWF
+  // (mapped onto a pay-a-merchant USSD code server-side).
+  const isActionable = isUssd || (isOneLedger && oneledgerCurrency === "RWF");
+  const needsAmount = isOneLedger && m.amountEditable;
   const canDial =
     typeof navigator !== "undefined" &&
     detectDialerCapability(navigator.userAgent).canAttemptDialer;
@@ -726,14 +734,17 @@ function ScanResultView({
     </>
   );
 
-  // R3 only continues verified USSD instructions.
-  if (!isUssd) {
+  // Not a route R3+ can continue (provider link, EMV, non-RWF OneLedger,
+  // or a provider with no verified pay-merchant code yet).
+  if (!isActionable) {
     return (
       <div className="flex flex-col gap-3">
         {Fields}
         {Warnings}
         <p className="rounded-control bg-background px-3 py-2 text-xs text-text-muted">
-          {r.handoffUnavailable}
+          {isOneLedger && oneledgerCurrency !== "RWF"
+            ? r.currencyUnsupported
+            : r.handoffUnavailable}
         </p>
         {AgainAndBack}
       </div>
@@ -742,11 +753,23 @@ function ScanResultView({
 
   async function onPrepare() {
     if (submittingRef.current || !raw) return;
+
+    let userAmountMinor: number | undefined;
+    if (needsAmount) {
+      const parsed = parseUserAmount(amountInput, "RWF");
+      if (!parsed.ok) {
+        setAmountErr(r.amountErrors[parsed.reason]);
+        return;
+      }
+      userAmountMinor = parsed.minor;
+    }
+    setAmountErr(null);
+
     submittingRef.current = true;
     setHandoff({ step: "preparing" });
     let res: PrepareScanHandoffResult;
     try {
-      res = await prepareScanHandoff(raw);
+      res = await prepareScanHandoff(raw, userAmountMinor);
     } catch {
       res = { status: "error" };
     }
@@ -756,7 +779,12 @@ function ScanResultView({
     } else if (res.status === "info_only") {
       setHandoff({ step: "ready", intentId: null, telHref: res.telHref });
     } else if (res.status === "unsupported") {
-      setHandoff({ step: "unavailable" });
+      setHandoff({ step: "unavailable", reason: "route" });
+    } else if (res.status === "currency_unsupported") {
+      setHandoff({ step: "unavailable", reason: "currency" });
+    } else if (res.status === "amount_required") {
+      setAmountErr(r.amountErrors.required);
+      setHandoff({ step: "review" });
     } else {
       setHandoff({ step: "error" });
     }
@@ -774,10 +802,10 @@ function ScanResultView({
     setHandoff({ step: "awaiting", intentId });
   }
 
-  async function onCopy(intentId: string | null) {
-    if (!dial) return;
+  async function onCopy(intentId: string | null, text: string) {
+    if (!text) return;
     try {
-      await navigator.clipboard.writeText(dial);
+      await navigator.clipboard.writeText(text);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
@@ -807,7 +835,17 @@ function ScanResultView({
   }
 
   if (handoff.step === "error") return notice(r.prepareError);
-  if (handoff.step === "unavailable") return notice(r.handoffUnavailable);
+  if (handoff.step === "unavailable") {
+    return notice(handoff.reason === "currency" ? r.currencyUnsupported : r.handoffUnavailable);
+  }
+
+  // The dial string shown / copied / QR-encoded on the ready step. USSD
+  // has it client-side; OneLedger's is built server-side and comes back
+  // only as the `tel:` href.
+  const readyDial =
+    handoff.step === "ready"
+      ? handoff.telHref.replace(/^tel:/i, "").replace(/%23/g, "#")
+      : (dial ?? "");
 
   return (
     <div className="flex flex-col gap-3">
@@ -819,10 +857,32 @@ function ScanResultView({
 
       {handoff.step === "review" && (
         <>
+          {needsAmount && (
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium text-text-primary">{r.amountLabel}</span>
+              <input
+                type="text"
+                inputMode="numeric"
+                value={amountInput}
+                onChange={(e) => {
+                  setAmountInput(e.target.value);
+                  setAmountErr(null);
+                }}
+                className="min-h-11 rounded-control border border-border-subtle bg-background px-3 py-2 text-text-primary"
+              />
+              <span className="text-xs text-text-muted">{r.amountHint}</span>
+              {amountErr && (
+                <span role="alert" className="text-xs text-attention">
+                  {amountErr}
+                </span>
+              )}
+            </label>
+          )}
           <button
             type="button"
+            disabled={needsAmount && amountInput.trim() === ""}
             onClick={() => void onPrepare()}
-            className="min-h-11 rounded-control bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground"
+            className="min-h-11 rounded-control bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground disabled:opacity-60"
           >
             {isMenu ? r.openMenu : r.prepareCta}
           </button>
@@ -841,7 +901,7 @@ function ScanResultView({
           <div className="flex flex-col gap-2 sm:flex-row">
             <button
               type="button"
-              onClick={() => void onCopy(handoff.intentId)}
+              onClick={() => void onCopy(handoff.intentId, readyDial)}
               className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-control border border-border-subtle bg-surface px-4 py-2 text-sm font-medium text-text-primary"
             >
               <CopyIcon className="h-4 w-4" />
@@ -849,7 +909,7 @@ function ScanResultView({
             </button>
             {canDial ? (
               <a
-                href={buildTelHref(dial ?? "")}
+                href={handoff.telHref}
                 onClick={() => onOpened(handoff.intentId, "dialer")}
                 className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-control bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground"
               >
@@ -870,9 +930,7 @@ function ScanResultView({
             )}
           </div>
           {!canDial && <p className="text-xs text-text-muted">{r.dialerUnavailable}</p>}
-          {showQr && dial && (
-            <PaymentQr value={scanTelHref(dial)} label={r.qrCaption} />
-          )}
+          {showQr && <PaymentQr value={handoff.telHref} label={r.qrCaption} />}
           {AgainAndBack}
         </>
       )}
