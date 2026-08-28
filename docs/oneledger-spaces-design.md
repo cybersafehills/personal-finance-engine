@@ -1192,6 +1192,33 @@ has no remaining deferred items.
 
 ---
 
+## 11q. Phase V PR1b — as built (web)
+
+The in-app notification surface for PR1 (§11p). **Web only, no migration.**
+
+- **`getUnreadNotificationCount()`** (RPC) + **`getNotifications(limit)`**
+  (`web/lib/queries.ts`) — the latter reads `channel = 'in_app'` rows
+  newest-first through RLS (own rows only).
+- **Header bell** — `NotificationBell` sits between the Pay trigger and
+  the Reports button in `AppShell`, with an unread-count badge. The count
+  is fetched once in the root layout (threaded as a prop, like every
+  other shell datum) and refreshed because the mark-read actions
+  `revalidatePath("/", "layout")`.
+- **`/notifications`** — `NotificationList` (client): "Mark all read"
+  when anything is unread, per-row "Mark read", an unread dot, and the
+  title links to the relevant screen (`workspace` → `/settings/workspace`,
+  `budget` → `/budgets`, `goal`/`transaction` → their detail pages).
+  Actions `markNotificationRead` / `markAllNotificationsRead`.
+- New `BellIcon` added to the hand-drawn icon set.
+
+`next build` ✓, `eslint` 0.
+
+Still ahead in Phase V: **PR2** (budget threshold-crossing producer) ·
+**PR3** (email outbox drainer, Resend) · **PR4** (Space-scoped scheduled
+reports).
+
+---
+
 ## 12. Testing strategy (per phase, aggregated here)
 
 - **Unit**: role→capability, `can_view_source_in_space` truth table,

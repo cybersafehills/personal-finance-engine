@@ -4,7 +4,12 @@ import { Geist } from "next/font/google";
 import { AppShell } from "../components/AppShell";
 import { BrandSplashScreen, SPLASH_CRITICAL_CSS } from "../components/brand/BrandSplashScreen";
 import { supabaseSession } from "../lib/supabase-session-server";
-import { getActiveWorkspaceId, getUiPreferences, getUserWorkspaces } from "../lib/queries";
+import {
+  getActiveWorkspaceId,
+  getUiPreferences,
+  getUnreadNotificationCount,
+  getUserWorkspaces,
+} from "../lib/queries";
 import { DEFAULT_NAV_ORDER } from "../lib/navigation";
 import {
   isAssistedPayEnabled,
@@ -94,13 +99,15 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   // privacy preference on the very first server-rendered paint, so there
   // is no client-side fetch and no flash of an unmasked balance or a
   // default nav order before the real one loads (§6.4/§11.1).
-  const [workspaces, activeWorkspaceId, uiPreferences] = user
-    ? await Promise.all([
+  const [workspaces, activeWorkspaceId, uiPreferences, unreadNotificationCount] =
+    user
+      ? await Promise.all([
         getUserWorkspaces(),
         getActiveWorkspaceId(),
         getUiPreferences(),
+        getUnreadNotificationCount(),
       ])
-    : [
+      : [
         [],
         null,
         {
@@ -109,6 +116,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           privacyMode: false,
           reportsRelocationNoticeDismissed: true,
         },
+        0,
       ];
 
   // Server-authoritative: the global Pay action only renders where the
@@ -146,6 +154,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           payEnabled={payEnabled}
           assistedPayEnabled={assistedPayEnabled}
           scanToPayEnabled={scanToPayEnabled}
+          unreadNotificationCount={unreadNotificationCount}
         >
           {children}
         </AppShell>

@@ -7,6 +7,7 @@ import { OneLedgerLogo } from "./brand/OneLedgerLogo";
 import { GearIcon, HomeIcon, ListIcon, MoreIcon, PieIcon, TargetIcon } from "./icons";
 import { LiveDataSync } from "./LiveDataSync";
 import { MoreSheet } from "./MoreSheet";
+import { NotificationBell } from "./NotificationBell";
 import { ProfileMenu } from "./ProfileMenu";
 import { PrivacyProvider } from "./PrivacyProvider";
 import { PayProvider } from "./pay/PayProvider";
@@ -87,6 +88,7 @@ export function AppShell({
   payEnabled,
   assistedPayEnabled,
   scanToPayEnabled,
+  unreadNotificationCount,
 }: {
   children: React.ReactNode;
   userEmail: string | null;
@@ -99,6 +101,7 @@ export function AppShell({
   payEnabled: boolean;
   assistedPayEnabled: boolean;
   scanToPayEnabled: boolean;
+  unreadNotificationCount: number;
 }) {
   const pathname = usePathname();
   const navItems = useOrderedNavItems(navOrder);
@@ -158,6 +161,7 @@ export function AppShell({
 
             <div className="flex shrink-0 items-center gap-1.5">
               {payEnabled && <PayTrigger variant="desktop" />}
+              <NotificationBell count={unreadNotificationCount} />
               <ReportsButton />
               <ProfileMenu
                 userEmail={userEmail}
