@@ -1,10 +1,13 @@
 import { test, expect } from "./fixtures";
 import AxeBuilder from "@axe-core/playwright";
 
-// Pay & Services - Phase R1 (Scan to pay, camera SHELL). Non-custodial
-// and deliberately incomplete: R1 opens the camera, models every
-// permission / no-camera / in-use / insecure state, and always releases
-// the stream. It does NOT decode a QR code or hand off a payment.
+// Pay & Services - Phase R1/R2 (Scan to pay). Non-custodial and
+// deliberately incomplete: the scanner opens the camera, models every
+// permission / device failure, decodes a QR (native BarcodeDetector),
+// and classifies the payload server-side - stopping at "here's what we
+// read". It does NOT show a full review screen or hand off a payment
+// (that's R3). The payload pipeline itself is covered exhaustively by
+// the Deno unit tests in web/lib/pay/scan/*_test.ts.
 //
 // This spec needs two things the default local run does NOT set, so the
 // whole file is skipped unless they're present:
@@ -19,9 +22,11 @@ import AxeBuilder from "@axe-core/playwright";
 //          "--use-fake-ui-for-media-stream",
 //        ] } }
 //
-// With neither, the entry point is server-gated off and there is nothing
-// to test. See docs/pay-and-services.md "Scan to pay (Phase R1)".
-test.describe("Scan to pay (R1)", () => {
+// Note: headless Chromium does not ship BarcodeDetector, so these tests
+// assert the scanner *shell* (open / status / Back / Esc / a11y), not a
+// live decode. With neither env set, the entry point is server-gated off
+// and there is nothing to test.
+test.describe("Scan to pay (R1/R2)", () => {
   test.skip(
     process.env.SCAN_TO_PAY_ENABLED !== "true",
     "SCAN_TO_PAY_ENABLED is not 'true' for this run - see file header.",
@@ -41,10 +46,10 @@ test.describe("Scan to pay (R1)", () => {
     const dialog = await openScanner(page);
 
     await expect(dialog.getByRole("heading", { name: "Scan to pay" })).toBeVisible();
-    // State is conveyed as text, not by the video alone.
+    // Guidance + a live status line - state is conveyed as text, never by
+    // the video pixels alone.
+    await expect(dialog.getByText(/hold steady inside the frame/i)).toBeVisible();
     await expect(dialog.getByRole("status")).toBeVisible();
-    // The R1 build is honest that decoding isn't wired yet.
-    await expect(dialog.getByText(/Reading a code isn't part of this build/)).toBeVisible();
 
     // Back returns to the menu and restores focus to the entry.
     const back = dialog.getByRole("button", { name: "Back to payment options" });

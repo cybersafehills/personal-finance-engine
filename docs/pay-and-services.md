@@ -46,41 +46,62 @@ Every dismissal path — the footer control, the dimmed overlay, `Esc`,
 and a navigation that closes the sheet — runs through one guarded
 `requestClose()` so a double activation can't fire `onClose` twice.
 
-## Scan to pay (Phase R1)
+## Scan to pay (Phases R1–R2)
 
 `SCAN_TO_PAY_ENABLED=true` (opt-in, off otherwise — same convention as
 `SMS_RECONCILIATION_ENABLED`) adds a **"Scan to pay"** entry at the top
 of the launcher. It swaps the sheet body for a camera scanner
-(`web/components/pay/ScanToPay.tsx`, `lazy`-loaded so no camera/decoder
-code is in the initial bundle). The header shows a Back control; the
-pinned footer close stays.
+(`web/components/pay/ScanToPay.tsx`, `lazy`-loaded so no camera/decoder/
+parser code is in the initial bundle). The header shows a Back control;
+the pinned footer close stays.
 
-**R1 is the camera shell only.** It opens the rear camera
-(`facingMode: environment`, retried unconstrained on `OverconstrainedError`),
-shows a live preview + viewfinder + an `aria-live` status line, and
-offers a torch toggle where `getCapabilities().torch` is present. It
-does **not** decode a QR code, parse a payload, or hand off to any
-payment channel — the on-screen notice says so, and later phases add
-that behind their own flags.
+### R1 — camera shell
 
-Guarantees:
+Opens the rear camera (`facingMode: environment`, retried unconstrained
+on `OverconstrainedError`), live preview + viewfinder + `aria-live`
+status line, torch toggle where `getCapabilities().torch` is present.
 
-- `getUserMedia` is called only from `ScanToPay`, i.e. only after an
-  explicit "Scan to pay" tap (the component is lazy-mounted by that tap).
-  Never on app start or when the sheet merely opens.
-- The `MediaStream` is released on unmount, on error, when the tab is
-  hidden (`visibilitychange`), and whenever a fresh start supersedes an
-  in-flight one (a monotonic start token).
+- `getUserMedia` is called only from `ScanToPay`, only after an explicit
+  "Scan to pay" tap. Never on app start or when the sheet merely opens.
+- The `MediaStream` is released on unmount, on error, on tab-hide
+  (`visibilitychange`), when a QR is accepted, and when a fresh start
+  supersedes an in-flight one (a monotonic start token).
 - Every failure is a distinct, actionable state: permission `denied` vs
-  `dismissed` (told apart via the Permissions API where available),
-  `noCamera`, `inUse`, `insecure` context, `unsupported` browser,
-  `generic`. A browser-level denial is never described as an app bug.
+  `dismissed` (Permissions API where available), `noCamera`, `inUse`,
+  `insecure` context, `unsupported` browser, `generic`. A browser-level
+  denial is never described as an app bug.
+
+### R2 — decode + classification
+
+Decodes a QR with the native `BarcodeDetector` — camera frames on a
+~350 ms loop, or a locally-processed uploaded image (never uploaded,
+bitmap released, multi-code frames ask for a retry). Where
+`BarcodeDetector` is missing the scanner is preview-only and says so.
+
+The decoded string goes through the shared, pure pipeline
+(`web/lib/pay/scan/pipeline.ts`) and is then re-classified
+**authoritatively on the server** (`classifyScannedCode`, feature-gated,
+resolvers bound to the RLS-scoped USSD directory + the provider
+allowlist). R2 stops at a **"here's what we read"** summary — masked
+recipient, amount, verification warnings — with a disabled "Review &
+continue". The review screen and the external hand-off are **R3**.
+
+Trust model, supported/unsupported formats, and the client/server split
+are ADR **`docs/adr/0006-qr-scan-payload-trust.md`**. Key points: no
+"decoded string → destination" path; the provider-link allowlist ships
+**empty** (real entries need provider specs + sign-off); EMV is
+recognised (TLV + CRC-16/CCITT) but always `emv_unsupported`; only the
+coarse `class` / `reason` is ever logged.
 
 | Concern | Location |
 |---|---|
 | Feature gate | `isScanToPayEnabled` / `assertScanToPayEnabled` in `web/lib/pay/gate.ts` |
 | Wiring | `web/app/layout.tsx` → `web/components/AppShell.tsx` → `web/components/pay/PayProvider.tsx` → `PayLauncher` |
-| Scanner | `web/components/pay/ScanToPay.tsx` |
+| Scanner UI | `web/components/pay/ScanToPay.tsx` |
+| QR decode (browser) | `web/lib/pay/scan/decode.client.ts` (`BarcodeDetector`) |
+| Payload pipeline (pure) | `web/lib/pay/scan/` — `normalize` · `classify` · `ussd` · `oneledger` · `emv` · `provider-link` · `money` · `pipeline` (+ `*_test.ts`) |
+| Server classification | `web/app/pay/scan/actions.ts` → `web/lib/pay/scan/resolve.server.ts` (`matchUssdInDirectory` via `getServiceDirectory`) |
+| Provider-link allowlist | `PROVIDER_LINK_ALLOWLIST` in `web/lib/pay/scan/provider-link.ts` (empty in R2) |
 | Privacy-safe events (no payload/PII ever) | `web/lib/pay/scan-analytics.ts` (+ `scan-analytics_test.ts`) |
 | e2e | `web/e2e/pay-scan.spec.ts` (skipped unless `SCAN_TO_PAY_ENABLED=true` + a fake camera — see the file header) |
 

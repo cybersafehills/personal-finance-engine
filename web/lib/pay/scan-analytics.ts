@@ -15,7 +15,14 @@ export type ScanEventName =
   | "scan_camera_permission"
   | "scan_camera_started"
   | "scan_torch_toggled"
-  | "scan_to_pay_closed";
+  | "scan_to_pay_closed"
+  // R2 - decode + classification lifecycle
+  | "scan_decoder_unsupported"
+  | "scan_qr_detected"
+  | "scan_image_selected"
+  | "scan_payload_classified"
+  | "scan_payload_rejected"
+  | "scan_again";
 
 /** Coarse outcome for `scan_camera_permission` - never a raw error
  *  string or stack. Mirrors ScanErrorKind in ScanToPay.tsx plus the
