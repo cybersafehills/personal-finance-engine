@@ -10,12 +10,15 @@ export function CategoryCorrectionForm({
   currentCategory,
   currentSubcategory,
   counterpartyName,
+  categorySuggestions = [],
 }: {
   transactionId: string;
   currentCategory: string | null;
   currentSubcategory: string | null;
   counterpartyName: string | null;
+  categorySuggestions?: string[];
 }) {
+  const suggestionsListId = `category-suggestions-${transactionId}`;
   const [open, setOpen] = useState(false);
   const [category, setCategory] = useState(currentCategory ?? "");
   const [subcategory, setSubcategory] = useState(currentSubcategory ?? "");
@@ -77,8 +80,16 @@ export function CategoryCorrectionForm({
           onChange={(event) => setCategory(event.target.value)}
           placeholder="e.g. Groceries"
           required
+          list={categorySuggestions.length > 0 ? suggestionsListId : undefined}
           className="min-h-11 rounded-control border border-border-strong bg-surface px-3 py-2 text-sm text-text-primary"
         />
+        {categorySuggestions.length > 0 && (
+          <datalist id={suggestionsListId}>
+            {categorySuggestions.map((name) => (
+              <option key={name} value={name} />
+            ))}
+          </datalist>
+        )}
       </label>
 
       <label className="flex flex-col gap-1 text-sm">

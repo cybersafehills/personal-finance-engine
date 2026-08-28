@@ -228,6 +228,179 @@ export async function getTransactionById(
   return data;
 }
 
+// ===========================================================================
+// Space provenance + attribution for one transaction (household ledger).
+// See Phase Q/S migrations: transactions gained financial_source_id /
+// performed_by_user_id / attribution_type / attributed_user_id /
+// allocation_status; 20260914000000 added set_transaction_attribution and
+// transaction_member_attributions; 20260915000000 added
+// space_member_directory (co-member display names past profiles' own RLS).
+// ===========================================================================
+
+export type SpaceMember = {
+  userId: string;
+  displayName: string | null;
+  role: WorkspaceRole;
+};
+
+/** Active members of a Space, with display names - only if the caller is a member. */
+export async function getSpaceMemberDirectory(
+  workspaceId: string,
+): Promise<SpaceMember[]> {
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase.rpc("space_member_directory", {
+    p_workspace_id: workspaceId,
+  });
+
+  if (error) {
+    console.error("getSpaceMemberDirectory failed:", error.message);
+    return [];
+  }
+
+  return ((data ?? []) as unknown as Array<{
+    user_id: string;
+    display_name: string | null;
+    role: WorkspaceRole;
+  }>).map((row) => ({
+    userId: row.user_id,
+    displayName: row.display_name,
+    role: row.role,
+  }));
+}
+
+/** The signed-in user's id, or null. */
+export async function getAuthUserId(): Promise<string | null> {
+  const supabase = await supabaseSession();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  return user?.id ?? null;
+}
+
+export type TransactionAttributionType =
+  | "shared"
+  | "member"
+  | "split"
+  | "unassigned";
+
+export type TransactionSpaceContext = {
+  workspaceId: string;
+  workspaceName: string | null;
+  workspaceKind: WorkspaceKind;
+  sourceName: string | null;
+  sourceProvider: string | null;
+  sourceMaskedIdentifier: string | null;
+  sourceOwnerUserId: string | null;
+  performedByUserId: string | null;
+  recordCreatedByUserId: string | null;
+  ingestionConnectionLabel: string | null;
+  attributionType: TransactionAttributionType | null;
+  attributedUserId: string | null;
+  allocationStatus: "allocated" | "needs_space" | "needs_attribution";
+  memberSplits: Array<{ userId: string; shareBps: number }>;
+};
+
+export async function getTransactionSpaceContext(
+  id: string,
+): Promise<TransactionSpaceContext | null> {
+  const supabase = await supabaseSession();
+
+  const { data, error } = await supabase
+    .from("transactions")
+    .select(
+      "workspace_id, performed_by_user_id, record_created_by_user_id, attribution_type, attributed_user_id, allocation_status, workspaces(name, kind), financial_sources(display_name, provider, masked_identifier, owner_user_id), ingestion_connections(label)",
+    )
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error || !data) {
+    if (error) console.error("getTransactionSpaceContext failed:", error.message);
+    return null;
+  }
+
+  const row = data as unknown as {
+    workspace_id: string;
+    performed_by_user_id: string | null;
+    record_created_by_user_id: string | null;
+    attribution_type: TransactionAttributionType | null;
+    attributed_user_id: string | null;
+    allocation_status: "allocated" | "needs_space" | "needs_attribution";
+    workspaces: { name: string; kind: WorkspaceKind } | null;
+    financial_sources: {
+      display_name: string;
+      provider: string;
+      masked_identifier: string | null;
+      owner_user_id: string;
+    } | null;
+    ingestion_connections: { label: string } | null;
+  };
+
+  let memberSplits: Array<{ userId: string; shareBps: number }> = [];
+  if (row.attribution_type === "split") {
+    const { data: splitRows } = await supabase
+      .from("transaction_member_attributions")
+      .select("user_id, share_bps")
+      .eq("transaction_id", id);
+    memberSplits = ((splitRows ?? []) as unknown as Array<{
+      user_id: string;
+      share_bps: number;
+    }>).map((s) => ({ userId: s.user_id, shareBps: s.share_bps }));
+  }
+
+  return {
+    workspaceId: row.workspace_id,
+    workspaceName: row.workspaces?.name ?? null,
+    workspaceKind: row.workspaces?.kind ?? "personal",
+    sourceName: row.financial_sources?.display_name ?? null,
+    sourceProvider: row.financial_sources?.provider ?? null,
+    sourceMaskedIdentifier: row.financial_sources?.masked_identifier ?? null,
+    sourceOwnerUserId: row.financial_sources?.owner_user_id ?? null,
+    performedByUserId: row.performed_by_user_id,
+    recordCreatedByUserId: row.record_created_by_user_id,
+    ingestionConnectionLabel: row.ingestion_connections?.label ?? null,
+    attributionType: row.attribution_type,
+    attributedUserId: row.attributed_user_id,
+    allocationStatus: row.allocation_status,
+    memberSplits,
+  };
+}
+
+/** Household transactions the caller can see that still need an attribution. */
+export async function getNeedsAttributionTransactions(): Promise<
+  Array<{ id: string; occurredAt: string; amountRwf: number; direction: string; counterpartyName: string | null; workspaceName: string | null }>
+> {
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("transactions")
+    .select(
+      "id, occurred_at, amount_rwf, direction, counterparty_name, workspaces(name)",
+    )
+    .eq("allocation_status", "needs_attribution")
+    .order("occurred_at", { ascending: false })
+    .limit(50);
+
+  if (error) {
+    console.error("getNeedsAttributionTransactions failed:", error.message);
+    return [];
+  }
+
+  return ((data ?? []) as unknown as Array<{
+    id: string;
+    occurred_at: string;
+    amount_rwf: number;
+    direction: string;
+    counterparty_name: string | null;
+    workspaces: { name: string } | null;
+  }>).map((row) => ({
+    id: row.id,
+    occurredAt: row.occurred_at,
+    amountRwf: row.amount_rwf,
+    direction: row.direction,
+    counterpartyName: row.counterparty_name,
+    workspaceName: row.workspaces?.name ?? null,
+  }));
+}
+
 export type CategoryTotal = {
   category: string; // "Uncategorized" for null
   totalRwf: number;
@@ -265,6 +438,95 @@ export async function getCategoryTotals(): Promise<CategoryTotal[]> {
       transactionCount: count,
     }))
     .sort((a, b) => b.totalRwf - a.totalRwf);
+}
+
+// ===========================================================================
+// Space category vocabulary (Phase T PR4). workspace_categories +
+// upsert_workspace_category / set_workspace_category_archived live in
+// supabase/migrations/20260920000000_phase_t_workspace_categories.sql.
+// Free-text category names on transactions are unchanged; this is a
+// per-Space list of preferred names, offered as suggestions.
+// ===========================================================================
+
+export type SpaceCategory = {
+  key: string;
+  label: string;
+  parentKey: string | null;
+  isArchived: boolean;
+};
+
+export type SpaceCategoryManagement = {
+  workspaceId: string;
+  canManage: boolean;
+  categories: SpaceCategory[];
+};
+
+/**
+ * The active Space's category vocabulary + whether the caller can edit
+ * it. Returns null for a Personal Space (no shared vocabulary there).
+ */
+export async function getSpaceCategoryManagement(
+  includeArchived = false,
+): Promise<SpaceCategoryManagement | null> {
+  const workspace = await getActiveWorkspace();
+  if (!workspace || workspace.kind === "personal") return null;
+
+  const supabase = await supabaseSession();
+  let query = supabase
+    .from("workspace_categories")
+    .select("key, label, parent_key, is_archived")
+    .eq("workspace_id", workspace.id)
+    .order("label", { ascending: true });
+  if (!includeArchived) query = query.eq("is_archived", false);
+
+  const { data, error } = await query;
+  if (error) {
+    console.error("getSpaceCategoryManagement failed:", error.message);
+    return null;
+  }
+
+  return {
+    workspaceId: workspace.id,
+    canManage: workspace.role === "owner" || workspace.role === "admin",
+    categories: (
+      (data ?? []) as unknown as Array<{
+        key: string;
+        label: string;
+        parent_key: string | null;
+        is_archived: boolean;
+      }>
+    ).map((r) => ({
+      key: r.key,
+      label: r.label,
+      parentKey: r.parent_key,
+      isArchived: r.is_archived,
+    })),
+  };
+}
+
+/**
+ * Category-name suggestions for the correction form: the active Space's
+ * (non-archived) preferred labels first, then any category name already
+ * seen on a transaction. Deduplicated, order-preserving.
+ */
+export async function getCategorySuggestions(): Promise<string[]> {
+  const [spaceMgmt, totals] = await Promise.all([
+    getSpaceCategoryManagement(false),
+    getCategoryTotals(),
+  ]);
+
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const add = (name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed || trimmed === "Uncategorized" || seen.has(trimmed)) return;
+    seen.add(trimmed);
+    out.push(trimmed);
+  };
+
+  for (const c of spaceMgmt?.categories ?? []) add(c.label);
+  for (const t of totals) add(t.category);
+  return out;
 }
 
 /**
@@ -1016,6 +1278,92 @@ export async function getGoalById(id: string): Promise<GoalWithContributions | n
 }
 
 // ===========================================================================
+// Shared goals (Phase T PR3): computed progress + participants.
+// goal_progress() / set_goal_participants() / goal_participants live in
+// supabase/migrations/20260919000000_phase_t_shared_goals.sql.
+// ===========================================================================
+
+export type GoalProgress = {
+  targetMinor: number;
+  currentMinor: number;
+  pctComplete: number;
+  targetDate: string | null;
+  monthsToTarget: number | null;
+  requiredMonthlyMinor: number;
+  recentMonthlyRateMinor: number;
+  projectedCompletionDate: string | null;
+};
+
+export async function getGoalProgress(goalId: string): Promise<GoalProgress | null> {
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase.rpc("goal_progress", {
+    p_goal_id: goalId,
+  });
+  if (error) {
+    console.error("getGoalProgress failed:", error.message);
+    return null;
+  }
+  const row = ((data ?? []) as unknown as Array<{
+    target_minor: number;
+    current_minor: number;
+    pct_complete: number;
+    target_date: string | null;
+    months_to_target: number | null;
+    required_monthly_minor: number;
+    recent_monthly_rate_minor: number;
+    projected_completion_date: string | null;
+  }>)[0];
+  if (!row) return null;
+  return {
+    targetMinor: row.target_minor,
+    currentMinor: row.current_minor,
+    pctComplete: Number(row.pct_complete),
+    targetDate: row.target_date,
+    monthsToTarget: row.months_to_target === null ? null : Number(row.months_to_target),
+    requiredMonthlyMinor: row.required_monthly_minor,
+    recentMonthlyRateMinor: row.recent_monthly_rate_minor,
+    projectedCompletionDate: row.projected_completion_date,
+  };
+}
+
+export type GoalCollaboration = {
+  workspaceId: string;
+  canManage: boolean;
+  members: SpaceMember[];
+  participantUserIds: string[];
+};
+
+/**
+ * The participant list + the member roster + whether the caller can edit
+ * it, for a goal in a shared (non-personal) Space. Returns null for a
+ * personal-Space goal (no collaborators to show).
+ */
+export async function getGoalCollaboration(
+  goalId: string,
+): Promise<GoalCollaboration | null> {
+  const workspace = await getActiveWorkspace();
+  if (!workspace || workspace.kind === "personal") return null;
+
+  const supabase = await supabaseSession();
+  const [{ data: participants }, members] = await Promise.all([
+    supabase
+      .from("goal_participants")
+      .select("user_id")
+      .eq("goal_id", goalId),
+    getSpaceMemberDirectory(workspace.id),
+  ]);
+
+  return {
+    workspaceId: workspace.id,
+    canManage: workspace.role === "owner" || workspace.role === "admin",
+    members,
+    participantUserIds: (
+      (participants ?? []) as unknown as Array<{ user_id: string }>
+    ).map((p) => p.user_id),
+  };
+}
+
+// ===========================================================================
 // Self-transfer detection
 // ===========================================================================
 
@@ -1566,10 +1914,12 @@ export async function getVariableIncomeMonths(
 
 export type WorkspaceRole = "owner" | "admin" | "member" | "viewer";
 
+export type WorkspaceKind = "personal" | "organization" | "household";
+
 export type WorkspaceSummary = {
   id: string;
   name: string;
-  kind: "personal" | "organization";
+  kind: WorkspaceKind;
   role: WorkspaceRole;
 };
 
@@ -1589,13 +1939,123 @@ export async function getUserWorkspaces(): Promise<WorkspaceSummary[]> {
 
   return (data ?? []).flatMap((row) => {
     const workspace = row.workspaces as unknown as
-      | { id: string; name: string; kind: "personal" | "organization" }
+      | { id: string; name: string; kind: WorkspaceKind }
       | null;
     if (!workspace) return [];
     return [
       { id: workspace.id, name: workspace.name, kind: workspace.kind, role: row.role },
     ] as WorkspaceSummary[];
   });
+}
+
+// ===========================================================================
+// Financial sources and their per-Space sharing. See Phase Q/S migrations
+// (20260910000000 financial_sources / source_space_links, 20260914000000
+// the sharing RPCs). "Source" is the user-facing name for a person-owned
+// financial_sources row; a household member decides, per source, what each
+// Space they belong to may see of it.
+// ===========================================================================
+
+export type SourceVisibilityMode =
+  | "personal_only"
+  | "share_transactions"
+  | "share_account";
+
+export type SourceSpaceLink = {
+  workspaceId: string;
+  workspaceName: string | null;
+  visibilityMode: "share_transactions" | "share_account";
+  status: "active" | "paused" | "revoked";
+  isDefaultTarget: boolean;
+};
+
+export type FinancialSourceRow = {
+  id: string;
+  displayName: string;
+  provider: string;
+  sourceType: string;
+  currency: string;
+  maskedIdentifier: string | null;
+  visibilityMode: SourceVisibilityMode;
+  status: "active" | "paused" | "archived";
+  links: SourceSpaceLink[];
+};
+
+/**
+ * The financial sources the caller *owns* (not ones merely shared with
+ * them), each with its collaborative Space allocations. financial_sources'
+ * RLS also returns sources shared into the caller's Spaces, so this
+ * filters to owner_user_id = the caller explicitly.
+ */
+export async function getMyFinancialSources(): Promise<FinancialSourceRow[]> {
+  const supabase = await supabaseSession();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return [];
+
+  const { data, error } = await supabase
+    .from("financial_sources")
+    .select(
+      "id, display_name, provider, source_type, currency, masked_identifier, visibility_mode, status, source_space_links(workspace_id, visibility_mode, status, is_default_target, workspaces(name))",
+    )
+    .eq("owner_user_id", user.id)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    console.error("getMyFinancialSources failed:", error.message);
+    return [];
+  }
+
+  type RawLink = {
+    workspace_id: string;
+    visibility_mode: "share_transactions" | "share_account";
+    status: "active" | "paused" | "revoked";
+    is_default_target: boolean;
+    workspaces: { name: string } | null;
+  };
+  type RawSource = {
+    id: string;
+    display_name: string;
+    provider: string;
+    source_type: string;
+    currency: string;
+    masked_identifier: string | null;
+    visibility_mode: SourceVisibilityMode;
+    status: "active" | "paused" | "archived";
+    source_space_links: RawLink[] | null;
+  };
+
+  return ((data ?? []) as unknown as RawSource[]).map((row) => ({
+    id: row.id,
+    displayName: row.display_name,
+    provider: row.provider,
+    sourceType: row.source_type,
+    currency: row.currency,
+    maskedIdentifier: row.masked_identifier ?? null,
+    visibilityMode: row.visibility_mode,
+    status: row.status,
+    links: (row.source_space_links ?? [])
+      .filter((link) => link.status !== "revoked")
+      .map((link) => ({
+        workspaceId: link.workspace_id,
+        workspaceName: link.workspaces?.name ?? null,
+        visibilityMode: link.visibility_mode,
+        status: link.status,
+        isDefaultTarget: link.is_default_target,
+      })),
+  }));
+}
+
+/**
+ * Households the caller can share a source into - every active household
+ * membership above 'viewer' (allocate_source_to_space requires 'member').
+ */
+export async function getShareableHouseholds(): Promise<WorkspaceSummary[]> {
+  const workspaces = await getUserWorkspaces();
+  return workspaces.filter(
+    (workspace) => workspace.kind === "household" && workspace.role !== "viewer",
+  );
 }
 
 /** The active workspace's own id/name/kind/the caller's role in it - for the workspace settings page and the switcher's current-selection label. */
@@ -1605,6 +2065,225 @@ export async function getActiveWorkspace(): Promise<WorkspaceSummary | null> {
 
   const workspaces = await getUserWorkspaces();
   return workspaces.find((workspace) => workspace.id === workspaceId) ?? null;
+}
+
+// ===========================================================================
+// Per-member notification preferences for the active Space. See Phase Q
+// (space_member_notification_prefs) and Phase T PR1
+// (20260917000000_phase_t_notification_resolution.sql: notification_event_
+// catalog / should_notify). Security-notable events are always on.
+// ===========================================================================
+
+export type NotificationEventSetting = {
+  eventKey: string;
+  label: string;
+  securityNotable: boolean;
+  inApp: boolean;
+  email: boolean;
+};
+
+export type NotificationSettings = {
+  workspaceId: string;
+  workspaceName: string;
+  events: NotificationEventSetting[];
+};
+
+export async function getNotificationSettings(): Promise<NotificationSettings | null> {
+  const workspace = await getActiveWorkspace();
+  if (!workspace || workspace.kind === "personal") return null;
+
+  const supabase = await supabaseSession();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  const [{ data: catalog }, { data: prefs }] = await Promise.all([
+    supabase.rpc("notification_event_catalog"),
+    supabase
+      .from("space_member_notification_prefs")
+      .select("event_key, channel, enabled")
+      .eq("workspace_id", workspace.id)
+      .eq("user_id", user.id),
+  ]);
+
+  const prefMap = new Map<string, boolean>();
+  for (const p of (prefs ?? []) as unknown as Array<{
+    event_key: string;
+    channel: string;
+    enabled: boolean;
+  }>) {
+    prefMap.set(`${p.event_key}:${p.channel}`, p.enabled);
+  }
+
+  const rows = (catalog ?? []) as unknown as Array<{
+    event_key: string;
+    label: string;
+    default_in_app: boolean;
+    default_email: boolean;
+    security_notable: boolean;
+  }>;
+
+  return {
+    workspaceId: workspace.id,
+    workspaceName: workspace.name,
+    events: rows.map((row) => {
+      const resolve = (channel: "in_app" | "email", dflt: boolean) =>
+        row.security_notable
+          ? true
+          : (prefMap.get(`${row.event_key}:${channel}`) ?? dflt);
+      return {
+        eventKey: row.event_key,
+        label: row.label,
+        securityNotable: row.security_notable,
+        inApp: resolve("in_app", row.default_in_app),
+        email: resolve("email", row.default_email),
+      };
+    }),
+  };
+}
+
+// ===========================================================================
+// Household dashboard: spending this month, split by member. Neutral
+// framing (master prompt §22) - a breakdown, never a "who spent more"
+// comparison. Only computed when the active Space is a household.
+// ===========================================================================
+
+export type HouseholdSpendBucket = {
+  key: string; // "shared" | "unassigned" | a user id
+  label: string;
+  amountMinor: number;
+  percent: number;
+};
+
+export type HouseholdSpendBreakdown = {
+  workspaceName: string;
+  monthLabel: string;
+  totalMinor: number;
+  buckets: HouseholdSpendBucket[];
+};
+
+export async function getHouseholdSpendingBreakdown(): Promise<HouseholdSpendBreakdown | null> {
+  const workspace = await getActiveWorkspace();
+  if (!workspace || workspace.kind !== "household") return null;
+
+  const monthKey = kigaliDateKey(new Date().toISOString()).slice(0, 7); // YYYY-MM
+  const [yearStr, monthStr] = monthKey.split("-");
+  const year = Number(yearStr);
+  const month = Number(monthStr); // 1-12
+  const monthStartKey = `${monthKey}-01`;
+  const nextMonthStartKey =
+    month === 12
+      ? `${year + 1}-01-01`
+      : `${year}-${String(month + 1).padStart(2, "0")}-01`;
+
+  const startUtc = kigaliDayBoundsUtc(monthStartKey).startUtc.toISOString();
+  const endUtc = kigaliDayBoundsUtc(nextMonthStartKey).startUtc.toISOString();
+  const monthLabel = new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    year: "numeric",
+  }).format(new Date(Date.UTC(year, month - 1, 1)));
+
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("transactions")
+    .select(
+      "id, attribution_type, attributed_user_id, principal_effect_rwf, fee_effect_rwf",
+    )
+    .eq("direction", "out")
+    .eq("settlement_state", "settled")
+    .gte("occurred_at", startUtc)
+    .lt("occurred_at", endUtc);
+
+  if (error) {
+    console.error("getHouseholdSpendingBreakdown failed:", error.message);
+    return null;
+  }
+
+  type Row = {
+    id: string;
+    attribution_type: TransactionAttributionType | null;
+    attributed_user_id: string | null;
+    principal_effect_rwf: number | null;
+    fee_effect_rwf: number | null;
+  };
+  const rows = (data ?? []) as unknown as Row[];
+  const effectOf = (r: Row) =>
+    Math.abs(Number(r.principal_effect_rwf) + Number(r.fee_effect_rwf));
+
+  const totals = new Map<string, number>();
+  const add = (key: string, minor: number) =>
+    totals.set(key, (totals.get(key) ?? 0) + minor);
+
+  const splitIds: string[] = [];
+  for (const r of rows) {
+    if (r.attribution_type === "shared") add("shared", effectOf(r));
+    else if (r.attribution_type === "member" && r.attributed_user_id)
+      add(r.attributed_user_id, effectOf(r));
+    else if (r.attribution_type === "split") splitIds.push(r.id);
+    else add("unassigned", effectOf(r));
+  }
+
+  if (splitIds.length > 0) {
+    const { data: splitRows } = await supabase
+      .from("transaction_member_attributions")
+      .select("transaction_id, user_id, share_bps")
+      .in("transaction_id", splitIds);
+    const byTxn = new Map<string, Array<{ userId: string; bps: number }>>();
+    for (const s of (splitRows ?? []) as unknown as Array<{
+      transaction_id: string;
+      user_id: string;
+      share_bps: number;
+    }>) {
+      const list = byTxn.get(s.transaction_id) ?? [];
+      list.push({ userId: s.user_id, bps: s.share_bps });
+      byTxn.set(s.transaction_id, list);
+    }
+    for (const id of splitIds) {
+      const r = rows.find((x) => x.id === id)!;
+      const parts = byTxn.get(id);
+      const effect = effectOf(r);
+      if (!parts || parts.length === 0) {
+        add("unassigned", effect);
+        continue;
+      }
+      for (const p of parts) add(p.userId, Math.round((effect * p.bps) / 10000));
+    }
+  }
+
+  const members = await getSpaceMemberDirectory(workspace.id);
+  const nameOf = (userId: string) =>
+    members.find((m) => m.userId === userId)?.displayName ?? "A member";
+
+  const totalMinor = Array.from(totals.values()).reduce((a, b) => a + b, 0);
+
+  const buckets: HouseholdSpendBucket[] = Array.from(totals.entries())
+    .filter(([, minor]) => minor > 0)
+    .map(([key, amountMinor]) => ({
+      key,
+      label:
+        key === "shared"
+          ? "Shared"
+          : key === "unassigned"
+            ? "Unassigned"
+            : nameOf(key),
+      amountMinor,
+      percent: totalMinor > 0 ? Math.round((amountMinor / totalMinor) * 100) : 0,
+    }))
+    .sort((a, b) => {
+      if (a.key === "shared") return -1;
+      if (b.key === "shared") return 1;
+      if (a.key === "unassigned") return 1;
+      if (b.key === "unassigned") return -1;
+      return b.amountMinor - a.amountMinor;
+    });
+
+  return {
+    workspaceName: workspace.name,
+    monthLabel,
+    totalMinor,
+    buckets,
+  };
 }
 
 export type WorkspaceMemberRow = {

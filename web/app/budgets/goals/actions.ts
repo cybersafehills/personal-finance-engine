@@ -162,6 +162,36 @@ export async function completeGoal(goalId: string): Promise<SimpleActionResult> 
   return { ok: true };
 }
 
+/**
+ * Replaces the participant set for a shared goal. set_goal_participants
+ * (supabase/migrations/20260919000000_phase_t_shared_goals.sql) enforces
+ * goal.manage and that every id is an active member of the Space - this
+ * only passes the ids through.
+ */
+export async function setGoalParticipants(
+  goalId: string,
+  userIds: string[],
+): Promise<SimpleActionResult> {
+  const supabase = await supabaseSession();
+  const { error } = await supabase.rpc("set_goal_participants", {
+    p_goal_id: goalId,
+    p_user_ids: userIds,
+  });
+
+  if (error) {
+    return {
+      ok: false,
+      error:
+        error.message.length > 0 && error.message.length < 200
+          ? error.message
+          : "Could not update the participants.",
+    };
+  }
+
+  revalidatePath(`/budgets/goals/${goalId}`);
+  return { ok: true };
+}
+
 export async function archiveGoal(goalId: string): Promise<SimpleActionResult> {
   const supabase = await supabaseSession();
   const { error } = await supabase

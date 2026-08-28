@@ -9,6 +9,7 @@ import { MemberItem } from "../../../components/MemberItem";
 import { InviteItem } from "../../../components/InviteItem";
 import { CreateInviteForm } from "../../../components/CreateInviteForm";
 import { CreateOrganizationForm } from "../../../components/CreateOrganizationForm";
+import { CreateHouseholdForm } from "../../../components/CreateHouseholdForm";
 
 export const dynamic = "force-dynamic";
 
@@ -28,33 +29,57 @@ export default async function WorkspacePage() {
     return (
       <div>
         <PageHeader
-          title="Workspace"
-          subtitle="Your personal workspace can't have other members"
+          title="Spaces"
+          subtitle="Personal is yours alone. Create a shared Space to collaborate."
         />
-        <div className="flex flex-col gap-3">
-          <p className="text-sm text-text-muted">
-            Create an organization workspace to share a ledger with other
-            people — accounts, transactions, and budgets, visible to
-            everyone you invite.
-          </p>
-          <CreateOrganizationForm />
+        <div className="flex flex-col gap-4">
+          <CreateHouseholdForm />
+
+          <div className="flex flex-col gap-3">
+            <p className="text-sm text-text-muted">
+              Running a business or a group instead? An organization Space
+              shares one ledger — every account, transaction, and budget —
+              with everyone you invite.
+            </p>
+            <CreateOrganizationForm />
+          </div>
         </div>
       </div>
     );
   }
+
+  const kindLabel = workspace.kind === "household" ? "Household" : "Organization";
 
   const [members, invites] = await Promise.all([
     getWorkspaceMembers(workspace.id),
     getWorkspaceInvites(workspace.id),
   ]);
 
-  const canManage = workspace.role === "owner";
+  // Owners and Admins can invite and manage members (has_space_capability
+  // 'members.manage'). Anything touching an Owner stays Owner-only,
+  // enforced server-side by set_member_role / remove_member.
+  const canManage = workspace.role === "owner" || workspace.role === "admin";
 
   return (
     <div>
-      <PageHeader title={workspace.name} subtitle="Members and invites" />
+      <PageHeader
+        title={workspace.name}
+        subtitle={`${kindLabel} · members and invites`}
+      />
 
       <div className="flex flex-col gap-3">
+        {workspace.kind === "household" && (
+          <p className="text-sm text-text-muted">
+            Everyone here has their own OneLedger account. What each person
+            shares — nothing, transactions only, or the full balance — is
+            set per account under{" "}
+            <span className="font-medium text-text-secondary">
+              Settings → Shared accounts
+            </span>
+            .
+          </p>
+        )}
+
         {members.map((member) => (
           <MemberItem key={member.membershipId} member={member} canManage={canManage} />
         ))}

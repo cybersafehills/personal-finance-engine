@@ -439,9 +439,9 @@ additive migration(s) → stacked PRs → migration-test block → e2e.
 |---|---|---|---|
 | **Q** — Foundation ✅ *migration written* | 1 | `kind='household'` + `create_household_workspace`; `financial_sources`, `source_space_links`, `raw_financial_events`, `can_view_source_in_space()` / `is_financial_source_visible()` / `owns_financial_source()`; nullable `transactions` provenance/attribution cols; `space_activity` / `space_audit_events` / `space_member_notification_prefs` / `workspace_categories` tables; **RLS refactor for `household`** (Phase C ledger loosening reverted for this kind via the source-visibility gate); backfill migration; indexes | No |
 | **R** — Security & authz ✅ *migration written* | 2 | capability layer (`space_role_has_capability` matrix + `space_member_capability_grants` + `has_space_capability()` primitive + `grant`/`revoke_space_capability` RPCs); audit-write primitives (`record_space_activity` / `record_space_audit_event`); `workspace_invites.accepted_by`; `accept_workspace_invite` / `set_member_role` / `remove_member` / `create_household_workspace` re-issued to write audit + activity rows; **14-assertion security test block** (capability matrix, grant/revoke, audit visibility, invite re-use/revoke rejection, post-removal access revocation, last-owner guard, internal-helper lockdown, service-role bypass) | No |
-| **S** — Shared ledger | 3 | Household creation + onboarding; upgraded Space switcher; invites/members UI for households; per-source visibility UI ("How should this account be used?"); transaction Space allocation + `reallocate_transaction`; provenance detail view; attribution (`shared`/`member`/`split`/`unassigned`) + review-queue reasons; optional `/spaces/{id}/…` routes | Yes |
-| **T** — Financial planning | 4 | Space-aware category scope; rule `scope_type` + deterministic precedence + explainability; shared budgets (space/category/member scopes) reusing `budget-math.ts`; threshold state-transition alerts (no per-txn spam); shared goals as first-class Space resources; per-member notification prefs | Yes |
-| **U** — Ingestion & reconciliation | 5 | `raw_financial_events` cutover for `ingest-momo` + SMS path; source routing (`is_default_target`); dedupe confidence engine + auto-merge + review cards; **statement (CSV/PDF) reconciliation** vs ledger + import summary; device management UX (rename / pause / reconnect / remove, history preserved) | Yes |
+| **S** — Shared ledger | 3 | **PR1 ✅:** `transaction_member_attributions` + the five sharing/attribution/reallocation RPCs. **PR2a ✅:** household creation (`/settings/workspace`), "Shared accounts" (`/settings/sources`). **PR2b ✅:** `space_member_directory` fn; transaction detail gets a "Where this came from" provenance panel + a household "Whose spending" attribution panel (shared / member / split / unassigned) + a needs-attention banner; review queue gets a "Needs attribution" section. **PR2c ✅:** household dashboard block (name header + `HouseholdSpendingCard` — spending-this-month by member, neutral framing) on `/`; upgraded Space switcher (kind-labelled list + "Create a Space" in the account menu, current-Space chip in the header). **PR2d ✅:** household/organization **Admin** can now manage members — `workspace_invites` RLS + `set_member_role` / `remove_member` re-issued from Owner-only to `has_space_capability(_, 'members.manage')`, with anything touching an Owner staying Owner-only and the last-owner guard intact. **PR2e ✅:** `e2e/spaces-household.spec.ts` — single-user Playwright flow (create household → share a source via `/settings/sources` → dashboard household block → resolve an unattributed transaction on `/transactions/[id]`) + a `/settings/sources` a11y check. **Phase S essentially complete.** Deferred to a later refinement: "available across shared accounts" balance semantics; optional `/spaces/{id}/…` routes; a two-user attribution e2e (the suite currently shares one identity) | Yes |
+| **T** — Financial planning | 4 | **PR1 ✅:** per-member notification prefs — `should_notify()` / `notification_event_catalog()` + `/settings/notifications`. **PR2 ✅:** budget threshold-crossing state — `budget_threshold_state` + `record_budget_threshold_crossing()` (one alert per upward crossing, not per transaction; service-role-only, Phase V consumes it). **PR3 ✅:** shared goals — `financial_goals` / `goal_contributions` writes moved to the capability model (Admin can manage goals; any member can contribute), `financial_goals.linked_account_id` / `.monthly_contribution_target_minor`, `goal_participants` table, `set_goal_participants()` + `goal_progress()` (the §26 computed metrics). **PR3b ✅:** goal detail page gets a `GoalProgressCard` (remaining / needed-per-month / observed rate / projected completion / on-track) + `GoalParticipants` (participant list; owner/admin edit via a member checklist → `set_goal_participants`). **PR4 ✅:** Space category vocabulary — `workspace_categories` writes routed through `upsert_workspace_category` / `set_workspace_category_archived` (`category.manage`-gated, audited; direct authenticated writes revoked); `/categories` gets a "This Space's categories" panel (owner/admin add/archive/restore) and the category-correction form offers the Space labels ∪ seen names as a `<datalist>`. **PR5 (not started):** rule `scope_type` + deterministic precedence + explainability (cross-cutting into the ingestion `policy-engine.ts` — deferred to Phase U's ingestion cutover) | Yes |
+| **U** — Ingestion & reconciliation | 5 | **PR1 ✅:** ingestion primitives (migration only) — `compute_transaction_fingerprint()`, `resolve_ingestion_target(connection, at)` (default = the connection's workspace; an opened `is_default_target` source link overrides), `transaction_duplicate_candidates()`, `merge_duplicate_transaction()` (row kept, audited); `transactions.dedupe_fingerprint` / `.dedupe_state` / `.merged_into_transaction_id`. **PR2+ (not started):** `ingest-momo` + SMS-path Deno cutover to `raw_financial_events` + these primitives; dedup review cards + aggregation excludes merged; statement (CSV/PDF) reconciliation + import summary; device management UX; rule `scope`/precedence/explainability (deferred here from Phase T) | Yes |
 | **V** — Reporting & intelligence | 6 | `workspace_id` scope on `report_*`; Household report template + attribution summaries; scheduler recipient filtering (exclude former members); AI Space-scope boundary + Household insights; dashboard projections | Yes |
 | **W** — UX hardening & production readiness | 7 | Responsive + a11y pass (no colour-only budget status); loading/empty/error/permission-denied/removed-member/expired-invite states; onboarding + help/tooltip/seeded-content updates; analytics events; monitoring (migration failures, RLS denials, reconciliation failures, dashboard latency); feature-flag rollout (internal → beta → GA); migration validation on realistic data; security + performance review | Yes |
 
@@ -507,6 +507,355 @@ post-removal access revocation + `member.removed` audit, last-owner guard
 survival, `member.role_changed` audit, service-role bypass. Privilege
 counters move to 68 tables / 115 `authenticated` table grants / 55
 `authenticated` function grants.
+
+### Phase S PR1 — as built (migration `20260914000000`)
+
+Backend only — the web UI is PR2. Every RPC is `SECURITY DEFINER` and
+**refuses a non-household target** (personal/organization ledgers keep
+their existing model).
+
+- **`transaction_member_attributions`** — per-member basis-point "who
+  spent this" split for `attribution_type='split'`. Parallel to Phase E's
+  `transaction_splits` (a different axis: budget buckets, not people).
+  Deferrable constraint trigger enforces the set totals exactly 10000 bps
+  when non-empty; a zero total (all rows deleted) is the valid "not
+  split" state. `SELECT`-gated by `can_view_source_in_space`; written only
+  by `set_transaction_attribution`.
+- **`set_source_visibility(source, mode)`** — owner sets the ceiling.
+  Narrowing cascades: `→ personal_only` revokes every active share link
+  (one audit + activity row per affected Space); `→ share_transactions`
+  downgrades any `share_account` link.
+- **`allocate_source_to_space(source, workspace, mode, is_default,
+  effective_from)`** — the "How should this account be used?" action.
+  Owner-only, household-only, member-of-target. Upserts the
+  `source_space_links` row and raises the source's own ceiling to at
+  least `mode` so one call is all the UI needs.
+- **`set_source_space_link_status(source, workspace, status)`** — owner
+  pauses / resumes / revokes one link (Phase Q RLS already keys off
+  `status='active'`, so pause cuts co-member access immediately).
+- **`set_transaction_attribution(txn, type, attributed_user, splits)`** —
+  household-only; needs `transaction.categorize` + source visibility;
+  validates the member / every split participant is an active member;
+  never guesses.
+- **`reallocate_transaction(txn, target_workspace)`** — moves a
+  transaction between Spaces its source is visible in. v1 **refuses** a
+  transaction carrying Space-scoped derived data (budget split, transfer
+  link, goal contribution, payment match — "resolve those first"), and
+  enforces the no-retroactive-exposure boundary (`effective_from`) when
+  moving into a household. Clears attribution and sets
+  `allocation_status='needs_attribution'` on landing in a household.
+
+Migration-test coverage: 15-assertion "Phase S" block. Privilege counters
+move to 69 tables / 116 `authenticated` table grants / 60 `authenticated`
+function grants.
+
+### Phase S PR2a — as built (web)
+
+First user-visible Spaces UI. Two surfaces, both under Settings — no new
+top-level nav (master prompt §48):
+
+- **`/settings/workspace`** — the personal-workspace view now leads with
+  "Start a household" (`create_household_workspace`); organization
+  creation stays as the secondary option. A household's member/invite
+  view reuses the existing kind-agnostic components and points members at
+  Shared accounts for per-source sharing. `WorkspaceSummary.kind` gains
+  `"household"`.
+- **`/settings/sources`** ("Shared accounts") — lists the sources the
+  caller *owns* (`getMyFinancialSources`, filtered to `owner_user_id`),
+  each showing its visibility ceiling and its active/paused share links.
+  Per source: **Share with a household** (pick household + "Transactions
+  only" / "Balance & transactions" + optional default-target) →
+  `allocate_source_to_space`; **Pause / Resume / Stop sharing** per link →
+  `set_source_space_link_status`; **Make private** (confirm) →
+  `set_source_visibility('personal_only')`. Every mutation is a
+  `"use server"` action that only calls the RPC — ownership and household
+  checks live in the RPC, never the client. Plain-language copy
+  throughout ("Nothing is shared until you say so").
+
+Members-management for a household is still owner-only (the Phase C
+`workspace_invites` / `set_member_role` / `remove_member` RLS is
+`is_workspace_member(_, 'owner')`); wiring those to
+`has_space_capability(_, 'members.manage')` so a household **admin** can
+manage members is a small follow-up. No e2e added here — the RPC layer is
+covered by the migration suite; a `/settings/sources` Playwright spec is a
+PR2c item.
+
+### Phase S PR2b — as built (migration `20260915000000` + web)
+
+- **`space_member_directory(workspace_id)`** — `SECURITY DEFINER` /
+  `STABLE`, returns `(user_id, display_name, role)` for active members,
+  gated so only an active member of that Space gets rows (bounded
+  disclosure past `profiles_select_own`). The one place a co-member's
+  display name is exposed; the attribution UI needs it. `authenticated`
+  function-EXECUTE count → 61. One migration-test assertion.
+- **`/transactions/[id]`** gains, for any transaction that resolves a
+  Space context: a **"Where this came from"** panel (Space · From
+  \<source + provider + masked id, "· X's account" when the source owner
+  isn't you\> · Paid by · Added by · Imported via) and, when the Space is
+  a household, a **needs-attention banner** (`allocation_status !==
+  'allocated'`) and a **"Whose spending"** attribution panel —
+  `TransactionAttributionPanel` (shared / one member / basis-point split /
+  unassigned), driven by `set_transaction_attribution`. Split editor is
+  in whole percents, converted to bps, submit gated on a 100 % total.
+- **Queries:** `getTransactionSpaceContext`, `getSpaceMemberDirectory`,
+  `getNeedsAttributionTransactions`, `getAuthUserId` in `lib/queries.ts`.
+  `TransactionRow` / `TRANSACTION_COLUMNS` deliberately left untouched —
+  the Space fields are read through the dedicated context query.
+- **`/transactions/review`** gains a **"Needs attribution (N)"** section
+  above the category-review list — plain links into
+  `/transactions/[id]`, where the attribution panel resolves them. The
+  existing category-review machinery is untouched (its confirm/dismiss/
+  bulk flow does not apply to attribution).
+
+`next build` ✓ compiled, `eslint` 0 errors. Full migration suite: 192
+passed / 0 failed.
+
+### Phase S PR2c — as built (web only)
+
+- **Household dashboard block** on `/` — when the active Space is a
+  household: a name header + `HouseholdSpendingCard`. New query
+  `getHouseholdSpendingBreakdown()` sums settled outgoing spend for the
+  current Kigali month and buckets it by attribution — `Shared`, each
+  member (from `attributed_user_id`, and basis-point-weighted from
+  `transaction_member_attributions` for splits), and `Unassigned`. Bars
+  **plus** an explicit `amount · N%` label (not colour-only, §56); no
+  "who spent more" comparison framing (§22). Returns `null` for
+  personal/organization Spaces, so the dashboard is unchanged there.
+- **Space switcher** — the bare `<select>` in the account menu becomes a
+  kind-labelled option list (`Personal` / `Household` / `Organization`)
+  with the active Space highlighted and a "Create a Space" link;
+  `ProfileMenu` also shows the current Space name as a chip in the header
+  (≥ sm). Switching still just sets the `active_workspace_id` cookie and
+  refreshes.
+
+No migration, no schema change. `next build` ✓ compiled, `eslint` 0
+errors.
+
+### Phase S PR2d — as built (migration `20260916000000` + web)
+
+Closes the gap where the Phase R capability matrix granted an **Admin**
+`members.manage` but the actual mutation surface was still Owner-only from
+Phase C:
+
+- `workspace_invites` `select` / `insert` / `update` policies re-issued
+  from `is_workspace_member(_, 'owner')` to
+  `has_space_capability(_, 'members.manage')` (the invite `role` CHECK
+  still forbids issuing an Owner invite, so an Admin can invite at most
+  another Admin).
+- `set_member_role` / `remove_member` (`CREATE OR REPLACE`, grants and
+  audit calls unchanged): `members.manage` to act at all; **Owner-only**
+  to promote to / demote / remove an Owner; the last-owner guard is
+  unchanged.
+- `/settings/workspace` — `canManage` now includes `role === 'admin'`,
+  so an Admin sees the invite form and member controls. Owner-only
+  operations still fail server-side with the RPC's message.
+
+No privilege-counter change (re-issues only). Migration-test coverage:
+7-assertion "Phase S PR2d" block (Admin invites; Admin changes a
+non-Owner role + audit; Admin cannot promote to Owner; Admin cannot
+remove an Owner; Admin removes a plain member; a plain member still
+cannot; last-owner guard survives). Full suite: 199 passed / 0 failed.
+
+### Phase S PR2e — as built (e2e)
+
+`web/e2e/spaces-household.spec.ts` (runs in the CI `chromium-desktop`
+project against a disposable local Supabase stack, same as every other
+spec). One flow test — the seeded e2e user creates a household, shares a
+seeded `financial_sources` row into it via `/settings/sources`
+("Transactions only"), sees the household dashboard block with an
+`Unassigned` bucket, finds the transaction in the review queue's "Needs
+attribution" section, and resolves it to `Shared` on
+`/transactions/[id]` — plus a `/settings/sources` axe check. Everything
+it creates (source, household, account, transaction) is deleted in
+`afterEach` so the shared DB is left empty for `visual.spec.ts`.
+
+Single-user by necessity (the suite shares one identity), so it covers
+the owner's side of `create_household_workspace` /
+`allocate_source_to_space` / `set_transaction_attribution`. A two-user
+test (co-member visibility, `member` / `split` attribution through the
+UI) needs a second seeded identity and is deferred.
+
+With this, **Phase S is functionally complete** across schema (PR1),
+the settings surfaces (PR2a), transaction provenance/attribution (PR2b),
+the household dashboard + Space switcher (PR2c), Admin member-management
+(PR2d), and e2e (PR2e).
+
+---
+
+## 11a. Phase T PR1 — as built (migration `20260917000000` + web)
+
+Per-member notification preferences. `space_member_notification_prefs`
+(Phase Q) already stores the overrides with full authenticated CRUD; this
+PR adds the read side and the settings UI.
+
+- **`should_notify(workspace, user, event_key, channel) → boolean`** —
+  `SECURITY DEFINER` / `STABLE`, the primitive Phase V's report /
+  notification jobs compose with. `false` for a non-member or former
+  member (§41); `true` unconditionally for a **security-notable** event
+  (§38: member add/remove, ownership transfer, sharing change,
+  permission/integration change, trusted-device connect) on either
+  channel; otherwise the member's stored `enabled`, or the event/channel
+  default.
+- **`notification_default_enabled` / `notification_event_is_security_notable`**
+  — pure `IMMUTABLE` helpers, `revoke all from public`, called only from
+  `should_notify`.
+- **`notification_event_catalog()`** — the 12-event toggle list the
+  settings UI renders from (defaults + which are security-notable),
+  inlined as a `values` list so it needs no nested EXECUTE grants.
+- **`/settings/notifications`** — per-event in-app / email checkboxes for
+  the active Space; security-notable rows show "Always on" and are
+  disabled. Toggling `upsert`s / deletes a `space_member_notification_prefs`
+  row through the caller's own RLS. Hidden for a Personal Space.
+
+`authenticated` function-EXECUTE count → 63 (`should_notify` +
+`notification_event_catalog`). 4-assertion "Phase T PR1" migration-test
+block (non-member → false; default follow-through; stored override;
+security-notable can't be suppressed; catalog populated). Full suite:
+203 passed / 0 failed. `next build` ✓, `eslint` 0 errors.
+
+No delivery path is wired yet — `should_notify` has no caller until
+Phase V. Nothing about notifications changes for existing users.
+
+## 11b. Phase T PR2 — as built (migration `20260918000000`)
+
+`web/lib/budget-math.ts` computes budget alerts fresh on every read and
+does not persist them — "since that's real notification infrastructure
+this project doesn't have yet" (its own comment). This PR is that
+infrastructure.
+
+- **`budget_threshold_state`** — one row per `(budget_id, scope)` (`scope`
+  = a `budget_allocations.allocation_type` or `'__total__'`) holding the
+  last bucket a periodic job observed. RLS on, **service-role-only**, no
+  authenticated policy (like `raw_financial_events`).
+- **`budget_bucket_for_percent(percent)`** — pure `IMMUTABLE`:
+  `ok` < 75 ≤ `watch` < 90 ≤ `at_risk` < 100 ≤ `exceeded` < 110 ≤ `over`
+  (§25's 75 / 90 / 100 / 110 thresholds).
+- **`record_budget_threshold_crossing(budget_id, scope, percent)`** —
+  `SECURITY DEFINER`, service-role-only. Upserts the tracked bucket and
+  returns the new bucket name **only on a strictly upward crossing** —
+  one alert per crossing, not one per transaction (§25). A same-or-lower
+  bucket updates state silently and returns `NULL`, so spending that
+  drops back and later climbs again produces a fresh alert.
+
+No authenticated privilege change; table count → 70 (69 with RLS).
+2-assertion "Phase T PR2" block (the full crossing sequence
+50→80→82→95→60→92 → `NULL,watch,NULL,at_risk,NULL,at_risk`; not
+authenticated-callable). Full suite: 205 passed / 0 failed. Migration
+only — no web, no behaviour change until Phase V's periodic job calls it.
+
+## 11c. Phase T PR3 — as built (migration `20260919000000`)
+
+Shared goals as first-class Space resources (§26). Migration only.
+
+- **Write policies to the capability model:** `financial_goals`
+  insert/update → `has_space_capability(_, 'goal.manage')` (Owner+Admin);
+  `goal_contributions` insert → `is_workspace_member(_, 'member')` (§7:
+  "participate in goals"); delete → `goal.manage` **or** the row's
+  `created_by`. Unchanged for personal workspaces. `refresh_goal_current_
+  amount` (Phase D) re-issued `SECURITY DEFINER` so the authoritative sum
+  is still maintained when a non-manager member contributes (the
+  re-issued `financial_goals` update policy would otherwise filter the
+  trigger's recompute to zero rows).
+- **`financial_goals.linked_account_id`** / **`.monthly_contribution_target_minor`**
+  — nullable, additive.
+- **`goal_participants`** — which active members are in on a goal
+  (advisory: a non-participant can still contribute; drives notification
+  targeting and report framing). RLS member-read, `SELECT`-only for
+  `authenticated`, written only by `set_goal_participants()`.
+- **`set_goal_participants(goal_id, user_ids[])`** — `goal.manage`-gated,
+  validates every id is an active member, replaces the set, audits
+  `goal.participants_changed`.
+- **`goal_progress(goal_id)`** — `SECURITY DEFINER` / `STABLE`,
+  member-readable: target / current / `pct_complete` (capped 100) /
+  `months_to_target` / `required_monthly_minor` (to hit `target_date`) /
+  `recent_monthly_rate_minor` (observed 90-day rate) /
+  `projected_completion_date`.
+
+Table count → 71 (70 with RLS); `authenticated` table grants → 117
+(`goal_participants` select); `authenticated` function count → 65
+(`set_goal_participants` + `goal_progress`). 7-assertion "Phase T PR3"
+block. Full suite: 212 passed / 0 failed. Web (goal-progress display +
+participant picker) is PR3b.
+
+## 11d. Phase T PR3b — as built (web)
+
+`/budgets/goals/[id]` gains two cards below the progress bar:
+
+- **`GoalProgressCard`** (server) — from `goal_progress()`: remaining,
+  time to target date, needed-per-month to hit it, the observed 90-day
+  contribution rate, the projected completion date, and an on-track /
+  behind-pace line. Shown for **every** goal, personal or shared.
+- **`GoalParticipants`** (client) — from `getGoalCollaboration()` (which
+  returns `null` for a personal Space, so this only appears for
+  household/organization goals): the participant names, plus — for an
+  Owner/Admin — an inline member checklist that calls
+  `set_goal_participants`. Copy makes clear a non-participant member can
+  still contribute.
+
+New queries: `getGoalProgress`, `getGoalCollaboration` in
+`lib/queries.ts`; `setGoalParticipants` action. No migration, no schema
+change. `next build` ✓ compiled, `eslint` 0 errors.
+
+## 11e. Phase T PR4 — as built (migration `20260920000000` + web)
+
+`workspace_categories` (Phase Q) had a table but no write RPCs and no
+consumer. This makes it a real per-Space *vocabulary* — add / relabel /
+archive preferred names, offered as suggestions. Categories on
+transactions stay free-text (§27).
+
+- **Writes routed through RPCs** (matching the `space_activity` /
+  `goal_participants` pattern): `workspace_categories_insert_admin` /
+  `_update_admin` dropped, `authenticated`'s `insert`/`update` grants
+  revoked (SELECT stays). `upsert_workspace_category(workspace, key,
+  label, parent_key)` and `set_workspace_category_archived(workspace,
+  key, archived)` — both `category.manage`-gated, audited
+  (`category.upserted` / `.archived` / `.restored`); re-adding an
+  archived key un-archives it; key validated `^[a-z0-9][a-z0-9_-]{0,48}$`.
+- **`/categories`** gains a "This Space's categories" panel (shown for
+  household / organization Spaces): the list, plus an add field and
+  archive/restore for an Owner/Admin. `getSpaceCategoryManagement()`.
+- **Category-correction form** gets a `<datalist>` — the Space's
+  non-archived labels first, then any category name already seen on a
+  transaction (`getCategorySuggestions()`). Free typing still works.
+
+`authenticated` table grants → 115 (−2, the revoked insert/update);
+`authenticated` function count → 67 (+`upsert_workspace_category` +
+`set_workspace_category_archived`); table count unchanged. 6-assertion
+"Phase T PR4" block. Full suite: 218 passed / 0 failed. `next build` ✓,
+`eslint` 0 errors.
+
+## 11f. Phase U PR1 — as built (migration `20260921000000`)
+
+The SQL foundation the `ingest-momo` cutover (PR2, a Deno change) will
+call. Migration only — no behaviour change until PR2 wires ingestion.
+
+- **`transactions.dedupe_fingerprint`** / **`.dedupe_state`**
+  (`unique` | `possible_duplicate` | `confirmed_duplicate` | `merged`) /
+  **`.merged_into_transaction_id`**, with a biconditional CHECK
+  (`merged` ⟺ `merged_into_transaction_id is not null`). Partial index on
+  the fingerprint.
+- **`compute_transaction_fingerprint(source, masked_id, amount, currency,
+  direction, counterparty, occurred_at)`** — pure `IMMUTABLE`;
+  case/punctuation/whitespace-normalised, `occurred_at` rounded to the
+  minute. Ingestion-only (`service_role`).
+- **`resolve_ingestion_target(connection, occurred_at)` →
+  `(workspace_id, financial_source_id)`** — `SECURITY DEFINER` / `STABLE`.
+  Default = the connection's bound workspace; an active `is_default_target`
+  source link whose window has opened (`effective_from <= occurred_at`)
+  overrides it. Ingestion-only.
+- **`transaction_duplicate_candidates(fingerprint, exclude_id)`** —
+  same-fingerprint transactions the caller can see (all, for a
+  service-role reconciler), excluding `merged` rows.
+- **`merge_duplicate_transaction(duplicate_id, canonical_id)`** —
+  `SECURITY DEFINER`; same-Space + `transaction.categorize` for an
+  authenticated caller. Marks the duplicate `merged` + sets
+  `merged_into_transaction_id` — **never deletes** it (evidence preserved,
+  §16). Audited `transaction.duplicate_merged`.
+
+`authenticated` function count → 69 (`transaction_duplicate_candidates` +
+`merge_duplicate_transaction`; the two ingestion functions are
+`service_role`-only). No table / table-grant change. 5-assertion "Phase U
+PR1" block. Full suite: 223 passed / 0 failed.
 
 ---
 

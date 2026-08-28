@@ -9,7 +9,9 @@
 --
 -- Idempotent and retryable: every write is guarded by
 -- `financial_source_id is null`, so a re-run after a partial application
--- is a no-op over already-linked rows.
+-- is a no-op over already-linked rows. An account whose workspace has no
+-- active owner (only the migration-only seed account, on a fresh reset
+-- with no signup) is skipped, not fatal.
 --
 -- Deliberately does NOT add a NOT NULL constraint to
 -- accounts.financial_source_id or transactions.financial_source_id. Both
@@ -54,10 +56,19 @@ begin
     order by m.joined_at nulls last, m.created_at
     limit 1;
 
+    -- On a real deployment every account belongs to a workspace with an
+    -- owner. On a fresh `supabase db reset` / `supabase start` the
+    -- migration-only seed account ("MTN MoMo (Primary)", accounting-
+    -- foundation) has no workspace and no signup has run, so there is no
+    -- owner to attribute a source to - skip it and leave
+    -- financial_source_id null (harmless; the column is nullable and
+    -- nothing downstream requires it yet). Never abort the whole reset
+    -- for a seed row.
     if v_owner is null then
-      raise exception
-        'Phase Q backfill: account % (workspace %) has no active owner membership to attribute a financial_sources row to',
+      raise notice
+        'Phase Q backfill: skipping account % (workspace %) - no active owner membership',
         a.id, a.workspace_id;
+      continue;
     end if;
 
     v_provider := case a.provider
@@ -99,8 +110,8 @@ begin
   where financial_source_id is null;
 
   if v_unlinked_remaining <> 0 then
-    raise exception
-      'Phase Q backfill: % account(s) still have no financial_source_id after the backfill loop',
+    raise notice
+      'Phase Q backfill: % account(s) left unlinked (no resolvable owner) - each gets its financial_sources row once an owner exists',
       v_unlinked_remaining;
   end if;
 end $$;
