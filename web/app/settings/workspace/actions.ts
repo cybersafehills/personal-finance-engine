@@ -78,6 +78,31 @@ export async function createOrganization(name: string): Promise<void> {
 }
 
 /**
+ * Creates a household Space, switches to it, and lands the caller on its
+ * member page. create_household_workspace()
+ * (supabase/migrations/20260910000000_phase_q_spaces_foundation.sql,
+ * re-issued in the Phase R migration to also log an activity/audit row)
+ * creates the Space and the caller's owner membership atomically, and
+ * inherits currency/timezone from the caller's profile.
+ */
+export async function createHousehold(name: string): Promise<void> {
+  const trimmedName = name.trim();
+  if (!trimmedName) return;
+
+  const supabase = await supabaseSession();
+  const { data: workspaceId, error } = await supabase.rpc(
+    "create_household_workspace",
+    { p_name: trimmedName },
+  );
+
+  if (error || !workspaceId) return;
+
+  await setActiveWorkspace(workspaceId);
+  revalidatePath("/settings/workspace");
+  redirect("/settings/workspace");
+}
+
+/**
  * Issues an invite for the active workspace. The link is returned to the
  * caller exactly once here - only token_hash/token_prefix are persisted,
  * same reveal-once contract as createConnection() in

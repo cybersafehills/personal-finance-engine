@@ -1,8 +1,15 @@
 import { notFound } from "next/navigation";
-import { getGoalById } from "../../../../lib/queries";
+import {
+  getAuthUserId,
+  getGoalById,
+  getGoalCollaboration,
+  getGoalProgress,
+} from "../../../../lib/queries";
 import { PageHeader } from "../../../../components/PageHeader";
 import { Badge } from "../../../../components/Badge";
 import { GoalDetailPanel } from "../../../../components/GoalDetailPanel";
+import { GoalProgressCard } from "../../../../components/GoalProgressCard";
+import { GoalParticipants } from "../../../../components/GoalParticipants";
 import { formatMoney, isSupportedCurrency } from "../../../../lib/money";
 
 export const dynamic = "force-dynamic";
@@ -21,7 +28,12 @@ export default async function GoalDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const goal = await getGoalById(id);
+  const [goal, progress, collaboration, selfUserId] = await Promise.all([
+    getGoalById(id),
+    getGoalProgress(id),
+    getGoalCollaboration(id),
+    getAuthUserId(),
+  ]);
 
   if (!goal || !isSupportedCurrency(goal.currency)) {
     notFound();
@@ -62,6 +74,20 @@ export default async function GoalDetailPage({
           <p className="mt-1 text-xs text-text-muted">Target date: {goal.target_date}</p>
         )}
       </div>
+
+      {progress && (
+        <GoalProgressCard progress={progress} currency={currency} />
+      )}
+
+      {collaboration && (
+        <GoalParticipants
+          goalId={goal.id}
+          members={collaboration.members}
+          participantUserIds={collaboration.participantUserIds}
+          canManage={collaboration.canManage}
+          selfUserId={selfUserId}
+        />
+      )}
 
       <GoalDetailPanel goal={goal} />
     </div>

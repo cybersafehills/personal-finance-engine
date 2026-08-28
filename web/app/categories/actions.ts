@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { supabaseSession } from "../../lib/supabase-session-server";
+import { getActiveWorkspaceId } from "../../lib/queries";
 
 export type CorrectCategoryResult = { ok: true } | { ok: false; error: string };
 
@@ -97,5 +98,86 @@ export async function correctCategory(
   revalidatePath(`/transactions/${transactionId}`);
   revalidatePath("/categories");
 
+  return { ok: true };
+}
+
+// ===========================================================================
+// Space category vocabulary (Phase T PR4). Thin wrappers over the
+// capability-gated, audited RPCs in
+// supabase/migrations/20260920000000_phase_t_workspace_categories.sql.
+// ===========================================================================
+
+export type SpaceCategoryActionResult =
+  | { ok: true }
+  | { ok: false; error: string };
+
+function slugifyCategoryKey(label: string): string {
+  return label
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 49);
+}
+
+export async function addSpaceCategory(
+  label: string,
+  parentKey: string | null,
+): Promise<SpaceCategoryActionResult> {
+  const trimmed = label.trim();
+  if (!trimmed) return { ok: false, error: "Give the category a name." };
+  const key = slugifyCategoryKey(trimmed);
+  if (!key) {
+    return { ok: false, error: "Use at least one letter or digit in the name." };
+  }
+
+  const supabase = await supabaseSession();
+  const workspaceId = await getActiveWorkspaceId();
+  if (!workspaceId) return { ok: false, error: "Could not resolve your Space." };
+
+  const { error } = await supabase.rpc("upsert_workspace_category", {
+    p_workspace_id: workspaceId,
+    p_key: key,
+    p_label: trimmed,
+    p_parent_key: parentKey,
+  });
+  if (error) {
+    return {
+      ok: false,
+      error:
+        error.message.length > 0 && error.message.length < 200
+          ? error.message
+          : "Could not add the category.",
+    };
+  }
+
+  revalidatePath("/categories");
+  return { ok: true };
+}
+
+export async function setSpaceCategoryArchived(
+  key: string,
+  archived: boolean,
+): Promise<SpaceCategoryActionResult> {
+  const supabase = await supabaseSession();
+  const workspaceId = await getActiveWorkspaceId();
+  if (!workspaceId) return { ok: false, error: "Could not resolve your Space." };
+
+  const { error } = await supabase.rpc("set_workspace_category_archived", {
+    p_workspace_id: workspaceId,
+    p_key: key,
+    p_archived: archived,
+  });
+  if (error) {
+    return {
+      ok: false,
+      error:
+        error.message.length > 0 && error.message.length < 200
+          ? error.message
+          : "Could not update the category.",
+    };
+  }
+
+  revalidatePath("/categories");
   return { ok: true };
 }

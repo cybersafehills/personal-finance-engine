@@ -1,13 +1,20 @@
 import Link from "next/link";
-import { getCategoryTotals } from "../../lib/queries";
+import {
+  getCategoryTotals,
+  getSpaceCategoryManagement,
+} from "../../lib/queries";
 import { PageHeader } from "../../components/PageHeader";
 import { CategoryItem } from "../../components/CategoryItem";
+import { SpaceCategoriesPanel } from "../../components/SpaceCategoriesPanel";
 import { EmptyState } from "../../components/EmptyState";
 
 export const dynamic = "force-dynamic";
 
 export default async function CategoriesPage() {
-  const categories = await getCategoryTotals();
+  const [categories, spaceCategories] = await Promise.all([
+    getCategoryTotals(),
+    getSpaceCategoryManagement(true),
+  ]);
   const grandTotal = categories.reduce((sum, c) => sum + c.totalRwf, 0);
 
   return (
@@ -21,6 +28,13 @@ export default async function CategoriesPage() {
           </Link>
         }
       />
+
+      {spaceCategories && (
+        <SpaceCategoriesPanel
+          categories={spaceCategories.categories}
+          canManage={spaceCategories.canManage}
+        />
+      )}
 
       <section className="rounded-card border border-border-subtle bg-surface p-1.5">
         {categories.length === 0 ? (

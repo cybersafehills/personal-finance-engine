@@ -28,6 +28,11 @@ export function ProfileMenu({
   const [isPending, startTransition] = useTransition();
   const triggerRef = useRef<HTMLButtonElement>(null);
 
+  const activeWorkspaceName =
+    workspaces.length > 1
+      ? (workspaces.find((w) => w.id === activeWorkspaceId)?.name ?? null)
+      : null;
+
   // Escape-to-close, with focus returned to the trigger - the click-
   // outside backdrop below handles the mouse case, this handles the
   // keyboard one (master prompt §3.1/§13).
@@ -44,7 +49,15 @@ export function ProfileMenu({
   }, [open]);
 
   return (
-    <div className="relative">
+    <div className="relative flex items-center gap-2">
+      {activeWorkspaceName && (
+        <span
+          className="hidden max-w-[9rem] truncate rounded-full border border-border-subtle bg-background px-2.5 py-1 text-xs font-medium text-text-secondary sm:inline"
+          title={`Current Space: ${activeWorkspaceName}`}
+        >
+          {activeWorkspaceName}
+        </span>
+      )}
       <button
         ref={triggerRef}
         type="button"
@@ -71,10 +84,11 @@ export function ProfileMenu({
               {userEmail}
             </p>
             {workspaces.length > 1 && (
-              <div className="mt-2">
+              <div className="mt-3 border-t border-border-subtle pt-2">
                 <WorkspaceSwitcher
                   workspaces={workspaces}
                   activeWorkspaceId={activeWorkspaceId}
+                  onNavigate={() => setOpen(false)}
                 />
               </div>
             )}

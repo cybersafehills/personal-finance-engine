@@ -38,6 +38,20 @@ const SETTINGS_LINKS = [
     Icon: PhoneIcon,
   },
   {
+    href: "/settings/sources",
+    title: "Shared accounts",
+    description:
+      "Choose what each household can see of your accounts — nothing, transactions, or the balance.",
+    Icon: UsersIcon,
+  },
+  {
+    href: "/settings/notifications",
+    title: "Notifications",
+    description:
+      "Choose what a shared Space tells you about — budgets, goals, members, and reports.",
+    Icon: DocumentIcon,
+  },
+  {
     href: "/reports",
     title: "Reports",
     description: "View your generated daily financial reports.",
@@ -57,8 +71,8 @@ const SETTINGS_LINKS = [
   },
   {
     href: "/settings/workspace",
-    title: "Workspace",
-    description: "Members, invites, and organizations.",
+    title: "Spaces",
+    description: "Households and organizations — members and invites.",
     Icon: UsersIcon,
   },
 ] as const;
