@@ -33,7 +33,7 @@ test("the global Pay action opens the launcher and is fully keyboard-dismissable
   await expect(payButton).toBeFocused();
 });
 
-test("the launcher closes from the bottom control, not a header action", async ({
+test("the launcher closes from the pinned bottom control, not a header action", async ({
   page,
 }) => {
   await page.goto("/");

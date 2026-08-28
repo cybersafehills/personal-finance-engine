@@ -7,6 +7,7 @@ import { supabaseServer } from "../../lib/supabase-server";
 import { getActiveWorkspaceId } from "../../lib/queries";
 import {
   assertAssistedPayEnabled,
+  assertPaymentIntentSurfaceEnabled,
   FeatureDisabledError,
   isPaymentTemplatesEnabled,
   isSmsReconciliationEnabled,
@@ -234,7 +235,7 @@ export async function recordHandoff(
 ): Promise<PayResult> {
   try {
     const { supabase, workspaceId } = await ctx();
-    assertAssistedPayEnabled(workspaceId);
+    assertPaymentIntentSurfaceEnabled(workspaceId);
 
     await supabase.rpc("record_payment_attempt", {
       p_intent_id: id,
@@ -287,7 +288,7 @@ export async function recordHandoff(
 export async function applyReconciliation(reconciliationId: string): Promise<PayResult> {
   try {
     const { supabase, workspaceId } = await ctx();
-    assertAssistedPayEnabled(workspaceId);
+    assertPaymentIntentSurfaceEnabled(workspaceId);
     const { error } = await supabase.rpc("apply_payment_reconciliation", {
       p_id: reconciliationId,
     });
@@ -314,7 +315,7 @@ export async function rejectReconciliation(
 ): Promise<PayResult> {
   try {
     const { supabase, workspaceId } = await ctx();
-    assertAssistedPayEnabled(workspaceId);
+    assertPaymentIntentSurfaceEnabled(workspaceId);
     const { error } = await supabase.rpc("reject_payment_reconciliation", {
       p_id: reconciliationId,
       p_reason: reason.trim().slice(0, 500) || null,
@@ -340,7 +341,7 @@ export async function linkPaymentManually(
 ): Promise<PayResult> {
   try {
     const { supabase, workspaceId } = await ctx();
-    assertAssistedPayEnabled(workspaceId);
+    assertPaymentIntentSurfaceEnabled(workspaceId);
     const { error } = await supabase.rpc("link_payment_manually", {
       p_intent_id: intentId,
       p_transaction_id: transactionId,
@@ -370,7 +371,7 @@ export async function linkPaymentManually(
 export async function manuallyConfirm(id: string, note: string): Promise<PayResult> {
   try {
     const { supabase, workspaceId } = await ctx();
-    assertAssistedPayEnabled(workspaceId);
+    assertPaymentIntentSurfaceEnabled(workspaceId);
     const { error } = await supabase.rpc("manually_confirm_payment", {
       p_intent_id: id,
       p_note: note.trim().slice(0, 500) || null,
@@ -404,7 +405,7 @@ async function transitionUser(
 ): Promise<PayResult> {
   try {
     const { supabase, workspaceId } = await ctx();
-    assertAssistedPayEnabled(workspaceId);
+    assertPaymentIntentSurfaceEnabled(workspaceId);
     const { error } = await supabase.rpc("transition_payment_intent", {
       p_id: id,
       p_to_state: toState,

@@ -37,6 +37,130 @@ const en = {
       template: "Use a payment template",
       scan: "Scan payment QR",
     },
+    // Phase R1/R2: the "Scan to pay" entry + camera scanner. R2 decodes a
+    // QR and classifies the payload; it does NOT show a full review
+    // screen or hand off a payment yet (that's R3) - the copy says so.
+    scan: {
+      entryLabel: "Scan to pay",
+      entryHint: "Scan a merchant payment QR code.",
+      opening: "Opening scanner…",
+      title: "Scan to pay",
+      guidance:
+        "Point your camera at the merchant's payment QR code and hold steady inside the frame.",
+      back: "Back to payment options",
+      backLabel: "Back",
+      starting: "Starting the camera…",
+      live: "Camera is on. Position the QR code inside the frame.",
+      multiple: "More than one code in view. Move closer to a single code.",
+      checking: "Checking the code…",
+      torchOn: "Turn on flashlight",
+      torchOff: "Turn off flashlight",
+      retry: "Try again",
+      scanAgain: "Scan again",
+      uploadImage: "Upload a QR image",
+      uploadNoCode: "No QR code was found in that image. Try another photo.",
+      decoderUnsupported:
+        "This browser can't read QR codes. Try a recent Chrome, or Safari 17 or newer.",
+      permissionHelp: "How to enable camera access",
+      permissionHelpBody:
+        "Open your browser or device settings, allow camera access for this site, then return here and try again.",
+      errors: {
+        denied:
+          "OneLedger doesn't have permission to use the camera. Enable camera access for this site, then try again.",
+        dismissed:
+          "Camera access wasn't granted. Try again, or go back to the other payment options.",
+        noCamera:
+          "No camera was found on this device. You can still use the other payment options.",
+        inUse:
+          "The camera is in use by another app. Close that app, then try again.",
+        insecure: "The camera only works over a secure (HTTPS) connection.",
+        unsupported:
+          "This browser can't open the camera. Try a recent version of Safari or Chrome.",
+        generic:
+          "The camera couldn't start. Try again, or go back to the other payment options.",
+      },
+      // The decoded-and-classified result, then (R3) the review + the
+      // external hand-off. OneLedger prepares and opens the instruction;
+      // it never claims the payment settled.
+      result: {
+        readTitle: "Review this payment",
+        classLabel: {
+          verified_ussd: "Verified USSD code",
+          provider_link: "Approved payment link",
+          oneledger_payment: "OneLedger merchant code",
+        },
+        merchantUnverified:
+          "OneLedger can't confirm this merchant's identity. Check the details carefully before paying.",
+        ussdUnverified:
+          "This USSD code is published but not officially verified.",
+        amountMissing: "This code has no amount — you'd enter one before paying.",
+        menuNote: "This code opens a menu on your phone — it isn't a payment on its own.",
+        fieldProvider: "Provider",
+        fieldPays: "Pays",
+        fieldAmount: "Amount",
+        fieldReference: "Reference",
+        fieldCode: "Code",
+        fieldRoute: "Opens",
+        handoffNotice:
+          "OneLedger will open this instruction on your device. You review and authorize the payment with your mobile network or provider — OneLedger never sees your PIN and can't send money for you.",
+        prepareCta: "Prepare payment",
+        preparing: "Preparing…",
+        openUssd: "Open USSD",
+        openMenu: "Open USSD menu",
+        copyCode: "Copy code",
+        copied: "Copied",
+        showQr: "Show QR for your phone",
+        qrCaption: "Scan with the phone you'll pay from, then follow the prompts.",
+        dialerUnavailable:
+          "Dialing isn't available on this device. Copy the code or scan the QR on the phone you'll pay from.",
+        awaitingTitle: "Awaiting confirmation",
+        awaitingBody:
+          "OneLedger opened the instruction on your device. Authorize it with your provider. OneLedger marks a payment confirmed only when it sees matching evidence — opening the dialer is not proof of payment.",
+        viewActivity: "View in payment activity",
+        handoffUnavailable:
+          "OneLedger can't continue this code from a scan. It has no verified USSD path for this provider yet.",
+        currencyUnsupported:
+          "OneLedger can only continue a scanned payment in RWF right now.",
+        amountLabel: "Amount to pay (RWF)",
+        amountHint: "This code didn't include an amount — enter it, then check it against the merchant.",
+        amountErrors: {
+          required: "Enter an amount.",
+          not_a_number: "Enter a whole RWF amount, digits only.",
+          too_precise: "RWF amounts have no decimals.",
+          not_positive: "Enter an amount greater than zero.",
+          too_large: "That amount is too large.",
+        },
+        prepareError:
+          "OneLedger couldn't prepare this payment. Try again.",
+        featureDisabled:
+          "Scan to pay isn't available on your account right now.",
+        genericError:
+          "OneLedger couldn't check this code. Check your connection and try again.",
+        reasons: {
+          empty: "That code was empty.",
+          too_long: "That code is too large to be a payment instruction.",
+          control_chars: "That code contains characters a payment instruction never has.",
+          deceptive_unicode: "That code uses hidden text tricks and was rejected.",
+          unsafe_scheme: "That code tries to open something that isn't a payment. It was blocked.",
+          embedded_credentials: "That link hides sign-in details and was rejected.",
+          unknown_scheme: "OneLedger doesn't recognise this kind of code.",
+          malformed_ussd: "That looks like a USSD code but it's malformed.",
+          unknown_ussd: "That USSD code isn't in OneLedger's verified directory.",
+          provider_not_allowlisted: "That link isn't from a payment provider OneLedger has approved.",
+          lookalike_host: "That link imitates a known provider's address. It was blocked.",
+          oneledger_schema: "That OneLedger code is malformed.",
+          oneledger_expired: "That payment request has expired.",
+          oneledger_replay: "That payment request has already been used.",
+          amount_invalid: "That code's amount isn't valid.",
+          currency_invalid: "That code's currency isn't supported.",
+          emv_unsupported: "OneLedger doesn't support this merchant QR format yet.",
+          emv_malformed: "That merchant QR is malformed or was tampered with.",
+          multiple_codes: "More than one code was found. Try again with a single code.",
+          not_recognised: "OneLedger couldn't recognise this code as a payment instruction.",
+          needs_connection: "OneLedger needs a connection to check this code.",
+        },
+      },
+    },
     favourites: "Favourites",
     recent: "Recently used",
     disabledTitle: "Pay & Services isn't available",
@@ -65,6 +189,7 @@ const en = {
       budgetLabel: "Budget (optional)",
       trustBadgeSaved: "Saved",
       trustBadgeTrusted: "Trusted by you",
+      fromScan: "From a scan",
       trustNotProviderVerified: "Neither means your provider has verified this recipient.",
       nextAction: "Next: hand off to your provider",
       prepare: "Prepare payment",

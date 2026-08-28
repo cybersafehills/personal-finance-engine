@@ -26,6 +26,212 @@ custody (see `docs/adr/0001-non-custodial-boundary.md`).
 | UI chrome strings (translation-ready) | `web/lib/ussd/messages.ts` |
 | e2e | `web/e2e/pay-ussd.spec.ts` |
 
+## Launcher shell UX
+
+`web/components/pay/PayLauncher.tsx` is a bottom sheet on mobile and a
+centred dialog on desktop. Full modal semantics: focus moves into the
+panel on open, Tab is trapped, background scroll is locked, focus is
+restored to the trigger on close.
+
+The panel is a three-part column — a static header, a single
+`overflow-y-auto` content region, and a **pinned footer** that stays put
+while the content scrolls. The footer holds the one closing control: a
+centred X + "Close" (`aria-label` "Close Pay & Services", `min-h-11`,
+`focus-visible` background) with `env(safe-area-inset-bottom)` padding so
+it clears the home indicator. There is deliberately no header close
+action — a long favourites / recent list must never push the way out
+off-screen.
+
+Every dismissal path — the footer control, the dimmed overlay, `Esc`,
+and a navigation that closes the sheet — runs through one guarded
+`requestClose()` so a double activation can't fire `onClose` twice.
+
+## Scan to pay (Phases R1–R5)
+
+`SCAN_TO_PAY_ENABLED=true` (opt-in, off otherwise — same convention as
+`SMS_RECONCILIATION_ENABLED`) adds a **"Scan to pay"** entry at the top
+of the launcher. It swaps the sheet body for a camera scanner
+(`web/components/pay/ScanToPay.tsx`, `lazy`-loaded so no camera/decoder/
+parser code is in the initial bundle). The header shows a Back control;
+the pinned footer close stays.
+
+### R1 — camera shell
+
+Opens the rear camera (`facingMode: environment`, retried unconstrained
+on `OverconstrainedError`), live preview + viewfinder + `aria-live`
+status line, torch toggle where `getCapabilities().torch` is present.
+
+- `getUserMedia` is called only from `ScanToPay`, only after an explicit
+  "Scan to pay" tap. Never on app start or when the sheet merely opens.
+- The `MediaStream` is released on unmount, on error, on tab-hide
+  (`visibilitychange`), when a QR is accepted, and when a fresh start
+  supersedes an in-flight one (a monotonic start token).
+- Every failure is a distinct, actionable state: permission `denied` vs
+  `dismissed` (Permissions API where available), `noCamera`, `inUse`,
+  `insecure` context, `unsupported` browser, `generic`. A browser-level
+  denial is never described as an app bug.
+
+### R2 — decode + classification
+
+Decodes a QR with the native `BarcodeDetector` — camera frames on a
+~350 ms loop, or a locally-processed uploaded image (never uploaded,
+bitmap released, multi-code frames ask for a retry). Where
+`BarcodeDetector` is missing the scanner is preview-only and says so.
+
+The decoded string goes through the shared, pure pipeline
+(`web/lib/pay/scan/pipeline.ts`) and is then re-classified
+**authoritatively on the server** (`classifyScannedCode`, feature-gated,
+resolvers bound to the RLS-scoped USSD directory + the provider
+allowlist). The review shows the masked recipient, amount, and
+verification warnings.
+
+### R3 — review + external hand-off
+
+`prepareScanHandoff(raw)` re-parses the raw string authoritatively (never
+a client-built model). For a **verified USSD instruction that carries an
+amount** it creates a `payment_intents` draft with **`source = 'qr_scan'`**
+(deterministic idempotency key = `qr:` + sha256 of `dial|amount`, so a
+re-scan within the TTL is the same intent, not a duplicate) and returns a
+`tel:` href. A **menu / inquiry code** (no amount) is `info_only` —
+openable, nothing persisted, because it is navigation, not a payment.
+
+The user must tap **Prepare payment**, then **Open USSD** (a real
+`<a href="tel:…">` — a user gesture, never a scripted navigation, never
+on detection). `recordScanHandoff` then records the attempt
+(`record_payment_attempt`) and moves the intent
+`draft → initiated → awaiting_verification`, mirroring `recordHandoff` in
+`assisted-actions.ts` (incl. the opt-in on-handoff SMS reconcile). The
+terminal state is **"Awaiting confirmation"** with the honest non-custody
+copy — opening the dialer is never shown as a completed payment.
+Desktop / no-telephony falls back to Copy + a locally-rendered QR
+(`PaymentQr`).
+
+**R3 continues verified USSD, and OneLedger merchant payments (RWF).**
+An `oneledger_payment` scan is mapped onto the mobile-money network's
+**pay-a-merchant USSD code** (`resolveMerchantPayCode` →
+`getServiceCodeForPayment(net, "merchant_payment")`), filled with the
+payload's `merchant_id` + amount (from the payload, or a validated
+amount the user types when the payload omits one — `parseUserAmount`,
+exact minor units, no floats), and then handed off exactly like a USSD
+scan. Non-RWF payloads, a provider with no seeded pay-merchant code, a
+non-numeric `merchant_id`, an expired / replayed payload, or
+`provider_link` / `emv_merchant` still show the details and "continuing
+isn't available". The seeded MTN pay-merchant code
+(`20260913000100_scan_merchant_pay_codes.sql`) is **published but
+unverified** — the review shows the "Not officially verified" warning and
+the full dial string, same as scanning `mtn-momo-send` today. Public
+sources (2026-08) corroborate the `*182*8*1#` entry point + prompts and
+5–6-digit merchant codes, but **not** the concatenated
+`*182*8*1*{merchant}*{amount}#` form used here — a real-device check is
+the blocker for `verified_at` (see the migration header and the
+runbook §4.7). Airtel is not seeded (its pay-code path is unconfirmed).
+
+Trust model, supported/unsupported formats, and the client/server split
+are ADR **`docs/adr/0006-qr-scan-payload-trust.md`**. Key points: no
+"decoded string → destination" path; the provider-link allowlist ships
+**empty** (real entries need provider specs + sign-off); EMV is
+recognised (TLV + CRC-16/CCITT) but always `emv_unsupported`; only the
+coarse `class` / `reason` is ever logged.
+
+The schema change — `payment_intents.source` + `create_payment_intent`
+learning an optional `source` key — is
+`supabase/migrations/20260913000000_scan_payment_source.sql`
+(additive, `default 'assisted'`). **It was verified by a manual `psql`
+apply of the full chain on PostgreSQL 16 but NOT by
+`run_migration_tests.sh` (needs pg17) — run that before merge.**
+
+### R4 — reconciliation & expiry
+
+**No new code in the reconciliation path.** A `source = 'qr_scan'` intent
+is a first-class `payment_intent`, and the Phase 2b reconciler
+(`reconciliation_candidate_intents` → `reconcile_payment_intent`, its
+retry cron `reconcile-pending-payments`, and the on-hand-off call from
+`recordScanHandoff`) and the expiry sweep (`expire_stale_payment_intents`
+/ `expire-payment-intents`) all key off `state` / `expires_at` /
+`recipient_msisdn_normalized`, never `source`. A scanned **send-money**
+USSD carries the normalized msisdn, so it deterministically matches an
+ingested MoMo transaction exactly like an assisted `pay_person`; a
+scanned **merchant / bill** code has no msisdn and stays
+awaiting-confirmation (same limitation as assisted `pay_merchant`).
+Verified end-to-end on pg16: `qr_scan` intent + matching `mtn_momo`
+transaction → `reconcile_payment_intent('apply')` → `linked` /
+`successful` / `verified`; and a past-due `qr_scan` intent → swept to
+`expired` with its `payment_events` trail intact.
+
+What R4 *does* change:
+
+- **`payment_intents.source` is now read + shown.** `INTENT_COLUMNS` /
+  `PaymentIntentRow` select it; `/pay/activity` and `PaymentIntentPanel`
+  show a **"From a scan"** badge.
+- **The lifecycle surface is gated on assisted OR scan.**
+  `isPaymentIntentSurfaceEnabled` (`isAssistedPayEnabled ||
+  isScanToPayEnabled`) now guards `/pay/[id]`, `/pay/activity`,
+  `/pay/reconciliation`, and the confirm / cancel / fail / reconcile /
+  re-hand-off actions in `assisted-actions.ts` — so a scan intent stays
+  viewable and manageable on a workspace where the assisted *form* is
+  off. Draft creation / editing / "pay again" / templates / trusted
+  recipients stay assisted-only.
+- Manual confirmation of a scan intent flows through the existing
+  `manually_confirm_payment` — labelled **"Manually confirmed"**, never
+  a verified check (ADR 0002 unchanged).
+
+| Concern | Location |
+|---|---|
+| Feature gate | `isScanToPayEnabled` / `assertScanToPayEnabled` in `web/lib/pay/gate.ts` |
+| Wiring | `web/app/layout.tsx` → `web/components/AppShell.tsx` → `web/components/pay/PayProvider.tsx` → `PayLauncher` |
+| Scanner UI | `web/components/pay/ScanToPay.tsx` |
+| QR decode (browser) | `web/lib/pay/scan/decode.client.ts` (`BarcodeDetector`) |
+| Payload pipeline (pure) | `web/lib/pay/scan/` — `normalize` · `classify` · `ussd` · `oneledger` · `emv` · `provider-link` · `money` · `redact` · `handoff` · `pipeline` (+ `*_test.ts`) |
+| Server actions | `web/app/pay/scan/actions.ts` — `classifyScannedCode` · `prepareScanHandoff` (USSD + OneLedger→USSD) · `recordScanHandoff`; resolvers `web/lib/pay/scan/resolve.server.ts` (`matchUssdInDirectory`, `resolveMerchantPayCode`) |
+| OneLedger→USSD mapping | `oneledgerProviderToDirectory` in `web/lib/pay/scan/handoff.ts`; fill via `fillUssdTemplate`; seeded `mtn-momo-pay-merchant` code in `supabase/migrations/20260913000100_scan_merchant_pay_codes.sql` (published, **unverified**) |
+| Provider-link allowlist | `PROVIDER_LINK_ALLOWLIST` in `web/lib/pay/scan/provider-link.ts` (empty) |
+| Schema | `payment_intents.source` + `create_payment_intent` in `supabase/migrations/20260913000000_scan_payment_source.sql` |
+| Lifecycle-surface gate | `isPaymentIntentSurfaceEnabled` in `web/lib/pay/gate.ts` — guards `/pay/[id]`, `/pay/activity`, `/pay/reconciliation`, and the lifecycle actions |
+| Reconciliation / expiry | unchanged — `reconcile-pending-payments` / `expire-payment-intents` crons + `reconcile_payment_intent` are source-agnostic |
+| Analytics + monitoring | `trackScanEvent` / `logScanError` in `web/lib/pay/scan-analytics.ts` (+ `scan-analytics_test.ts`) — no sink; redaction is the guarantee |
+| Rollout / device QA / §22 checklist | `docs/pay-scan-verification-runbook.md` |
+| e2e | `web/e2e/pay-scan.spec.ts` (skipped unless `SCAN_TO_PAY_ENABLED=true` + a fake camera — see the file header) |
+
+### R5 — analytics, audit, monitoring, help
+
+There is **no analytics provider and no APM** in this codebase, so R5
+standardises the seams a sink would attach to rather than adding one.
+
+- **Product analytics** — `trackScanEvent(name, props)` in
+  `web/lib/pay/scan-analytics.ts`. `sanitizeScanEventProps` drops any
+  key/value that looks like a QR payload, a filled USSD string, a phone
+  number, an amount, a reference, or a URL *before* it could leave the
+  process (unit-tested). The event vocabulary spans the whole flow:
+  `scan_to_pay_opened` · `scan_camera_permission` · `scan_camera_started`
+  · `scan_torch_toggled` · `scan_decoder_unsupported` ·
+  `scan_qr_detected` · `scan_image_selected` · `scan_payload_classified`
+  · `scan_payload_rejected` · `scan_again` · `scan_handoff_prepared` ·
+  `scan_handoff_opened` · `scan_handoff_unavailable` ·
+  `scan_attempt_awaiting` · `scan_attempt_reconciled` (emitted by the
+  reconcile cron for `source='qr_scan'` intents) ·
+  `scan_attempt_expired` (emitted by the expire cron). Non-prod logs
+  them as `console.debug("[scan-event]", …)`.
+- **Monitoring** — `logScanError(stage, err)` is the one place scanner /
+  decode / parse / classify / hand-off / reconcile failures are logged:
+  a stable `[scan-error] stage=<stage>` prefix and `redactErrorText`
+  (strips digit runs, URLs, USSD-shaped runs; caps length; never a
+  stack). The two cron routes keep their own
+  `reconcile-pending-payments:` / `expire-payment-intents:` prefixes.
+  When a log-based alert sink is added, alert on: a `[scan-error]`
+  spike, an elevated `scan_payload_rejected` rate,
+  `scan_handoff_unavailable`, and cron non-200s.
+- **Audit** — scan intents reuse the Phase N `payment_events` /
+  `payment_audit_events` writers (`create_payment_intent`,
+  `record_payment_attempt`, `transition_payment_intent`,
+  `manually_confirm_payment`). `payment_intents.source = 'qr_scan'` plus
+  `{ method, source: 'qr_scan' }` in the `initiated` event's `evidence`
+  distinguish scan flows. No parallel audit system.
+- **Help** — no separate help system exists; the honest in-product copy
+  in `web/lib/ussd/messages.ts` (`pay.scan.*`) is the help surface. What
+  it covers (and where) is enumerated in the runbook, §10.
+- **Device QA + rollback + the §22 completion checklist** live in
+  **`docs/pay-scan-verification-runbook.md`**.
+
 ## Data model
 
 Global (not workspace-scoped) directory content, plus per-user tables:

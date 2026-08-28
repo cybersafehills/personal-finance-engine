@@ -36,6 +36,7 @@ const t = messages().pay.assisted;
 
 export type PanelIntent = IntentStatusInput & {
   id: string;
+  source: string;
   payment_type: string;
   provider: string | null;
   currency: string;
@@ -240,8 +241,11 @@ export function PaymentIntentPanel({
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Badge variant={TONE_VARIANT[tone]}>{label}</Badge>
+        {intent.source === "qr_scan" && (
+          <Badge variant="neutral">{t.fromScan}</Badge>
+        )}
         <span className="text-xs text-text-muted">{statusDescription(intent)}</span>
       </div>
 

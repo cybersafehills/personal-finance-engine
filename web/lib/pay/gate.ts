@@ -130,6 +130,49 @@ export function smsReconciliationMode(): "observe" | "apply" {
   return process.env.SMS_RECONCILIATION_MODE === "apply" ? "apply" : "observe";
 }
 
+// --- Phase R1: Scan to pay (QR payment scanner) -------------------------
+//
+//   SCAN_TO_PAY_ENABLED - the "Scan to pay" launcher entry + camera
+//                         scanner. OPT-IN: off unless exactly "true",
+//                         the same convention as SMS_RECONCILIATION_ENABLED
+//                         (a new payment route that ships in stages —
+//                         R1 is the camera shell only: no QR decoding,
+//                         no payload parsing, no external handoff). The
+//                         workspace allowlist still applies for a staged
+//                         internal beta.
+export function isScanToPayEnabled(workspaceId: string | null): boolean {
+  return (
+    isPayServicesEnabled(workspaceId) &&
+    process.env.SCAN_TO_PAY_ENABLED === "true" &&
+    workspaceAllowed(workspaceId)
+  );
+}
+
+export function assertScanToPayEnabled(workspaceId: string | null): void {
+  if (!isScanToPayEnabled(workspaceId)) {
+    throw new FeatureDisabledError("scan_to_pay");
+  }
+}
+
+/**
+ * The payment-intent LIFECYCLE surface: the activity list, `/pay/[id]`,
+ * and the confirm / cancel / fail / reconcile actions. Assisted Quick
+ * Pay OR Scan to pay is enough - a `source = 'qr_scan'` intent (Phase
+ * R3+) is a first-class `payment_intent` and must stay viewable and
+ * manageable even on a workspace where the assisted *form*
+ * (`ASSISTED_PAY_ENABLED`) is turned off. Draft creation / editing /
+ * "pay again" / templates / trusted recipients remain assisted-only.
+ */
+export function isPaymentIntentSurfaceEnabled(workspaceId: string | null): boolean {
+  return isAssistedPayEnabled(workspaceId) || isScanToPayEnabled(workspaceId);
+}
+
+export function assertPaymentIntentSurfaceEnabled(workspaceId: string | null): void {
+  if (!isPaymentIntentSurfaceEnabled(workspaceId)) {
+    throw new FeatureDisabledError("payment_intent_surface");
+  }
+}
+
 /** Draft-intent TTL, in hours. Default 24. */
 export function paymentIntentTtlHours(): number {
   const raw = Number(process.env.PAYMENT_INTENT_TTL_HOURS);

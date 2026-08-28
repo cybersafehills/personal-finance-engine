@@ -2,7 +2,7 @@ import { PageHeader } from "../../../components/PageHeader";
 import { EmptyState } from "../../../components/EmptyState";
 import { ReconciliationQueue } from "../../../components/pay/ReconciliationQueue";
 import { getActiveWorkspaceId } from "../../../lib/queries";
-import { isAssistedPayEnabled, smsReconciliationMode } from "../../../lib/pay/gate";
+import { isPaymentIntentSurfaceEnabled, smsReconciliationMode } from "../../../lib/pay/gate";
 import { getReconciliationQueue } from "../../../lib/pay/intents";
 import { messages } from "../../../lib/ussd/messages";
 
@@ -12,7 +12,7 @@ export default async function ReconciliationPage() {
   const workspaceId = await getActiveWorkspaceId();
   const t = messages().pay.assisted;
 
-  if (!isAssistedPayEnabled(workspaceId)) {
+  if (!isPaymentIntentSurfaceEnabled(workspaceId)) {
     return (
       <div>
         <PageHeader title={t.recon.title} backHref="/pay/activity" backLabel={t.activityTitle} />
