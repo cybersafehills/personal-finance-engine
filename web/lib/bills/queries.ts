@@ -46,10 +46,11 @@ export type BillDocumentRow = {
   uploaded_at: string;
   created_at: string;
   updated_at: string;
+  review_revision: number;
 };
 
 const BILL_DOCUMENT_COLUMNS =
-  "id, workspace_id, status, doc_class, intake_channel, original_filename, sanitized_filename, mime_type, byte_size, page_count, checksum_sha256, security_scan_status, retention_status, uploaded_at, created_at, updated_at";
+  "id, workspace_id, status, doc_class, intake_channel, original_filename, sanitized_filename, mime_type, byte_size, page_count, checksum_sha256, security_scan_status, retention_status, uploaded_at, created_at, updated_at, review_revision";
 
 export type BillProcessingEventRow = {
   id: string;
@@ -315,6 +316,7 @@ export type BillValidationRow = {
   blocking_count: number;
   warning_count: number;
   info_count: number;
+  review_revision: number;
   error: Record<string, unknown> | null;
   created_at: string;
 };
@@ -351,7 +353,7 @@ export async function getCurrentBillValidation(
   const { data: validation, error } = await supabase
     .from("bill_validations")
     .select(
-      "id, status, ruleset_version, blocking_count, warning_count, info_count, error, created_at",
+      "id, status, ruleset_version, blocking_count, warning_count, info_count, review_revision, error, created_at",
     )
     .eq("bill_document_id", billDocumentId)
     .eq("is_current", true)
@@ -606,6 +608,37 @@ export async function getBillLedger(billDocumentId: string): Promise<BillLedgerB
     });
 
   return { bill: (bill as BillObligationRow | null) ?? null, links, candidates };
+}
+
+// --- Phase 7: review workspace ----------------------------------
+
+export type BillCommentRow = {
+  id: string;
+  body: string;
+  created_at: string;
+  mine: boolean;
+};
+
+export async function getBillComments(billDocumentId: string): Promise<BillCommentRow[]> {
+  const supabase = await supabaseSession();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const { data, error } = await supabase
+    .from("bill_comments")
+    .select("id, body, created_at, author_id")
+    .eq("bill_document_id", billDocumentId)
+    .order("created_at", { ascending: true });
+  if (error) {
+    console.error("getBillComments failed:", error.message);
+    return [];
+  }
+  return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
+    id: r.id as string,
+    body: r.body as string,
+    created_at: r.created_at as string,
+    mine: !!user && r.author_id === user.id,
+  }));
 }
 
 export async function searchSuppliers(

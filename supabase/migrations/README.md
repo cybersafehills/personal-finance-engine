@@ -188,7 +188,12 @@ Expenses Phase 5** - `20260926000000`: `create_supplier` being
 posting is rejected; link → matched, no link → posted),
 `get_bill_transaction_search_set` /
 `record_bill_transaction_match_candidates` being `service_role`-only, and
-cross-workspace RLS on `bills`). The privilege-regression counts (public
+cross-workspace RLS on `bills`; then **Bills & Expenses Phase 7** -
+`20260928000000`: `correct_bill_field` provenance (raw/normalised
+preserved) + `review_revision` bump, the `approve_bill` `stale_validation`
+guard and its clearance by a fresh validation run, `add_bill_comment`
+being `bill.review`-gated, and cross-workspace RLS on `bill_comments`).
+The privilege-regression counts (public
 table count, `authenticated` table-grant count, `authenticated`
 function-EXECUTE count) are asserted exactly and must be updated in
 lock-step with any migration that adds a table, an `authenticated` grant,

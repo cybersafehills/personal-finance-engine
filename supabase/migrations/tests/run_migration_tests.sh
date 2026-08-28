@@ -6199,6 +6199,76 @@ else
   fail "Bills Phase 6: RLS isolation breach on bills"
 fi
 
+# ===========================================================================
+# Bills & Expenses Phase 7 (20260928000000): correct_bill_field provenance
+# + review_revision bump, the stale_validation approve guard and its
+# clearance by a fresh validation run, add_bill_comment being
+# bill.review-gated, and cross-workspace RLS on bill_comments. Reuses
+# pfe_rls + USER_A / USER_B / USER_C / BILL_WS_A (USER_C was granted
+# bill.upload/review in the Phase 6 block).
+# ===========================================================================
+echo "=== Bills Phase 7: review workspace ==="
+
+BILL7_DOC="$(make_review_doc "$(printf 'ca%.0s' $(seq 1 32))" "$BILL_WS_A" "" "$USER_C")"
+
+# correct_bill_field is bill.review-gated.
+if as_user "$USER_B" "select public.correct_bill_field('$BILL7_DOC', 'total', '999');" >/dev/null 2>$ARTIFACT_DIR/pfe_b7.log; then
+  fail "Bills Phase 7: a non-member corrected a field"
+else
+  pass "Bills Phase 7: correct_bill_field refuses a non-member"
+fi
+rm -f $ARTIFACT_DIR/pfe_b7.log
+
+# A correction preserves raw/normalized, writes user_corrected_value, and
+# bumps review_revision.
+as_user "$USER_C" "select public.correct_bill_field('$BILL7_DOC', 'total', '150000');" >/dev/null
+BILL7_FIELD="$(psql -d pfe_rls -t -A -c "select user_corrected_value || '|' || coalesce(normalized_value,'') || '|' || (corrected_by is not null)
+  from public.bill_extracted_fields f join public.bill_extractions e on e.id = f.extraction_id
+  where e.bill_document_id = '$BILL7_DOC' and e.is_current and f.field_key = 'total';")"
+BILL7_REV="$(psql -d pfe_rls -t -A -c "select review_revision from public.bill_documents where id = '$BILL7_DOC';")"
+BILL7_EVT="$(psql -d pfe_rls -t -A -c "select count(*) from public.bill_processing_events where bill_document_id = '$BILL7_DOC' and event_type = 'field_corrected';")"
+if [ "$BILL7_FIELD" = "150000|141600|true" ] && [ "$BILL7_REV" = "1" ] && [ "$BILL7_EVT" = "1" ]; then
+  pass "Bills Phase 7: correct_bill_field writes user_corrected_value (raw/normalized preserved), bumps review_revision, journals it"
+else
+  fail "Bills Phase 7: correction wrong (field=$BILL7_FIELD rev=$BILL7_REV evt=$BILL7_EVT)"
+fi
+
+# approve_bill now refuses because the current validation predates the
+# correction; a fresh validation clears it.
+BILL7_STALE="$(as_user "$USER_A" "select (public.approve_bill(jsonb_build_object('bill_document_id','$BILL7_DOC')))->>'error';")"
+psql -d pfe_rls -t -A -c "set role service_role; select public.record_bill_validation(jsonb_build_object(
+  'bill_document_id','$BILL7_DOC','workspace_id','$BILL_WS_A','status','succeeded','findings','[]'::jsonb));" >/dev/null
+BILL7_OK="$(as_user "$USER_A" "select (public.approve_bill(jsonb_build_object('bill_document_id','$BILL7_DOC')))->>'bill_id';")"
+BILL7_TOTAL="$(psql -d pfe_rls -t -A -c "select total_minor from public.bills where bill_document_id = '$BILL7_DOC';")"
+if [ "$BILL7_STALE" = "stale_validation" ] && [ -n "$BILL7_OK" ] && [ "$BILL7_TOTAL" = "150000" ]; then
+  pass "Bills Phase 7: approve_bill refuses a validation older than the last correction, then succeeds after a re-check (and uses the corrected total)"
+else
+  fail "Bills Phase 7: stale-validation guard wrong (stale=$BILL7_STALE ok=$BILL7_OK total=$BILL7_TOTAL)"
+fi
+
+# add_bill_comment.
+BILL7_C_DOC="$(make_review_doc "$(printf 'cb%.0s' $(seq 1 32))" "$BILL_WS_A" "" "$USER_C")"
+BILL7_COMMENT="$(as_user "$USER_C" "select (public.add_bill_comment('$BILL7_C_DOC', 'Please check the tax line.'))->>'ok';")"
+BILL7_C_ROWS="$(psql -d pfe_rls -t -A -c "select count(*) from public.bill_comments where bill_document_id = '$BILL7_C_DOC';")"
+if [ "$BILL7_COMMENT" = "true" ] && [ "$BILL7_C_ROWS" = "1" ]; then
+  pass "Bills Phase 7: add_bill_comment records an internal note for a bill.review holder"
+else
+  fail "Bills Phase 7: comment wrong (ok=$BILL7_COMMENT rows=$BILL7_C_ROWS)"
+fi
+if as_user "$USER_B" "select public.add_bill_comment('$BILL7_C_DOC', 'x');" >/dev/null 2>$ARTIFACT_DIR/pfe_b7c.log; then
+  fail "Bills Phase 7: a non-member added a comment"
+else
+  pass "Bills Phase 7: add_bill_comment refuses a non-member"
+fi
+rm -f $ARTIFACT_DIR/pfe_b7c.log
+
+BILL7_B_SEES="$(as_user "$USER_B" "select count(*) from public.bill_comments where bill_document_id = '$BILL7_C_DOC';")"
+if [ "$BILL7_B_SEES" = "0" ]; then
+  pass "Bills Phase 7: a non-member cannot read another workspace's comments"
+else
+  fail "Bills Phase 7: RLS isolation breach on bill_comments"
+fi
+
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="
 if [ "$FAIL_COUNT" -ne 0 ]; then

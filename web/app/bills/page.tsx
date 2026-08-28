@@ -4,19 +4,32 @@ import { PageHeader } from "../../components/PageHeader";
 import { EmptyState } from "../../components/EmptyState";
 import { BillStatusBadge } from "../../components/bills/BillStatusBadge";
 import { BillUploadForm } from "../../components/bills/BillUploadForm";
+import { BillListFilters } from "../../components/bills/BillListFilters";
 import { isBillsEnabled } from "../../lib/bills/gate";
-import { getActiveBillContext, getBillDocuments } from "../../lib/bills/queries";
+import {
+  getActiveBillContext,
+  getBillDocuments,
+  type BillDocumentStatus,
+} from "../../lib/bills/queries";
 import { formatFullDateTime } from "../../lib/format";
 
 export const dynamic = "force-dynamic";
 
-export default async function BillsPage() {
+export default async function BillsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ status?: string }>;
+}) {
   const { workspaceId, permissions } = await getActiveBillContext();
   if (!isBillsEnabled(workspaceId)) {
     notFound();
   }
 
-  const documents = await getBillDocuments({ limit: 100 });
+  const { status } = await searchParams;
+  const documents = await getBillDocuments({
+    limit: 100,
+    status: (status as BillDocumentStatus | undefined) ?? "all",
+  });
 
   return (
     <div className="flex flex-col gap-5">
@@ -29,10 +42,15 @@ export default async function BillsPage() {
 
       <section className="flex flex-col gap-3">
         <h2 className="text-sm font-semibold text-text-secondary">Documents</h2>
+        <BillListFilters active={status ?? ""} />
         {documents.length === 0 ? (
           <EmptyState
-            title="No documents yet"
-            description="Uploaded invoices and receipts appear here with their processing status."
+            title={status ? "Nothing here" : "No documents yet"}
+            description={
+              status
+                ? "No documents match this filter."
+                : "Uploaded invoices and receipts appear here with their processing status."
+            }
           />
         ) : (
           <ul className="flex flex-col gap-2">

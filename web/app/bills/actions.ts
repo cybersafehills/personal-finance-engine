@@ -22,6 +22,7 @@ import {
 import { logBillError, trackBillEvent } from "../../lib/bills/analytics";
 import { normalizeSupplierName } from "../../lib/bills/normalize";
 import { searchSuppliers, type SupplierSearchRow } from "../../lib/bills/queries";
+import { revalidateBillDocument } from "../../lib/bills/revalidate";
 
 // Authoritative server-side handling for Bills & Expenses Phase 1: secure
 // upload + original preservation + lifecycle transitions. Everything that
@@ -554,6 +555,113 @@ export async function unlinkBillTransactionAction(
     }
     if (!(data as { ok: boolean }).ok) return { ok: false, error: "That couldn't be unlinked." };
     trackBillEvent("bill_match_rejected", {});
+    revalidatePath(`/bills/${documentId}`);
+    return { ok: true };
+  } catch (err) {
+    logBillError("transition", err);
+    return { ok: false, error: "Something went wrong." };
+  }
+}
+
+// --- Phase 7: review workspace --------------------------------
+
+export type CorrectFieldResult =
+  | { ok: true; cleared: boolean }
+  | { ok: false; error: string };
+
+/** A bill.review holder overrides one extracted field. Raw + model
+ *  values are preserved; the correction bumps the document's
+ *  review_revision. Validation is re-run immediately so approval never
+ *  acts on a stale check. */
+export async function correctBillField(
+  documentId: string,
+  fieldKey: string,
+  value: string,
+): Promise<CorrectFieldResult> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!isBillsEnabled(workspaceId) || !workspaceId) {
+    return { ok: false, error: "Bills & Expenses isn't available here." };
+  }
+  try {
+    const session = await supabaseSession();
+    const { data, error } = await session.rpc("correct_bill_field", {
+      p_bill_document_id: documentId,
+      p_field_key: fieldKey,
+      p_value: value,
+    });
+    if (error) {
+      logBillError("transition", error);
+      if (/bill\.review/i.test(error.message)) {
+        return { ok: false, error: "You don't have permission to edit fields." };
+      }
+      return { ok: false, error: "That change couldn't be saved." };
+    }
+    const res = data as { ok: boolean; cleared?: boolean; error?: string };
+    if (!res.ok) return { ok: false, error: "That change couldn't be saved." };
+
+    // Re-run the deterministic checks against the corrected value.
+    try {
+      await revalidateBillDocument(supabaseServer(), documentId, workspaceId);
+    } catch (err) {
+      logBillError("record", err);
+    }
+
+    trackBillEvent("bill_field_corrected", {});
+    revalidatePath(`/bills/${documentId}`);
+    return { ok: true, cleared: !!res.cleared };
+  } catch (err) {
+    logBillError("transition", err);
+    return { ok: false, error: "Something went wrong." };
+  }
+}
+
+export async function revalidateBillDocumentAction(
+  documentId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!isBillsEnabled(workspaceId) || !workspaceId) {
+    return { ok: false, error: "Not available." };
+  }
+  // Authorisation: only a reviewer may trigger a re-check.
+  const session = await supabaseSession();
+  const { data: cap } = await session.rpc("has_space_capability", {
+    p_workspace_id: workspaceId,
+    p_capability: "bill.review",
+  });
+  if (cap !== true) return { ok: false, error: "You don't have permission." };
+  try {
+    await revalidateBillDocument(supabaseServer(), documentId, workspaceId);
+    revalidatePath(`/bills/${documentId}`);
+    return { ok: true };
+  } catch (err) {
+    logBillError("record", err);
+    return { ok: false, error: "Re-check failed." };
+  }
+}
+
+export async function addBillCommentAction(
+  documentId: string,
+  body: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!isBillsEnabled(workspaceId)) return { ok: false, error: "Not available." };
+  const trimmed = body.trim();
+  if (trimmed.length === 0) return { ok: false, error: "Write something first." };
+  try {
+    const session = await supabaseSession();
+    const { data, error } = await session.rpc("add_bill_comment", {
+      p_bill_document_id: documentId,
+      p_body: trimmed.slice(0, 4000),
+    });
+    if (error) {
+      logBillError("transition", error);
+      if (/bill\.review/i.test(error.message)) {
+        return { ok: false, error: "You don't have permission to comment." };
+      }
+      return { ok: false, error: "Couldn't add that note." };
+    }
+    if (!(data as { ok: boolean }).ok) return { ok: false, error: "Couldn't add that note." };
+    trackBillEvent("bill_review_opened", {});
     revalidatePath(`/bills/${documentId}`);
     return { ok: true };
   } catch (err) {
