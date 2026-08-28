@@ -38,6 +38,15 @@ export default async function SourcesPage() {
       />
 
       <div className="flex flex-col gap-3">
+        {spacesEnabled && sources.length > 0 && (
+          <p className="text-sm text-text-muted">
+            Sharing is per account and off by default. &ldquo;Transactions
+            only&rdquo; lets a household see what you spend from an account
+            but not its balance; &ldquo;Balance &amp; transactions&rdquo;
+            shows both. You can pause or stop sharing any time.
+          </p>
+        )}
+
         {sources.length === 0 ? (
           <EmptyState
             title="No accounts yet"
