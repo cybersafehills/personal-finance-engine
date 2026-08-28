@@ -983,9 +983,46 @@ ride with the merge button. **Web only — no migration.**
 `next build` ✓, `eslint` 0. No migration, no test-suite change (PR3's
 7-assertion block already covers the RPC contract).
 
-Still deferred: statement (CSV/PDF) reconciliation; device-management UX;
+Still deferred: statement (CSV/PDF) reconciliation;
 rule `scope` / precedence / explainability; a "merged duplicates" section
 on the canonical transaction's detail page.
+
+---
+
+## 11j. Phase U PR4 — as built (migration `20260923000000` + web)
+
+Device management: a reversible **`paused`** state for
+`ingestion_connections`, between `active` and the one-way `revoked`, plus
+rename. Ingestion needed no change — `authenticateCredential` already
+rejects any status other than `active`, so a paused device simply stops
+sending until it is resumed, with its credential untouched.
+
+- **Migration** — `ingestion_connections.paused_at` (nullable), the status
+  CHECK widened to `('active', 'paused', 'revoked')`, and the
+  status/timestamp consistency constraint replaced
+  (`ingestion_connections_status_timestamps`): `active` has neither
+  timestamp, `paused` has `paused_at` and no `revoked_at`, `revoked` has
+  `revoked_at`. No new table / grant / function / policy — the existing
+  `ingestion_connections_update_owner` RLS already scopes who can change
+  this. Counters unchanged (71 / 115 / 71).
+- **`connection-resolver.ts`** — the `IngestionConnectionRow.status` union
+  widened to include `'paused'` (one line; behaviour already correct).
+- **Web** — `getIngestionConnections` selects `paused_at`; new actions
+  `pauseConnection` / `resumeConnection` / `renameConnection` (plain
+  owner-scoped updates, same as `rotate`/`revoke`); `ConnectionItem` gains
+  a "Paused" badge + explanation line, **Pause**/**Resume** and
+  **Rename** (inline edit) controls. A paused connection hides "Rotate
+  credential" (nothing to rotate while it can't be used) but keeps Rename
+  and Revoke.
+- **Migration test** — 4-assertion "Phase U PR4" block: owner pause,
+  constraint rejects `paused` without `paused_at`, constraint rejects
+  `active` with a lingering `paused_at`, owner resume. Full suite:
+  **233 passed / 0 failed**. `deno check` / `deno test ingest-momo` (74) /
+  `next build` / `eslint` all green.
+
+Still deferred: statement (CSV/PDF) reconciliation; rule `scope` /
+precedence / explainability; a "merged duplicates" section on the
+canonical transaction's detail page.
 
 ---
 

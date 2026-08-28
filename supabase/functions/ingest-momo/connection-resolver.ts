@@ -22,7 +22,11 @@ export type IngestionConnectionRow = {
   id: string;
   workspace_id: string;
   account_id: string;
-  status: "active" | "revoked";
+  // 'paused' is the reversible middle state (Phase U PR4). Only 'active'
+  // authenticates - authenticateCredential rejects both 'paused' and
+  // 'revoked' identically, so a paused device silently stops ingesting
+  // until it is resumed.
+  status: "active" | "paused" | "revoked";
 };
 
 export type AccountRow = {

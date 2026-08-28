@@ -722,9 +722,10 @@ export type IngestionConnectionRow = {
   id: string;
   label: string;
   provider: string;
-  status: "active" | "revoked";
+  status: "active" | "paused" | "revoked";
   credential_prefix: string;
   last_used_at: string | null;
+  paused_at: string | null;
   created_at: string;
   account_id: string;
   account_name: string;
@@ -742,7 +743,7 @@ export async function getIngestionConnections(): Promise<
       // one used only to guarantee same-workspace routing at the database
       // level) - the embed must name the single-column FK explicitly or
       // PostgREST cannot pick one automatically.
-      "id, label, provider, status, credential_prefix, last_used_at, created_at, account_id, accounts!ingestion_connections_account_id_fkey(name)",
+      "id, label, provider, status, credential_prefix, last_used_at, paused_at, created_at, account_id, accounts!ingestion_connections_account_id_fkey(name)",
     )
     .order("created_at", { ascending: true });
 
@@ -760,6 +761,7 @@ export async function getIngestionConnections(): Promise<
       status: row.status,
       credential_prefix: row.credential_prefix,
       last_used_at: row.last_used_at,
+      paused_at: row.paused_at,
       created_at: row.created_at,
       account_id: row.account_id,
       account_name: account?.name ?? "Unknown account",
