@@ -879,6 +879,32 @@ Deno.serve(async (req: Request) => {
     }
 
     // ========================================================
+    // BUDGET THRESHOLD SWEEP (Phase V)
+    // ========================================================
+    //
+    // A new settled outflow can push a budget past 75 / 90 / 100 / 110%.
+    // sweep_budget_thresholds recomputes every active budget's total and
+    // enqueues a notification only on a genuine upward crossing
+    // (record_budget_threshold_crossing is idempotent). Best-effort and
+    // non-fatal: a failure here must never fail a request that already
+    // successfully ingested.
+
+    try {
+      const { error: sweepError } = await supabase.rpc(
+        "sweep_budget_thresholds",
+        { p_workspace_id: resolvedWorkspaceId },
+      );
+      if (sweepError) {
+        console.error("Budget threshold sweep error (non-fatal):", sweepError);
+      }
+    } catch (sweepException) {
+      console.error(
+        "Budget threshold sweep threw (non-fatal):",
+        sweepException,
+      );
+    }
+
+    // ========================================================
     // RECORD CONNECTION ACTIVITY
     // ========================================================
     //
