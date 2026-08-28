@@ -10,14 +10,13 @@ never shown as a completed payment.
 
 ## 0. Before you start
 
-- Branch merged; `pnpm`/`npm` build green; `deno test lib/` green.
-- **`supabase/migrations/tests/run_migration_tests.sh` has been run on
-  PostgreSQL 17** and passes. Two scan migrations were only
-  smoke-applied on pg16 during development (see their headers):
-  `20260913000000_scan_payment_source.sql` (the `source`
-  column + `create_payment_intent` change) and
-  `20260913000100_scan_merchant_pay_codes.sql` (the seeded MTN
-  pay-merchant code).
+- Branch merged (`origin/main` @ `8b6953f`); `npm run build` green;
+  `deno test lib/` green (332); `tsc` / `eslint` clean.
+- **`run_migration_tests.sh` — DONE.** 176 passed / 0 failed on
+  PostgreSQL 17.11, with `20260913000000_scan_payment_source.sql` and
+  `20260913000100_scan_merchant_pay_codes.sql` in the full chain (both
+  apply cleanly + idempotently; "Phase N" block green). The macOS/pg17
+  spawn-mode fixes are on `origin/main` @ `62f10c0`.
 - Generated DB/API types regenerated if your pipeline uses them (this
   repo hand-types its queries, so usually nothing to do).
 - The app sets **no** `Content-Security-Policy` or `Permissions-Policy`

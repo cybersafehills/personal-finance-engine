@@ -136,9 +136,13 @@ coarse `class` / `reason` is ever logged.
 The schema change — `payment_intents.source` + `create_payment_intent`
 learning an optional `source` key — is
 `supabase/migrations/20260913000000_scan_payment_source.sql`
-(additive, `default 'assisted'`). **It was verified by a manual `psql`
-apply of the full chain on PostgreSQL 16 but NOT by
-`run_migration_tests.sh` (needs pg17) — run that before merge.**
+(additive, `default 'assisted'`). Verified: `run_migration_tests.sh`
+passes on **PostgreSQL 17** (176/0) with this migration and
+`20260913000100_scan_merchant_pay_codes.sql` in the full chain — they
+apply cleanly and idempotently (twice, byte-identical dumps), and the
+"Phase N" block (which exercises `create_payment_intent`) stays green.
+There is still no *dedicated* assertion for `source = 'qr_scan'`
+behaviour or the seed contents.
 
 ### R4 — reconciliation & expiry
 
