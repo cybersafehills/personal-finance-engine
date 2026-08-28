@@ -1403,6 +1403,36 @@ dark and rolls out internal → beta → GA.
 Phase W remaining: W2 state matrix · W3 onboarding/help · W4 analytics ·
 W5 monitoring · W6 migration validation + security/perf review.
 
+
+---
+
+## 11w. Phase W PR2 — as built (migration `20261005000000` + web)
+
+State-matrix pass over the Spaces surfaces.
+
+- **Removed-member notice** — `remove_member` re-issued (re-issue only) to
+  also `enqueue_notification` a **"You were removed from this Space"** to
+  the departing member, `metadata.self = true`, placed *before* the
+  status flip so `enqueue_notification`'s active-member filter still
+  reaches them. Closes the gap where `getActiveWorkspaceId()` silently
+  dropped a removed member back to Personal with no explanation.
+- **`loading.tsx`** added for `/notifications`,
+  `/settings/sources/import`, `/transactions/review`,
+  `/settings/workspace` (Skeleton + `aria-busy`, matching the existing
+  `settings/sources` / `settings/notifications` pattern).
+- Audited and already covered: invite-accept states (`invite_preview` →
+  `notFound` / "no longer valid" / valid / signed-out); root
+  `app/error.tsx` + `app/global-error.tsx`; empty states on every new
+  surface; stale-cookie fallback in `getActiveWorkspaceId`.
+
+Counters unchanged (re-issue only). The Phase V PR1 removal-fan-out
+assertion now checks both the remaining-member and the self-flagged
+removed-member notification. Full suite: **252 passed / 0 failed**.
+`next build` ✓, `eslint` 0.
+
+Phase W remaining: W3 onboarding/help · W4 analytics · W5 monitoring ·
+W6 migration validation + security/perf review.
+
 ---
 
 ## 12. Testing strategy (per phase, aggregated here)
