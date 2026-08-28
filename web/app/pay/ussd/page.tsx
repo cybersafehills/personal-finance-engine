@@ -53,7 +53,7 @@ export default async function UssdDirectoryPage({
     getActiveProviders(),
     getFavouriteCodeIds(),
     getFavourites(),
-    getRecentServices(6),
+    getRecentServices(1),
     query ? searchPaymentNetworks(query) : getPublishedNetworks(),
   ]);
 
@@ -86,8 +86,7 @@ export default async function UssdDirectoryPage({
                       <Badge variant="accent">Network</Badge>
                     </div>
                     <p className="mt-0.5 text-xs text-text-muted">
-                      Interoperable transfers between banks and mobile wallets — open to find a
-                      verified route.
+                      Move money between a bank account and a Mobile Money wallet.
                     </p>
                   </div>
                   <span
@@ -118,7 +117,7 @@ export default async function UssdDirectoryPage({
         <section className="mb-5">
           <h2 className="mb-1 text-sm font-semibold text-text-secondary">{t.recent}</h2>
           <ul>
-            {recent.map((code) => (
+            {recent.slice(0, 1).map((code) => (
               <ServiceCodeRow
                 key={code.id}
                 code={code}

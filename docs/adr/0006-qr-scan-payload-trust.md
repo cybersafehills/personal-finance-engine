@@ -105,7 +105,7 @@ everything (directory row, captured params, normalized msisdn) from
   `merchant_code` field), or an expired / replayed payload all
   dead-end in the review.
   - The seeded MTN pay-merchant code
-    (`20260911000000_scan_merchant_pay_codes.sql`) is **`published` with
+    (`20260913000100_scan_merchant_pay_codes.sql`) is **`published` with
     `verified_at = null`** — same provenance bar as the Phase M
     `send_money` seeds. The review surfaces "Not officially verified"
     and the full dial string before the user opens it. Airtel is not

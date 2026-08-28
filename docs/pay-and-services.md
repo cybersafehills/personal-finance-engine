@@ -117,7 +117,7 @@ scan. Non-RWF payloads, a provider with no seeded pay-merchant code, a
 non-numeric `merchant_id`, an expired / replayed payload, or
 `provider_link` / `emv_merchant` still show the details and "continuing
 isn't available". The seeded MTN pay-merchant code
-(`20260911000000_scan_merchant_pay_codes.sql`) is **published but
+(`20260913000100_scan_merchant_pay_codes.sql`) is **published but
 unverified** — the review shows the "Not officially verified" warning and
 the full dial string, same as scanning `mtn-momo-send` today. Public
 sources (2026-08) corroborate the `*182*8*1#` entry point + prompts and
@@ -135,7 +135,7 @@ coarse `class` / `reason` is ever logged.
 
 The schema change — `payment_intents.source` + `create_payment_intent`
 learning an optional `source` key — is
-`supabase/migrations/20260910000000_phase_r3_scan_payment_source.sql`
+`supabase/migrations/20260913000000_scan_payment_source.sql`
 (additive, `default 'assisted'`). **It was verified by a manual `psql`
 apply of the full chain on PostgreSQL 16 but NOT by
 `run_migration_tests.sh` (needs pg17) — run that before merge.**
@@ -183,9 +183,9 @@ What R4 *does* change:
 | QR decode (browser) | `web/lib/pay/scan/decode.client.ts` (`BarcodeDetector`) |
 | Payload pipeline (pure) | `web/lib/pay/scan/` — `normalize` · `classify` · `ussd` · `oneledger` · `emv` · `provider-link` · `money` · `redact` · `handoff` · `pipeline` (+ `*_test.ts`) |
 | Server actions | `web/app/pay/scan/actions.ts` — `classifyScannedCode` · `prepareScanHandoff` (USSD + OneLedger→USSD) · `recordScanHandoff`; resolvers `web/lib/pay/scan/resolve.server.ts` (`matchUssdInDirectory`, `resolveMerchantPayCode`) |
-| OneLedger→USSD mapping | `oneledgerProviderToDirectory` in `web/lib/pay/scan/handoff.ts`; fill via `fillUssdTemplate`; seeded `mtn-momo-pay-merchant` code in `supabase/migrations/20260911000000_scan_merchant_pay_codes.sql` (published, **unverified**) |
+| OneLedger→USSD mapping | `oneledgerProviderToDirectory` in `web/lib/pay/scan/handoff.ts`; fill via `fillUssdTemplate`; seeded `mtn-momo-pay-merchant` code in `supabase/migrations/20260913000100_scan_merchant_pay_codes.sql` (published, **unverified**) |
 | Provider-link allowlist | `PROVIDER_LINK_ALLOWLIST` in `web/lib/pay/scan/provider-link.ts` (empty) |
-| Schema | `payment_intents.source` + `create_payment_intent` in `supabase/migrations/20260910000000_phase_r3_scan_payment_source.sql` |
+| Schema | `payment_intents.source` + `create_payment_intent` in `supabase/migrations/20260913000000_scan_payment_source.sql` |
 | Lifecycle-surface gate | `isPaymentIntentSurfaceEnabled` in `web/lib/pay/gate.ts` — guards `/pay/[id]`, `/pay/activity`, `/pay/reconciliation`, and the lifecycle actions |
 | Reconciliation / expiry | unchanged — `reconcile-pending-payments` / `expire-payment-intents` crons + `reconcile_payment_intent` are source-agnostic |
 | Analytics + monitoring | `trackScanEvent` / `logScanError` in `web/lib/pay/scan-analytics.ts` (+ `scan-analytics_test.ts`) — no sink; redaction is the guarantee |

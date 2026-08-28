@@ -1,4 +1,3 @@
-import { Badge } from "../../Badge";
 import { messages } from "../../../lib/ussd/messages";
 import { describeFee, describeLimit } from "../../../lib/directory/format";
 import { FLOW_LABELS, type NetworkOverview as NetworkOverviewData } from "../../../lib/directory/public-types";
@@ -12,19 +11,8 @@ export function NetworkOverview({
   network: NetworkOverviewData;
   supportedFlows: string[];
 }) {
-  const unverified = network.verified_at == null;
-
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex flex-wrap items-center gap-2">
-        {unverified ? (
-          <Badge variant="attention">{messages().ussd.notVerifiedBadge}</Badge>
-        ) : (
-          <Badge variant="positive">{messages().ussd.verifiedBadge}</Badge>
-        )}
-        <span className="text-sm text-text-secondary">{network.entity_type.replace(/_/g, " ")}</span>
-      </div>
-
       {network.description_en && (
         <p className="text-sm text-text-secondary">{network.description_en}</p>
       )}

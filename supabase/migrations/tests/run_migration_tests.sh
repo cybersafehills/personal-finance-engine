@@ -572,7 +572,15 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # 58 with RLS, the same one intentional gap.
 # Phase P (20260909000300) adds directory_suggestions (RLS enabled) - 60
 # tables, 59 with RLS.
-if [ "$TABLE_COUNT" = "60" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Phase Q (20260910000000) adds 7 more, all RLS-enabled (financial_sources,
+# source_space_links, raw_financial_events, space_activity,
+# space_audit_events, space_member_notification_prefs,
+# workspace_categories) - 67 tables, 66 with RLS, the same one intentional
+# gap. raw_financial_events has RLS enabled with no authenticated policy
+# (deny-by-default, like momo_messages) - it is NOT a second exception.
+# Phase R (20260912000000) adds space_member_capability_grants (RLS
+# enabled, SELECT-only for authenticated) - 68 tables, 67 with RLS.
+if [ "$TABLE_COUNT" = "68" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -637,11 +645,23 @@ fi
 # Phase P (20260909000300) adds directory_suggestions (select, insert = 2)
 # - the moderation status is only ever advanced by
 # admin_resolve_directory_suggestion, so no update grant here. 97 + 2 = 99.
+# Phase Q (20260910000000) adds 15 more: financial_sources (select, insert,
+# update = 3), source_space_links (select, insert, update = 3),
+# workspace_categories (select, insert, update = 3),
+# space_member_notification_prefs (select, insert, update, delete = 4),
+# space_activity (select = 1), space_audit_events (select = 1).
+# raw_financial_events gets zero authenticated grants (service-role-only
+# ingestion plumbing). space_activity / space_audit_events are SELECT-only
+# because every write goes through a SECURITY DEFINER RPC (Phase R/S).
+# 99 + 15 = 114.
+# Phase R (20260912000000) adds space_member_capability_grants (select
+# only - mutated exclusively by grant_space_capability /
+# revoke_space_capability). 114 + 1 = 115.
 AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and grantee = 'authenticated';")"
-if [ "$AUTHENTICATED_GRANT_COUNT" = "99" ]; then
-  pass "authenticated holds exactly the 99 table grants expected, no more"
+if [ "$AUTHENTICATED_GRANT_COUNT" = "115" ]; then
+  pass "authenticated holds exactly the 115 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 99 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 115 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -731,11 +751,27 @@ fi
 # admin_resolve_directory_suggestion; its
 # enforce_directory_suggestion_rate_limit trigger function is
 # `revoke all from public`. = 48 total.
+# Phase Q (20260910000000) adds 4 authenticated-callable functions: the
+# user-initiated create_household_workspace RPC, plus the three
+# source-visibility authorization primitives owns_financial_source,
+# is_financial_source_visible, and can_view_source_in_space - each granted
+# to authenticated because, like is_workspace_member, they are invoked
+# from RLS policies that run as the calling role (the Phase L
+# is_valid_nav_order lesson). = 52 total.
+# Phase R (20260912000000) adds 3 authenticated-callable functions:
+# has_space_capability (the capability authorization primitive) and the
+# grant_space_capability / revoke_space_capability RPCs. Its internal
+# helpers space_role_has_capability (pure matrix, called only from
+# has_space_capability), record_space_activity, and record_space_audit_event
+# are `revoke all from public` with no authenticated grant. The four
+# re-issued RPCs (accept_workspace_invite, set_member_role, remove_member,
+# create_household_workspace) keep their existing grants (CREATE OR REPLACE
+# preserves privileges). = 55 total.
 AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname = 'authenticated' where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "48" ]; then
-  pass "authenticated holds EXECUTE on exactly the 48 functions expected, no more"
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "55" ]; then
+  pass "authenticated holds EXECUTE on exactly the 55 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 48 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 55 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -2448,6 +2484,287 @@ if [ "$S_STATUS" = "accepted" ] && [ "$S_AUDIT" = "1" ]; then
   pass "Phase P: an admin resolves a suggestion and it writes an audit event (never an auto-publish)"
 else
   fail "Phase P: suggestion resolution wrong (status=$S_STATUS audit=$S_AUDIT)"
+fi
+
+# ===========================================================================
+# Phase Q: OneLedger Spaces foundation - the household Space kind, the
+# person-owned financial-source model, and the hard privacy rule that
+# joining a household shares nothing until the source owner explicitly
+# allocates a source into it. Reuses pfe_rls (USER_A/WORKSPACE_A,
+# USER_B/WORKSPACE_B, and the User A transaction d3 from the RLS block).
+# ===========================================================================
+echo "=== Phase Q: Spaces foundation - household kind and source visibility ==="
+
+# --- household workspace creation ----------------------------------------
+
+Q_HH="$(as_user "$USER_A" "select public.create_household_workspace('Niyoyo Household');")"
+Q_HH_OK="$(psql -d pfe_rls -t -A -c "select count(*) from public.workspaces w join public.workspace_memberships m on m.workspace_id = w.id where w.id = '$Q_HH' and w.kind = 'household' and m.user_id = '$USER_A' and m.role = 'owner' and m.status = 'active';")"
+if [ "$Q_HH_OK" = "1" ]; then
+  pass "Phase Q: create_household_workspace makes a kind='household' workspace with the caller as sole active owner"
+else
+  fail "Phase Q: create_household_workspace did not produce the expected household + owner membership (got $Q_HH_OK)"
+fi
+
+# currency/timezone inherited from the creator's profile (RWF/Africa/Kigali
+# defaults here, since the mock profile is never customised) - assert the
+# household is at least well-formed, not left with NULLs.
+Q_HH_SHAPE="$(psql -d pfe_rls -t -A -c "select count(*) from public.workspaces where id = '$Q_HH' and default_currency = 'RWF' and timezone = 'Africa/Kigali' and status = 'active';")"
+if [ "$Q_HH_SHAPE" = "1" ]; then
+  pass "Phase Q: a new household inherits currency/timezone (profile defaults) and opens active"
+else
+  fail "Phase Q: new household currency/timezone/status not set as expected"
+fi
+
+# --- financial_sources ownership isolation ------------------------------
+
+Q_SRC_A="$(as_user "$USER_A" "insert into public.financial_sources (owner_user_id, provider, source_type, display_name, currency) values ('$USER_A', 'mtn_momo', 'mobile_money', 'Alice MTN MoMo', 'RWF') returning id;")"
+Q_SRC_SEES_OWNER="$(as_user "$USER_A" "select count(*) from public.financial_sources where id = '$Q_SRC_A';")"
+Q_SRC_SEES_OTHER="$(as_user "$USER_B" "select count(*) from public.financial_sources where id = '$Q_SRC_A';")"
+if [ "$Q_SRC_SEES_OWNER" = "1" ] && [ "$Q_SRC_SEES_OTHER" = "0" ]; then
+  pass "Phase Q: a financial source is visible to its owner and to nobody else by default (personal_only)"
+else
+  fail "Phase Q: financial_sources visibility wrong (owner=$Q_SRC_SEES_OWNER other=$Q_SRC_SEES_OTHER, expected 1/0)"
+fi
+
+# User B cannot create a source owned by User A.
+if as_user "$USER_B" "insert into public.financial_sources (owner_user_id, provider, source_type, display_name, currency) values ('$USER_A', 'bank', 'bank_account', 'Forged', 'RWF');" >/dev/null 2>$ARTIFACT_DIR/pfe_q_forge_src.log; then
+  fail "Phase Q: User B created a financial source owned by User A - insert policy not owner-scoped"
+else
+  pass "Phase Q: financial_sources insert is rejected unless owner_user_id = auth.uid()"
+fi
+rm -f $ARTIFACT_DIR/pfe_q_forge_src.log
+
+# --- joining a household shares nothing --------------------------------
+
+# User B joins the household as a member (membership rows are service-role
+# managed - Phase B/C left workspace_memberships SELECT-only for authenticated).
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.workspace_memberships (workspace_id, user_id, role, status, joined_at) values ('$Q_HH', '$USER_B', 'member', 'active', now());" >/dev/null
+
+# Fixture: an account + transaction in the household, backed by User A's
+# source, created via service_role (mirrors the Phase C fixture style).
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.accounts (id, workspace_id, name, provider, currency, financial_source_id)
+  values ('00000000-0000-0000-0000-0000000000aa', '$Q_HH', 'Alice MoMo (household)', 'mtn_momo', 'RWF', '$Q_SRC_A');
+  insert into public.transactions (id, source, financial_source_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version)
+  values ('00000000-0000-0000-0000-0000000000ab', 'manual', '$Q_SRC_A', '00000000-0000-0000-0000-0000000000aa', '$Q_HH', 'merchant_payment', 'out', 'success', 15000, 0, now(), 'test');
+" >/dev/null
+
+Q_B_SEES_TXN_BEFORE="$(as_user "$USER_B" "select count(*) from public.transactions where id = '00000000-0000-0000-0000-0000000000ab';")"
+Q_B_SEES_ACCT_BEFORE="$(as_user "$USER_B" "select count(*) from public.accounts where id = '00000000-0000-0000-0000-0000000000aa';")"
+if [ "$Q_B_SEES_TXN_BEFORE" = "0" ] && [ "$Q_B_SEES_ACCT_BEFORE" = "0" ]; then
+  pass "Phase Q: a household member cannot see a co-member's source, account, or transactions with no share link (the hard privacy rule)"
+else
+  fail "Phase Q: household member saw an unshared co-member's data (txn=$Q_B_SEES_TXN_BEFORE acct=$Q_B_SEES_ACCT_BEFORE, expected 0/0) - privacy breach"
+fi
+
+# Positive control: the source owner, who is also a household member, sees
+# their own source's household data.
+Q_A_SEES_TXN="$(as_user "$USER_A" "select count(*) from public.transactions where id = '00000000-0000-0000-0000-0000000000ab';")"
+if [ "$Q_A_SEES_TXN" = "1" ]; then
+  pass "Phase Q: the source owner sees their own source's transactions inside the household (positive control)"
+else
+  fail "Phase Q: the source owner could not see their own household transaction - policy over-blocking"
+fi
+
+# --- explicit allocation makes it visible -----------------------------
+
+as_user "$USER_A" "insert into public.source_space_links (financial_source_id, workspace_id, visibility_mode, created_by) values ('$Q_SRC_A', '$Q_HH', 'share_transactions', '$USER_A');" >/dev/null
+Q_B_SEES_TXN_AFTER="$(as_user "$USER_B" "select count(*) from public.transactions where id = '00000000-0000-0000-0000-0000000000ab';")"
+Q_B_SEES_ACCT_AFTER="$(as_user "$USER_B" "select count(*) from public.accounts where id = '00000000-0000-0000-0000-0000000000aa';")"
+if [ "$Q_B_SEES_TXN_AFTER" = "1" ] && [ "$Q_B_SEES_ACCT_AFTER" = "1" ]; then
+  pass "Phase Q: after the owner allocates the source into the household with share_transactions, the co-member sees its transactions and account"
+else
+  fail "Phase Q: share link did not grant the co-member visibility (txn=$Q_B_SEES_TXN_AFTER acct=$Q_B_SEES_ACCT_AFTER, expected 1/1)"
+fi
+
+# A non-owner cannot forge a share link for someone else's source.
+if as_user "$USER_B" "insert into public.source_space_links (financial_source_id, workspace_id, visibility_mode) values ('$Q_SRC_A', '$WORKSPACE_B', 'share_account');" >/dev/null 2>$ARTIFACT_DIR/pfe_q_forge_link.log; then
+  fail "Phase Q: User B created a share link for User A's source - source_space_links insert not owner-scoped"
+else
+  pass "Phase Q: source_space_links insert is rejected unless the caller owns the source"
+fi
+rm -f $ARTIFACT_DIR/pfe_q_forge_link.log
+
+# Pausing the link immediately hides the household-allocated history again.
+as_user "$USER_A" "update public.source_space_links set status = 'paused' where financial_source_id = '$Q_SRC_A' and workspace_id = '$Q_HH';" >/dev/null
+Q_B_SEES_TXN_PAUSED="$(as_user "$USER_B" "select count(*) from public.transactions where id = '00000000-0000-0000-0000-0000000000ab';")"
+if [ "$Q_B_SEES_TXN_PAUSED" = "0" ]; then
+  pass "Phase Q: pausing the share link immediately revokes the co-member's visibility of household-allocated history"
+else
+  fail "Phase Q: co-member still saw the transaction after the share link was paused (got $Q_B_SEES_TXN_PAUSED)"
+fi
+
+# --- personal/organization workspaces are unaffected -------------------
+
+# User A can still read their own personal-workspace transaction (d3 from
+# the RLS block) - can_view_source_in_space collapses to is_workspace_member
+# for non-household workspaces, so the re-issued policy is behaviourally
+# unchanged there.
+Q_A_PERSONAL_STILL_OK="$(as_user "$USER_A" "select count(*) from public.transactions where id = '00000000-0000-0000-0000-0000000000d3';")"
+if [ "$Q_A_PERSONAL_STILL_OK" = "1" ]; then
+  pass "Phase Q: the re-issued accounts/transactions policies leave personal-workspace access unchanged (regression guard)"
+else
+  fail "Phase Q: User A lost access to their own personal-workspace transaction after the Phase Q policy re-issue - regression"
+fi
+
+# service_role still bypasses every Phase Q policy.
+Q_SERVICE_SEES="$(psql -d pfe_rls -t -A -c "set role service_role; select count(*) from public.transactions where id = '00000000-0000-0000-0000-0000000000ab';" | tail -1)"
+if [ "$Q_SERVICE_SEES" = "1" ]; then
+  pass "Phase Q: service_role still sees household transactions regardless of source-visibility policies (ingestion unaffected)"
+else
+  fail "Phase Q: service_role visibility changed under the Phase Q policies (got $Q_SERVICE_SEES) - would break ingest-momo"
+fi
+
+# ===========================================================================
+# Phase R: Spaces authorization capability layer + audit/activity write
+# primitives + membership/invite RPC hardening. Continues in pfe_rls, on
+# the Phase Q household Q_HH (USER_A owner, USER_B member) and USER_A's
+# source Q_SRC_A.
+# ===========================================================================
+echo "=== Phase R: Spaces authz capabilities and audit ==="
+
+# --- capability matrix ---------------------------------------------------
+
+R_OWNER_DELETE="$(as_user "$USER_A" "select public.has_space_capability('$Q_HH', 'space.delete');")"
+R_MEMBER_BUDGET="$(as_user "$USER_B" "select public.has_space_capability('$Q_HH', 'budget.manage');")"
+R_MEMBER_TXN="$(as_user "$USER_B" "select public.has_space_capability('$Q_HH', 'transaction.create');")"
+R_NONMEMBER="$(as_user "$USER_B" "select public.has_space_capability('$WORKSPACE_A', 'transaction.create');")"
+if [ "$R_OWNER_DELETE" = "t" ] && [ "$R_MEMBER_BUDGET" = "f" ] && [ "$R_MEMBER_TXN" = "t" ] && [ "$R_NONMEMBER" = "f" ]; then
+  pass "Phase R: has_space_capability reflects the role matrix (owner:space.delete, member:transaction.create yes / budget.manage no, non-member:nothing)"
+else
+  fail "Phase R: capability matrix wrong (owner.delete=$R_OWNER_DELETE member.budget=$R_MEMBER_BUDGET member.txn=$R_MEMBER_TXN nonmember=$R_NONMEMBER)"
+fi
+
+# --- per-member capability grant --------------------------------------
+
+as_user "$USER_A" "select public.grant_space_capability('$Q_HH', '$USER_B', 'budget.manage');" >/dev/null
+R_MEMBER_BUDGET_AFTER="$(as_user "$USER_B" "select public.has_space_capability('$Q_HH', 'budget.manage');")"
+R_GRANT_AUDIT="$(psql -d pfe_rls -t -A -c "select count(*) from public.space_audit_events where workspace_id = '$Q_HH' and event_type = 'capability.granted';")"
+if [ "$R_MEMBER_BUDGET_AFTER" = "t" ] && [ "$R_GRANT_AUDIT" = "1" ]; then
+  pass "Phase R: grant_space_capability flips a member's capability on and writes one audit event"
+else
+  fail "Phase R: capability grant did not take effect (has=$R_MEMBER_BUDGET_AFTER audit=$R_GRANT_AUDIT)"
+fi
+
+# A plain member (no members.manage) cannot grant capabilities.
+if as_user "$USER_B" "select public.grant_space_capability('$Q_HH', '$USER_B', 'rule.manage');" >/dev/null 2>$ARTIFACT_DIR/pfe_r_grant.log; then
+  fail "Phase R: a member without members.manage granted a capability"
+else
+  pass "Phase R: grant_space_capability refuses a caller without members.manage"
+fi
+rm -f $ARTIFACT_DIR/pfe_r_grant.log
+
+as_user "$USER_A" "select public.revoke_space_capability('$Q_HH', '$USER_B', 'budget.manage');" >/dev/null
+R_MEMBER_BUDGET_REVOKED="$(as_user "$USER_B" "select public.has_space_capability('$Q_HH', 'budget.manage');")"
+if [ "$R_MEMBER_BUDGET_REVOKED" = "f" ]; then
+  pass "Phase R: revoke_space_capability removes the grant"
+else
+  fail "Phase R: capability still held after revoke (got $R_MEMBER_BUDGET_REVOKED)"
+fi
+
+# --- audit vs activity visibility -----------------------------------
+
+R_AUDIT_MEMBER="$(as_user "$USER_B" "select count(*) from public.space_audit_events where workspace_id = '$Q_HH';")"
+R_AUDIT_OWNER="$(as_user "$USER_A" "select count(*) from public.space_audit_events where workspace_id = '$Q_HH';")"
+if [ "$R_AUDIT_MEMBER" = "0" ] && [ "$R_AUDIT_OWNER" -ge "1" ]; then
+  pass "Phase R: space_audit_events is owner/admin-readable only (a plain member sees none)"
+else
+  fail "Phase R: space_audit_events visibility wrong (member=$R_AUDIT_MEMBER owner=$R_AUDIT_OWNER)"
+fi
+
+R_ACTIVITY_MEMBER="$(as_user "$USER_B" "select count(*) from public.space_activity where workspace_id = '$Q_HH' and kind = 'space.created';")"
+if [ "$R_ACTIVITY_MEMBER" = "1" ]; then
+  pass "Phase R: create_household_workspace wrote a member-readable 'space.created' activity row"
+else
+  fail "Phase R: expected one member-visible space.created activity row, got $R_ACTIVITY_MEMBER"
+fi
+
+# --- internal helpers are not authenticated-callable -----------------
+
+R_HELPERS_LOCKED=1
+for fn in "record_space_audit_event('$Q_HH','x','y',null,null,null)" "record_space_activity('$Q_HH','x','y',null,null)"; do
+  if as_user "$USER_A" "select public.$fn;" >/dev/null 2>&1; then R_HELPERS_LOCKED=0; fi
+done
+if [ "$R_HELPERS_LOCKED" = "1" ]; then
+  pass "Phase R: record_space_audit_event / record_space_activity are not authenticated-callable (internal helpers)"
+else
+  fail "Phase R: an internal audit/activity helper was callable by an authenticated user"
+fi
+
+# --- invite hardening -------------------------------------------------
+
+USER_R="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('r-invitee@example.com') returning id;" | head -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.workspace_invites (workspace_id, email, role, token_hash, token_prefix, invited_by) values ('$Q_HH', 'r-invitee@example.com', 'member', 'r-token-hash-1', 'r-pref-1', '$USER_A');" >/dev/null
+
+R_ACCEPT_WS="$(as_user "$USER_R" "select public.accept_workspace_invite('r-token-hash-1');")"
+R_ACCEPTED_BY="$(psql -d pfe_rls -t -A -c "select count(*) from public.workspace_invites where token_hash = 'r-token-hash-1' and status = 'accepted' and accepted_by = '$USER_R';")"
+R_JOIN_AUDIT="$(psql -d pfe_rls -t -A -c "select count(*) from public.space_audit_events where workspace_id = '$Q_HH' and event_type = 'member.joined_via_invite';")"
+if [ "$R_ACCEPT_WS" = "$Q_HH" ] && [ "$R_ACCEPTED_BY" = "1" ] && [ "$R_JOIN_AUDIT" = "1" ]; then
+  pass "Phase R: accept_workspace_invite records accepted_by and writes a member.joined_via_invite audit event"
+else
+  fail "Phase R: invite acceptance bookkeeping wrong (ws=$R_ACCEPT_WS accepted_by=$R_ACCEPTED_BY audit=$R_JOIN_AUDIT)"
+fi
+
+# Re-accepting the same (now non-pending) token is rejected.
+if as_user "$USER_R" "select public.accept_workspace_invite('r-token-hash-1');" >/dev/null 2>$ARTIFACT_DIR/pfe_r_reaccept.log; then
+  fail "Phase R: an already-accepted invite token was accepted a second time"
+else
+  pass "Phase R: accept_workspace_invite rejects an already-redeemed token"
+fi
+rm -f $ARTIFACT_DIR/pfe_r_reaccept.log
+
+# A revoked invite cannot be accepted.
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.workspace_invites (workspace_id, email, role, token_hash, token_prefix, invited_by, status) values ('$Q_HH', 'r2@example.com', 'member', 'r-token-hash-2', 'r-pref-2', '$USER_A', 'revoked');" >/dev/null
+if as_user "$USER_R" "select public.accept_workspace_invite('r-token-hash-2');" >/dev/null 2>$ARTIFACT_DIR/pfe_r_revoked.log; then
+  fail "Phase R: a revoked invite token was accepted"
+else
+  pass "Phase R: accept_workspace_invite rejects a revoked token"
+fi
+rm -f $ARTIFACT_DIR/pfe_r_revoked.log
+
+# --- membership RPC hardening + post-removal access revocation --------
+
+# Re-activate the Q_SRC_A -> Q_HH share so USER_B can see the household txn
+# again, then remove USER_B and confirm the access is gone.
+as_user "$USER_A" "update public.source_space_links set status = 'active' where financial_source_id = '$Q_SRC_A' and workspace_id = '$Q_HH';" >/dev/null
+R_B_SEES_BEFORE_REMOVE="$(as_user "$USER_B" "select count(*) from public.transactions where id = '00000000-0000-0000-0000-0000000000ab';")"
+
+R_MEMB_B="$(psql -d pfe_rls -t -A -c "select id from public.workspace_memberships where workspace_id = '$Q_HH' and user_id = '$USER_B' and status = 'active';" | head -1)"
+as_user "$USER_A" "select public.remove_member('$R_MEMB_B');" >/dev/null
+R_B_SEES_AFTER_REMOVE="$(as_user "$USER_B" "select count(*) from public.transactions where id = '00000000-0000-0000-0000-0000000000ab';")"
+R_REMOVE_AUDIT="$(psql -d pfe_rls -t -A -c "select count(*) from public.space_audit_events where workspace_id = '$Q_HH' and event_type = 'member.removed' and resource_id = '$R_MEMB_B';")"
+if [ "$R_B_SEES_BEFORE_REMOVE" = "1" ] && [ "$R_B_SEES_AFTER_REMOVE" = "0" ] && [ "$R_REMOVE_AUDIT" = "1" ]; then
+  pass "Phase R: remove_member immediately revokes the removed member's Space access and writes a member.removed audit event"
+else
+  fail "Phase R: removal did not revoke access / audit (before=$R_B_SEES_BEFORE_REMOVE after=$R_B_SEES_AFTER_REMOVE audit=$R_REMOVE_AUDIT)"
+fi
+
+# The last-owner guard still holds after the re-issue.
+R_MEMB_A="$(psql -d pfe_rls -t -A -c "select id from public.workspace_memberships where workspace_id = '$Q_HH' and user_id = '$USER_A' and role = 'owner' and status = 'active';" | head -1)"
+if as_user "$USER_A" "select public.set_member_role('$R_MEMB_A', 'member');" >/dev/null 2>$ARTIFACT_DIR/pfe_r_lastowner.log; then
+  fail "Phase R: the sole owner was allowed to demote themselves"
+else
+  pass "Phase R: set_member_role still refuses to demote the final owner (guard survived the re-issue)"
+fi
+rm -f $ARTIFACT_DIR/pfe_r_lastowner.log
+
+# set_member_role writes an audit event (promote USER_R, still a member).
+R_MEMB_R="$(psql -d pfe_rls -t -A -c "select id from public.workspace_memberships where workspace_id = '$Q_HH' and user_id = '$USER_R' and status = 'active';" | head -1)"
+as_user "$USER_A" "select public.set_member_role('$R_MEMB_R', 'admin');" >/dev/null
+R_ROLE_AUDIT="$(psql -d pfe_rls -t -A -c "select count(*) from public.space_audit_events where workspace_id = '$Q_HH' and event_type = 'member.role_changed' and resource_id = '$R_MEMB_R';")"
+if [ "$R_ROLE_AUDIT" = "1" ]; then
+  pass "Phase R: set_member_role writes a member.role_changed audit event"
+else
+  fail "Phase R: expected one member.role_changed audit event, got $R_ROLE_AUDIT"
+fi
+
+# service_role reads the audit trail unaffected by RLS.
+R_SERVICE_AUDIT="$(psql -d pfe_rls -t -A -c "set role service_role; select count(*) from public.space_audit_events where workspace_id = '$Q_HH';" | tail -1)"
+if [ "$R_SERVICE_AUDIT" -ge "1" ]; then
+  pass "Phase R: service_role reads space_audit_events unaffected by RLS"
+else
+  fail "Phase R: service_role could not read space_audit_events (got $R_SERVICE_AUDIT)"
 fi
 
 echo ""

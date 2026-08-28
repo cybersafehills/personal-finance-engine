@@ -14,9 +14,9 @@ never shown as a completed payment.
 - **`supabase/migrations/tests/run_migration_tests.sh` has been run on
   PostgreSQL 17** and passes. Two scan migrations were only
   smoke-applied on pg16 during development (see their headers):
-  `20260910000000_phase_r3_scan_payment_source.sql` (the `source`
+  `20260913000000_scan_payment_source.sql` (the `source`
   column + `create_payment_intent` change) and
-  `20260911000000_scan_merchant_pay_codes.sql` (the seeded MTN
+  `20260913000100_scan_merchant_pay_codes.sql` (the seeded MTN
   pay-merchant code).
 - Generated DB/API types regenerated if your pipeline uses them (this
   repo hand-types its queries, so usually nothing to do).

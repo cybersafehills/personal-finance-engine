@@ -18,12 +18,38 @@ const geistSans = Geist({
   subsets: ["latin"],
 });
 
+// One <link rel="apple-touch-startup-image"> per iPhone family. Without
+// these, an installed iOS PWA shows a solid BLACK screen for the whole
+// cold-start / network wait before the web content paints; with them it
+// shows the same white field + centred mark as the in-app splash, so the
+// opening experience is branded end to end. Regenerate with
+// scripts/generate-ios-launch-assets.py (it prints this array) whenever
+// app/icon.png changes or a new device resolution ships.
+const IOS_STARTUP_IMAGES = [
+  { device: [320, 568, 2] },
+  { device: [375, 667, 2] },
+  { device: [414, 736, 3] },
+  { device: [375, 812, 3] },
+  { device: [414, 896, 2] },
+  { device: [414, 896, 3] },
+  { device: [390, 844, 3] },
+  { device: [428, 926, 3] },
+  { device: [393, 852, 3] },
+  { device: [430, 932, 3] },
+  { device: [402, 874, 3] },
+  { device: [440, 956, 3] },
+].map(({ device: [w, h, r] }) => ({
+  url: `/brand/oneledger/startup/apple-splash-${w * r}-${h * r}.png`,
+  media: `(device-width: ${w}px) and (device-height: ${h}px) and (-webkit-device-pixel-ratio: ${r}) and (orientation: portrait)`,
+}));
+
 export const metadata: Metadata = {
   title: "OneLedger",
   description: "MoMo balance, transactions, and categories.",
   applicationName: "OneLedger",
   appleWebApp: {
     title: "OneLedger",
+    startupImage: IOS_STARTUP_IMAGES,
   },
   openGraph: {
     title: "OneLedger",

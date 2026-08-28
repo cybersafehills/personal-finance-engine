@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { ONELEDGER_MARK_DATA_URI } from "./oneledger-mark-data-uri";
 
 /**
  * OneLedger branded app-opening screen.
@@ -16,30 +17,32 @@ import { useEffect, useRef, useState } from "react";
  *   intended "genuine application opening" trigger set (spec section 6).
  *
  * WHAT DETERMINES READINESS
- *   Two independent timers, both measured from navigation start
- *   (performance.now()), whichever fires first wins:
- *     1. readyToExit = MIN_VISIBLE_MS since the user opened the page.
- *        The critical CSS is inlined in <head> (SPLASH_CRITICAL_CSS), so
- *        the splash paints on the first frame - "time since navigation"
- *        is therefore an honest measure of how long it has been visible,
- *        and stays correct even if JS hydrates before or long after the
- *        first paint.
- *     2. hard cap = HARD_CAP_MS since navigation start, unconditionally.
+ *   The splash is painted from the moment the HTML arrives (its CSS is
+ *   inlined in <head> as SPLASH_CRITICAL_CSS), so it already covers the
+ *   network / iOS-PWA-launch phase. The two exit timers are measured
+ *   from HYDRATION (this component's effect), so that once the app is
+ *   actually interactive the brand screen still gets a clean, full
+ *   showing instead of being torn away the same instant:
+ *     1. readyToExit = MIN_VISIBLE_MS after hydration. The route behind
+ *        the overlay is server-rendered and already in the DOM, so the
+ *        fade reveals finished content, not a blank frame.
+ *     2. hard cap = HARD_CAP_MS after hydration, unconditionally.
  *   The splash deliberately does NOT wait on dashboard data. Per-route
- *   Suspense (app/loading.tsx) and per-page skeletons own that; the
- *   splash only covers initial shell assembly.
+ *   Suspense (app/loading.tsx) and per-page skeletons own that.
+ *
+ *   The pre-hydration wait (slow network, cold serverless) is handled
+ *   separately: the inlined CSS shows the same white field + logo, and
+ *   the iOS launch screen itself is branded via appleWebApp.startupImage
+ *   in app/layout.tsx (without which iOS shows solid black).
  *
  * TIMING (see constants below)
- *   Normal: MIN_VISIBLE_MS visible + EXIT_MS fade  (~= 900ms + 320ms).
- *   Minimum: the logo is shown for at least MIN_VISIBLE_MS since
- *     navigation (MIN_VISIBLE_REDUCED_MS with reduced motion) so it
- *     never flashes - unless hydration itself takes longer than that, in
- *     which case it has already been on screen that whole time and
- *     exits promptly.
- *   Maximum: HARD_CAP_MS. If hydration stalls past this the splash exits
- *     anyway and hands off to whatever the app renders underneath
- *     (dashboard, its skeleton, the auth screen, or an error boundary) -
- *     the user is never trapped behind the logo.
+ *   Normal: MIN_VISIBLE_MS visible + EXIT_MS fade  (~= 900ms + 320ms),
+ *     counted from when the app becomes interactive.
+ *   Minimum: the logo is shown for at least MIN_VISIBLE_MS after
+ *     hydration (MIN_VISIBLE_REDUCED_MS with reduced motion).
+ *   Maximum: HARD_CAP_MS after hydration - then it exits and hands off
+ *     to whatever the app renders underneath (dashboard, its skeleton,
+ *     the auth screen, or an error boundary). The user is never trapped.
  *
  * REDUCED MOTION
  *   prefers-reduced-motion: reduce => no scale/settle animation (in
@@ -55,16 +58,14 @@ import { useEffect, useRef, useState } from "react";
  *   place - it makes no auth decision and cannot flash the wrong page.
  *
  * UPDATING THE LOGO ASSET
- *   LOGO_SRC points at `/icon.png` - Next's file-based metadata route for
- *   app/icon.png, which is the approved 512x512 transparent OneLedger
- *   mark (byte-identical to public/brand/oneledger/app-icons/icon-512.png,
- *   see docs/ONELEDGER_BRAND_ASSETS.md). It is used here specifically
- *   because web/proxy.ts's matcher already exempts `icon.png` from the
- *   session gate; a `/brand/oneledger/...` path would 307 to /login for a
- *   logged-out visitor and render broken on the auth screen's own splash.
- *   To change the mark, replace app/icon.png (and its public/ twin) per
- *   that doc's "Updating assets" steps. Do not inline or hand-trace an
- *   SVG - there is no vector master.
+ *   The logo is inlined as a base64 data URI (ONELEDGER_MARK_DATA_URI,
+ *   generated from the approved app/icon.png by
+ *   scripts/generate-ios-launch-assets.py) and drawn as a CSS
+ *   background, so it paints WITH the splash - no separate request that,
+ *   on a slow link, would leave the white screen empty for a beat. To
+ *   change the mark, replace app/icon.png per docs/ONELEDGER_BRAND_ASSETS.md,
+ *   then re-run that script (it also regenerates the iOS launch images).
+ *   Do not inline or hand-trace an SVG - there is no vector master.
  *
  * KILL SWITCH
  *   `disabled` (from the `oneledger_splash_off=1` cookie, read in
@@ -74,9 +75,6 @@ import { useEffect, useRef, useState } from "react";
  *   the real thing.
  */
 
-/** Approved 512x512 transparent OneLedger mark. Displayed at clamp(64-112px). */
-const LOGO_SRC = "/icon.png";
-
 const MIN_VISIBLE_MS = 900;
 const MIN_VISIBLE_REDUCED_MS = 350;
 const EXIT_MS = 320;
@@ -84,16 +82,18 @@ const HARD_CAP_MS = 2000;
 
 /**
  * Critical CSS for the opening screen, inlined into <head> by
- * app/layout.tsx. It MUST NOT depend on the app's Tailwind/token
- * stylesheet: that sheet loads as a separate render-blocking <link>, and
- * on a slow connection the splash markup can be parsed (and its
- * animation clock started) before it arrives - which showed up in
- * production as a blank/black frame, a collapsed 0x0 overlay, and a logo
- * that had already finished animating by the time anything painted.
- * Inlining it means the white field + centred logo paint on the very
- * first frame. Colours are literal (no CSS custom properties) for the
- * same reason. The `.is-exiting` fade and the full reduced-motion
- * treatment also live here so the whole feature is self-contained.
+ * app/layout.tsx. It MUST be fully self-contained:
+ *   - No dependency on the app's Tailwind/token stylesheet - that loads
+ *     as a separate render-blocking <link>, and on a slow connection the
+ *     splash markup is parsed (and its animation clock started) before
+ *     it arrives. In production that showed as a blank/black frame, a
+ *     collapsed 0x0 overlay, and a logo that had finished animating
+ *     before it painted. Colours here are literal.
+ *   - The logo is the inlined data URI, drawn as a background-image, so
+ *     it needs no network request and appears in the same frame as the
+ *     white field (a separate <img> left the screen blank-white for a
+ *     beat on slow links before the icon popped in).
+ * The `.is-exiting` fade and the reduced-motion treatment live here too.
  */
 export const SPLASH_CRITICAL_CSS = `
 .oneledger-splash{position:fixed;inset:0;z-index:100;display:flex;
@@ -103,7 +103,8 @@ padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-
 opacity:1}
 .oneledger-splash.is-exiting{opacity:0;pointer-events:none;
 transition:opacity 320ms cubic-bezier(0.4,0,0.2,1)}
-.oneledger-splash__logo{width:clamp(64px,12vw,112px);height:auto;
+.oneledger-splash__logo{width:clamp(64px,12vw,112px);aspect-ratio:1;
+background:url("${ONELEDGER_MARK_DATA_URI}") center/contain no-repeat;
 transform-origin:center;
 animation:oneledger-splash-logo-in 640ms cubic-bezier(0.22,1,0.36,1) both}
 @keyframes oneledger-splash-logo-in{
@@ -154,29 +155,27 @@ export function BrandSplashScreen({ disabled = false }: { disabled?: boolean }) 
     };
 
     let exiting = false;
-    const complete = () => {
-      finished = true;
-      setState("complete");
-    };
     const startExit = () => {
-      if (exiting) return; // whichever of the two triggers below fires first wins
+      if (exiting) return; // min-visible and the hard cap both call this
       exiting = true;
       setState((s) => (s === "opening" ? "exiting" : s));
-      push(complete, exitMs);
+      push(() => {
+        finished = true;
+        setState("complete");
+      }, exitMs);
     };
 
-    // Anchor to navigation start, not to this effect: with the critical
-    // CSS inlined the splash paints on the first frame, well before
-    // hydration, so "time since the user opened the page" is the honest
-    // measure of how long the brand screen has actually been visible.
-    // It is also self-bounding - if hydration is slow, `elapsed` is
-    // already large and the timers fire almost immediately.
-    const elapsed =
-      typeof performance !== "undefined" ? performance.now() : 0;
-    // readyToExit: minimum visible time satisfied.
-    push(startExit, minVisible - elapsed);
-    // Hard cap: exit no matter what (stalled hydration, init error, ...).
-    push(startExit, HARD_CAP_MS - elapsed);
+    // Timers are anchored to this effect (i.e. hydration), NOT to
+    // navigation start. The inlined critical CSS keeps the splash painted
+    // from the moment the HTML arrives, so it already covers the network
+    // / iOS-launch phase; what we guarantee here is that once the app is
+    // actually interactive the brand screen still gets its full minimum
+    // showing instead of being torn away the same instant. The route
+    // behind the overlay is server-rendered and already in the DOM, so
+    // fading straight away reveals finished content, not a blank frame.
+    push(startExit, minVisible);
+    // Safety net: never stay past the hard cap once hydrated.
+    push(startExit, HARD_CAP_MS);
 
     return () => {
       armed.forEach(clearTimeout);
@@ -187,34 +186,20 @@ export function BrandSplashScreen({ disabled = false }: { disabled?: boolean }) 
   if (state === "complete") return null;
 
   return (
-    <>
-      <link rel="preload" as="image" href={LOGO_SRC} />
-      <div
-        className={`oneledger-splash${state === "exiting" ? " is-exiting" : ""}`}
-        data-state={state}
-        // Decorative startup chrome: the meaningful loading/skeleton/error
-        // UI lives on the route underneath. Nothing here is focusable, so
-        // focus is neither trapped nor moved, and the node is fully
-        // removed from the DOM once `state === "complete"`.
-        aria-hidden="true"
-        role="presentation"
-      >
-        {/* Deliberate plain <img>, not next/image: a static /public URL is
-            in the first SSR HTML and paints in the opening frame with no
-            JS, optimizer round-trip, or hydration needed - the whole point
-            of the splash. */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={LOGO_SRC}
-          alt=""
-          width={112}
-          height={112}
-          className="oneledger-splash__logo"
-          decoding="async"
-          fetchPriority="high"
-          draggable={false}
-        />
-      </div>
-    </>
+    <div
+      className={`oneledger-splash${state === "exiting" ? " is-exiting" : ""}`}
+      data-state={state}
+      // Decorative startup chrome: the meaningful loading/skeleton/error
+      // UI lives on the route underneath. Nothing here is focusable, so
+      // focus is neither trapped nor moved, and the node is fully removed
+      // from the DOM once `state === "complete"`.
+      aria-hidden="true"
+      role="presentation"
+    >
+      {/* The mark is a CSS background-image (inlined data URI in
+          SPLASH_CRITICAL_CSS), so it paints in the same frame as the
+          white field with no request of its own. */}
+      <div className="oneledger-splash__logo" />
+    </div>
   );
 }

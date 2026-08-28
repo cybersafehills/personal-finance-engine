@@ -34,7 +34,7 @@ export async function getLauncherSnapshot(): Promise<LauncherSnapshot> {
   }
   const [favourites, recent] = await Promise.all([
     getFavourites(),
-    getRecentServices(5),
+    getRecentServices(1),
   ]);
   const toEntry = (c: {
     slug: string;
@@ -49,7 +49,7 @@ export async function getLauncherSnapshot(): Promise<LauncherSnapshot> {
   });
   return {
     favourites: favourites.slice(0, 5).map(toEntry),
-    recent: recent.map(toEntry),
+    recent: recent.slice(0, 1).map(toEntry),
   };
 }
 
