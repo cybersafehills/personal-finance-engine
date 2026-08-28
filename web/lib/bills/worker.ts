@@ -6,6 +6,7 @@ import { runValidation } from "./validation/engine";
 import type { ValidationContext, ValidationPolicy } from "./validation/types";
 import { RULESET_VERSION } from "./validation/types";
 import { scoreDuplicates, type Fingerprint } from "./duplicates/detect";
+import { scoreTransactionMatches, type TxnCandidate } from "./matching/score";
 import { normalizeSupplierName } from "./normalize";
 import { logBillError } from "./analytics";
 
@@ -130,6 +131,11 @@ export async function runBillProcessingTick(
       }
       try {
         await resolveSupplier(admin, doc.id, doc.workspace_id);
+      } catch (err) {
+        logBillError("record", err);
+      }
+      try {
+        await matchTransactions(admin, doc.id, doc.workspace_id);
       } catch (err) {
         logBillError("record", err);
       }
@@ -439,5 +445,78 @@ async function resolveSupplier(
 
   await admin.rpc("record_bill_supplier_candidates", {
     payload: { bill_document_id: billDocumentId, workspace_id: workspaceId, candidates },
+  });
+}
+
+async function matchTransactions(
+  admin: Admin,
+  billDocumentId: string,
+  workspaceId: string,
+): Promise<void> {
+  const { data: doc } = await admin
+    .from("bill_documents")
+    .select("status")
+    .eq("id", billDocumentId)
+    .maybeSingle();
+  if (!doc || doc.status !== "needs_review") return; // only pre-approval
+
+  const { data: extraction } = await admin
+    .from("bill_extractions")
+    .select("id")
+    .eq("bill_document_id", billDocumentId)
+    .eq("is_current", true)
+    .maybeSingle();
+  if (!extraction) return;
+
+  const { data: fieldRows } = await admin
+    .from("bill_extracted_fields")
+    .select("field_key, normalized_value, raw_value")
+    .eq("extraction_id", extraction.id)
+    .in("field_key", ["total", "currency", "issue_date", "supplier_name", "invoice_number"]);
+
+  const totalMinor = fieldValue(fieldRows, "total");
+  if (!totalMinor) return;
+
+  const { data: txns, error } = await admin.rpc("get_bill_transaction_search_set", {
+    p_bill_document_id: billDocumentId,
+  });
+  if (error) {
+    logBillError("record", error);
+    return;
+  }
+
+  const candidates: TxnCandidate[] = (
+    (txns ?? []) as Array<Record<string, string | null>>
+  ).map((t) => ({
+    transactionId: t.transaction_id as string,
+    occurredAt: t.occurred_at as string,
+    amountMinor: t.amount_minor != null ? String(t.amount_minor) : "0",
+    currency: (t.currency as string) ?? "",
+    counterpartyName: t.counterparty_name,
+    counterpartyReference: t.counterparty_reference,
+  }));
+
+  const matches = scoreTransactionMatches(
+    {
+      totalMinor,
+      currency: fieldValue(fieldRows, "currency"),
+      issueDate: fieldValue(fieldRows, "issue_date"),
+      supplierName: fieldValue(fieldRows, "supplier_name"),
+      invoiceNumber: fieldValue(fieldRows, "invoice_number"),
+    },
+    candidates,
+  );
+
+  await admin.rpc("record_bill_transaction_match_candidates", {
+    payload: {
+      bill_document_id: billDocumentId,
+      workspace_id: workspaceId,
+      candidates: matches.map((m) => ({
+        transaction_id: m.transactionId,
+        score: m.score,
+        reasons_for: m.reasonsFor,
+        reasons_against: m.reasonsAgainst,
+      })),
+    },
   });
 }

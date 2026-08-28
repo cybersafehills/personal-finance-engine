@@ -8,12 +8,14 @@ import { BillExtractedFields } from "../../../components/bills/BillExtractedFiel
 import { BillValidationFindings } from "../../../components/bills/BillValidationFindings";
 import { BillDuplicateCandidates } from "../../../components/bills/BillDuplicateCandidates";
 import { BillSupplierPanel } from "../../../components/bills/BillSupplierPanel";
+import { BillLedgerPanel } from "../../../components/bills/BillLedgerPanel";
 import { BillRetryButton } from "../../../components/bills/BillRetryButton";
 import { isBillsEnabled, isBillsExtractionEnabled } from "../../../lib/bills/gate";
 import {
   getActiveBillContext,
   getBillDocumentById,
   getBillDuplicateCandidates,
+  getBillLedger,
   getBillProcessingEvents,
   getBillSupplierCandidates,
   getBillSupplierLink,
@@ -64,6 +66,7 @@ export default async function BillDetailPage({
   const [supplierLink, supplierCandidates] = extractionEnabled
     ? await Promise.all([getBillSupplierLink(id), getBillSupplierCandidates(id)])
     : [null, []];
+  const ledger = extractionEnabled ? await getBillLedger(id) : null;
   const extractedName =
     bundle?.fields.find((f) => f.field_key === "supplier_name")?.normalized_value ??
     bundle?.fields.find((f) => f.field_key === "supplier_name")?.raw_value ??
@@ -176,6 +179,22 @@ export default async function BillDetailPage({
           <BillDuplicateCandidates
             documentId={doc.id}
             candidates={duplicates}
+            canReview={permissions.canReview}
+          />
+        </section>
+      )}
+
+      {extractionEnabled && ledger && (
+        <section className="flex flex-col gap-3">
+          <h2 className="text-sm font-semibold text-text-secondary">
+            Approval &amp; ledger
+          </h2>
+          <BillLedgerPanel
+            documentId={doc.id}
+            status={doc.status}
+            ledger={ledger}
+            canApprove={permissions.canApprove}
+            canPost={permissions.canPost}
             canReview={permissions.canReview}
           />
         </section>
