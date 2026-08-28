@@ -124,6 +124,41 @@ learning an optional `source` key — is
 apply of the full chain on PostgreSQL 16 but NOT by
 `run_migration_tests.sh` (needs pg17) — run that before merge.**
 
+### R4 — reconciliation & expiry
+
+**No new code in the reconciliation path.** A `source = 'qr_scan'` intent
+is a first-class `payment_intent`, and the Phase 2b reconciler
+(`reconciliation_candidate_intents` → `reconcile_payment_intent`, its
+retry cron `reconcile-pending-payments`, and the on-hand-off call from
+`recordScanHandoff`) and the expiry sweep (`expire_stale_payment_intents`
+/ `expire-payment-intents`) all key off `state` / `expires_at` /
+`recipient_msisdn_normalized`, never `source`. A scanned **send-money**
+USSD carries the normalized msisdn, so it deterministically matches an
+ingested MoMo transaction exactly like an assisted `pay_person`; a
+scanned **merchant / bill** code has no msisdn and stays
+awaiting-confirmation (same limitation as assisted `pay_merchant`).
+Verified end-to-end on pg16: `qr_scan` intent + matching `mtn_momo`
+transaction → `reconcile_payment_intent('apply')` → `linked` /
+`successful` / `verified`; and a past-due `qr_scan` intent → swept to
+`expired` with its `payment_events` trail intact.
+
+What R4 *does* change:
+
+- **`payment_intents.source` is now read + shown.** `INTENT_COLUMNS` /
+  `PaymentIntentRow` select it; `/pay/activity` and `PaymentIntentPanel`
+  show a **"From a scan"** badge.
+- **The lifecycle surface is gated on assisted OR scan.**
+  `isPaymentIntentSurfaceEnabled` (`isAssistedPayEnabled ||
+  isScanToPayEnabled`) now guards `/pay/[id]`, `/pay/activity`,
+  `/pay/reconciliation`, and the confirm / cancel / fail / reconcile /
+  re-hand-off actions in `assisted-actions.ts` — so a scan intent stays
+  viewable and manageable on a workspace where the assisted *form* is
+  off. Draft creation / editing / "pay again" / templates / trusted
+  recipients stay assisted-only.
+- Manual confirmation of a scan intent flows through the existing
+  `manually_confirm_payment` — labelled **"Manually confirmed"**, never
+  a verified check (ADR 0002 unchanged).
+
 | Concern | Location |
 |---|---|
 | Feature gate | `isScanToPayEnabled` / `assertScanToPayEnabled` in `web/lib/pay/gate.ts` |
@@ -134,6 +169,8 @@ apply of the full chain on PostgreSQL 16 but NOT by
 | Server actions | `web/app/pay/scan/actions.ts` — `classifyScannedCode` · `prepareScanHandoff` · `recordScanHandoff`; resolver `web/lib/pay/scan/resolve.server.ts` (`matchUssdInDirectory` via `getServiceDirectory`) |
 | Provider-link allowlist | `PROVIDER_LINK_ALLOWLIST` in `web/lib/pay/scan/provider-link.ts` (empty) |
 | Schema | `payment_intents.source` + `create_payment_intent` in `supabase/migrations/20260910000000_phase_r3_scan_payment_source.sql` |
+| Lifecycle-surface gate | `isPaymentIntentSurfaceEnabled` in `web/lib/pay/gate.ts` — guards `/pay/[id]`, `/pay/activity`, `/pay/reconciliation`, and the lifecycle actions |
+| Reconciliation / expiry | unchanged — `reconcile-pending-payments` / `expire-payment-intents` crons + `reconcile_payment_intent` are source-agnostic |
 | Privacy-safe events (no payload/PII ever) | `web/lib/pay/scan-analytics.ts` (+ `scan-analytics_test.ts`) |
 | e2e | `web/e2e/pay-scan.spec.ts` (skipped unless `SCAN_TO_PAY_ENABLED=true` + a fake camera — see the file header) |
 

@@ -178,6 +178,7 @@ const en = {
       budgetLabel: "Budget (optional)",
       trustBadgeSaved: "Saved",
       trustBadgeTrusted: "Trusted by you",
+      fromScan: "From a scan",
       trustNotProviderVerified: "Neither means your provider has verified this recipient.",
       nextAction: "Next: hand off to your provider",
       prepare: "Prepare payment",

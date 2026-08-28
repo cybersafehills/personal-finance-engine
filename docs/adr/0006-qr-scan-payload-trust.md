@@ -1,7 +1,8 @@
 # ADR 0006: A scanned QR is untrusted data — every payload passes a fixed classify → validate → resolve → allowlist pipeline before it can become an action
 
-- **Status:** Accepted (Pay & Services — Phases R2–R3, "Scan to pay")
-- **Date:** 2026-08-28 (R2); amended 2026-08-28 (R3 — review & hand-off)
+- **Status:** Accepted (Pay & Services — Phases R2–R4, "Scan to pay")
+- **Date:** 2026-08-28 (R2); amended 2026-08-28 (R3 — review & hand-off;
+  R4 — reconciliation)
 - **Context:** R1 shipped the camera scanner shell. R2 adds QR *decoding*
   and turns a decoded string into a structured, display-ready payment
   instruction. A QR code is attacker-controllable: a merchant sticker
@@ -112,6 +113,23 @@ The idempotency key is deterministic —
 `qr:` + sha256(`dial` + `|` + `amount_minor`) — so a double-tap or a
 re-scan of the same code within the TTL returns the existing draft
 (`existed: true`), never a duplicate.
+
+### 11. Reconciliation reuses Phase 2b unchanged (R4)
+
+A `source = 'qr_scan'` intent carries the same match keys an assisted
+`pay_person` does (`recipient_msisdn_normalized`, `amount_minor`,
+`provider`, time window), so `reconciliation_candidate_intents` /
+`reconcile_payment_intent`, its retry cron, and the expiry sweep pick it
+up with **zero changes** — they never look at `source`. A scanned
+send-money USSD auto-reconciles against an ingested MoMo SMS; a scanned
+merchant/bill code (no msisdn) stays awaiting-confirmation, the same as
+assisted `pay_merchant`. Reaching `successful` still needs ADR-0002
+evidence; manual confirmation is still labelled "Manually confirmed".
+
+The one app-layer change: the payment-intent *lifecycle surface*
+(`/pay/[id]`, activity, reconciliation, and confirm/cancel/fail/reconcile
+actions) is gated `isAssistedPayEnabled || isScanToPayEnabled` so a scan
+intent is manageable even where the assisted form is off.
 
 ## Consequences
 

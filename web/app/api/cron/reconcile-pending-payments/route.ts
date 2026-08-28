@@ -9,6 +9,13 @@ import { supabaseServer } from "../../../../lib/supabase-server";
 // user has already left the review screen, or ingestion ran before the
 // intent existed.
 //
+// SOURCE-AGNOSTIC: it selects on `state` only, so Phase R3 `source =
+// 'qr_scan'` intents are picked up here with no change. A scanned
+// send-money USSD carries `recipient_msisdn_normalized`, so
+// reconcile_payment_intent matches it exactly like an assisted
+// pay_person; a scanned merchant/bill code has no msisdn and is skipped
+// (`no_recipient_msisdn`) - the same limitation as assisted pay_merchant.
+//
 // OFF unless SMS_RECONCILIATION_ENABLED === "true". NOT YET WIRED TO A
 // SCHEDULER (mirrors the other cron routes) - see
 // supabase/scheduling/activate_payment_reconciliation.sql. Idempotent:

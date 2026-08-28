@@ -12,6 +12,8 @@ export type PaymentIntentRow = {
   workspace_id: string;
   created_by: string | null;
   idempotency_key: string;
+  /** 'assisted' (Assisted Quick Pay form) or 'qr_scan' (Scan to pay). */
+  source: string;
   payment_type: string;
   provider: string | null;
   source_account_id: string | null;
@@ -64,7 +66,7 @@ export type PaymentAttemptRow = {
 };
 
 const INTENT_COLUMNS =
-  "id, workspace_id, created_by, idempotency_key, payment_type, provider, source_account_id, currency, amount_minor, fee_minor, recipient_kind, recipient_name, recipient_msisdn_normalized, recipient_msisdn_masked, merchant_code, meter_number, billing_reference, government_reference, service_code_id, ussd_string_redacted, note, category, budget_id, trusted_recipient_id, template_id, handoff_method, state, expires_at, linked_transaction_id, verified_at, manually_confirmed_at, manually_confirmed_by, session_fresh_at_creation, created_at, updated_at";
+  "id, workspace_id, created_by, idempotency_key, source, payment_type, provider, source_account_id, currency, amount_minor, fee_minor, recipient_kind, recipient_name, recipient_msisdn_normalized, recipient_msisdn_masked, merchant_code, meter_number, billing_reference, government_reference, service_code_id, ussd_string_redacted, note, category, budget_id, trusted_recipient_id, template_id, handoff_method, state, expires_at, linked_transaction_id, verified_at, manually_confirmed_at, manually_confirmed_by, session_fresh_at_creation, created_at, updated_at";
 
 /**
  * Lazily present a past-`expires_at`, still-open intent as `expired`

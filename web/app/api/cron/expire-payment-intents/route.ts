@@ -8,6 +8,11 @@ import { supabaseServer } from "../../../../lib/supabase-server";
 // belt-and-braces — it makes the stored state authoritative and writes
 // the lifecycle event.
 //
+// SOURCE-AGNOSTIC: expire_stale_payment_intents keys off state + expires_at
+// only, so Phase R3 `source = 'qr_scan'` intents expire on the same
+// PAYMENT_INTENT_TTL_HOURS policy. Expiry only changes state + writes an
+// event; the payment_events / payment_attempts audit trail is preserved.
+//
 // NOT YET WIRED TO A SCHEDULER. Mirrors the report-generation route: the
 // pg_cron activation is a separate, manual step
 // (supabase/scheduling/activate_payment_intent_expiry.sql). Calling this

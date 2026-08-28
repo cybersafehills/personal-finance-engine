@@ -3,7 +3,7 @@ import { PageHeader } from "../../../components/PageHeader";
 import { EmptyState } from "../../../components/EmptyState";
 import { PaymentIntentPanel } from "../../../components/pay/PaymentIntentPanel";
 import { getAccounts, getActiveWorkspaceId, getBudgets } from "../../../lib/queries";
-import { isAssistedPayEnabled } from "../../../lib/pay/gate";
+import { isPaymentIntentSurfaceEnabled } from "../../../lib/pay/gate";
 import {
   getPaymentIntent,
   getTrustedRecipients,
@@ -21,7 +21,7 @@ export default async function PaymentIntentPage({
   params: Promise<{ id: string }>;
 }) {
   const workspaceId = await getActiveWorkspaceId();
-  if (!isAssistedPayEnabled(workspaceId)) {
+  if (!isPaymentIntentSurfaceEnabled(workspaceId)) {
     return (
       <div>
         <PageHeader title="Pay" backHref="/pay/activity" backLabel="Payment activity" />

@@ -154,6 +154,25 @@ export function assertScanToPayEnabled(workspaceId: string | null): void {
   }
 }
 
+/**
+ * The payment-intent LIFECYCLE surface: the activity list, `/pay/[id]`,
+ * and the confirm / cancel / fail / reconcile actions. Assisted Quick
+ * Pay OR Scan to pay is enough - a `source = 'qr_scan'` intent (Phase
+ * R3+) is a first-class `payment_intent` and must stay viewable and
+ * manageable even on a workspace where the assisted *form*
+ * (`ASSISTED_PAY_ENABLED`) is turned off. Draft creation / editing /
+ * "pay again" / templates / trusted recipients remain assisted-only.
+ */
+export function isPaymentIntentSurfaceEnabled(workspaceId: string | null): boolean {
+  return isAssistedPayEnabled(workspaceId) || isScanToPayEnabled(workspaceId);
+}
+
+export function assertPaymentIntentSurfaceEnabled(workspaceId: string | null): void {
+  if (!isPaymentIntentSurfaceEnabled(workspaceId)) {
+    throw new FeatureDisabledError("payment_intent_surface");
+  }
+}
+
 /** Draft-intent TTL, in hours. Default 24. */
 export function paymentIntentTtlHours(): number {
   const raw = Number(process.env.PAYMENT_INTENT_TTL_HOURS);

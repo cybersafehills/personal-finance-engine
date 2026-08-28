@@ -3,7 +3,7 @@ import { PageHeader } from "../../../components/PageHeader";
 import { EmptyState } from "../../../components/EmptyState";
 import { Badge } from "../../../components/Badge";
 import { getActiveWorkspaceId } from "../../../lib/queries";
-import { isAssistedPayEnabled } from "../../../lib/pay/gate";
+import { isPaymentIntentSurfaceEnabled } from "../../../lib/pay/gate";
 import { getPaymentActivity } from "../../../lib/pay/intents";
 import { statusLabel, statusTone } from "../../../lib/pay/state";
 import { messages } from "../../../lib/ussd/messages";
@@ -24,7 +24,7 @@ export default async function PaymentActivityPage() {
   const workspaceId = await getActiveWorkspaceId();
   const t = messages().pay.assisted;
 
-  if (!isAssistedPayEnabled(workspaceId)) {
+  if (!isPaymentIntentSurfaceEnabled(workspaceId)) {
     return (
       <div>
         <PageHeader title={t.activityTitle} />
@@ -83,6 +83,12 @@ export default async function PaymentActivityPage() {
                     <span>{TYPE_LABEL[i.payment_type] ?? i.payment_type}</span>
                     <span aria-hidden="true">·</span>
                     <span>{new Date(i.created_at).toLocaleDateString()}</span>
+                    {i.source === "qr_scan" && (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        <span>{t.fromScan}</span>
+                      </>
+                    )}
                   </div>
                 </Link>
                 <Badge variant={TONE_VARIANT[statusTone(i)]}>{statusLabel(i)}</Badge>
