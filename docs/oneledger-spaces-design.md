@@ -1026,6 +1026,94 @@ canonical transaction's detail page.
 
 ---
 
+## 11k. Phase U PR5 — as built (web)
+
+The duplicate-resolution trail on `/transactions/[id]`. **Web only — no
+migration**, no new grant. Closes the loop opened by PR3/PR3b: a merge is
+now visible from both ends.
+
+- **`getTransactionDuplicateContext(id)`** (`web/lib/queries.ts`) — one
+  read of the row's `dedupe_state` / `merged_into_transaction_id`, then
+  (only if relevant) the canonical it was merged into and the rows merged
+  into it. Returns null only if the transaction itself can't be read.
+  `getTransactionById` deliberately still resolves a `merged` row (its
+  `TRANSACTION_COLUMNS` read was never given the PR3b `.neq` filter), so a
+  direct link keeps working.
+- **`TransactionDuplicateSection`** (server component) renders nothing for
+  an ordinary `unique` row with no merged children. Otherwise a
+  "Duplicates" card: a "flagged as a possible duplicate → Review it" line
+  for `possible_duplicate`; a "merged into another transaction … → Open
+  the kept transaction" line for a `merged` row; and a list of the
+  transactions merged **into** this one ("kept as a record, left out of
+  every total"), each linking to its own detail page.
+
+`next build` ✓, `eslint` 0. No migration, no test-suite change.
+
+---
+
+## 11l. Phase U PR6 — as built (migration `20260924000000` + Deno)
+
+Categorization-policy **scope**. A policy is `space`-scoped (default,
+workspace-wide — unchanged) or `source`-scoped (applies only to
+transactions from one `financial_source_id`). **Priority stays the
+primary ordering**; scope is a within-tier ranking bump only, so a
+deliberately high-priority space rule is never overridden by a narrower
+one. Backend only — the policy-form scope selector is **PR6b (web)**.
+
+- **Migration** — `categorization_policies.scope_type` (`'space'` default
+  / `'source'`), `.scope_source_id` (nullable FK to `financial_sources`),
+  a biconditional CHECK (`source` ⟺ `scope_source_id is not null`), a
+  partial index on `scope_source_id`. `policy_matches_transaction()`
+  (Phase G) re-issued (`create or replace`) with a leading scope clause:
+  `scope_type <> 'source' or scope_source_id = txn.financial_source_id`
+  (a `source` policy never matches a transaction with no source). No new
+  table / grant / function / policy — counters unchanged (71 / 115 / 71).
+- **`policy-engine.ts`** — `EvaluatePoliciesInput` gains
+  `financialSourceId`; `matchesScope()` filters `source` policies before
+  ranking; the sort is now
+  `priority ↑, then source-before-space, then condition count`; the
+  tied-for-best conflict group compares scope too; `buildExplanation()`
+  appends "for this account" for a source match. `index.ts` passes the
+  routed `resolvedFinancialSourceId`. The SQL/Deno sync comment now names
+  both migrations.
+- **Tests** — 3-assertion "Phase U PR6" migration block (scope-honouring
+  match counts via `preview_policy_historical_match_count`, both CHECK
+  rejections). Suite **236 passed / 0 failed**. `deno test ingest-momo`
+  **78 passed** (+4 scope cases: source match isolation, source beats
+  same-priority space, priority still beats scope, explanation text).
+  `deno check` / `deno fmt` / `deno lint` green.
+
+Still deferred: statement (CSV/PDF) reconciliation; **PR6b** — the
+`PolicyForm` "applies to" selector (Space-wide vs a specific source) +
+`getCategorizationPolicies` / `upsertPolicy` / `PolicyItem` plumbing.
+
+---
+
+## 11m. Phase U PR6b — as built (web)
+
+The policy-form surface for PR6's scope. **Web only, no migration.**
+
+- **`getCategorizationPolicies` / `getCategorizationPolicyById`** now
+  return `scope_type` / `scope_source_id` (added to
+  `CATEGORIZATION_POLICY_COLUMNS` and `CategorizationPolicyRow`).
+- **`PolicyForm`** gains an "Applies to" fieldset — *Every account in this
+  Space* (default) vs *One account only* + a `<select>` of the caller's
+  financial sources (`financialSourceOptions()` over
+  `getMyFinancialSources()`). Hidden entirely when the caller has no
+  sources. `upsertPolicy` gains `scopeType` / `scopeSourceId`, validates
+  the pair (source requires an id), and writes `scope_type` /
+  `scope_source_id` (null for space).
+- **`PolicyItem`** shows a neutral badge with the source label (or "One
+  account") for a `source`-scoped rule; the rules list resolves the label
+  from one `getMyFinancialSources()` call.
+- New tiny helper `web/lib/financial-source-options.ts` (shared by the
+  three rules pages).
+
+`next build` ✓, `eslint` 0. Rule scope/precedence/explainability is now
+complete (PR6 backend + PR6b web).
+
+---
+
 ## 11n. Phase U PR7 — as built (migration `20260925000000`, backend)
 
 Generic-CSV **statement import** — the write path. The web layer (PR7b)
@@ -1068,6 +1156,39 @@ re-import no-op; non-owner refusal). Full suite: **237 passed / 0 failed**.
 Still deferred: **PR7b (web)** — the CSV upload + column-mapping + preview
 + confirm flow calling `import_statement_transactions`, with an import
 summary and a link into the duplicate-review queue.
+
+---
+
+## 11o. Phase U PR7b — as built (web)
+
+The upload/mapping/preview flow that calls `import_statement_transactions`
+(PR7). **Web only, no migration**, no new dependency.
+
+- **`web/lib/csv.ts`** — a ~90-line RFC-4180-ish parser (quoted fields,
+  embedded commas/newlines, `""` escaping, CRLF/LF, BOM strip, blank-row
+  drop). Statement import is its only caller.
+- **`web/lib/statement-import.ts`** — pure normalizers to the RPC's row
+  shape: `parseAmount` (symbols, thousands separators, `(…)` negatives;
+  RWF is zero-decimal), `parseStatementDate` (ISO / day-first / month-first
+  slash or dot dates → ISO, rollovers rejected), `normalizeStatementRow`
+  with a `directionStrategy` of `sign` | `column` (debit/credit words) |
+  `all_out` | `all_in`, `guessMapping` to pre-fill the picker from header
+  names. Unparseable rows are dropped and counted, never fatal.
+- **`/settings/sources/import`** (`StatementImportFlow`) — pick a source,
+  drop a CSV, match the columns (date + date-format, amount,
+  counterparty?, reference?, direction strategy), a live preview
+  (`N importable · M skipped` + a sample table), then **Import** →
+  `importStatement` server action → the RPC. A result screen shows
+  `added` / `flagged as possible duplicates` / `skipped` with a link
+  straight into `/transactions/review` when anything was flagged. The
+  action caps a file at 5000 rows and re-shape-checks every row; the RPC
+  remains the authority. Linked from the Shared-accounts page header.
+- Tests: `web/lib/statement_import_test.ts` (8 cases — CSV edge cases,
+  amount/date parsing, all four direction strategies, skip-not-fail).
+  `next build` ✓, `eslint` 0.
+
+**Statement reconciliation complete** (PR7 backend + PR7b web). Phase U
+has no remaining deferred items.
 
 ---
 

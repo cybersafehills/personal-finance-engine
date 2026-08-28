@@ -3494,6 +3494,58 @@ fi
 rm -f $ARTIFACT_DIR/pfe_u_pr4.log
 
 # ===========================================================================
+# Phase U PR6: categorization-policy scope. A 'source'-scoped policy only
+# matches transactions from its scope_source_id; 'space' (default) matches
+# workspace-wide. Verified through preview_policy_historical_match_count(),
+# which runs the re-issued policy_matches_transaction(). Reuses pfe_rls
+# (USER_A / WORKSPACE_A / U_SRC / U_ACCT).
+# ===========================================================================
+echo "=== Phase U PR6: categorization-policy scope ==="
+
+U_SRC2="$(psql -d pfe_rls -t -A -c "set role service_role; insert into public.financial_sources (owner_user_id, provider, source_type, display_name, currency) values ('$USER_A', 'airtel_money', 'mobile_money', 'Alice Airtel (U6)', 'RWF') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+U6_ACCT2="$(psql -d pfe_rls -t -A -c "set role service_role; insert into public.accounts (workspace_id, name, provider, currency, financial_source_id) values ('$WORKSPACE_A', 'Alice second acct (U6)', 'mtn_momo', 'RWF', '$U_SRC2') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+
+# One uncategorized transaction on each source, same distinctive counterparty.
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.transactions (id, source, financial_source_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version, counterparty_name) values
+    ('00000000-0000-0000-0000-00000000006a', 'manual', '$U_SRC',  '$U_ACCT',   '$WORKSPACE_A', 'merchant_payment', 'out', 'success', 4000, 0, now(), 'test', 'SCOPE-TEST-CP'),
+    ('00000000-0000-0000-0000-00000000006b', 'manual', '$U_SRC2', '$U6_ACCT2', '$WORKSPACE_A', 'merchant_payment', 'out', 'success', 4000, 0, now(), 'test', 'SCOPE-TEST-CP');
+" >/dev/null
+
+U6_SPACE_POLICY="$(psql -d pfe_rls -t -A -c "
+  insert into public.categorization_policies (workspace_id, category, merchant_pattern, match_type, confidence, priority)
+  values ('$WORKSPACE_A', 'Scoped test - space', 'scope-test-cp', 'exact', 1.0, 100)
+  returning id;" | head -1)"
+U6_SOURCE_POLICY="$(psql -d pfe_rls -t -A -c "
+  insert into public.categorization_policies (workspace_id, category, merchant_pattern, match_type, confidence, priority, scope_type, scope_source_id)
+  values ('$WORKSPACE_A', 'Scoped test - source', 'scope-test-cp', 'exact', 1.0, 100, 'source', '$U_SRC')
+  returning id;" | head -1)"
+
+U6_SPACE_MATCHES="$(as_user "$USER_A" "select public.preview_policy_historical_match_count('$U6_SPACE_POLICY');")"
+U6_SOURCE_MATCHES="$(as_user "$USER_A" "select public.preview_policy_historical_match_count('$U6_SOURCE_POLICY');")"
+if [ "$U6_SPACE_MATCHES" = "2" ] && [ "$U6_SOURCE_MATCHES" = "1" ]; then
+  pass "Phase U PR6: policy_matches_transaction honours scope - a space policy matches both sources' transactions, a source-scoped policy only its own"
+else
+  fail "Phase U PR6: scope match wrong (space=$U6_SPACE_MATCHES expected 2, source=$U6_SOURCE_MATCHES expected 1)"
+fi
+
+# The consistency CHECK rejects an inconsistent scope.
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "insert into public.categorization_policies (workspace_id, category, scope_type) values ('$WORKSPACE_A', 'Bad scope', 'source');" >/dev/null 2>$ARTIFACT_DIR/pfe_u_pr6.log; then
+  fail "Phase U PR6: a source-scoped policy with no scope_source_id was accepted"
+else
+  pass "Phase U PR6: the scope-consistency CHECK rejects scope_type='source' without a scope_source_id"
+fi
+
+# And rejects the reverse (a space policy carrying a stray scope_source_id).
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "insert into public.categorization_policies (workspace_id, category, scope_type, scope_source_id) values ('$WORKSPACE_A', 'Bad scope 2', 'space', '$U_SRC');" >/dev/null 2>$ARTIFACT_DIR/pfe_u_pr6.log; then
+  fail "Phase U PR6: a space-scoped policy carrying a scope_source_id was accepted"
+else
+  pass "Phase U PR6: the scope-consistency CHECK rejects scope_type='space' with a scope_source_id"
+fi
+rm -f $ARTIFACT_DIR/pfe_u_pr6.log
+
+# ===========================================================================
 # Phase U PR7: generic-CSV statement import (import_statement_transactions).
 # Reuses pfe_rls: USER_A owns U_SRC (mtn_momo, masked_identifier NULL) ->
 # U_ACCT -> WORKSPACE_A; USER_B is not the owner.

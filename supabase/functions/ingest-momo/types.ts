@@ -74,4 +74,7 @@ export type CategorizationPolicyRow = {
   amount_max_rwf: number | null;
   time_start: string | null;
   time_end: string | null;
+  /** Phase U PR6: 'space' (workspace-wide, default) or 'source' (only its scope_source_id). */
+  scope_type: "space" | "source" | string;
+  scope_source_id: string | null;
 };

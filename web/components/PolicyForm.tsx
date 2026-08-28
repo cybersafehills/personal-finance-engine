@@ -24,11 +24,13 @@ const INPUT_CLASS =
   "min-h-11 rounded-control border border-border-strong bg-background px-3 py-2 text-sm text-text-primary";
 
 export function PolicyForm(
-  { mode, policy, template }: {
+  { mode, policy, template, sources = [] }: {
     mode: "create" | "edit";
     policy?: CategorizationPolicyRow;
     /** Pre-fills defaults on a fresh create form; ignored in edit mode. Nothing is saved until the user submits. */
     template?: PolicyTemplate;
+    /** The caller's financial sources, for the "applies to one account" option. */
+    sources?: Array<{ id: string; label: string }>;
   },
 ) {
   const router = useRouter();
@@ -53,6 +55,12 @@ export function PolicyForm(
   const [timeStart, setTimeStart] = useState(policy?.time_start?.slice(0, 5) ?? "");
   const [timeEnd, setTimeEnd] = useState(policy?.time_end?.slice(0, 5) ?? "");
   const [priority, setPriority] = useState(policy?.priority?.toString() ?? "100");
+  const [scopeType, setScopeType] = useState<"space" | "source">(
+    policy?.scope_type ?? "space",
+  );
+  const [scopeSourceId, setScopeSourceId] = useState(
+    policy?.scope_source_id ?? sources[0]?.id ?? "",
+  );
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -72,6 +80,8 @@ export function PolicyForm(
           timeStart,
           timeEnd,
           priority,
+          scopeType,
+          scopeSourceId,
         },
         policy?.id,
       );
@@ -129,6 +139,48 @@ export function PolicyForm(
           />
         </label>
       </div>
+
+      {sources.length > 0 && (
+        <fieldset className="flex flex-col gap-2 text-sm">
+          <legend className="font-medium text-text-secondary">Applies to</legend>
+          <label className="flex items-center gap-2">
+            <input
+              type="radio"
+              name="scope-type"
+              checked={scopeType === "space"}
+              onChange={() => setScopeType("space")}
+            />
+            <span className="text-text-primary">
+              Every account in this Space
+            </span>
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="radio"
+              name="scope-type"
+              checked={scopeType === "source"}
+              onChange={() => setScopeType("source")}
+            />
+            <span className="text-text-primary">One account only</span>
+          </label>
+          {scopeType === "source" && (
+            <select
+              value={scopeSourceId}
+              onChange={(e) => setScopeSourceId(e.target.value)}
+              aria-label="Account this rule applies to"
+              className={`${INPUT_CLASS} mt-1`}
+            >
+              {sources.map((s) => (
+                <option key={s.id} value={s.id}>{s.label}</option>
+              ))}
+            </select>
+          )}
+          <span className="text-xs text-text-muted">
+            An account-only rule outranks a Space-wide one at the same
+            priority — but priority still comes first.
+          </span>
+        </fieldset>
+      )}
 
       <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
         Conditions

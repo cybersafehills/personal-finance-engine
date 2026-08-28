@@ -502,6 +502,101 @@ export async function getSpaceDuplicateReview(): Promise<
   return Array.from(byFingerprint.values());
 }
 
+export type TransactionDuplicateContext = {
+  dedupeState:
+    | "unique"
+    | "possible_duplicate"
+    | "confirmed_duplicate"
+    | "merged";
+  /** Set when this transaction is itself `merged` - the canonical it was folded into. */
+  mergedInto:
+    | { id: string; occurredAt: string; counterparty: string | null }
+    | null;
+  /** Transactions that were merged INTO this one (kept for evidence, excluded from totals). */
+  mergedDuplicates: Array<{
+    id: string;
+    occurredAt: string;
+    counterparty: string | null;
+    source: string;
+  }>;
+};
+
+/**
+ * Duplicate-resolution context for one transaction's detail page (Phase U
+ * PR5): whether it is flagged / was merged away, and which other rows
+ * were merged into it. Returns null only if the transaction itself can't
+ * be read.
+ */
+export async function getTransactionDuplicateContext(
+  id: string,
+): Promise<TransactionDuplicateContext | null> {
+  const supabase = await supabaseSession();
+
+  const { data: self, error: selfError } = await supabase
+    .from("transactions")
+    .select("dedupe_state, merged_into_transaction_id")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (selfError || !self) {
+    if (selfError) {
+      console.error(
+        "getTransactionDuplicateContext failed:",
+        selfError.message,
+      );
+    }
+    return null;
+  }
+
+  const row = self as unknown as {
+    dedupe_state: TransactionDuplicateContext["dedupeState"];
+    merged_into_transaction_id: string | null;
+  };
+
+  let mergedInto: TransactionDuplicateContext["mergedInto"] = null;
+  if (row.merged_into_transaction_id) {
+    const { data: canon } = await supabase
+      .from("transactions")
+      .select("id, occurred_at, counterparty_name")
+      .eq("id", row.merged_into_transaction_id)
+      .maybeSingle();
+    if (canon) {
+      const c = canon as unknown as {
+        id: string;
+        occurred_at: string;
+        counterparty_name: string | null;
+      };
+      mergedInto = {
+        id: c.id,
+        occurredAt: c.occurred_at,
+        counterparty: c.counterparty_name,
+      };
+    }
+  }
+
+  const { data: dups } = await supabase
+    .from("transactions")
+    .select("id, occurred_at, counterparty_name, source")
+    .eq("merged_into_transaction_id", id)
+    .order("occurred_at", { ascending: true });
+
+  const mergedDuplicates = (
+    (dups ?? []) as unknown as Array<{
+      id: string;
+      occurred_at: string;
+      counterparty_name: string | null;
+      source: string;
+    }>
+  ).map((d) => ({
+    id: d.id,
+    occurredAt: d.occurred_at,
+    counterparty: d.counterparty_name,
+    source: d.source,
+  }));
+
+  return { dedupeState: row.dedupe_state, mergedInto, mergedDuplicates };
+}
+
 export type CategoryTotal = {
   category: string; // "Uncategorized" for null
   totalRwf: number;
@@ -1640,7 +1735,7 @@ export async function getCategoryHistory(
 }
 
 const CATEGORIZATION_POLICY_COLUMNS =
-  "id, name, description, category, subcategory, match_type, merchant_pattern, direction, amount_min_rwf, amount_max_rwf, time_start, time_end, priority, is_active, rule_source, confidence, usage_count, last_used_at";
+  "id, name, description, category, subcategory, match_type, merchant_pattern, direction, amount_min_rwf, amount_max_rwf, time_start, time_end, priority, is_active, rule_source, confidence, usage_count, last_used_at, scope_type, scope_source_id";
 
 export type CategorizationPolicyRow = {
   id: string;
@@ -1661,6 +1756,9 @@ export type CategorizationPolicyRow = {
   confidence: number;
   usage_count: number;
   last_used_at: string | null;
+  /** Phase U PR6: "space" (workspace-wide, default) or "source" (only scope_source_id). */
+  scope_type: "space" | "source";
+  scope_source_id: string | null;
 };
 
 // Unlike most reads in this file, policies genuinely need explicit
