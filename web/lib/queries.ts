@@ -1640,7 +1640,7 @@ export async function getCategoryHistory(
 }
 
 const CATEGORIZATION_POLICY_COLUMNS =
-  "id, name, description, category, subcategory, match_type, merchant_pattern, direction, amount_min_rwf, amount_max_rwf, time_start, time_end, priority, is_active, rule_source, confidence, usage_count, last_used_at";
+  "id, name, description, category, subcategory, match_type, merchant_pattern, direction, amount_min_rwf, amount_max_rwf, time_start, time_end, priority, is_active, rule_source, confidence, usage_count, last_used_at, scope_type, scope_source_id";
 
 export type CategorizationPolicyRow = {
   id: string;
@@ -1661,6 +1661,9 @@ export type CategorizationPolicyRow = {
   confidence: number;
   usage_count: number;
   last_used_at: string | null;
+  /** Phase U PR6: "space" (workspace-wide, default) or "source" (only scope_source_id). */
+  scope_type: "space" | "source";
+  scope_source_id: string | null;
 };
 
 // Unlike most reads in this file, policies genuinely need explicit

@@ -1,5 +1,10 @@
 import Link from "next/link";
-import { getCategorizationPolicies, getLearnedPolicySuggestionCount } from "../../../lib/queries";
+import {
+  getCategorizationPolicies,
+  getLearnedPolicySuggestionCount,
+  getMyFinancialSources,
+} from "../../../lib/queries";
+import { financialSourceOptions } from "../../../lib/financial-source-options";
 import { PageHeader } from "../../../components/PageHeader";
 import { EmptyState } from "../../../components/EmptyState";
 import { PolicyItem } from "../../../components/PolicyItem";
@@ -7,10 +12,14 @@ import { PolicyItem } from "../../../components/PolicyItem";
 export const dynamic = "force-dynamic";
 
 export default async function CategorizationRulesPage() {
-  const [policies, suggestionCount] = await Promise.all([
+  const [policies, suggestionCount, sources] = await Promise.all([
     getCategorizationPolicies(),
     getLearnedPolicySuggestionCount(),
+    getMyFinancialSources(),
   ]);
+  const sourceLabelById = new Map(
+    financialSourceOptions(sources).map((s) => [s.id, s.label]),
+  );
 
   return (
     <div>
@@ -51,7 +60,15 @@ export default async function CategorizationRulesPage() {
         />
       ) : (
         <div className="flex flex-col gap-3">
-          {policies.map((policy) => <PolicyItem key={policy.id} policy={policy} />)}
+          {policies.map((policy) => (
+            <PolicyItem
+              key={policy.id}
+              policy={policy}
+              scopeSourceLabel={policy.scope_source_id
+                ? sourceLabelById.get(policy.scope_source_id) ?? null
+                : null}
+            />
+          ))}
         </div>
       )}
     </div>
