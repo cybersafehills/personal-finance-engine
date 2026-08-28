@@ -1051,6 +1051,44 @@ now visible from both ends.
 
 ---
 
+## 11l. Phase U PR6 — as built (migration `20260924000000` + Deno)
+
+Categorization-policy **scope**. A policy is `space`-scoped (default,
+workspace-wide — unchanged) or `source`-scoped (applies only to
+transactions from one `financial_source_id`). **Priority stays the
+primary ordering**; scope is a within-tier ranking bump only, so a
+deliberately high-priority space rule is never overridden by a narrower
+one. Backend only — the policy-form scope selector is **PR6b (web)**.
+
+- **Migration** — `categorization_policies.scope_type` (`'space'` default
+  / `'source'`), `.scope_source_id` (nullable FK to `financial_sources`),
+  a biconditional CHECK (`source` ⟺ `scope_source_id is not null`), a
+  partial index on `scope_source_id`. `policy_matches_transaction()`
+  (Phase G) re-issued (`create or replace`) with a leading scope clause:
+  `scope_type <> 'source' or scope_source_id = txn.financial_source_id`
+  (a `source` policy never matches a transaction with no source). No new
+  table / grant / function / policy — counters unchanged (71 / 115 / 71).
+- **`policy-engine.ts`** — `EvaluatePoliciesInput` gains
+  `financialSourceId`; `matchesScope()` filters `source` policies before
+  ranking; the sort is now
+  `priority ↑, then source-before-space, then condition count`; the
+  tied-for-best conflict group compares scope too; `buildExplanation()`
+  appends "for this account" for a source match. `index.ts` passes the
+  routed `resolvedFinancialSourceId`. The SQL/Deno sync comment now names
+  both migrations.
+- **Tests** — 3-assertion "Phase U PR6" migration block (scope-honouring
+  match counts via `preview_policy_historical_match_count`, both CHECK
+  rejections). Suite **236 passed / 0 failed**. `deno test ingest-momo`
+  **78 passed** (+4 scope cases: source match isolation, source beats
+  same-priority space, priority still beats scope, explanation text).
+  `deno check` / `deno fmt` / `deno lint` green.
+
+Still deferred: statement (CSV/PDF) reconciliation; **PR6b** — the
+`PolicyForm` "applies to" selector (Space-wide vs a specific source) +
+`getCategorizationPolicies` / `upsertPolicy` / `PolicyItem` plumbing.
+
+---
+
 ## 11m. Phase U PR6b — as built (web)
 
 The policy-form surface for PR6's scope. **Web only, no migration.**

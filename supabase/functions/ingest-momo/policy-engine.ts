@@ -43,6 +43,8 @@ export type EvaluatePoliciesInput = {
   counterpartyName: string | null;
   /** ISO 8601 timestamp with a local offset, as produced by the parser (e.g. Kigali's +02:00). */
   occurredAt: string;
+  /** The transaction's routed financial source, for evaluating 'source'-scoped policies. Null when the routed account has no linked source. */
+  financialSourceId: string | null;
 };
 
 function matchesCounterparty(
@@ -83,6 +85,28 @@ function matchesDirection(
   direction: TransactionDirection,
 ): boolean {
   return rule.direction === null || rule.direction === direction;
+}
+
+/**
+ * A 'source'-scoped policy applies only to transactions from its
+ * scope_source_id. A 'space'-scoped policy (the default) always passes
+ * this gate. Mirrors the scope clause in policy_matches_transaction()
+ * (migration 20260830000000, re-issued in 20260924000000).
+ */
+function matchesScope(
+  rule: CategorizationPolicyRow,
+  financialSourceId: string | null,
+): boolean {
+  if (rule.scope_type !== "source") {
+    return true;
+  }
+  return rule.scope_source_id != null &&
+    rule.scope_source_id === financialSourceId;
+}
+
+/** 1 for a source-scoped policy, 0 for space - a within-tier ranking bump, never a priority override. */
+function scopeRank(rule: CategorizationPolicyRow): number {
+  return rule.scope_type === "source" ? 1 : 0;
 }
 
 function matchesAmount(
@@ -170,14 +194,16 @@ function buildExplanation(
   rule: CategorizationPolicyRow,
   counterpartyName: string | null,
 ): string {
+  const scopeSuffix = rule.scope_type === "source" ? " for this account" : "";
+
   if (rule.name) {
-    return `Matched your "${rule.name}" policy.`;
+    return `Matched your "${rule.name}" policy${scopeSuffix}.`;
   }
 
   const clauses = describeConditions(rule, counterpartyName);
   return clauses.length > 0
-    ? `Matched a policy: ${clauses}.`
-    : "Matched a policy.";
+    ? `Matched a policy${scopeSuffix}: ${clauses}.`
+    : `Matched a policy${scopeSuffix}.`;
 }
 
 function buildConflictExplanation(
@@ -201,23 +227,28 @@ function buildConflictExplanation(
 /**
  * Evaluates a workspace's active categorization policies against a
  * normalized transaction, first-match-wins in ascending priority order
- * (ties broken by whichever policy has more non-null conditions - the
- * more specific match), then tiers the result by the winning policy's
- * confidence. If more than one policy is tied for the very best
- * (priority, specificity) and they disagree on the resulting category,
+ * (within a tier, a source-scoped policy outranks a space-scoped one,
+ * then whichever policy has more non-null conditions - the more specific
+ * match), then tiers the result by the winning policy's confidence. A
+ * source-scoped policy whose scope_source_id does not match the
+ * transaction's financial source is filtered out before any of this. If
+ * more than one policy is tied for the very best (priority, scope,
+ * specificity) and they disagree on the resulting category,
  * nothing is committed - the transaction is flagged 'conflict' for
  * review instead of silently picking one arbitrarily. Never throws: any
  * Supabase error is logged and degrades to an empty classification, so a
  * failure here can never block ingestion of the underlying financial
  * transaction.
  *
- * This same per-condition matching logic (counterparty/direction/amount/
- * time) is duplicated, deliberately and narrowly, in
- * supabase/migrations/20260830000000_phase_g_review_and_backfill.sql's
- * policy_matches_transaction() SQL function, used for historical
- * preview/backfill against a single policy at a time (no priority/
- * conflict resolution needed there). Keep the two in sync by hand if
- * either changes.
+ * This same per-condition matching logic (scope/counterparty/direction/
+ * amount/time) is duplicated, deliberately and narrowly, in
+ * policy_matches_transaction() (SQL) - defined in
+ * supabase/migrations/20260830000000_phase_g_review_and_backfill.sql and
+ * re-issued with the scope clause in
+ * supabase/migrations/20260924000000_phase_u_rule_scope.sql - used for
+ * historical preview/backfill against a single policy at a time (no
+ * priority/conflict resolution needed there). Keep the two in sync by
+ * hand if either changes.
  */
 export async function evaluatePolicies(
   supabase: SupabaseClient,
@@ -241,7 +272,9 @@ export async function evaluatePolicies(
         amount_min_rwf,
         amount_max_rwf,
         time_start,
-        time_end
+        time_end,
+        scope_type,
+        scope_source_id
       `,
     )
     .eq("workspace_id", input.workspaceId)
@@ -255,6 +288,7 @@ export async function evaluatePolicies(
 
   const candidates = (rules as CategorizationPolicyRow[])
     .filter((rule) =>
+      matchesScope(rule, input.financialSourceId) &&
       matchesCounterparty(rule, input.counterpartyName) &&
       matchesDirection(rule, input.direction) &&
       matchesAmount(rule, input.amountRwf) &&
@@ -265,16 +299,22 @@ export async function evaluatePolicies(
     return EMPTY_CLASSIFICATION;
   }
 
-  // Priority is the primary ordering; specificity (condition count) only
-  // breaks ties between policies that share the same priority - it must
-  // never let a lower-priority policy win over a higher-priority one.
+  // Priority is the primary ordering. Within one priority tier, a
+  // source-scoped policy outranks a space-scoped one; specificity
+  // (condition count) is the last tie-break. Neither of the two
+  // tie-breaks can ever let a lower-priority policy win over a
+  // higher-priority one.
   candidates.sort((a, b) =>
-    a.priority - b.priority || conditionCount(b) - conditionCount(a)
+    a.priority - b.priority ||
+    scopeRank(b) - scopeRank(a) ||
+    conditionCount(b) - conditionCount(a)
   );
 
   const best = candidates[0];
   const tiedForBest = candidates.filter((c) =>
-    c.priority === best.priority && conditionCount(c) === conditionCount(best)
+    c.priority === best.priority &&
+    scopeRank(c) === scopeRank(best) &&
+    conditionCount(c) === conditionCount(best)
   );
   const distinctOutcomes = new Set(
     tiedForBest.map((c) => `${c.category ?? ""}|${c.subcategory ?? ""}`),

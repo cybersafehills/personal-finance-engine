@@ -84,6 +84,8 @@ function policy(overrides: Partial<FakeRow>): FakeRow {
     amount_max_rwf: null,
     time_start: null,
     time_end: null,
+    scope_type: "space",
+    scope_source_id: null,
     workspace_id: "ws-a",
     is_active: true,
     ...overrides,
@@ -96,6 +98,7 @@ const BASE_INPUT = {
   amountRwf: 1200,
   counterpartyName: "James KAYIJE",
   occurredAt: "2026-08-25T08:00:00+02:00",
+  financialSourceId: "src-a",
 };
 
 Deno.test("evaluatePolicies: matches counterparty + direction + amount + time (spec Scenario A)", async () => {
@@ -539,4 +542,124 @@ Deno.test("evaluatePolicies: an invalid regex pattern never matches and never th
   });
 
   assertEquals(result.category, null);
+});
+
+// --- Phase U PR6: rule scope ------------------------------------------
+
+Deno.test("evaluatePolicies: a source-scoped policy matches only its own financial source", async () => {
+  const supabase = fakeSupabase([
+    policy({
+      id: "p-scoped",
+      match_type: "contains",
+      merchant_pattern: "kayije",
+      category: "Personal transport",
+      confidence: 1,
+      scope_type: "source",
+      scope_source_id: "src-a",
+    }),
+  ]);
+
+  const onScope = await evaluatePolicies(supabase, {
+    ...BASE_INPUT,
+    financialSourceId: "src-a",
+  });
+  const offScope = await evaluatePolicies(supabase, {
+    ...BASE_INPUT,
+    financialSourceId: "src-b",
+  });
+  const noSource = await evaluatePolicies(supabase, {
+    ...BASE_INPUT,
+    financialSourceId: null,
+  });
+
+  assertEquals(onScope.category, "Personal transport");
+  assertEquals(offScope.category, null);
+  assertEquals(noSource.category, null);
+});
+
+Deno.test("evaluatePolicies: a source-scoped policy outranks a same-priority space-scoped one", async () => {
+  const supabase = fakeSupabase([
+    policy({
+      id: "p-space",
+      priority: 100,
+      match_type: "contains",
+      merchant_pattern: "kayije",
+      category: "General",
+      confidence: 1,
+    }),
+    policy({
+      id: "p-source",
+      priority: 100,
+      match_type: "contains",
+      merchant_pattern: "kayije",
+      category: "Account-specific",
+      confidence: 1,
+      scope_type: "source",
+      scope_source_id: "src-a",
+    }),
+  ]);
+
+  const result = await evaluatePolicies(supabase, {
+    ...BASE_INPUT,
+    financialSourceId: "src-a",
+  });
+
+  assertEquals(result.category, "Account-specific");
+  assertEquals(result.matchedPolicyId, "p-source");
+});
+
+Deno.test("evaluatePolicies: scope never overrides priority - a lower-priority-number space policy still wins", async () => {
+  const supabase = fakeSupabase([
+    policy({
+      id: "p-space-high",
+      priority: 10,
+      match_type: "contains",
+      merchant_pattern: "kayije",
+      category: "High-priority general",
+      confidence: 1,
+    }),
+    policy({
+      id: "p-source-low",
+      priority: 100,
+      match_type: "contains",
+      merchant_pattern: "kayije",
+      category: "Account-specific",
+      confidence: 1,
+      scope_type: "source",
+      scope_source_id: "src-a",
+    }),
+  ]);
+
+  const result = await evaluatePolicies(supabase, {
+    ...BASE_INPUT,
+    financialSourceId: "src-a",
+  });
+
+  assertEquals(result.category, "High-priority general");
+  assertEquals(result.matchedPolicyId, "p-space-high");
+});
+
+Deno.test("evaluatePolicies: a source-scoped match explains itself as account-specific", async () => {
+  const supabase = fakeSupabase([
+    policy({
+      id: "p-source",
+      name: "Airtel line",
+      match_type: "contains",
+      merchant_pattern: "kayije",
+      category: "Personal",
+      confidence: 1,
+      scope_type: "source",
+      scope_source_id: "src-a",
+    }),
+  ]);
+
+  const result = await evaluatePolicies(supabase, {
+    ...BASE_INPUT,
+    financialSourceId: "src-a",
+  });
+
+  assertEquals(
+    result.explanation,
+    'Matched your "Airtel line" policy for this account.',
+  );
 });
