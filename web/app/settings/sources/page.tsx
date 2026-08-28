@@ -1,3 +1,4 @@
+import Link from "next/link";
 import {
   getMyFinancialSources,
   getShareableHouseholds,
@@ -19,6 +20,16 @@ export default async function SourcesPage() {
       <PageHeader
         title="Shared accounts"
         subtitle="Choose what each household can see of your accounts. Nothing is shared until you say so."
+        action={sources.length > 0
+          ? (
+            <Link
+              href="/settings/sources/import"
+              className="text-sm font-medium text-accent"
+            >
+              Import a statement
+            </Link>
+          )
+          : undefined}
       />
 
       <div className="flex flex-col gap-3">
