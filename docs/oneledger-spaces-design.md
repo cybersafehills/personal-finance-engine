@@ -1026,6 +1026,39 @@ canonical transaction's detail page.
 
 ---
 
+## 11o. Phase U PR7b — as built (web)
+
+The upload/mapping/preview flow that calls `import_statement_transactions`
+(PR7). **Web only, no migration**, no new dependency.
+
+- **`web/lib/csv.ts`** — a ~90-line RFC-4180-ish parser (quoted fields,
+  embedded commas/newlines, `""` escaping, CRLF/LF, BOM strip, blank-row
+  drop). Statement import is its only caller.
+- **`web/lib/statement-import.ts`** — pure normalizers to the RPC's row
+  shape: `parseAmount` (symbols, thousands separators, `(…)` negatives;
+  RWF is zero-decimal), `parseStatementDate` (ISO / day-first / month-first
+  slash or dot dates → ISO, rollovers rejected), `normalizeStatementRow`
+  with a `directionStrategy` of `sign` | `column` (debit/credit words) |
+  `all_out` | `all_in`, `guessMapping` to pre-fill the picker from header
+  names. Unparseable rows are dropped and counted, never fatal.
+- **`/settings/sources/import`** (`StatementImportFlow`) — pick a source,
+  drop a CSV, match the columns (date + date-format, amount,
+  counterparty?, reference?, direction strategy), a live preview
+  (`N importable · M skipped` + a sample table), then **Import** →
+  `importStatement` server action → the RPC. A result screen shows
+  `added` / `flagged as possible duplicates` / `skipped` with a link
+  straight into `/transactions/review` when anything was flagged. The
+  action caps a file at 5000 rows and re-shape-checks every row; the RPC
+  remains the authority. Linked from the Shared-accounts page header.
+- Tests: `web/lib/statement_import_test.ts` (8 cases — CSV edge cases,
+  amount/date parsing, all four direction strategies, skip-not-fail).
+  `next build` ✓, `eslint` 0.
+
+**Statement reconciliation complete** (PR7 backend + PR7b web). Phase U
+has no remaining deferred items.
+
+---
+
 ## 12. Testing strategy (per phase, aggregated here)
 
 - **Unit**: role→capability, `can_view_source_in_space` truth table,
