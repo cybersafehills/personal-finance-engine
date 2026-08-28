@@ -220,6 +220,8 @@ jobs:
             echo "NEXT_PUBLIC_SUPABASE_URL=$(echo "$STATUS_JSON" | jq -r '.API_URL')"
             echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$(echo "$STATUS_JSON" | jq -r '.ANON_KEY')"
             echo "SITE_URL=http://127.0.0.1:3417"
+            # OneLedger Spaces is opt-in (lib/spaces/gate.ts); e2e/spaces-household.spec.ts needs it on.
+            echo "SPACES_ENABLED=true"
           } >> "$GITHUB_ENV"
 
       # e2e/auth.setup.ts separately resolves these same values itself

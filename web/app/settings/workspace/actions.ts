@@ -7,7 +7,8 @@ import { supabaseSession } from "../../../lib/supabase-session-server";
 import { generateInviteToken } from "../../../lib/credentials";
 import { sendInviteEmail } from "../../../lib/emails";
 import { siteUrl } from "../../../lib/site-url";
-import type { WorkspaceRole } from "../../../lib/queries";
+import { isSpacesEnabled } from "../../../lib/spaces/gate";
+import { getActiveWorkspaceId, type WorkspaceRole } from "../../../lib/queries";
 
 export type WorkspaceActionResult = { ok: true } | { ok: false; error: string };
 export type CreateInviteResult =
@@ -88,6 +89,10 @@ export async function createOrganization(name: string): Promise<void> {
 export async function createHousehold(name: string): Promise<void> {
   const trimmedName = name.trim();
   if (!trimmedName) return;
+
+  // Spaces is gated (SPACES_ENABLED + allowlist). Off => silent no-op,
+  // same as this function's existing error handling.
+  if (!isSpacesEnabled(await getActiveWorkspaceId())) return;
 
   const supabase = await supabaseSession();
   const { data: workspaceId, error } = await supabase.rpc(
