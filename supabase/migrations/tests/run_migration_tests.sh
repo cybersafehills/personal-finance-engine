@@ -585,7 +585,9 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # Phase T PR2 (20260917000000) adds budget_threshold_state (RLS enabled,
 # service-role-only, no authenticated policy - like raw_financial_events)
 # - 70 tables, 69 with RLS.
-if [ "$TABLE_COUNT" = "70" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Phase T PR3 (20260918000000) adds goal_participants (RLS enabled,
+# SELECT-only for authenticated) - 71 tables, 70 with RLS.
+if [ "$TABLE_COUNT" = "71" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -664,11 +666,13 @@ fi
 # revoke_space_capability). 114 + 1 = 115.
 # Phase S (20260913000000) adds transaction_member_attributions (select
 # only - written exclusively by set_transaction_attribution). 115 + 1 = 116.
+# Phase T PR3 (20260918000000) adds goal_participants (select only -
+# written exclusively by set_goal_participants). 116 + 1 = 117.
 AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and grantee = 'authenticated';")"
-if [ "$AUTHENTICATED_GRANT_COUNT" = "116" ]; then
-  pass "authenticated holds exactly the 116 table grants expected, no more"
+if [ "$AUTHENTICATED_GRANT_COUNT" = "117" ]; then
+  pass "authenticated holds exactly the 117 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 116 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 117 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -788,11 +792,15 @@ fi
 # settings-UI toggle list). Its two IMMUTABLE helpers
 # (notification_event_is_security_notable, notification_default_enabled)
 # are `revoke all from public` - called only from should_notify. = 63.
+# Phase T PR3 (20260918000000) adds set_goal_participants and
+# goal_progress. Its budget_bucket_for_percent counterpart is Phase T PR2;
+# nothing else here is authenticated-callable
+# (record_budget_threshold_crossing is service-role-only). = 65.
 AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname = 'authenticated' where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "63" ]; then
-  pass "authenticated holds EXECUTE on exactly the 63 functions expected, no more"
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "65" ]; then
+  pass "authenticated holds EXECUTE on exactly the 65 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 63 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 65 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -3144,6 +3152,74 @@ else
   pass "Phase T PR2: record_budget_threshold_crossing is service-role-only"
 fi
 rm -f $ARTIFACT_DIR/pfe_t2.log
+
+# ===========================================================================
+# Phase T PR3: shared goals. financial_goals writes move to goal.manage
+# (an Admin can now manage goals); any member can contribute;
+# goal_participants + goal_progress. Continues in pfe_rls on Q_HH -
+# USER_A owner, USER_R admin, USER_E member, USER_B non-member.
+# ===========================================================================
+echo "=== Phase T PR3: shared goals ==="
+
+# An Admin can create a household goal (was Owner-only through Phase D).
+T3_GOAL="$(as_user "$USER_R" "insert into public.financial_goals (workspace_id, goal_type, name, currency, target_amount_minor, target_date) values ('$Q_HH', 'general_savings', 'T3 Emergency Fund', 'RWF', 1000000, (current_date + 60)) returning id;")"
+if [ -n "$T3_GOAL" ]; then
+  pass "Phase T PR3: an Admin can create a goal in a household (goal.manage, not Owner-only)"
+else
+  fail "Phase T PR3: an Admin was blocked from creating a goal"
+fi
+
+# A plain member cannot create a goal.
+if as_user "$USER_E" "insert into public.financial_goals (workspace_id, goal_type, name, currency, target_amount_minor) values ('$Q_HH', 'general_savings', 'Nope', 'RWF', 500000);" >/dev/null 2>$ARTIFACT_DIR/pfe_t3_goal.log; then
+  fail "Phase T PR3: a plain member created a goal"
+else
+  pass "Phase T PR3: a plain member cannot create a goal"
+fi
+rm -f $ARTIFACT_DIR/pfe_t3_goal.log
+
+# A plain member CAN contribute to a goal.
+as_user "$USER_E" "insert into public.goal_contributions (goal_id, workspace_id, amount_minor, source) values ('$T3_GOAL', '$Q_HH', 200000, 'manual');" >/dev/null
+T3_CURRENT="$(psql -d pfe_rls -t -A -c "select current_amount_minor from public.financial_goals where id = '$T3_GOAL';")"
+if [ "$T3_CURRENT" = "200000" ]; then
+  pass "Phase T PR3: any member can record a goal contribution"
+else
+  fail "Phase T PR3: member contribution not reflected (current=$T3_CURRENT)"
+fi
+
+# set_goal_participants: Admin sets the participant list; audited.
+as_user "$USER_R" "select public.set_goal_participants('$T3_GOAL', array['$USER_A', '$USER_E']::uuid[]);" >/dev/null
+T3_PART_COUNT="$(psql -d pfe_rls -t -A -c "select count(*) from public.goal_participants where goal_id = '$T3_GOAL';")"
+T3_PART_AUDIT="$(psql -d pfe_rls -t -A -c "select count(*) from public.space_audit_events where workspace_id = '$Q_HH' and event_type = 'goal.participants_changed' and resource_id = '$T3_GOAL';")"
+if [ "$T3_PART_COUNT" = "2" ] && [ "$T3_PART_AUDIT" -ge "1" ]; then
+  pass "Phase T PR3: set_goal_participants replaces the participant set and writes an audit event"
+else
+  fail "Phase T PR3: participant set wrong (count=$T3_PART_COUNT audit=$T3_PART_AUDIT)"
+fi
+
+# A non-member cannot be named a participant.
+if as_user "$USER_R" "select public.set_goal_participants('$T3_GOAL', array['$USER_A', '$USER_B']::uuid[]);" >/dev/null 2>$ARTIFACT_DIR/pfe_t3_part.log; then
+  fail "Phase T PR3: a non-member was added as a goal participant"
+else
+  pass "Phase T PR3: set_goal_participants rejects a non-member"
+fi
+rm -f $ARTIFACT_DIR/pfe_t3_part.log
+
+# A plain member cannot set participants.
+if as_user "$USER_E" "select public.set_goal_participants('$T3_GOAL', array['$USER_E']::uuid[]);" >/dev/null 2>$ARTIFACT_DIR/pfe_t3_part2.log; then
+  fail "Phase T PR3: a plain member set goal participants"
+else
+  pass "Phase T PR3: set_goal_participants refuses a caller without goal.manage"
+fi
+rm -f $ARTIFACT_DIR/pfe_t3_part2.log
+
+# goal_progress: a member reads the computed metrics; a non-member gets nothing.
+T3_PROG="$(as_user "$USER_E" "select current_minor || '/' || pct_complete from public.goal_progress('$T3_GOAL');")"
+T3_PROG_NONMEMBER="$(as_user "$USER_B" "select count(*) from public.goal_progress('$T3_GOAL');")"
+if [ "$T3_PROG" = "200000/20.0" ] && [ "$T3_PROG_NONMEMBER" = "0" ]; then
+  pass "Phase T PR3: goal_progress returns the computed metrics to a member and nothing to a non-member"
+else
+  fail "Phase T PR3: goal_progress wrong (member='$T3_PROG' nonmember_rows=$T3_PROG_NONMEMBER)"
+fi
 
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="
