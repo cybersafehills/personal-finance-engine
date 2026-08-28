@@ -1,5 +1,5 @@
-import { currencyMinorDigits } from "./money";
-import { MAX_AMOUNT_MINOR } from "./types";
+import { currencyMinorDigits } from "./money.ts";
+import { MAX_AMOUNT_MINOR } from "./types.ts";
 
 // Phase R3 - turning a validated verified_ussd scan into a
 // payment_intents draft + a hand-off. Pure: string arithmetic for money

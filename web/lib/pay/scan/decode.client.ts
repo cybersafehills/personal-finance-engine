@@ -1,6 +1,6 @@
 "use client";
 
-import type { RejectionReason } from "./types";
+import type { RejectionReason } from "./types.ts";
 
 // Stage 2a - QR DECODE, browser side only. Uses the native
 // `BarcodeDetector` (Chrome/Android, Safari 17+, most Android WebViews).

@@ -1,4 +1,4 @@
-import { MAX_PAYLOAD_LENGTH, type RejectionReason } from "./types";
+import { MAX_PAYLOAD_LENGTH, type RejectionReason } from "./types.ts";
 
 // Stage 1 - normalization. Turn whatever the decoder handed us into a
 // trimmed, length-bounded, control-character-free string, or reject it

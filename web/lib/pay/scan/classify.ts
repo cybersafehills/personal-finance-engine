@@ -1,5 +1,5 @@
-import type { NormalizedScan } from "./normalize";
-import type { PayloadClass, RejectionReason } from "./types";
+import type { NormalizedScan } from "./normalize.ts";
+import type { PayloadClass, RejectionReason } from "./types.ts";
 
 // Stage 2 - classification. Decide which parser owns this payload. This
 // is a cheap structural sort, NOT validation: a string classified

@@ -2,7 +2,7 @@ import {
   KNOWN_CURRENCIES,
   MAX_AMOUNT_MINOR,
   type RejectionReason,
-} from "./types";
+} from "./types.ts";
 
 // The OneLedger first-party payment payload (v1). A merchant QR the
 // product controls end to end. R2 implements the PARSER only - generation

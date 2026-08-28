@@ -1,4 +1,4 @@
-import type { RejectionReason } from "./types";
+import type { RejectionReason } from "./types.ts";
 
 // Approved-provider deep/universal link handling. A scanned https URL is
 // only ever accepted if its host is on a CENTRAL allowlist of verified

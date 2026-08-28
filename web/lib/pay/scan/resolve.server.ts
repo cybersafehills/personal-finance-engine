@@ -1,9 +1,9 @@
 import "server-only";
 
-import { getServiceCodeForPayment, getServiceDirectory } from "../../ussd/queries";
-import type { ServiceCodeDetail } from "../../ussd/queries";
-import { matchesTemplate } from "./ussd";
-import type { UssdDirectoryMatch } from "./pipeline";
+import { getServiceCodeForPayment, getServiceDirectory } from "../../ussd/queries.ts";
+import type { ServiceCodeDetail } from "../../ussd/queries.ts";
+import { matchesTemplate } from "./ussd.ts";
+import type { UssdDirectoryMatch } from "./pipeline.ts";
 
 // Server-side resolvers for the scan pipeline. RLS-scoped: getService
 // directory only ever returns rows the caller is allowed to see
