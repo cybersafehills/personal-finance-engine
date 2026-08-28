@@ -117,7 +117,7 @@ export default async function UssdDirectoryPage({
         <section className="mb-5">
           <h2 className="mb-1 text-sm font-semibold text-text-secondary">{t.recent}</h2>
           <ul>
-            {recent.map((code) => (
+            {recent.slice(0, 1).map((code) => (
               <ServiceCodeRow
                 key={code.id}
                 code={code}

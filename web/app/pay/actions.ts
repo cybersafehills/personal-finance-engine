@@ -49,7 +49,7 @@ export async function getLauncherSnapshot(): Promise<LauncherSnapshot> {
   });
   return {
     favourites: favourites.slice(0, 5).map(toEntry),
-    recent: recent.map(toEntry),
+    recent: recent.slice(0, 1).map(toEntry),
   };
 }
 
