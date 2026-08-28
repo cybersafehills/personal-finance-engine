@@ -439,7 +439,7 @@ additive migration(s) → stacked PRs → migration-test block → e2e.
 |---|---|---|---|
 | **Q** — Foundation ✅ *migration written* | 1 | `kind='household'` + `create_household_workspace`; `financial_sources`, `source_space_links`, `raw_financial_events`, `can_view_source_in_space()` / `is_financial_source_visible()` / `owns_financial_source()`; nullable `transactions` provenance/attribution cols; `space_activity` / `space_audit_events` / `space_member_notification_prefs` / `workspace_categories` tables; **RLS refactor for `household`** (Phase C ledger loosening reverted for this kind via the source-visibility gate); backfill migration; indexes | No |
 | **R** — Security & authz ✅ *migration written* | 2 | capability layer (`space_role_has_capability` matrix + `space_member_capability_grants` + `has_space_capability()` primitive + `grant`/`revoke_space_capability` RPCs); audit-write primitives (`record_space_activity` / `record_space_audit_event`); `workspace_invites.accepted_by`; `accept_workspace_invite` / `set_member_role` / `remove_member` / `create_household_workspace` re-issued to write audit + activity rows; **14-assertion security test block** (capability matrix, grant/revoke, audit visibility, invite re-use/revoke rejection, post-removal access revocation, last-owner guard, internal-helper lockdown, service-role bypass) | No |
-| **S** — Shared ledger | 3 | **PR1 ✅:** `transaction_member_attributions` + the five sharing/attribution/reallocation RPCs. **PR2a ✅:** household creation (`/settings/workspace`), "Shared accounts" (`/settings/sources`). **PR2b ✅:** `space_member_directory` fn; transaction detail gets a "Where this came from" provenance panel + a household "Whose spending" attribution panel (shared / member / split / unassigned) + a needs-attention banner; review queue gets a "Needs attribution" section. **PR2c (not started):** household dashboard; upgraded Space switcher; `/settings/sources` + attribution e2e; household **admin** member-management; optional `/spaces/{id}/…` routes | Yes |
+| **S** — Shared ledger | 3 | **PR1 ✅:** `transaction_member_attributions` + the five sharing/attribution/reallocation RPCs. **PR2a ✅:** household creation (`/settings/workspace`), "Shared accounts" (`/settings/sources`). **PR2b ✅:** `space_member_directory` fn; transaction detail gets a "Where this came from" provenance panel + a household "Whose spending" attribution panel (shared / member / split / unassigned) + a needs-attention banner; review queue gets a "Needs attribution" section. **PR2c ✅:** household dashboard block (name header + `HouseholdSpendingCard` — spending-this-month by member, neutral framing) on `/`; upgraded Space switcher (kind-labelled list + "Create a Space" in the account menu, current-Space chip in the header). **PR2d (not started):** `/settings/sources` + attribution Playwright e2e; household **admin** member-management; "available across shared accounts" balance semantics; optional `/spaces/{id}/…` routes | Yes |
 | **T** — Financial planning | 4 | Space-aware category scope; rule `scope_type` + deterministic precedence + explainability; shared budgets (space/category/member scopes) reusing `budget-math.ts`; threshold state-transition alerts (no per-txn spam); shared goals as first-class Space resources; per-member notification prefs | Yes |
 | **U** — Ingestion & reconciliation | 5 | `raw_financial_events` cutover for `ingest-momo` + SMS path; source routing (`is_default_target`); dedupe confidence engine + auto-merge + review cards; **statement (CSV/PDF) reconciliation** vs ledger + import summary; device management UX (rename / pause / reconnect / remove, history preserved) | Yes |
 | **V** — Reporting & intelligence | 6 | `workspace_id` scope on `report_*`; Household report template + attribution summaries; scheduler recipient filtering (exclude former members); AI Space-scope boundary + Household insights; dashboard projections | Yes |
@@ -609,6 +609,27 @@ PR2c item.
 
 `next build` ✓ compiled, `eslint` 0 errors. Full migration suite: 192
 passed / 0 failed.
+
+### Phase S PR2c — as built (web only)
+
+- **Household dashboard block** on `/` — when the active Space is a
+  household: a name header + `HouseholdSpendingCard`. New query
+  `getHouseholdSpendingBreakdown()` sums settled outgoing spend for the
+  current Kigali month and buckets it by attribution — `Shared`, each
+  member (from `attributed_user_id`, and basis-point-weighted from
+  `transaction_member_attributions` for splits), and `Unassigned`. Bars
+  **plus** an explicit `amount · N%` label (not colour-only, §56); no
+  "who spent more" comparison framing (§22). Returns `null` for
+  personal/organization Spaces, so the dashboard is unchanged there.
+- **Space switcher** — the bare `<select>` in the account menu becomes a
+  kind-labelled option list (`Personal` / `Household` / `Organization`)
+  with the active Space highlighted and a "Create a Space" link;
+  `ProfileMenu` also shows the current Space name as a chip in the header
+  (≥ sm). Switching still just sets the `active_workspace_id` cookie and
+  refreshes.
+
+No migration, no schema change. `next build` ✓ compiled, `eslint` 0
+errors.
 
 ---
 

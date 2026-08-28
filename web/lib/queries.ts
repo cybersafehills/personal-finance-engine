@@ -1892,6 +1892,149 @@ export async function getActiveWorkspace(): Promise<WorkspaceSummary | null> {
   return workspaces.find((workspace) => workspace.id === workspaceId) ?? null;
 }
 
+// ===========================================================================
+// Household dashboard: spending this month, split by member. Neutral
+// framing (master prompt §22) - a breakdown, never a "who spent more"
+// comparison. Only computed when the active Space is a household.
+// ===========================================================================
+
+export type HouseholdSpendBucket = {
+  key: string; // "shared" | "unassigned" | a user id
+  label: string;
+  amountMinor: number;
+  percent: number;
+};
+
+export type HouseholdSpendBreakdown = {
+  workspaceName: string;
+  monthLabel: string;
+  totalMinor: number;
+  buckets: HouseholdSpendBucket[];
+};
+
+export async function getHouseholdSpendingBreakdown(): Promise<HouseholdSpendBreakdown | null> {
+  const workspace = await getActiveWorkspace();
+  if (!workspace || workspace.kind !== "household") return null;
+
+  const monthKey = kigaliDateKey(new Date().toISOString()).slice(0, 7); // YYYY-MM
+  const [yearStr, monthStr] = monthKey.split("-");
+  const year = Number(yearStr);
+  const month = Number(monthStr); // 1-12
+  const monthStartKey = `${monthKey}-01`;
+  const nextMonthStartKey =
+    month === 12
+      ? `${year + 1}-01-01`
+      : `${year}-${String(month + 1).padStart(2, "0")}-01`;
+
+  const startUtc = kigaliDayBoundsUtc(monthStartKey).startUtc.toISOString();
+  const endUtc = kigaliDayBoundsUtc(nextMonthStartKey).startUtc.toISOString();
+  const monthLabel = new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    year: "numeric",
+  }).format(new Date(Date.UTC(year, month - 1, 1)));
+
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("transactions")
+    .select(
+      "id, attribution_type, attributed_user_id, principal_effect_rwf, fee_effect_rwf",
+    )
+    .eq("direction", "out")
+    .eq("settlement_state", "settled")
+    .gte("occurred_at", startUtc)
+    .lt("occurred_at", endUtc);
+
+  if (error) {
+    console.error("getHouseholdSpendingBreakdown failed:", error.message);
+    return null;
+  }
+
+  type Row = {
+    id: string;
+    attribution_type: TransactionAttributionType | null;
+    attributed_user_id: string | null;
+    principal_effect_rwf: number | null;
+    fee_effect_rwf: number | null;
+  };
+  const rows = (data ?? []) as unknown as Row[];
+  const effectOf = (r: Row) =>
+    Math.abs(Number(r.principal_effect_rwf) + Number(r.fee_effect_rwf));
+
+  const totals = new Map<string, number>();
+  const add = (key: string, minor: number) =>
+    totals.set(key, (totals.get(key) ?? 0) + minor);
+
+  const splitIds: string[] = [];
+  for (const r of rows) {
+    if (r.attribution_type === "shared") add("shared", effectOf(r));
+    else if (r.attribution_type === "member" && r.attributed_user_id)
+      add(r.attributed_user_id, effectOf(r));
+    else if (r.attribution_type === "split") splitIds.push(r.id);
+    else add("unassigned", effectOf(r));
+  }
+
+  if (splitIds.length > 0) {
+    const { data: splitRows } = await supabase
+      .from("transaction_member_attributions")
+      .select("transaction_id, user_id, share_bps")
+      .in("transaction_id", splitIds);
+    const byTxn = new Map<string, Array<{ userId: string; bps: number }>>();
+    for (const s of (splitRows ?? []) as unknown as Array<{
+      transaction_id: string;
+      user_id: string;
+      share_bps: number;
+    }>) {
+      const list = byTxn.get(s.transaction_id) ?? [];
+      list.push({ userId: s.user_id, bps: s.share_bps });
+      byTxn.set(s.transaction_id, list);
+    }
+    for (const id of splitIds) {
+      const r = rows.find((x) => x.id === id)!;
+      const parts = byTxn.get(id);
+      const effect = effectOf(r);
+      if (!parts || parts.length === 0) {
+        add("unassigned", effect);
+        continue;
+      }
+      for (const p of parts) add(p.userId, Math.round((effect * p.bps) / 10000));
+    }
+  }
+
+  const members = await getSpaceMemberDirectory(workspace.id);
+  const nameOf = (userId: string) =>
+    members.find((m) => m.userId === userId)?.displayName ?? "A member";
+
+  const totalMinor = Array.from(totals.values()).reduce((a, b) => a + b, 0);
+
+  const buckets: HouseholdSpendBucket[] = Array.from(totals.entries())
+    .filter(([, minor]) => minor > 0)
+    .map(([key, amountMinor]) => ({
+      key,
+      label:
+        key === "shared"
+          ? "Shared"
+          : key === "unassigned"
+            ? "Unassigned"
+            : nameOf(key),
+      amountMinor,
+      percent: totalMinor > 0 ? Math.round((amountMinor / totalMinor) * 100) : 0,
+    }))
+    .sort((a, b) => {
+      if (a.key === "shared") return -1;
+      if (b.key === "shared") return 1;
+      if (a.key === "unassigned") return 1;
+      if (b.key === "unassigned") return -1;
+      return b.amountMinor - a.amountMinor;
+    });
+
+  return {
+    workspaceName: workspace.name,
+    monthLabel,
+    totalMinor,
+    buckets,
+  };
+}
+
 export type WorkspaceMemberRow = {
   membershipId: string;
   userId: string;
