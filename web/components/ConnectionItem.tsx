@@ -2,6 +2,9 @@
 
 import { useState, useTransition } from "react";
 import {
+  pauseConnection,
+  renameConnection,
+  resumeConnection,
   revokeConnection,
   rotateConnection,
 } from "../app/settings/connections/actions";
@@ -31,6 +34,9 @@ function connectionStatus(
   if (connection.status === "revoked") {
     return { label: "Disabled", variant: "attention" };
   }
+  if (connection.status === "paused") {
+    return { label: "Paused", variant: "neutral" };
+  }
   if (connection.last_used_at) {
     return { label: "Ready", variant: "positive" };
   }
@@ -44,11 +50,26 @@ export function ConnectionItem({
 }) {
   const [confirmingRevoke, setConfirmingRevoke] = useState(false);
   const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState(false);
+  const [draftLabel, setDraftLabel] = useState(connection.label);
   const [isPending, startTransition] = useTransition();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const status = connectionStatus(connection);
   const isRevoked = connection.status === "revoked";
+  const isPaused = connection.status === "paused";
+
+  const run = (fn: () => Promise<{ ok: true } | { ok: false; error: string }>) => {
+    setErrorMessage(null);
+    startTransition(async () => {
+      const result = await fn();
+      if (!result.ok) setErrorMessage(result.error);
+      else {
+        setConfirmingRevoke(false);
+        setRenaming(false);
+      }
+    });
+  };
 
   if (revealedSecret) {
     return (
@@ -97,25 +118,100 @@ export function ConnectionItem({
           : "Never used yet"}
       </p>
 
-      {!isRevoked && !confirmingRevoke && (
-        <div className="flex flex-wrap items-center gap-4 pt-1">
+      {isPaused && !renaming && (
+        <p className="text-xs text-text-secondary">
+          Paused
+          {connection.paused_at
+            ? ` ${formatDateTime(connection.paused_at)}`
+            : ""}
+          . The device keeps its credential but can&apos;t send transactions
+          in until you resume it.
+        </p>
+      )}
+
+      {!isRevoked && renaming && (
+        <div className="flex flex-wrap items-center gap-2 rounded-control bg-background p-3">
+          <input
+            type="text"
+            value={draftLabel}
+            disabled={isPending}
+            onChange={(e) => setDraftLabel(e.target.value)}
+            aria-label="Connection name"
+            className="min-h-8 flex-1 rounded-control border border-border-subtle bg-surface px-2 text-sm text-text-primary"
+          />
           <button
             type="button"
-            disabled={isPending}
+            disabled={isPending || !draftLabel.trim()}
+            onClick={() => run(() =>
+              renameConnection(connection.id, draftLabel))}
+            className="min-h-8 rounded-control bg-accent px-3 text-xs font-medium text-accent-foreground disabled:opacity-50"
+          >
+            Save
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setDraftLabel(connection.label);
+              setRenaming(false);
+            }}
+            className="min-h-8 text-xs font-medium text-text-muted"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {!isRevoked && !confirmingRevoke && !renaming && (
+        <div className="flex flex-wrap items-center gap-4 pt-1">
+          {!isPaused && (
+            <button
+              type="button"
+              disabled={isPending}
+              onClick={() => {
+                setErrorMessage(null);
+                startTransition(async () => {
+                  const result = await rotateConnection(connection.id);
+                  if (result.ok) {
+                    setRevealedSecret(result.secret);
+                  } else {
+                    setErrorMessage(result.error);
+                  }
+                });
+              }}
+              className="min-h-8 text-xs font-medium text-accent hover:underline disabled:opacity-50"
+            >
+              Rotate credential
+            </button>
+          )}
+          {isPaused ? (
+            <button
+              type="button"
+              disabled={isPending}
+              onClick={() => run(() => resumeConnection(connection.id))}
+              className="min-h-8 text-xs font-medium text-accent hover:underline disabled:opacity-50"
+            >
+              Resume
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={isPending}
+              onClick={() => run(() => pauseConnection(connection.id))}
+              className="min-h-8 text-xs font-medium text-text-muted hover:text-text-primary disabled:opacity-50"
+            >
+              Pause
+            </button>
+          )}
+          <button
+            type="button"
             onClick={() => {
               setErrorMessage(null);
-              startTransition(async () => {
-                const result = await rotateConnection(connection.id);
-                if (result.ok) {
-                  setRevealedSecret(result.secret);
-                } else {
-                  setErrorMessage(result.error);
-                }
-              });
+              setDraftLabel(connection.label);
+              setRenaming(true);
             }}
-            className="min-h-8 text-xs font-medium text-accent hover:underline disabled:opacity-50"
+            className="min-h-8 text-xs font-medium text-text-muted hover:text-text-primary"
           >
-            Rotate credential
+            Rename
           </button>
           <button
             type="button"

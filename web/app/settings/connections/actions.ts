@@ -118,3 +118,73 @@ export async function revokeConnection(
 
   return { ok: true };
 }
+
+/**
+ * Pauses a connection (Phase U PR4). Reversible and non-destructive: the
+ * credential is untouched, but ingest-momo's authenticateCredential
+ * rejects any status other than 'active', so the device stops being able
+ * to send transactions in until resumeConnection() is called. Nothing
+ * already ingested is affected.
+ */
+export async function pauseConnection(
+  connectionId: string,
+): Promise<ConnectionActionResult> {
+  const supabase = await supabaseSession();
+  const { error } = await supabase
+    .from("ingestion_connections")
+    .update({ status: "paused", paused_at: new Date().toISOString() })
+    .eq("id", connectionId);
+
+  if (error) {
+    return { ok: false, error: "Could not pause the connection." };
+  }
+
+  revalidatePath("/settings/connections");
+
+  return { ok: true };
+}
+
+/** Resumes a paused connection - back to 'active', paused_at cleared. */
+export async function resumeConnection(
+  connectionId: string,
+): Promise<ConnectionActionResult> {
+  const supabase = await supabaseSession();
+  const { error } = await supabase
+    .from("ingestion_connections")
+    .update({ status: "active", paused_at: null })
+    .eq("id", connectionId);
+
+  if (error) {
+    return { ok: false, error: "Could not resume the connection." };
+  }
+
+  revalidatePath("/settings/connections");
+
+  return { ok: true };
+}
+
+/** Renames a connection. Label only - the bound account and credential are unchanged. */
+export async function renameConnection(
+  connectionId: string,
+  label: string,
+): Promise<ConnectionActionResult> {
+  const trimmedLabel = label.trim();
+
+  if (!trimmedLabel) {
+    return { ok: false, error: "Connection label cannot be empty." };
+  }
+
+  const supabase = await supabaseSession();
+  const { error } = await supabase
+    .from("ingestion_connections")
+    .update({ label: trimmedLabel })
+    .eq("id", connectionId);
+
+  if (error) {
+    return { ok: false, error: "Could not rename the connection." };
+  }
+
+  revalidatePath("/settings/connections");
+
+  return { ok: true };
+}

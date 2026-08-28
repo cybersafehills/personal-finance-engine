@@ -3451,6 +3451,46 @@ else
 fi
 rm -f $ARTIFACT_DIR/pfe_u_pr3.log
 
+# ===========================================================================
+# Phase U PR4: ingestion-connection lifecycle - the reversible 'paused'
+# state. Reuses U_CONN (WORKSPACE_A, owned by USER_A, still active from the
+# PR1 block).
+# ===========================================================================
+echo "=== Phase U PR4: connection pause / resume ==="
+
+# Owner pauses their own connection.
+as_user "$USER_A" "update public.ingestion_connections set status = 'paused', paused_at = now() where id = '$U_CONN';" >/dev/null
+U_PR4_PAUSED="$(psql -d pfe_rls -t -A -c "select count(*) from public.ingestion_connections where id = '$U_CONN' and status = 'paused' and paused_at is not null and revoked_at is null;")"
+if [ "$U_PR4_PAUSED" = "1" ]; then
+  pass "Phase U PR4: workspace owner can pause their own ingestion connection (reversible, credential preserved)"
+else
+  fail "Phase U PR4: pausing a connection did not take (got $U_PR4_PAUSED)"
+fi
+
+# The status/timestamp consistency constraint rejects an inconsistent pause
+# (status paused, no paused_at) and an inconsistent active (paused_at set).
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; update public.ingestion_connections set status = 'paused', paused_at = null where id = '$U_CONN';" >/dev/null 2>$ARTIFACT_DIR/pfe_u_pr4.log; then
+  fail "Phase U PR4: a paused connection with no paused_at was accepted"
+else
+  pass "Phase U PR4: the consistency constraint rejects status='paused' without paused_at"
+fi
+
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; update public.ingestion_connections set status = 'active', paused_at = now() where id = '$U_CONN';" >/dev/null 2>$ARTIFACT_DIR/pfe_u_pr4.log; then
+  fail "Phase U PR4: an active connection carrying a paused_at was accepted"
+else
+  pass "Phase U PR4: the consistency constraint rejects status='active' with a lingering paused_at"
+fi
+
+# Owner resumes: paused -> active, paused_at cleared.
+as_user "$USER_A" "update public.ingestion_connections set status = 'active', paused_at = null where id = '$U_CONN';" >/dev/null
+U_PR4_RESUMED="$(psql -d pfe_rls -t -A -c "select count(*) from public.ingestion_connections where id = '$U_CONN' and status = 'active' and paused_at is null and revoked_at is null;")"
+if [ "$U_PR4_RESUMED" = "1" ]; then
+  pass "Phase U PR4: workspace owner can resume a paused connection back to active"
+else
+  fail "Phase U PR4: resuming a paused connection did not take (got $U_PR4_RESUMED)"
+fi
+rm -f $ARTIFACT_DIR/pfe_u_pr4.log
+
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="
 if [ "$FAIL_COUNT" -ne 0 ]; then
