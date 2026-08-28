@@ -41,7 +41,13 @@ test.describe("Scan to pay (R1-R3 shell)", () => {
   async function openScanner(page: import("@playwright/test").Page) {
     await page.goto("/");
     await page.locator("header").getByRole("button", { name: "Pay", exact: true }).click();
-    const dialog = page.getByRole("dialog", { name: "Pay & Services" });
+    // The sheet is one <div role="dialog"> whose aria-labelledby points at
+    // its current <h2>, so its accessible name flips from "Pay & Services"
+    // to "Scan to pay" the moment the scanner view opens. Locate it by
+    // role only - a name filter would go stale after the click and every
+    // scoped query below would then resolve to nothing.
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toHaveAccessibleName("Pay & Services");
     await dialog.getByRole("button", { name: "Scan to pay" }).click();
     return dialog;
   }
