@@ -215,3 +215,93 @@ export async function getActiveBillContext(): Promise<{
   const permissions = await getBillPermissions(workspaceId);
   return { workspaceId, permissions };
 }
+
+// --- Phase 2: extraction read side ----------------------------------
+
+export type BillExtractionRow = {
+  id: string;
+  status: "pending" | "running" | "succeeded" | "failed";
+  doc_class: string | null;
+  doc_class_confidence: number | null;
+  provider: string | null;
+  model: string | null;
+  ruleset_version: string;
+  error: Record<string, unknown> | null;
+  completed_at: string | null;
+  created_at: string;
+};
+
+export type BillExtractedFieldRow = {
+  id: string;
+  field_key: string;
+  value_type: "string" | "date" | "money_minor" | "decimal" | "integer";
+  raw_value: string | null;
+  normalized_value: string | null;
+  currency: string | null;
+  confidence: number | null;
+  source_page: number | null;
+  user_corrected_value: string | null;
+};
+
+export type BillLineItemRow = {
+  id: string;
+  line_index: number;
+  description: string | null;
+  quantity: number | null;
+  unit: string | null;
+  unit_price_minor: number | null;
+  currency: string | null;
+  tax_rate: number | null;
+  line_total_minor: number | null;
+  confidence: number | null;
+};
+
+export type BillExtractionBundle = {
+  extraction: BillExtractionRow | null;
+  fields: BillExtractedFieldRow[];
+  lineItems: BillLineItemRow[];
+};
+
+export async function getCurrentBillExtraction(
+  billDocumentId: string,
+): Promise<BillExtractionBundle> {
+  const supabase = await supabaseSession();
+
+  const { data: extraction, error } = await supabase
+    .from("bill_extractions")
+    .select(
+      "id, status, doc_class, doc_class_confidence, provider, model, ruleset_version, error, completed_at, created_at",
+    )
+    .eq("bill_document_id", billDocumentId)
+    .eq("is_current", true)
+    .maybeSingle();
+
+  if (error) {
+    console.error("getCurrentBillExtraction failed:", error.message);
+    return { extraction: null, fields: [], lineItems: [] };
+  }
+  if (!extraction) return { extraction: null, fields: [], lineItems: [] };
+
+  const [{ data: fields }, { data: lineItems }] = await Promise.all([
+    supabase
+      .from("bill_extracted_fields")
+      .select(
+        "id, field_key, value_type, raw_value, normalized_value, currency, confidence, source_page, user_corrected_value",
+      )
+      .eq("extraction_id", extraction.id)
+      .order("field_key", { ascending: true }),
+    supabase
+      .from("bill_line_items")
+      .select(
+        "id, line_index, description, quantity, unit, unit_price_minor, currency, tax_rate, line_total_minor, confidence",
+      )
+      .eq("extraction_id", extraction.id)
+      .order("line_index", { ascending: true }),
+  ]);
+
+  return {
+    extraction: extraction as BillExtractionRow,
+    fields: (fields ?? []) as BillExtractedFieldRow[],
+    lineItems: (lineItems ?? []) as BillLineItemRow[],
+  };
+}

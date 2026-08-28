@@ -4,11 +4,14 @@ import { PageHeader } from "../../../components/PageHeader";
 import { BillStatusBadge } from "../../../components/bills/BillStatusBadge";
 import { BillProcessingTimeline } from "../../../components/bills/BillProcessingTimeline";
 import { BillArchiveButton } from "../../../components/bills/BillArchiveButton";
-import { isBillsEnabled } from "../../../lib/bills/gate";
+import { BillExtractedFields } from "../../../components/bills/BillExtractedFields";
+import { BillRetryButton } from "../../../components/bills/BillRetryButton";
+import { isBillsEnabled, isBillsExtractionEnabled } from "../../../lib/bills/gate";
 import {
   getActiveBillContext,
   getBillDocumentById,
   getBillProcessingEvents,
+  getCurrentBillExtraction,
 } from "../../../lib/bills/queries";
 import { formatFullDateTime } from "../../../lib/format";
 
@@ -46,6 +49,12 @@ export default async function BillDetailPage({
 
   const events = permissions.canViewAudit ? await getBillProcessingEvents(id) : [];
   const canArchive = permissions.canManage && doc.retention_status !== "archived" && doc.status !== "archived";
+
+  const extractionEnabled = isBillsExtractionEnabled(workspaceId);
+  const bundle = extractionEnabled ? await getCurrentBillExtraction(id) : null;
+  const canRetry =
+    permissions.canReview &&
+    (doc.status === "processing_failed" || bundle?.extraction?.status === "failed");
 
   return (
     <div className="flex flex-col gap-6">
@@ -104,7 +113,19 @@ export default async function BillDetailPage({
           </span>
         )}
         {canArchive && <BillArchiveButton id={doc.id} />}
+        {canRetry && <BillRetryButton id={doc.id} />}
       </div>
+
+      {extractionEnabled && (
+        <section className="flex flex-col gap-3">
+          <h2 className="text-sm font-semibold text-text-secondary">Extracted details</h2>
+          <BillExtractedFields
+            extraction={bundle?.extraction ?? null}
+            fields={bundle?.fields ?? []}
+            lineItems={bundle?.lineItems ?? []}
+          />
+        </section>
+      )}
 
       <section className="flex flex-col gap-3">
         <h2 className="text-sm font-semibold text-text-secondary">Processing history</h2>
@@ -118,7 +139,7 @@ export default async function BillDetailPage({
       </section>
 
       <p className="text-xs text-text-muted">
-        Review and correction of extracted fields arrive in a later release.{" "}
+        Editing and approving extracted fields arrives in a later release.{" "}
         <Link href="/bills" className="text-accent hover:underline">
           Back to all documents
         </Link>

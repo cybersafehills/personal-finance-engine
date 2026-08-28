@@ -10,6 +10,7 @@ import {
   billsMaxUploadBytes,
   FeatureDisabledError,
   isBillsEnabled,
+  isBillsExtractionEnabled,
 } from "../../lib/bills/gate";
 import {
   generateStorageKey,
@@ -165,6 +166,22 @@ export async function uploadBillDocument(
   }
 
   trackBillEvent("bill_uploaded", { mime: mimeType });
+
+  // When extraction is enabled for this workspace, hand the document to
+  // the Phase 2 worker by moving it into the queue. Otherwise it stays
+  // at 'stored' until the Phase 7 review workflow picks it up. A failure
+  // here is non-fatal - the document is safely stored and can be
+  // re-queued.
+  if (isBillsExtractionEnabled(workspaceId)) {
+    const { error: queueError } = await session.rpc("transition_bill_document", {
+      p_id: result.id,
+      p_to_state: "queued",
+      p_reason: null,
+      p_evidence: {},
+    });
+    if (queueError) logBillError("transition", queueError);
+  }
+
   revalidatePath("/bills");
   return { ok: true, id: result.id };
 }
@@ -220,4 +237,38 @@ export async function archiveBillDocument(id: string): Promise<TransitionBillRes
   const result = await transitionBillDocument(id, "archived");
   if (result.ok) trackBillEvent("bill_archived", {});
   return result;
+}
+
+export type RetryExtractionResult =
+  | { ok: true; status: string }
+  | { ok: false; error: string };
+
+/** Re-queue a failed or stuck document for extraction. bill.review-gated
+ *  (enforced by the RPC). */
+export async function retryBillExtraction(id: string): Promise<RetryExtractionResult> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!isBillsEnabled(workspaceId)) {
+    return { ok: false, error: "Bills & Expenses isn't available here." };
+  }
+  try {
+    const session = await supabaseSession();
+    const { data, error } = await session.rpc("retry_bill_extraction", {
+      p_bill_document_id: id,
+    });
+    if (error) {
+      logBillError("transition", error);
+      return { ok: false, error: "That couldn't be retried." };
+    }
+    const res = data as { ok: boolean; status?: string; error?: string };
+    if (!res.ok) {
+      return { ok: false, error: "This document can't be retried from its current state." };
+    }
+    trackBillEvent("bill_processing_retried", {});
+    revalidatePath("/bills");
+    revalidatePath(`/bills/${id}`);
+    return { ok: true, status: res.status ?? "queued" };
+  } catch (err) {
+    logBillError("transition", err);
+    return { ok: false, error: "Something went wrong." };
+  }
 }
