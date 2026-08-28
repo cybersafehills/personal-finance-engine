@@ -155,6 +155,22 @@ disposable, version-matched (PostgreSQL 17) local cluster and asserts:
   auto-regains `anon`/`authenticated` access (including the PUBLIC-EXECUTE-
   on-functions quirk described below).
 
+Per-phase functional blocks follow (Phase B ... Phase U, then **Bills &
+Expenses Phase 1** - `20260922000000`: the document lifecycle CHECK, the
+per-workspace `checksum_sha256` uniqueness guard, `transition_bill_
+document`'s matrix + capability gating, the `record_bill_event` /
+`enforce_bill_original_immutable` lockdowns, and cross-workspace RLS
+isolation on `bill_documents`; then **Bills & Expenses Phase 2** -
+`20260923000000`: `record_bill_extraction` / `system_transition_bill_
+document` being `service_role`-only, a full worker round-trip
+(`queued -> ... -> extracting -> record -> needs_review` with `doc_class`,
+fields and line items), `is_current` supersession, `retry_bill_extraction`,
+and cross-workspace RLS on the three extraction tables). The privilege-
+regression counts (public table count, `authenticated` table-grant count,
+`authenticated` function-EXECUTE count) are asserted exactly and must be
+updated in lock-step with any migration that adds a table, an
+`authenticated` grant, or an `authenticated`-callable function.
+
 Run it with:
 
 ```sh
