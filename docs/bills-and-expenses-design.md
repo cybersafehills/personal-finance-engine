@@ -13,7 +13,9 @@ Phase 2 — `20260923000000_bills_phase_2_extraction.sql` +
 `web/lib/bills/worker.ts`, `web/app/api/cron/process-bill-documents/`.
 Phase 3 — `20260924000000_bills_phase_3_validation.sql` +
 `web/lib/bills/validation/**` (pure rule engine), wired into the worker.
-Phases 4–8 are designed here and architected-for; none of their code
+Phase 4 — `20260925000000_bills_phase_4_duplicates.sql` +
+`web/lib/bills/duplicates/detect.ts` (pure scorer), wired into the worker.
+Phases 5–8 are designed here and architected-for; none of their code
 exists yet.
 
 ---
@@ -330,17 +332,44 @@ Transaction-mismatch rules are **Phase 6**.
 
 ---
 
-## 9. Duplicate detection & idempotency (Phase 4)
+## 9. Duplicate detection & idempotency (Phase 4 — built)
 
-Signals: exact checksum (enforced by `bill_documents_checksum_unique` from
-Phase 1); perceptual/normalized content; invoice/receipt number; supplier
-+ date + currency + total; payment reference; existing transaction/ledger
-links. Relations: exact duplicate / probable / similar / legitimate
-recurring / multiple files for one expense. **Never auto-delete** — the
-evidence is shown to an authorised reviewer. All posting operations are
-idempotent (DB unique on `bills(bill_document_id)` + an idempotency key +
-one transaction; retries resume without a second `bills` row or duplicate
-`bill_transaction_links`).
+`bill_duplicate_candidates` (one row per (newer document, prior document)
+pair, `is_current` cleared on re-run). After validation the worker calls
+the service-role-only `get_bill_document_fingerprints(workspace, exclude)`
+— the current-extraction identity of every non-terminal document in the
+workspace — runs the pure `web/lib/bills/duplicates/detect.ts` scorer, and
+persists the ranked candidates through `record_bill_duplicate_candidates`
+(which emits a `duplicate_detected` journal event).
+
+Signals: exact checksum is already enforced by
+`bill_documents_checksum_unique` (Phase 1) and never reaches here.
+`scoreDuplicates` compares normalised invoice/receipt number, supplier-name
+key (`normalizeSupplierName`), issue date, currency, and total (integer
+minor units, within `policy.duplicate_amount_tolerance_minor`):
+
+- **probable** — same document number + same supplier (0.96), or same
+  document number with no supplier to compare (0.82), or full identity
+  match incl. number (0.98).
+- **multi_file** — same supplier + amount + currency + date but *no*
+  matching document number (0.9) — likely two files for one expense.
+- **recurring** — same supplier + amount + currency, different date within
+  45 days (0.55) — flagged as a likely legitimate repeat, not a
+  duplicate.
+- **similar** — weaker overlap (0.5). Below 0.5 is dropped; capped at 10,
+  sorted by score.
+
+**Never auto-deleted or auto-merged.** A `bill.review` holder resolves
+each candidate through `resolve_bill_duplicate_candidate`
+(`kept_both` / `merged` / `dismissed`; `merged` records intent only — the
+actual document/transaction merge is Phase 6), which writes a Space audit
+event. The detail page shows candidates in both directions (this document
+flagged against an earlier one, and later documents flagged against it).
+
+Perceptual/near-duplicate content matching and the "existing linked
+ledger record" signal are Phase 6 (they need the posting model).
+Idempotent posting itself — DB unique on `bills(bill_document_id)` +
+idempotency key + one transaction — is Phase 6.
 
 ---
 
@@ -412,7 +441,7 @@ rejected filters.
 | **1 — Schema, storage & intake** *(built)* | 4 tables, 2 buckets, `transition_bill_document` + `record_bill_event` + `record_bill_original_download` + `get_or_create_bill_processing_policy`, 8 new capabilities, secure upload + SHA-256 + immutable original, `lib/bills/gate.ts`, minimal list + detail UI, migration-test block, unit + e2e. **No AI, no posting.** | Behind `BILLS_ENABLED` only |
 | **2 — Classification & extraction** *(built)* | `bill_extractions` / `bill_extracted_fields` / `bill_line_items`; `record_bill_extraction` + `system_transition_bill_document` + `retry_bill_extraction` RPCs; `lib/bills/extraction/**` (provider abstraction incl. `mock`, strict schema, injection-hardened prompt) + `lib/bills/normalize.ts`; cron worker `queued → … → needs_review`; read-only extracted-fields on the detail page. **PDF/image rendering is client-side in Phase 7 (pdf.js), so no server preview/thumbnail generation.** | Behind `BILLS_EXTRACTION_ENABLED` |
 | **3 — Validation & exception detection** *(built)* | `bill_validations` (is_current) / `bill_validation_findings`; service_role-only `record_bill_validation`; `record_bill_extraction` re-issued to land at `validating`; the pure `web/lib/bills/validation/` rule engine wired into the worker; read-only "Checks" section on the detail page. Per-workspace policy *edits* (`bill.configure` UI) deferred to Phase 7. | Behind `BILLS_EXTRACTION_ENABLED` |
-| **4 — Duplicate detection & idempotency** | `bill_duplicate_candidates`; the multi-signal engine; idempotency keys across the posting path | Behind flag |
+| **4 — Duplicate detection** *(built)* | `bill_duplicate_candidates` (is_current); service_role-only `get_bill_document_fingerprints` + `record_bill_duplicate_candidates`; `bill.review`-gated `resolve_bill_duplicate_candidate`; pure `web/lib/bills/duplicates/detect.ts` (document-number / supplier+date+amount / recurring signals) wired into the worker; "Possible duplicates" section on the detail page. Perceptual matching + idempotent posting are Phase 6. | Behind `BILLS_EXTRACTION_ENABLED` |
 | **5 — Supplier resolution** | `suppliers` / `supplier_aliases` / `bill_supplier_candidates`; ranked search; permissioned creation | Behind flag |
 | **6 — Transaction matching & posting** | `bills` / `bill_transaction_links` / `bill_ledger_links`; ranked match candidates; `approve_bill` (limits, no self-approval, stale-guard); idempotent `post_bill` | **Yes** |
 | **7 — Review workspace & UX** | Full split-pane review UI; draft/approve/reject/clarify; corrected-value provenance; responsive + a11y; landing-page filters; nav placement | **Yes** |
@@ -434,8 +463,8 @@ activation. The disabled state is `notFound()` for pages,
   authenticated-callable; `kind='original'` artifact immutability;
   cross-workspace RLS isolation; the capability matrix. Privilege-
   regression counts updated in lock-step (on `main` after Phases S–U:
-  80 tables, 125 `authenticated` table grants, 74 `authenticated`-callable
-  functions). Full-chain harness: **244 assertions**, 25 of them Bills.
+  81 tables, 126 `authenticated` table grants, 75 `authenticated`-callable
+  functions). Full-chain harness: **251 assertions**, 32 of them Bills.
 - **Unit** (Deno, `web/lib/bills/**/*_test.ts`): `intake.ts` — magic-byte
   sniffing vs a spoofed extension, size cap, filename sanitisation,
   storage-key opacity, PDF page count, encrypted/truncated rejection,
@@ -460,7 +489,12 @@ activation. The disabled state is `notFound()` for pages,
   secret → in one tick the document runs extraction **and** validation
   and reaches `needs_review` with `doc_class`, the extracted supplier /
   total / date, and a "Checks" section (the self-consistent mock invoice
-  → no findings); the cron route 401s without the secret.
+  → no findings); the cron route 401s without the secret; two documents
+  that resolve to the same identity → the second shows a "Probable
+  duplicate" in "Possible duplicates" and a reviewer can dismiss it.
+  `validation/engine.ts` + `duplicates/detect.ts` also have their own
+  unit suites (document-number / multi-file / recurring / tolerance /
+  cap-and-sort).
 - Later phases add the extraction-pipeline, validation-rule,
   duplicate-scoring, matching, approval-policy, permission, idempotency
   and provider-response-validation suites, plus the master-prompt §29

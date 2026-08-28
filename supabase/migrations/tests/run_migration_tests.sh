@@ -5834,6 +5834,110 @@ else
   fail "Bills Phase 3: RLS isolation breach on bill_validation_findings"
 fi
 
+# ===========================================================================
+# Bills & Expenses Phase 4 (20260925000000): get_bill_document_fingerprints
+# + record_bill_duplicate_candidates being service_role-only, a two-document
+# content-duplicate round-trip, resolve_bill_duplicate_candidate being
+# member + bill.review gated, and cross-workspace RLS. Reuses pfe_rls +
+# USER_A / USER_B / BILL_WS_A.
+# ===========================================================================
+echo "=== Bills Phase 4: duplicate detection ==="
+
+BILL4A_CHK="$(printf 'f%.0s' $(seq 1 64))"
+BILL4B_CHK="$(printf '9%.0s' $(seq 1 64))"
+
+if as_user "$USER_A" "select public.record_bill_duplicate_candidates('{}'::jsonb);" >/dev/null 2>$ARTIFACT_DIR/pfe_b4a.log; then
+  fail "Bills Phase 4: record_bill_duplicate_candidates was authenticated-callable"
+else
+  pass "Bills Phase 4: record_bill_duplicate_candidates is service_role-only"
+fi
+rm -f $ARTIFACT_DIR/pfe_b4a.log
+if as_user "$USER_A" "select * from public.get_bill_document_fingerprints('$BILL_WS_A', '00000000-0000-0000-0000-000000000000');" >/dev/null 2>$ARTIFACT_DIR/pfe_b4b.log; then
+  fail "Bills Phase 4: get_bill_document_fingerprints was authenticated-callable"
+else
+  pass "Bills Phase 4: get_bill_document_fingerprints is service_role-only"
+fi
+rm -f $ARTIFACT_DIR/pfe_b4b.log
+
+# Two documents with the same extracted identity, both driven to 'validating'.
+make_bill4_doc() {
+  local chk="$1" name="$2"
+  local id
+  id="$(as_user "$USER_A" "select (public.create_bill_document(jsonb_build_object(
+    'workspace_id','$BILL_WS_A','original_filename','$name','sanitized_filename','$name',
+    'storage_key','$BILL_WS_A/${chk}.pdf','mime_type','application/pdf',
+    'byte_size',4096,'checksum_sha256','$chk')))->>'id';")"
+  as_user "$USER_A" "select public.transition_bill_document('$id','queued');" >/dev/null
+  psql -d pfe_rls -t -A -c "set role service_role;
+    select public.system_transition_bill_document('$id','scanning');
+    select public.system_transition_bill_document('$id','classifying');
+    select public.system_transition_bill_document('$id','extracting');
+    select public.record_bill_extraction(jsonb_build_object(
+      'bill_document_id','$id','workspace_id','$BILL_WS_A','status','succeeded',
+      'provider','mock','model','mock','doc_class','supplier_invoice',
+      'fields', jsonb_build_array(
+        jsonb_build_object('field_key','supplier_name','value_type','string','normalized_value','Kigali Office Supplies Ltd','source_page',1),
+        jsonb_build_object('field_key','invoice_number','value_type','string','normalized_value','INV-2026-0442','source_page',1),
+        jsonb_build_object('field_key','issue_date','value_type','date','normalized_value','2026-08-12','source_page',1),
+        jsonb_build_object('field_key','currency','value_type','string','normalized_value','RWF','source_page',1),
+        jsonb_build_object('field_key','total','value_type','money_minor','normalized_value','141600','currency','RWF','source_page',1)),
+      'line_items','[]'::jsonb));" >/dev/null
+  echo "$id"
+}
+BILL4A_ID="$(make_bill4_doc "$BILL4A_CHK" a4.pdf)"
+BILL4B_ID="$(make_bill4_doc "$BILL4B_CHK" b4.pdf)"
+
+# get_bill_document_fingerprints for B returns A (and not B itself).
+BILL4_FP="$(psql -d pfe_rls -t -A -c "set role service_role; select count(*) from public.get_bill_document_fingerprints('$BILL_WS_A', '$BILL4B_ID') where bill_document_id = '$BILL4A_ID';" | tail -1)"
+BILL4_FP_SELF="$(psql -d pfe_rls -t -A -c "set role service_role; select count(*) from public.get_bill_document_fingerprints('$BILL_WS_A', '$BILL4B_ID') where bill_document_id = '$BILL4B_ID';" | tail -1)"
+if [ "$BILL4_FP" = "1" ] && [ "$BILL4_FP_SELF" = "0" ]; then
+  pass "Bills Phase 4: get_bill_document_fingerprints returns the workspace's other current-extraction documents, excluding the subject"
+else
+  fail "Bills Phase 4: fingerprint set wrong (sawA=$BILL4_FP sawSelf=$BILL4_FP_SELF)"
+fi
+
+# Record a candidate for B pointing at A.
+BILL4_REC="$(psql -d pfe_rls -t -A -c "set role service_role; select (public.record_bill_duplicate_candidates(jsonb_build_object(
+  'bill_document_id','$BILL4B_ID','workspace_id','$BILL_WS_A',
+  'candidates', jsonb_build_array(jsonb_build_object(
+    'candidate_document_id','$BILL4A_ID','relation','probable','score',0.96,
+    'signals', jsonb_build_array('document_number','supplier_name','total'))))))->>'candidates';" | tail -1)"
+BILL4_ROWS="$(psql -d pfe_rls -t -A -c "select count(*) from public.bill_duplicate_candidates where bill_document_id = '$BILL4B_ID' and is_current;")"
+BILL4_EVENT="$(psql -d pfe_rls -t -A -c "select count(*) from public.bill_processing_events where bill_document_id = '$BILL4B_ID' and event_type = 'duplicate_detected';")"
+if [ "$BILL4_REC" = "1" ] && [ "$BILL4_ROWS" = "1" ] && [ "$BILL4_EVENT" = "1" ]; then
+  pass "Bills Phase 4: record_bill_duplicate_candidates writes the candidate + a duplicate_detected event"
+else
+  fail "Bills Phase 4: candidate write wrong (rec=$BILL4_REC rows=$BILL4_ROWS event=$BILL4_EVENT)"
+fi
+
+BILL4_CID="$(psql -d pfe_rls -t -A -c "select id from public.bill_duplicate_candidates where bill_document_id = '$BILL4B_ID' and is_current limit 1;")"
+
+# A non-member cannot resolve it.
+if as_user "$USER_B" "select public.resolve_bill_duplicate_candidate('$BILL4_CID', 'dismissed');" >/dev/null 2>$ARTIFACT_DIR/pfe_b4c.log; then
+  fail "Bills Phase 4: a non-member resolved a duplicate candidate"
+else
+  pass "Bills Phase 4: resolve_bill_duplicate_candidate refuses a non-member"
+fi
+rm -f $ARTIFACT_DIR/pfe_b4c.log
+
+# The owner (bill.review via personal-owner) resolves it; audit recorded.
+BILL4_RES="$(as_user "$USER_A" "select (public.resolve_bill_duplicate_candidate('$BILL4_CID', 'dismissed'))->>'resolution';")"
+BILL4_RES_ROW="$(psql -d pfe_rls -t -A -c "select resolution from public.bill_duplicate_candidates where id = '$BILL4_CID';")"
+BILL4_AUDIT="$(psql -d pfe_rls -t -A -c "select count(*) from public.space_audit_events where workspace_id = '$BILL_WS_A' and event_type = 'bill.duplicate_resolved';")"
+if [ "$BILL4_RES" = "dismissed" ] && [ "$BILL4_RES_ROW" = "dismissed" ] && [ "$BILL4_AUDIT" -ge "1" ]; then
+  pass "Bills Phase 4: a bill.review holder resolves a candidate and it writes a space audit event"
+else
+  fail "Bills Phase 4: resolve wrong (res=$BILL4_RES row=$BILL4_RES_ROW audit=$BILL4_AUDIT)"
+fi
+
+# Cross-workspace RLS.
+BILL4_B_SEES="$(as_user "$USER_B" "select count(*) from public.bill_duplicate_candidates where bill_document_id = '$BILL4B_ID';")"
+if [ "$BILL4_B_SEES" = "0" ]; then
+  pass "Bills Phase 4: a non-member cannot read another workspace's duplicate candidates"
+else
+  fail "Bills Phase 4: RLS isolation breach on bill_duplicate_candidates"
+fi
+
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="
 if [ "$FAIL_COUNT" -ne 0 ]; then

@@ -6,11 +6,13 @@ import { BillProcessingTimeline } from "../../../components/bills/BillProcessing
 import { BillArchiveButton } from "../../../components/bills/BillArchiveButton";
 import { BillExtractedFields } from "../../../components/bills/BillExtractedFields";
 import { BillValidationFindings } from "../../../components/bills/BillValidationFindings";
+import { BillDuplicateCandidates } from "../../../components/bills/BillDuplicateCandidates";
 import { BillRetryButton } from "../../../components/bills/BillRetryButton";
 import { isBillsEnabled, isBillsExtractionEnabled } from "../../../lib/bills/gate";
 import {
   getActiveBillContext,
   getBillDocumentById,
+  getBillDuplicateCandidates,
   getBillProcessingEvents,
   getCurrentBillExtraction,
   getCurrentBillValidation,
@@ -55,6 +57,7 @@ export default async function BillDetailPage({
   const extractionEnabled = isBillsExtractionEnabled(workspaceId);
   const bundle = extractionEnabled ? await getCurrentBillExtraction(id) : null;
   const validation = extractionEnabled ? await getCurrentBillValidation(id) : null;
+  const duplicates = extractionEnabled ? await getBillDuplicateCandidates(id) : [];
   const canRetry =
     permissions.canReview &&
     (doc.status === "processing_failed" || bundle?.extraction?.status === "failed");
@@ -136,6 +139,17 @@ export default async function BillDetailPage({
           <BillValidationFindings
             validation={validation?.validation ?? null}
             findings={validation?.findings ?? []}
+          />
+        </section>
+      )}
+
+      {extractionEnabled && (
+        <section className="flex flex-col gap-3">
+          <h2 className="text-sm font-semibold text-text-secondary">Possible duplicates</h2>
+          <BillDuplicateCandidates
+            documentId={doc.id}
+            candidates={duplicates}
+            canReview={permissions.canReview}
           />
         </section>
       )}

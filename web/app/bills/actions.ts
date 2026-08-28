@@ -272,3 +272,39 @@ export async function retryBillExtraction(id: string): Promise<RetryExtractionRe
     return { ok: false, error: "Something went wrong." };
   }
 }
+
+export type ResolveDuplicateResult =
+  | { ok: true; resolution: string }
+  | { ok: false; error: string };
+
+/** Resolve one duplicate candidate (kept_both | merged | dismissed).
+ *  bill.review-gated by the RPC. */
+export async function resolveBillDuplicate(
+  candidateId: string,
+  resolution: "kept_both" | "merged" | "dismissed",
+  documentId: string,
+): Promise<ResolveDuplicateResult> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!isBillsEnabled(workspaceId)) {
+    return { ok: false, error: "Bills & Expenses isn't available here." };
+  }
+  try {
+    const session = await supabaseSession();
+    const { data, error } = await session.rpc("resolve_bill_duplicate_candidate", {
+      p_id: candidateId,
+      p_resolution: resolution,
+    });
+    if (error) {
+      logBillError("transition", error);
+      return { ok: false, error: "That couldn't be applied." };
+    }
+    const res = data as { ok: boolean; resolution?: string };
+    if (!res.ok) return { ok: false, error: "That isn't a valid resolution." };
+    trackBillEvent("bill_status_changed", { to: `dup_${resolution}` });
+    revalidatePath(`/bills/${documentId}`);
+    return { ok: true, resolution: res.resolution ?? resolution };
+  } catch (err) {
+    logBillError("transition", err);
+    return { ok: false, error: "Something went wrong." };
+  }
+}

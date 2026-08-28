@@ -5,6 +5,7 @@ import { buildExtractionRecordPayload } from "./extraction";
 import { runValidation } from "./validation/engine";
 import type { ValidationContext, ValidationPolicy } from "./validation/types";
 import { RULESET_VERSION } from "./validation/types";
+import { scoreDuplicates, type Fingerprint } from "./duplicates/detect";
 import { logBillError } from "./analytics";
 
 // The Bills & Expenses processing worker (master prompt §18). Invoked by
@@ -118,6 +119,15 @@ export async function runBillProcessingTick(
       // stuck at 'validating').
       const validated = await validateDocument(admin, doc.id, doc.workspace_id);
       if (validated) summary.validated += 1;
+
+      // Content-duplicate detection - non-fatal (a failure here just
+      // means no candidates are recorded this tick).
+      try {
+        await detectDuplicates(admin, doc.id, doc.workspace_id);
+      } catch (err) {
+        logBillError("record", err);
+      }
+
       summary.succeeded += 1;
     } catch (err) {
       logBillError("record", err);
@@ -288,4 +298,86 @@ async function validateDocument(
     return false;
   }
   return true;
+}
+
+function fieldValue(
+  rows: Array<{ field_key: string; normalized_value: string | null; raw_value: string | null }> | null,
+  key: string,
+): string | null {
+  const r = (rows ?? []).find((x) => x.field_key === key);
+  return r ? (r.normalized_value ?? r.raw_value) : null;
+}
+
+async function detectDuplicates(
+  admin: Admin,
+  billDocumentId: string,
+  workspaceId: string,
+): Promise<void> {
+  const { data: extraction } = await admin
+    .from("bill_extractions")
+    .select("id")
+    .eq("bill_document_id", billDocumentId)
+    .eq("is_current", true)
+    .maybeSingle();
+  if (!extraction) return;
+
+  const [{ data: fieldRows }, { data: priorRows }, { data: policyRow }] = await Promise.all([
+    admin
+      .from("bill_extracted_fields")
+      .select("field_key, normalized_value, raw_value")
+      .eq("extraction_id", extraction.id),
+    admin.rpc("get_bill_document_fingerprints", {
+      p_workspace_id: workspaceId,
+      p_exclude_document_id: billDocumentId,
+    }),
+    admin
+      .from("bill_processing_policies")
+      .select("duplicate_amount_tolerance_minor")
+      .eq("workspace_id", workspaceId)
+      .maybeSingle(),
+  ]);
+
+  const subject: Fingerprint = {
+    billDocumentId,
+    status: "needs_review",
+    supplierName: fieldValue(fieldRows, "supplier_name"),
+    invoiceNumber: fieldValue(fieldRows, "invoice_number"),
+    receiptNumber: fieldValue(fieldRows, "receipt_number"),
+    issueDate: fieldValue(fieldRows, "issue_date"),
+    currency: fieldValue(fieldRows, "currency"),
+    totalMinor: fieldValue(fieldRows, "total"),
+  };
+
+  const priors: Fingerprint[] = (
+    (priorRows ?? []) as Array<Record<string, string | null>>
+  ).map((r) => ({
+    billDocumentId: r.bill_document_id as string,
+    status: (r.status as string) ?? "",
+    supplierName: r.supplier_name,
+    invoiceNumber: r.invoice_number,
+    receiptNumber: r.receipt_number,
+    issueDate: r.issue_date,
+    currency: r.currency,
+    totalMinor: r.total_minor,
+  }));
+
+  const tolerance = policyRow?.duplicate_amount_tolerance_minor
+    ? BigInt(policyRow.duplicate_amount_tolerance_minor)
+    : 0n;
+
+  const candidates = scoreDuplicates(subject, priors, { amountToleranceMinor: tolerance });
+
+  await admin.rpc("record_bill_duplicate_candidates", {
+    payload: {
+      bill_document_id: billDocumentId,
+      workspace_id: workspaceId,
+      candidates: candidates.map((c) => ({
+        candidate_document_id: c.candidateDocumentId,
+        relation: c.relation,
+        score: c.score,
+        signals: c.signals,
+        detail: c.detail,
+      })),
+    },
+  });
 }
