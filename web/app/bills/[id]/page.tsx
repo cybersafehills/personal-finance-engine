@@ -4,15 +4,18 @@ import { PageHeader } from "../../../components/PageHeader";
 import { BillStatusBadge } from "../../../components/bills/BillStatusBadge";
 import { BillProcessingTimeline } from "../../../components/bills/BillProcessingTimeline";
 import { BillArchiveButton } from "../../../components/bills/BillArchiveButton";
-import { BillExtractedFields } from "../../../components/bills/BillExtractedFields";
+import { BillDocumentPreview } from "../../../components/bills/BillDocumentPreview";
+import { BillFieldsEditor } from "../../../components/bills/BillFieldsEditor";
 import { BillValidationFindings } from "../../../components/bills/BillValidationFindings";
 import { BillDuplicateCandidates } from "../../../components/bills/BillDuplicateCandidates";
 import { BillSupplierPanel } from "../../../components/bills/BillSupplierPanel";
 import { BillLedgerPanel } from "../../../components/bills/BillLedgerPanel";
+import { BillComments } from "../../../components/bills/BillComments";
 import { BillRetryButton } from "../../../components/bills/BillRetryButton";
 import { isBillsEnabled, isBillsExtractionEnabled } from "../../../lib/bills/gate";
 import {
   getActiveBillContext,
+  getBillComments,
   getBillDocumentById,
   getBillDuplicateCandidates,
   getBillLedger,
@@ -40,6 +43,15 @@ const MIME_LABEL: Record<string, string> = {
   "image/heif": "HEIF image",
 };
 
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="flex flex-col gap-3">
+      <h2 className="text-sm font-semibold text-text-secondary">{title}</h2>
+      {children}
+    </section>
+  );
+}
+
 export default async function BillDetailPage({
   params,
 }: {
@@ -56,17 +68,24 @@ export default async function BillDetailPage({
     notFound();
   }
 
-  const events = permissions.canViewAudit ? await getBillProcessingEvents(id) : [];
-  const canArchive = permissions.canManage && doc.retention_status !== "archived" && doc.status !== "archived";
-
   const extractionEnabled = isBillsExtractionEnabled(workspaceId);
-  const bundle = extractionEnabled ? await getCurrentBillExtraction(id) : null;
-  const validation = extractionEnabled ? await getCurrentBillValidation(id) : null;
-  const duplicates = extractionEnabled ? await getBillDuplicateCandidates(id) : [];
-  const [supplierLink, supplierCandidates] = extractionEnabled
-    ? await Promise.all([getBillSupplierLink(id), getBillSupplierCandidates(id)])
-    : [null, []];
-  const ledger = extractionEnabled ? await getBillLedger(id) : null;
+  const events = permissions.canViewAudit ? await getBillProcessingEvents(id) : [];
+  const canArchive =
+    permissions.canManage && doc.retention_status !== "archived" && doc.status !== "archived";
+
+  const [bundle, validation, duplicates, supplierLink, supplierCandidates, ledger, comments] =
+    extractionEnabled
+      ? await Promise.all([
+          getCurrentBillExtraction(id),
+          getCurrentBillValidation(id),
+          getBillDuplicateCandidates(id),
+          getBillSupplierLink(id),
+          getBillSupplierCandidates(id),
+          getBillLedger(id),
+          getBillComments(id),
+        ])
+      : [null, null, [], null, [], null, []];
+
   const extractedName =
     bundle?.fields.find((f) => f.field_key === "supplier_name")?.normalized_value ??
     bundle?.fields.find((f) => f.field_key === "supplier_name")?.raw_value ??
@@ -76,6 +95,10 @@ export default async function BillDetailPage({
   const canRetry =
     permissions.canReview &&
     (doc.status === "processing_failed" || bundle?.extraction?.status === "failed");
+  const validationStale =
+    !!bundle?.extraction &&
+    !!validation?.validation &&
+    validation.validation.review_revision !== doc.review_revision;
 
   return (
     <div className="flex flex-col gap-6">
@@ -87,137 +110,148 @@ export default async function BillDetailPage({
         action={<BillStatusBadge status={doc.status} />}
       />
 
-      <dl className="grid grid-cols-1 gap-x-6 gap-y-3 rounded-card border border-border-subtle bg-surface p-4 text-sm sm:grid-cols-2">
-        <div>
-          <dt className="text-text-muted">Type</dt>
-          <dd className="text-text-primary">{MIME_LABEL[doc.mime_type] ?? doc.mime_type}</dd>
-        </div>
-        <div>
-          <dt className="text-text-muted">Size</dt>
-          <dd className="text-text-primary">{formatBytes(doc.byte_size)}</dd>
-        </div>
-        {doc.page_count != null && (
-          <div>
-            <dt className="text-text-muted">Pages</dt>
-            <dd className="text-text-primary">{doc.page_count}</dd>
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* Document */}
+        <div className="lg:sticky lg:top-4 lg:self-start">
+          <BillDocumentPreview
+            documentId={doc.id}
+            mimeType={doc.mime_type}
+            canView={permissions.canDownloadOriginal}
+          />
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            {canArchive && <BillArchiveButton id={doc.id} />}
+            {canRetry && <BillRetryButton id={doc.id} />}
           </div>
-        )}
-        <div>
-          <dt className="text-text-muted">Uploaded</dt>
-          <dd className="text-text-primary">{formatFullDateTime(doc.uploaded_at)}</dd>
         </div>
-        <div>
-          <dt className="text-text-muted">Security scan</dt>
-          <dd className="text-text-primary">{doc.security_scan_status}</dd>
-        </div>
-        <div>
-          <dt className="text-text-muted">Retention</dt>
-          <dd className="text-text-primary">{doc.retention_status}</dd>
-        </div>
-        <div className="sm:col-span-2">
-          <dt className="text-text-muted">Checksum (SHA-256)</dt>
-          <dd className="break-all font-mono text-xs text-text-secondary">{doc.checksum_sha256}</dd>
-        </div>
-      </dl>
 
-      <div className="flex flex-wrap items-center gap-3">
-        {permissions.canDownloadOriginal ? (
-          <a
-            href={`/api/bills/${doc.id}/original`}
-            className="min-h-11 rounded-control bg-accent px-4 py-2 text-sm font-medium text-accent-foreground"
-          >
-            Download original
-          </a>
-        ) : (
-          <span className="text-sm text-text-muted">
-            You don&rsquo;t have permission to download the original.
-          </span>
-        )}
-        {canArchive && <BillArchiveButton id={doc.id} />}
-        {canRetry && <BillRetryButton id={doc.id} />}
-      </div>
+        {/* Review */}
+        <div className="flex flex-col gap-6">
+          {extractionEnabled ? (
+            <>
+              <Section title="Fields">
+                <BillFieldsEditor
+                  documentId={doc.id}
+                  extraction={bundle?.extraction ?? null}
+                  fields={bundle?.fields ?? []}
+                  lineItems={bundle?.lineItems ?? []}
+                  canReview={permissions.canReview}
+                  validationStale={validationStale}
+                />
+              </Section>
 
-      {extractionEnabled && (
-        <section className="flex flex-col gap-3">
-          <h2 className="text-sm font-semibold text-text-secondary">Extracted details</h2>
-          <BillExtractedFields
-            extraction={bundle?.extraction ?? null}
-            fields={bundle?.fields ?? []}
-            lineItems={bundle?.lineItems ?? []}
-          />
-        </section>
-      )}
+              <Section title="Checks">
+                <BillValidationFindings
+                  validation={validation?.validation ?? null}
+                  findings={validation?.findings ?? []}
+                />
+              </Section>
 
-      {extractionEnabled && (
-        <section className="flex flex-col gap-3">
-          <h2 className="text-sm font-semibold text-text-secondary">Checks</h2>
-          <BillValidationFindings
-            validation={validation?.validation ?? null}
-            findings={validation?.findings ?? []}
-          />
-        </section>
-      )}
+              <Section title="Supplier">
+                <BillSupplierPanel
+                  documentId={doc.id}
+                  linked={supplierLink}
+                  candidates={supplierCandidates}
+                  canReview={permissions.canReview}
+                  canManage={permissions.canManage}
+                  extractedName={extractedName}
+                  extractedTaxId={extractedTaxId}
+                />
+              </Section>
 
-      {extractionEnabled && (
-        <section className="flex flex-col gap-3">
-          <h2 className="text-sm font-semibold text-text-secondary">Supplier</h2>
-          <BillSupplierPanel
-            documentId={doc.id}
-            linked={supplierLink}
-            candidates={supplierCandidates}
-            canReview={permissions.canReview}
-            canManage={permissions.canManage}
-            extractedName={extractedName}
-            extractedTaxId={extractedTaxId}
-          />
-        </section>
-      )}
+              <Section title="Possible duplicates">
+                <BillDuplicateCandidates
+                  documentId={doc.id}
+                  candidates={duplicates}
+                  canReview={permissions.canReview}
+                />
+              </Section>
 
-      {extractionEnabled && (
-        <section className="flex flex-col gap-3">
-          <h2 className="text-sm font-semibold text-text-secondary">Possible duplicates</h2>
-          <BillDuplicateCandidates
-            documentId={doc.id}
-            candidates={duplicates}
-            canReview={permissions.canReview}
-          />
-        </section>
-      )}
+              {ledger && (
+                <Section title="Approval & ledger">
+                  <BillLedgerPanel
+                    documentId={doc.id}
+                    status={doc.status}
+                    ledger={ledger}
+                    canApprove={permissions.canApprove}
+                    canPost={permissions.canPost}
+                    canReview={permissions.canReview}
+                  />
+                </Section>
+              )}
 
-      {extractionEnabled && ledger && (
-        <section className="flex flex-col gap-3">
-          <h2 className="text-sm font-semibold text-text-secondary">
-            Approval &amp; ledger
-          </h2>
-          <BillLedgerPanel
-            documentId={doc.id}
-            status={doc.status}
-            ledger={ledger}
-            canApprove={permissions.canApprove}
-            canPost={permissions.canPost}
-            canReview={permissions.canReview}
-          />
-        </section>
-      )}
+              <Section title="Notes">
+                <BillComments
+                  documentId={doc.id}
+                  comments={comments}
+                  canComment={permissions.canReview}
+                />
+              </Section>
+            </>
+          ) : (
+            <p className="text-sm text-text-muted">
+              Automated extraction isn&rsquo;t enabled for this workspace. The original is
+              stored and its processing history is below.
+            </p>
+          )}
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold text-text-secondary">Processing history</h2>
-        {permissions.canViewAudit ? (
-          <BillProcessingTimeline events={events} />
-        ) : (
-          <p className="text-sm text-text-muted">
-            You don&rsquo;t have permission to view this document&rsquo;s processing history.
+          <Section title="Processing history">
+            {permissions.canViewAudit ? (
+              <BillProcessingTimeline events={events} />
+            ) : (
+              <p className="text-sm text-text-muted">
+                You don&rsquo;t have permission to view this document&rsquo;s processing
+                history.
+              </p>
+            )}
+          </Section>
+
+          <details className="rounded-card border border-border-subtle bg-surface p-4 text-sm">
+            <summary className="cursor-pointer font-medium text-text-secondary">
+              Document details
+            </summary>
+            <dl className="mt-3 grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2">
+              <div>
+                <dt className="text-text-muted">Type</dt>
+                <dd className="text-text-primary">{MIME_LABEL[doc.mime_type] ?? doc.mime_type}</dd>
+              </div>
+              <div>
+                <dt className="text-text-muted">Size</dt>
+                <dd className="text-text-primary">{formatBytes(doc.byte_size)}</dd>
+              </div>
+              {doc.page_count != null && (
+                <div>
+                  <dt className="text-text-muted">Pages</dt>
+                  <dd className="text-text-primary">{doc.page_count}</dd>
+                </div>
+              )}
+              <div>
+                <dt className="text-text-muted">Uploaded</dt>
+                <dd className="text-text-primary">{formatFullDateTime(doc.uploaded_at)}</dd>
+              </div>
+              <div>
+                <dt className="text-text-muted">Security scan</dt>
+                <dd className="text-text-primary">{doc.security_scan_status}</dd>
+              </div>
+              <div>
+                <dt className="text-text-muted">Retention</dt>
+                <dd className="text-text-primary">{doc.retention_status}</dd>
+              </div>
+              <div className="sm:col-span-2">
+                <dt className="text-text-muted">Checksum (SHA-256)</dt>
+                <dd className="break-all font-mono text-xs text-text-secondary">
+                  {doc.checksum_sha256}
+                </dd>
+              </div>
+            </dl>
+          </details>
+
+          <p className="text-xs text-text-muted">
+            <Link href="/bills" className="text-accent hover:underline">
+              Back to all documents
+            </Link>
           </p>
-        )}
-      </section>
-
-      <p className="text-xs text-text-muted">
-        Editing and approving extracted fields arrives in a later release.{" "}
-        <Link href="/bills" className="text-accent hover:underline">
-          Back to all documents
-        </Link>
-        .
-      </p>
+        </div>
+      </div>
     </div>
   );
 }

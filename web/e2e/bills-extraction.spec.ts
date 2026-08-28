@@ -51,8 +51,7 @@ test.describe("Bills & Expenses - Phase 2 extraction", () => {
     await page.goto(detailUrl);
     await expect(page.getByText("Needs review")).toBeVisible();
 
-    const extracted = page.getByRole("heading", { name: "Extracted details" });
-    await expect(extracted).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Fields", exact: true })).toBeVisible();
     await expect(page.getByText("Kigali Office Supplies Ltd")).toBeVisible();
     await expect(page.getByText("RWF 141,600")).toBeVisible();
     await expect(page.getByText("2026-08-12")).toBeVisible();
@@ -66,6 +65,23 @@ test.describe("Bills & Expenses - Phase 2 extraction", () => {
     // sum to the subtotal; dates in the past), so it has no findings.
     await expect(page.getByRole("heading", { name: "Checks" })).toBeVisible();
     await expect(page.getByText(/No issues found by the automated checks/)).toBeVisible();
+
+    // The review layout: the reviewer affordances (inline field edit) and
+    // the ledger + notes sections are present.
+    await expect(page.getByRole("button", { name: "Edit" }).first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Approval & ledger" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Notes" })).toBeVisible();
+
+    // Inline-correct the invoice number, then confirm it renders as
+    // "(corrected)" and the checks re-ran clean.
+    const fieldsRegion = page.locator("section", {
+      has: page.getByRole("heading", { name: "Fields", exact: true }),
+    });
+    await fieldsRegion.getByText("INV-2026-0442").locator("..").getByRole("button", { name: "Edit" }).click();
+    await page.getByRole("textbox").first().fill("INV-2026-0442-R1");
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(page.getByText("INV-2026-0442-R1")).toBeVisible();
+    await expect(page.getByText("(corrected)").first()).toBeVisible();
 
     // No serious/critical a11y violations on the populated detail page.
     const results = await new AxeBuilder({ page }).analyze();

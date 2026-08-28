@@ -2,9 +2,7 @@ import "server-only";
 import { supabaseServer } from "../supabase-server";
 import { classifyAndExtract } from "./extraction/provider";
 import { buildExtractionRecordPayload } from "./extraction";
-import { runValidation } from "./validation/engine";
-import type { ValidationContext, ValidationPolicy } from "./validation/types";
-import { RULESET_VERSION } from "./validation/types";
+import { revalidateBillDocument } from "./revalidate";
 import { scoreDuplicates, type Fingerprint } from "./duplicates/detect";
 import { scoreTransactionMatches, type TxnCandidate } from "./matching/score";
 import { normalizeSupplierName } from "./normalize";
@@ -118,9 +116,9 @@ export async function runBillProcessingTick(
       }
 
       // Validation step (for a freshly-extracted doc, or a doc that was
-      // stuck at 'validating').
-      const validated = await validateDocument(admin, doc.id, doc.workspace_id);
-      if (validated) summary.validated += 1;
+      // stuck at 'validating'). Shared with the "re-check" action.
+      const validated = await revalidateBillDocument(admin, doc.id, doc.workspace_id);
+      if (validated.ok) summary.validated += 1;
 
       // Content-duplicate detection + supplier resolution - both
       // non-fatal (a failure here just means no candidates this tick).
@@ -179,138 +177,6 @@ async function recordExtractionFailure(
   });
 }
 
-const DEFAULT_POLICY: ValidationPolicy = {
-  supportedCurrencies: ["RWF", "USD", "EUR"],
-  expectedTaxRates: [],
-  requiredFields: ["supplier", "issue_date", "total", "currency"],
-  largeAmountThresholdMinor: null,
-  largeAmountCurrency: "RWF",
-  dateToleranceDays: 3,
-};
-
-async function validateDocument(
-  admin: Admin,
-  billDocumentId: string,
-  workspaceId: string,
-): Promise<boolean> {
-  const { data: extraction, error: exErr } = await admin
-    .from("bill_extractions")
-    .select("id, doc_class")
-    .eq("bill_document_id", billDocumentId)
-    .eq("is_current", true)
-    .maybeSingle();
-
-  if (exErr || !extraction) {
-    // Nothing to validate against - still advance the document so a
-    // reviewer sees it (record_bill_validation moves validating ->
-    // needs_review even for a failed run).
-    await admin.rpc("record_bill_validation", {
-      payload: {
-        bill_document_id: billDocumentId,
-        workspace_id: workspaceId,
-        status: "failed",
-        error: { kind: "no_current_extraction" },
-      },
-    });
-    return false;
-  }
-
-  const [{ data: fieldRows }, { data: lineRows }, { data: policyRow }] = await Promise.all([
-    admin
-      .from("bill_extracted_fields")
-      .select("field_key, normalized_value, raw_value, currency, confidence, value_type")
-      .eq("extraction_id", extraction.id),
-    admin
-      .from("bill_line_items")
-      .select("line_total_minor, tax_rate, currency")
-      .eq("extraction_id", extraction.id),
-    admin
-      .from("bill_processing_policies")
-      .select(
-        "supported_currencies, expected_tax_rates, required_fields, large_amount_threshold_minor, large_amount_currency, date_tolerance_days",
-      )
-      .eq("workspace_id", workspaceId)
-      .maybeSingle(),
-  ]);
-
-  const fields: ValidationContext["fields"] = {};
-  for (const r of fieldRows ?? []) {
-    fields[r.field_key] = {
-      normalized: r.normalized_value,
-      raw: r.raw_value,
-      currency: r.currency,
-      confidence: r.confidence,
-      valueType: r.value_type,
-    };
-  }
-
-  const policy: ValidationPolicy = policyRow
-    ? {
-        supportedCurrencies: policyRow.supported_currencies ?? DEFAULT_POLICY.supportedCurrencies,
-        expectedTaxRates: (policyRow.expected_tax_rates ?? []).map((n: number | string) => String(n)),
-        requiredFields: policyRow.required_fields ?? DEFAULT_POLICY.requiredFields,
-        largeAmountThresholdMinor:
-          policyRow.large_amount_threshold_minor != null
-            ? String(policyRow.large_amount_threshold_minor)
-            : null,
-        largeAmountCurrency: policyRow.large_amount_currency ?? "RWF",
-        dateToleranceDays: policyRow.date_tolerance_days ?? DEFAULT_POLICY.dateToleranceDays,
-      }
-    : DEFAULT_POLICY;
-
-  const ctx: ValidationContext = {
-    docClass: extraction.doc_class,
-    fields,
-    lineItems: (lineRows ?? []).map((r) => ({
-      lineTotalMinor: r.line_total_minor != null ? String(r.line_total_minor) : null,
-      taxRate: r.tax_rate != null ? String(r.tax_rate) : null,
-      currency: r.currency,
-    })),
-    policy,
-    now: new Date().toISOString().slice(0, 10),
-  };
-
-  let result;
-  try {
-    result = runValidation(ctx);
-  } catch (err) {
-    logBillError("record", err);
-    await admin.rpc("record_bill_validation", {
-      payload: {
-        bill_document_id: billDocumentId,
-        workspace_id: workspaceId,
-        extraction_id: extraction.id,
-        status: "failed",
-        error: { kind: "engine_exception" },
-      },
-    });
-    return false;
-  }
-
-  const { error: recErr } = await admin.rpc("record_bill_validation", {
-    payload: {
-      bill_document_id: billDocumentId,
-      workspace_id: workspaceId,
-      extraction_id: extraction.id,
-      status: "succeeded",
-      ruleset_version: RULESET_VERSION,
-      findings: result.findings.map((f) => ({
-        rule_id: f.ruleId,
-        severity: f.severity,
-        title: f.title,
-        detail: f.detail,
-        affected_fields: f.affectedFields,
-        blocks_approval: f.blocksApproval,
-        suggested_action: f.suggestedAction,
-      })),
-    },
-  });
-  if (recErr) {
-    logBillError("record", recErr);
-    return false;
-  }
-  return true;
-}
 
 function fieldValue(
   rows: Array<{ field_key: string; normalized_value: string | null; raw_value: string | null }> | null,

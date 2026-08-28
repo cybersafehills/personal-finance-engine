@@ -5,7 +5,7 @@ internal implementation plan the master prompt asks for in §1: relevant
 existing architecture, proposed architecture, the phased delivery, the
 security model, the testing strategy, and the deferred set.
 
-Status: **Phases 1–6 built** (on `main` after Phases S–U).
+Status: **Phases 1–7 built** (on `main` after Phases S–U).
 Phase 1 — `20260922000000_bills_phase_1_intake_and_lifecycle.sql` +
 `web/lib/bills/**`, `web/app/bills/**`, `web/app/api/bills/**`.
 Phase 2 — `20260923000000_bills_phase_2_extraction.sql` +
@@ -21,8 +21,13 @@ the worker.
 Phase 6 — `20260927000000_bills_phase_6_matching_posting.sql` +
 `web/lib/bills/matching/score.ts` (pure scorer),
 `web/components/bills/BillLedgerPanel.tsx`, wired into the worker.
-Phases 7–8 are designed here and architected-for; none of their code
-exists yet.
+Phase 7 — `20260928000000_bills_phase_7_review.sql` +
+`web/lib/bills/revalidate.ts` (shared with the worker) +
+`web/components/bills/BillFieldsEditor.tsx` / `BillDocumentPreview.tsx` /
+`BillComments.tsx` / `BillListFilters.tsx`, and the two-column review
+layout in `web/app/bills/[id]/page.tsx`.
+Phase 8 is designed here and architected-for; none of its code exists
+yet.
 
 ---
 
@@ -458,13 +463,17 @@ Phase 1 (behind `BILLS_ENABLED`, not in `MOVABLE_NAV_KEYS` yet):
   messages; links to an existing duplicate), a document list with
   `BillStatusBadge` (label always shown — never colour-only), intentional
   empty / uploading / permission-denied states.
-- `/bills/[id]` — metadata, `BillStatusBadge`, capability-gated "Download
-  original", the append-only `BillProcessingTimeline` (requires
-  `bill.audit.view`), a capability-gated `BillArchiveButton` (confirm →
-  archive, never delete). When `BILLS_EXTRACTION_ENABLED`: a read-only
-  `BillExtractedFields` section (`doc_class`, fields with an explicit
-  confidence %, line-items table) and a `bill.review`-gated
-  `BillRetryButton` for a failed run.
+- `/bills/[id]` — the **review workspace** (Phase 7): a two-column
+  layout — the document (`BillDocumentPreview`: native `<object>` for
+  PDF, `<img>` for images, from `/api/bills/[id]/original`; sticky on
+  desktop) beside stacked review sections — **Fields** (`BillFieldsEditor`
+  — inline edit for `bill.review` holders, "(corrected)" marker keeping
+  the model value on hover, an auto re-check and a "checks are out of
+  date" prompt when a stale validation is detected), **Checks**,
+  **Supplier**, **Possible duplicates**, **Approval & ledger**,
+  **Notes** (`BillComments`), **Processing history**, and a collapsible
+  "Document details". Capability-gated `BillArchiveButton` /
+  `BillRetryButton`. On small screens it collapses to one column.
 - `/api/bills/[id]/original` — 302 to a short-lived signed URL after
   `record_bill_original_download()` (membership + `bill.download_original`
   + audit).
@@ -472,12 +481,10 @@ Phase 1 (behind `BILLS_ENABLED`, not in `MOVABLE_NAV_KEYS` yet):
   returns `409 preview_not_ready` in Phase 1 (previews are Phase 2). Ship
   now so the review-UI contract is stable.
 
-Phases 6–7 add the full split-pane review workspace (document viewer with
-zoom / pages / source-highlight, editable fields, findings, duplicate /
-supplier / match panels, comments), draft / approve / reject / clarify,
-corrected-value provenance, a responsive stacked/tabbed mobile layout that
-preserves edits, and the landing-page queue / drafts / failures / posted /
-rejected filters.
+`/bills` also gains status filter chips (`BillListFilters`, updates the
+`status` search param). **Follow-ups:** a client-side pdf.js viewer with
+per-page navigation and source-region (bbox) highlighting; a draft-save /
+request-clarification flow; nav placement (`MOVABLE_NAV_KEYS`).
 
 ---
 
@@ -491,7 +498,7 @@ rejected filters.
 | **4 — Duplicate detection** *(built)* | `bill_duplicate_candidates` (is_current); service_role-only `get_bill_document_fingerprints` + `record_bill_duplicate_candidates`; `bill.review`-gated `resolve_bill_duplicate_candidate`; pure `web/lib/bills/duplicates/detect.ts` (document-number / supplier+date+amount / recurring signals) wired into the worker; "Possible duplicates" section on the detail page. Perceptual matching + idempotent posting are Phase 6. | Behind `BILLS_EXTRACTION_ENABLED` |
 | **5 — Supplier resolution** *(built)* | `suppliers` (name_key non-unique, TIN unique) / `supplier_aliases` / `bill_supplier_candidates`; `bill_documents.supplier_id`; SQL-ranked `search_suppliers`; `bill.manage`-gated `create_supplier` (TIN guard, never merges); `bill.review`-gated `link_bill_supplier`; service_role-only `record_bill_supplier_candidates` wired into the worker; `BillSupplierPanel` on the detail page. | Behind `BILLS_EXTRACTION_ENABLED` |
 | **6 — Transaction matching & posting** *(built)* | `bills` (one per document) / `bill_transaction_links` / `bill_transaction_match_candidates`; service_role-only `get_bill_transaction_search_set` + `record_bill_transaction_match_candidates`; pure `web/lib/bills/matching/score.ts` wired into the worker; `approve_bill` (blocking-finding + unresolved-duplicate + no-self-approval guards); idempotent `post_bill` (→ matched / posted); `confirm`/`unlink` link adjustments; `BillLedgerPanel`. `transactions` is only read. | **Yes** |
-| **7 — Review workspace & UX** | Full split-pane review UI; draft/approve/reject/clarify; corrected-value provenance; responsive + a11y; landing-page filters; nav placement | **Yes** |
+| **7 — Review workspace & UX** *(built)* | `bill_comments` + `review_revision` columns; `bill.review`-gated `correct_bill_field` (raw/normalised preserved, bumps `review_revision`) + `add_bill_comment`; `record_bill_validation` re-issued to stamp the revision; **`approve_bill` re-issued with a `stale_validation` guard** (no approving a check older than the last correction) that prefers a user correction over the model value; shared `web/lib/bills/revalidate.ts`; two-column document-alongside-review layout with inline field editing + auto re-check, `BillDocumentPreview` (native `<object>` / `<img>` from the signed-URL route), notes, and status filter chips on the landing page. | **Yes** |
 | **8 — Notifications, monitoring, rollout hardening** | Notifications via existing infra + prefs; analytics events; monitoring (upload success, queue depth, extraction success, provider latency/error, correction rate, approval turnaround, posting failure, match-confirm rate, unauthorized-access attempts); WCAG 2.1 AA pass; staged flag rollout internal → beta → GA; migration validation on realistic data; security + performance review; runbooks + ADR follow-ups | **Yes** |
 
 Release order per phase (master prompt §24): additive migration bakes →
@@ -510,8 +517,8 @@ activation. The disabled state is `notFound()` for pages,
   authenticated-callable; `kind='original'` artifact immutability;
   cross-workspace RLS isolation; the capability matrix. Privilege-
   regression counts updated in lock-step (on `main` after Phases S–U:
-  87 tables, 132 `authenticated` table grants, 82 `authenticated`-callable
-  functions). Full-chain harness: **270 assertions**, 51 of them Bills.
+  88 tables, 133 `authenticated` table grants, 84 `authenticated`-callable
+  functions). Full-chain harness: **276 assertions**, 57 of them Bills.
 - **Unit** (Deno, `web/lib/bills/**/*_test.ts`): `intake.ts` — magic-byte
   sniffing vs a spoofed extension, size cap, filename sanitisation,
   storage-key opacity, PDF page count, encrypted/truncated rejection,

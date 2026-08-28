@@ -603,8 +603,9 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # Phase 5 (20260926000000) adds 3 (suppliers, supplier_aliases,
 # bill_supplier_candidates) - 84 tables, 83 with RLS. Phase 6
 # (20260927000000) adds 3 (bills, bill_transaction_links,
-# bill_transaction_match_candidates) - 87 tables, 86 with RLS.
-if [ "$TABLE_COUNT" = "87" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# bill_transaction_match_candidates) - 87 tables, 86 with RLS. Phase 7
+# (20260928000000) adds bill_comments - 88 tables, 87 with RLS.
+if [ "$TABLE_COUNT" = "88" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -699,11 +700,12 @@ AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from inform
 # (bill_duplicate_candidates). Phase 5 (20260926000000) adds 3 select-only
 # (suppliers, supplier_aliases, bill_supplier_candidates). Phase 6
 # (20260927000000) adds 3 select-only (bills, bill_transaction_links,
-# bill_transaction_match_candidates). 115 + 17 = 132.
-if [ "$AUTHENTICATED_GRANT_COUNT" = "132" ]; then
-  pass "authenticated holds exactly the 132 table grants expected, no more"
+# bill_transaction_match_candidates). Phase 7 (20260928000000) adds 1
+# select-only (bill_comments). 115 + 18 = 133.
+if [ "$AUTHENTICATED_GRANT_COUNT" = "133" ]; then
+  pass "authenticated holds exactly the 133 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 132 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 133 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -851,11 +853,14 @@ AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_p
 # 75 + 3 = 78. Phase 6 (20260927000000) adds 4: approve_bill, post_bill,
 # confirm_bill_transaction_match, unlink_bill_transaction
 # (get_bill_transaction_search_set / record_bill_transaction_match_candidates
-# are service_role-only). 78 + 4 = 82.
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "82" ]; then
-  pass "authenticated holds EXECUTE on exactly the 82 functions expected, no more"
+# are service_role-only). 78 + 4 = 82. Phase 7 (20260928000000) adds 2:
+# correct_bill_field, add_bill_comment (the record_bill_validation /
+# approve_bill re-issues are CREATE OR REPLACE, grants preserved).
+# 82 + 2 = 84.
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "84" ]; then
+  pass "authenticated holds EXECUTE on exactly the 84 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 82 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 84 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -4075,6 +4080,76 @@ if [ "$BILL6_B_SEES" = "0" ]; then
   pass "Bills Phase 6: a non-member cannot read another workspace's bills"
 else
   fail "Bills Phase 6: RLS isolation breach on bills"
+fi
+
+# ===========================================================================
+# Bills & Expenses Phase 7 (20260928000000): correct_bill_field provenance
+# + review_revision bump, the stale_validation approve guard and its
+# clearance by a fresh validation run, add_bill_comment being
+# bill.review-gated, and cross-workspace RLS on bill_comments. Reuses
+# pfe_rls + USER_A / USER_B / USER_C / BILL_WS_A (USER_C was granted
+# bill.upload/review in the Phase 6 block).
+# ===========================================================================
+echo "=== Bills Phase 7: review workspace ==="
+
+BILL7_DOC="$(make_review_doc "$(printf 'ca%.0s' $(seq 1 32))" "$BILL_WS_A" "" "$USER_C")"
+
+# correct_bill_field is bill.review-gated.
+if as_user "$USER_B" "select public.correct_bill_field('$BILL7_DOC', 'total', '999');" >/dev/null 2>$ARTIFACT_DIR/pfe_b7.log; then
+  fail "Bills Phase 7: a non-member corrected a field"
+else
+  pass "Bills Phase 7: correct_bill_field refuses a non-member"
+fi
+rm -f $ARTIFACT_DIR/pfe_b7.log
+
+# A correction preserves raw/normalized, writes user_corrected_value, and
+# bumps review_revision.
+as_user "$USER_C" "select public.correct_bill_field('$BILL7_DOC', 'total', '150000');" >/dev/null
+BILL7_FIELD="$(psql -d pfe_rls -t -A -c "select user_corrected_value || '|' || coalesce(normalized_value,'') || '|' || (corrected_by is not null)
+  from public.bill_extracted_fields f join public.bill_extractions e on e.id = f.extraction_id
+  where e.bill_document_id = '$BILL7_DOC' and e.is_current and f.field_key = 'total';")"
+BILL7_REV="$(psql -d pfe_rls -t -A -c "select review_revision from public.bill_documents where id = '$BILL7_DOC';")"
+BILL7_EVT="$(psql -d pfe_rls -t -A -c "select count(*) from public.bill_processing_events where bill_document_id = '$BILL7_DOC' and event_type = 'field_corrected';")"
+if [ "$BILL7_FIELD" = "150000|141600|true" ] && [ "$BILL7_REV" = "1" ] && [ "$BILL7_EVT" = "1" ]; then
+  pass "Bills Phase 7: correct_bill_field writes user_corrected_value (raw/normalized preserved), bumps review_revision, journals it"
+else
+  fail "Bills Phase 7: correction wrong (field=$BILL7_FIELD rev=$BILL7_REV evt=$BILL7_EVT)"
+fi
+
+# approve_bill now refuses because the current validation predates the
+# correction; a fresh validation clears it.
+BILL7_STALE="$(as_user "$USER_A" "select (public.approve_bill(jsonb_build_object('bill_document_id','$BILL7_DOC')))->>'error';")"
+psql -d pfe_rls -t -A -c "set role service_role; select public.record_bill_validation(jsonb_build_object(
+  'bill_document_id','$BILL7_DOC','workspace_id','$BILL_WS_A','status','succeeded','findings','[]'::jsonb));" >/dev/null
+BILL7_OK="$(as_user "$USER_A" "select (public.approve_bill(jsonb_build_object('bill_document_id','$BILL7_DOC')))->>'bill_id';")"
+BILL7_TOTAL="$(psql -d pfe_rls -t -A -c "select total_minor from public.bills where bill_document_id = '$BILL7_DOC';")"
+if [ "$BILL7_STALE" = "stale_validation" ] && [ -n "$BILL7_OK" ] && [ "$BILL7_TOTAL" = "150000" ]; then
+  pass "Bills Phase 7: approve_bill refuses a validation older than the last correction, then succeeds after a re-check (and uses the corrected total)"
+else
+  fail "Bills Phase 7: stale-validation guard wrong (stale=$BILL7_STALE ok=$BILL7_OK total=$BILL7_TOTAL)"
+fi
+
+# add_bill_comment.
+BILL7_C_DOC="$(make_review_doc "$(printf 'cb%.0s' $(seq 1 32))" "$BILL_WS_A" "" "$USER_C")"
+BILL7_COMMENT="$(as_user "$USER_C" "select (public.add_bill_comment('$BILL7_C_DOC', 'Please check the tax line.'))->>'ok';")"
+BILL7_C_ROWS="$(psql -d pfe_rls -t -A -c "select count(*) from public.bill_comments where bill_document_id = '$BILL7_C_DOC';")"
+if [ "$BILL7_COMMENT" = "true" ] && [ "$BILL7_C_ROWS" = "1" ]; then
+  pass "Bills Phase 7: add_bill_comment records an internal note for a bill.review holder"
+else
+  fail "Bills Phase 7: comment wrong (ok=$BILL7_COMMENT rows=$BILL7_C_ROWS)"
+fi
+if as_user "$USER_B" "select public.add_bill_comment('$BILL7_C_DOC', 'x');" >/dev/null 2>$ARTIFACT_DIR/pfe_b7c.log; then
+  fail "Bills Phase 7: a non-member added a comment"
+else
+  pass "Bills Phase 7: add_bill_comment refuses a non-member"
+fi
+rm -f $ARTIFACT_DIR/pfe_b7c.log
+
+BILL7_B_SEES="$(as_user "$USER_B" "select count(*) from public.bill_comments where bill_document_id = '$BILL7_C_DOC';")"
+if [ "$BILL7_B_SEES" = "0" ]; then
+  pass "Bills Phase 7: a non-member cannot read another workspace's comments"
+else
+  fail "Bills Phase 7: RLS isolation breach on bill_comments"
 fi
 
 echo ""
