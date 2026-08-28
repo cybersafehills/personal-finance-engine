@@ -193,6 +193,9 @@ cross-workspace RLS on `bills`; then **Bills & Expenses Phase 7** -
 preserved) + `review_revision` bump, the `approve_bill` `stale_validation`
 guard and its clearance by a fresh validation run, `add_bill_comment`
 being `bill.review`-gated, and cross-workspace RLS on `bill_comments`).
+**Bills & Expenses Phase 8** adds no migration - notifications,
+monitoring, the manual `supabase/scheduling/activate_bill_workers.sql`,
+the runbook (`docs/bills-verification-runbook.md`), and an a11y e2e spec.
 The privilege-regression counts (public
 table count, `authenticated` table-grant count, `authenticated`
 function-EXECUTE count) are asserted exactly and must be updated in
