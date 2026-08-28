@@ -1,5 +1,5 @@
-import { assertEquals } from "jsr:@std/assert@1";
-import { sanitizeScanEventProps } from "./scan-analytics.ts";
+import { assert, assertEquals } from "jsr:@std/assert@1";
+import { redactErrorText, sanitizeScanEventProps } from "./scan-analytics.ts";
 
 Deno.test("sanitizeScanEventProps: drops forbidden keys outright", () => {
   const out = sanitizeScanEventProps({
@@ -38,4 +38,21 @@ Deno.test("sanitizeScanEventProps: keeps safe primitives and caps string length"
 
 Deno.test("sanitizeScanEventProps: undefined input yields an empty object", () => {
   assertEquals(sanitizeScanEventProps(undefined), {});
+});
+
+Deno.test("redactErrorText: strips digit runs, URLs, and USSD-shaped runs", () => {
+  assertEquals(
+    redactErrorText(new Error("failed for 250781234567 at *182*1*1*5000#")),
+    "failed for ‹redacted› at ‹redacted-ussd›",
+  );
+  assertEquals(
+    redactErrorText("bad redirect https://evil.example/x?a=1"),
+    "bad redirect ‹redacted-url›",
+  );
+});
+
+Deno.test("redactErrorText: non-Error inputs and length cap", () => {
+  assertEquals(redactErrorText(null), "unknown error");
+  assertEquals(redactErrorText({ weird: true }), "unknown error");
+  assert(redactErrorText("x".repeat(500)).length <= 200);
 });

@@ -23,7 +23,7 @@ import {
   ussdPaymentType,
   ussdProvider,
 } from "../../../lib/pay/scan/handoff";
-import { trackScanEvent } from "../../../lib/pay/scan-analytics";
+import { logScanError, trackScanEvent } from "../../../lib/pay/scan-analytics";
 import type { ScanResult } from "../../../lib/pay/scan/types";
 
 // Authoritative server-side handling for "Scan to pay". The browser
@@ -62,7 +62,7 @@ export async function classifyScannedCode(raw: string): Promise<ClassifyScanResu
     }
     return { status: "ok", result };
   } catch (err) {
-    console.error("classifyScannedCode failed:", (err as Error).message);
+    logScanError("classify", err);
     return { status: "error" };
   }
 }
@@ -146,7 +146,7 @@ export async function prepareScanHandoff(raw: string): Promise<PrepareScanHandof
 
     const { data, error } = await supabase.rpc("create_payment_intent", { payload });
     if (error) {
-      console.error("prepareScanHandoff create failed:", error.message);
+      logScanError("prepare_handoff", error);
       return { status: "error" };
     }
     const row = data as { id: string; existed: boolean };
@@ -154,7 +154,7 @@ export async function prepareScanHandoff(raw: string): Promise<PrepareScanHandof
     revalidatePath("/pay/activity");
     return { status: "prepared", intentId: row.id, telHref, existed: row.existed };
   } catch (err) {
-    console.error("prepareScanHandoff failed:", (err as Error).message);
+    logScanError("prepare_handoff", err);
     return { status: "error" };
   }
 }
@@ -214,7 +214,7 @@ export async function recordScanHandoff(
     revalidatePath(`/pay/${intentId}`);
     return { ok: true };
   } catch (err) {
-    console.error("recordScanHandoff failed:", (err as Error).message);
+    logScanError("record_handoff", err);
     return { ok: false };
   }
 }

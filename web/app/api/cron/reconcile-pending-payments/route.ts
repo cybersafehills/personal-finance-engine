@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAuthorizedCronRequest } from "../../../../lib/cron-auth";
 import { supabaseServer } from "../../../../lib/supabase-server";
+import { trackScanEvent } from "../../../../lib/pay/scan-analytics";
 
 // Retry tick for Phase 2b SMS reconciliation: re-attempts a
 // deterministic match for every still-open (initiated /
@@ -36,7 +37,7 @@ export async function POST(request: NextRequest) {
     const supabase = supabaseServer();
     const { data: intents, error } = await supabase
       .from("payment_intents")
-      .select("id")
+      .select("id, source")
       .in("state", ["initiated", "awaiting_verification"])
       .is("linked_transaction_id", null)
       .or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`)
@@ -49,7 +50,7 @@ export async function POST(request: NextRequest) {
 
     let linked = 0;
     let conflicts = 0;
-    for (const { id } of intents ?? []) {
+    for (const { id, source } of (intents ?? []) as { id: string; source: string }[]) {
       const { data } = await supabase.rpc("reconcile_payment_intent", {
         p_intent_id: id,
         p_mode: mode,
@@ -57,6 +58,11 @@ export async function POST(request: NextRequest) {
       const status = (data as { status?: string } | null)?.status;
       if (status === "linked") linked++;
       else if (status === "conflict") conflicts++;
+      // Scan-originated attempts get their own lifecycle event (§13.1),
+      // carrying only the coarse outcome - never the intent id.
+      if ((status === "linked" || status === "conflict") && source === "qr_scan") {
+        trackScanEvent("scan_attempt_reconciled", { outcome: status, mode });
+      }
     }
 
     return NextResponse.json({

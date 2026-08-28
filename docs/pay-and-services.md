@@ -46,7 +46,7 @@ Every dismissal path — the footer control, the dimmed overlay, `Esc`,
 and a navigation that closes the sheet — runs through one guarded
 `requestClose()` so a double activation can't fire `onClose` twice.
 
-## Scan to pay (Phases R1–R3)
+## Scan to pay (Phases R1–R5)
 
 `SCAN_TO_PAY_ENABLED=true` (opt-in, off otherwise — same convention as
 `SMS_RECONCILIATION_ENABLED`) adds a **"Scan to pay"** entry at the top
@@ -171,8 +171,49 @@ What R4 *does* change:
 | Schema | `payment_intents.source` + `create_payment_intent` in `supabase/migrations/20260910000000_phase_r3_scan_payment_source.sql` |
 | Lifecycle-surface gate | `isPaymentIntentSurfaceEnabled` in `web/lib/pay/gate.ts` — guards `/pay/[id]`, `/pay/activity`, `/pay/reconciliation`, and the lifecycle actions |
 | Reconciliation / expiry | unchanged — `reconcile-pending-payments` / `expire-payment-intents` crons + `reconcile_payment_intent` are source-agnostic |
-| Privacy-safe events (no payload/PII ever) | `web/lib/pay/scan-analytics.ts` (+ `scan-analytics_test.ts`) |
+| Analytics + monitoring | `trackScanEvent` / `logScanError` in `web/lib/pay/scan-analytics.ts` (+ `scan-analytics_test.ts`) — no sink; redaction is the guarantee |
+| Rollout / device QA / §22 checklist | `docs/pay-scan-verification-runbook.md` |
 | e2e | `web/e2e/pay-scan.spec.ts` (skipped unless `SCAN_TO_PAY_ENABLED=true` + a fake camera — see the file header) |
+
+### R5 — analytics, audit, monitoring, help
+
+There is **no analytics provider and no APM** in this codebase, so R5
+standardises the seams a sink would attach to rather than adding one.
+
+- **Product analytics** — `trackScanEvent(name, props)` in
+  `web/lib/pay/scan-analytics.ts`. `sanitizeScanEventProps` drops any
+  key/value that looks like a QR payload, a filled USSD string, a phone
+  number, an amount, a reference, or a URL *before* it could leave the
+  process (unit-tested). The event vocabulary spans the whole flow:
+  `scan_to_pay_opened` · `scan_camera_permission` · `scan_camera_started`
+  · `scan_torch_toggled` · `scan_decoder_unsupported` ·
+  `scan_qr_detected` · `scan_image_selected` · `scan_payload_classified`
+  · `scan_payload_rejected` · `scan_again` · `scan_handoff_prepared` ·
+  `scan_handoff_opened` · `scan_handoff_unavailable` ·
+  `scan_attempt_awaiting` · `scan_attempt_reconciled` (emitted by the
+  reconcile cron for `source='qr_scan'` intents) ·
+  `scan_attempt_expired` (emitted by the expire cron). Non-prod logs
+  them as `console.debug("[scan-event]", …)`.
+- **Monitoring** — `logScanError(stage, err)` is the one place scanner /
+  decode / parse / classify / hand-off / reconcile failures are logged:
+  a stable `[scan-error] stage=<stage>` prefix and `redactErrorText`
+  (strips digit runs, URLs, USSD-shaped runs; caps length; never a
+  stack). The two cron routes keep their own
+  `reconcile-pending-payments:` / `expire-payment-intents:` prefixes.
+  When a log-based alert sink is added, alert on: a `[scan-error]`
+  spike, an elevated `scan_payload_rejected` rate,
+  `scan_handoff_unavailable`, and cron non-200s.
+- **Audit** — scan intents reuse the Phase N `payment_events` /
+  `payment_audit_events` writers (`create_payment_intent`,
+  `record_payment_attempt`, `transition_payment_intent`,
+  `manually_confirm_payment`). `payment_intents.source = 'qr_scan'` plus
+  `{ method, source: 'qr_scan' }` in the `initiated` event's `evidence`
+  distinguish scan flows. No parallel audit system.
+- **Help** — no separate help system exists; the honest in-product copy
+  in `web/lib/ussd/messages.ts` (`pay.scan.*`) is the help surface. What
+  it covers (and where) is enumerated in the runbook, §10.
+- **Device QA + rollback + the §22 completion checklist** live in
+  **`docs/pay-scan-verification-runbook.md`**.
 
 ## Data model
 

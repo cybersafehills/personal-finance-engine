@@ -27,7 +27,10 @@ export type ScanEventName =
   | "scan_handoff_prepared"
   | "scan_handoff_opened"
   | "scan_handoff_unavailable"
-  | "scan_attempt_awaiting";
+  | "scan_attempt_awaiting"
+  // R4 - reconciliation lifecycle (emitted server-side by the crons)
+  | "scan_attempt_reconciled"
+  | "scan_attempt_expired";
 
 /** Coarse outcome for `scan_camera_permission` - never a raw error
  *  string or stack. Mirrors ScanErrorKind in ScanToPay.tsx plus the
@@ -78,4 +81,44 @@ export function trackScanEvent(
   if (process.env.NODE_ENV !== "production") {
     console.debug("[scan-event]", name, safe);
   }
+}
+
+// --- Monitoring ---------------------------------------------------------
+//
+// This codebase has no APM/Sentry. Server-side monitoring is structured
+// `console.error` with a stable prefix (the platform log drain is the
+// sink). `logScanError` is the one place scanner / decoder / parser /
+// hand-off / reconciliation failures are logged, so redaction is
+// guaranteed and the events are greppable / alertable as one family.
+
+export type ScanErrorStage =
+  | "scanner_init"
+  | "decode"
+  | "parse"
+  | "classify"
+  | "prepare_handoff"
+  | "record_handoff"
+  | "reconcile";
+
+/** Strip anything that looks like a raw identifier / payload out of an
+ *  error message, and cap it. An Error's `.message` can quote user input;
+ *  the stack is never logged. */
+export function redactErrorText(input: unknown): string {
+  const raw =
+    input instanceof Error
+      ? input.message
+      : typeof input === "string"
+        ? input
+        : "unknown error";
+  return raw
+    .replace(/\d(?:[\s-]?\d){5,}/g, "‹redacted›")
+    .replace(/https?:\/\/\S+/gi, "‹redacted-url›")
+    .replace(/[*#][\d*#]{2,}/g, "‹redacted-ussd›")
+    .slice(0, 200);
+}
+
+export function logScanError(stage: ScanErrorStage, err: unknown): void {
+  // The platform log drain is the monitoring sink for this codebase
+  // (mirrors the cron routes' own console.error usage).
+  console.error(`[scan-error] stage=${stage}`, redactErrorText(err));
 }
