@@ -79,4 +79,45 @@ test.describe("Bills & Expenses - Phase 2 extraction", () => {
     const res = await request.post("/api/cron/process-bill-documents");
     expect(res.status()).toBe(401);
   });
+
+  test("a second document with the same extracted identity is flagged as a possible duplicate", async ({
+    page,
+    request,
+  }) => {
+    async function uploadAndProcess(marker: string): Promise<string> {
+      await page.goto("/bills");
+      await page.getByLabel("Add an invoice or receipt").setInputFiles({
+        name: `${marker}.pdf`,
+        mimeType: "application/pdf",
+        buffer: minimalPdf(marker),
+      });
+      await page.getByRole("button", { name: "Upload" }).click();
+      await expect(page).toHaveURL(/\/bills\/[0-9a-f-]{36}$/);
+      const url = page.url();
+      const res = await request.post("/api/cron/process-bill-documents", {
+        headers: { "x-report-cron-secret": CRON_SECRET },
+      });
+      expect(res.ok()).toBeTruthy();
+      return url;
+    }
+
+    const stamp = Date.now();
+    // The mock provider returns the same invoice for every document, so
+    // two distinct files resolve to the same supplier / number / total.
+    await uploadAndProcess(`e2e-dupe-first-${stamp}`);
+    const secondUrl = await uploadAndProcess(`e2e-dupe-second-${stamp}`);
+
+    await page.goto(secondUrl);
+    const section = page.getByRole("heading", { name: "Possible duplicates" });
+    await expect(section).toBeVisible();
+    await expect(page.getByText("Probable duplicate").first()).toBeVisible();
+    // The candidate links to another bill document.
+    await expect(
+      page.locator('section', { has: section }).locator('a[href^="/bills/"]').first(),
+    ).toBeVisible();
+
+    // A reviewer can dismiss it.
+    await page.getByRole("button", { name: "Dismiss" }).first().click();
+    await expect(page.getByText("Dismissed").first()).toBeVisible();
+  });
 });

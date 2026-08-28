@@ -170,7 +170,13 @@ Expenses Phase 3** - `20260924000000`: `record_bill_validation` being
 `service_role`-only, a validation run inserting findings + tallying
 severities + advancing `validating -> needs_review`, `is_current`
 supersession, and cross-workspace RLS on `bill_validations` /
-`bill_validation_findings`). The privilege-regression counts (public
+`bill_validation_findings`; then **Bills & Expenses Phase 4** -
+`20260925000000`: `get_bill_document_fingerprints` /
+`record_bill_duplicate_candidates` being `service_role`-only, a
+two-document content-duplicate round-trip,
+`resolve_bill_duplicate_candidate` being member + `bill.review` gated,
+and cross-workspace RLS on `bill_duplicate_candidates`). The
+privilege-regression counts (public
 table count, `authenticated` table-grant count, `authenticated`
 function-EXECUTE count) are asserted exactly and must be updated in
 lock-step with any migration that adds a table, an `authenticated` grant,

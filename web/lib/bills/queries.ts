@@ -376,3 +376,67 @@ export async function getCurrentBillValidation(
 
   return { validation: validation as BillValidationRow, findings: sorted };
 }
+
+// --- Phase 4: duplicate candidates --------------------------------
+
+export type BillDuplicateCandidateRow = {
+  id: string;
+  bill_document_id: string;
+  candidate_document_id: string;
+  relation: "exact" | "probable" | "similar" | "recurring" | "multi_file";
+  score: number;
+  signals: string[];
+  resolution: "unresolved" | "kept_both" | "merged" | "dismissed";
+  created_at: string;
+  /** The other document in the pair (not the one being viewed). */
+  otherDocumentId: string;
+  otherFilename: string | null;
+  /** True when the viewed document is the newer one that was checked. */
+  viewedIsSubject: boolean;
+};
+
+export async function getBillDuplicateCandidates(
+  billDocumentId: string,
+): Promise<BillDuplicateCandidateRow[]> {
+  const supabase = await supabaseSession();
+
+  const { data, error } = await supabase
+    .from("bill_duplicate_candidates")
+    .select(
+      "id, bill_document_id, candidate_document_id, relation, score, signals, resolution, created_at, is_current",
+    )
+    .or(`bill_document_id.eq.${billDocumentId},candidate_document_id.eq.${billDocumentId}`)
+    .eq("is_current", true)
+    .order("score", { ascending: false });
+
+  if (error) {
+    console.error("getBillDuplicateCandidates failed:", error.message);
+    return [];
+  }
+  const rows = (data ?? []) as Array<Omit<BillDuplicateCandidateRow, "otherDocumentId" | "otherFilename" | "viewedIsSubject">>;
+  if (rows.length === 0) return [];
+
+  const otherIds = [
+    ...new Set(
+      rows.map((r) =>
+        r.bill_document_id === billDocumentId ? r.candidate_document_id : r.bill_document_id,
+      ),
+    ),
+  ];
+  const { data: docs } = await supabase
+    .from("bill_documents")
+    .select("id, sanitized_filename")
+    .in("id", otherIds);
+  const nameById = new Map((docs ?? []).map((d) => [d.id, d.sanitized_filename as string]));
+
+  return rows.map((r) => {
+    const viewedIsSubject = r.bill_document_id === billDocumentId;
+    const otherDocumentId = viewedIsSubject ? r.candidate_document_id : r.bill_document_id;
+    return {
+      ...r,
+      otherDocumentId,
+      otherFilename: nameById.get(otherDocumentId) ?? null,
+      viewedIsSubject,
+    };
+  });
+}
