@@ -176,6 +176,11 @@ if [ "$PFE_PG_MODE" = "spawn" ]; then
   trap cleanup EXIT
 
   echo "=== bootstrapping disposable PostgreSQL 17 cluster ==="
+  # PostgreSQL 17 on macOS aborts at startup with "postmaster became
+  # multithreaded during startup" unless a locale is pinned in the
+  # environment as well - initdb's --locale=C alone is not enough for the
+  # postmaster process itself.
+  export LC_ALL=C LANG=C
   initdb -D "$WORKDIR/pgdata" -U postgres --auth=trust --locale=C -E UTF8 >/dev/null
   pg_ctl -D "$WORKDIR/pgdata" -o "-p $PGPORT_TEST -c listen_addresses='' -k $SOCK_DIR" -l "$WORKDIR/pg.log" start >/dev/null
 else
@@ -309,9 +314,9 @@ end
 \$\$;
 
 -- Minimal mock of the Supabase-platform-managed storage schema (Phase K:
--- 20260903000000_phase_k_report_artifacts.sql's
--- `insert into storage.buckets (...)`) - just enough columns to satisfy
--- that one insert. Real Supabase provisions the full Storage API schema;
+-- 20260903000000_phase_k_report_artifacts.sql's "insert into
+-- storage.buckets (...)") - just enough columns to satisfy that one
+-- insert. Real Supabase provisions the full Storage API schema;
 -- this disposable cluster only needs the table to exist.
 create schema if not exists storage;
 create table if not exists storage.buckets (
