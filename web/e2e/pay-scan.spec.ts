@@ -15,27 +15,27 @@ import AxeBuilder from "@axe-core/playwright";
 // scanner *shell* (headless Chromium ships no BarcodeDetector, so a live
 // decode / review / hand-off can't run here - that's manual device QA).
 //
-// This spec needs two things the default local run does NOT set, so the
-// whole file is skipped unless they're present:
+// The two things this spec needs are wired in playwright.config.ts, not
+// here, and only for the chromium-desktop project (this spec is excluded
+// from every other project via testIgnore):
 //
-//   1. SCAN_TO_PAY_ENABLED=true in the Playwright webServer env
-//      (playwright.config.ts -> webServer.env), because the flag is
-//      opt-in (off unless exactly "true"), unlike the other Pay flags.
-//   2. Chromium launched with a fake camera so getUserMedia resolves
-//      headlessly:
-//        use: { launchOptions: { args: [
-//          "--use-fake-device-for-media-stream",
-//          "--use-fake-ui-for-media-stream",
-//        ] } }
+//   1. SCAN_TO_PAY_ENABLED=true in webServer.env - the flag is opt-in
+//      (off unless exactly "true", unlike the other Pay flags), so the
+//      "Scan to pay" launcher entry is server-gated off without it.
+//   2. chromium-desktop's use.launchOptions.args carries
+//      --use-fake-device-for-media-stream + --use-fake-ui-for-media-stream
+//      so getUserMedia resolves headlessly and the scanner reaches its
+//      "camera on" shell state.
 //
-// Note: headless Chromium does not ship BarcodeDetector, so these tests
-// assert the scanner *shell* (open / status / Back / Esc / a11y), not a
-// live decode. With neither env set, the entry point is server-gated off
-// and there is nothing to test.
+// So the file always runs under chromium-desktop and needs no per-run
+// env guard. It still asserts the scanner *shell* (open / status / Back /
+// Esc / a11y), never a live decode.
 test.describe("Scan to pay (R1-R3 shell)", () => {
+  // Defensive: if this file is ever added back to a non-chromium project,
+  // the fake-media flags won't apply there and getUserMedia can't resolve.
   test.skip(
-    process.env.SCAN_TO_PAY_ENABLED !== "true",
-    "SCAN_TO_PAY_ENABLED is not 'true' for this run - see file header.",
+    ({ browserName }) => browserName !== "chromium",
+    "Scan-to-pay e2e is chromium-only (fake-camera flags) - see file header.",
   );
 
   async function openScanner(page: import("@playwright/test").Page) {

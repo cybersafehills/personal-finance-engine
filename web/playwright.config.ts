@@ -59,7 +59,11 @@ export default defineConfig({
     url: BASE_URL,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
-    env: { PORT: String(PORT) },
+    // SCAN_TO_PAY_ENABLED is opt-in (off unless exactly "true", unlike the
+    // other Pay flags) - pay-scan.spec.ts needs the server-side gate open
+    // to render the "Scan to pay" launcher entry + its server actions.
+    // Inert for every other spec (nothing else routes through that gate).
+    env: { PORT: String(PORT), SCAN_TO_PAY_ENABLED: "true" },
   },
 
   projects: [
@@ -90,23 +94,39 @@ export default defineConfig({
         ...devices["Desktop Chrome"],
         viewport: { width: 1280, height: 900 },
         storageState: AUTH_STORAGE_STATE_PATH,
+        // Headless Chromium ships no real camera; pay-scan.spec.ts needs
+        // getUserMedia to resolve so the scanner reaches its "camera on"
+        // shell state. These flags feed a synthetic stream and auto-accept
+        // the permission prompt. Inert for every other spec - nothing else
+        // calls getUserMedia. (Headless Chromium also ships no
+        // BarcodeDetector, so pay-scan.spec.ts asserts the shell only, not
+        // a live decode - that stays manual device QA.)
+        launchOptions: {
+          args: [
+            "--use-fake-device-for-media-stream",
+            "--use-fake-ui-for-media-stream",
+          ],
+        },
       },
       dependencies: ["setup"],
     },
 
     // Chrome on Android (Pixel device profile - real touch/UA emulation,
-    // not just a narrow viewport).
+    // not just a narrow viewport). pay-scan.spec.ts is chromium-desktop
+    // only (see its header) - the mobile launcher layout and the fake-
+    // camera flags are exercised there; real mobile scanning is manual QA.
     {
       name: "chrome-android",
-      testIgnore: /(unauthenticated|brand-splash)\.spec\.ts/,
+      testIgnore: /(unauthenticated|brand-splash|pay-scan)\.spec\.ts/,
       use: { ...devices["Pixel 7"], storageState: AUTH_STORAGE_STATE_PATH },
       dependencies: ["setup"],
     },
 
-    // Safari on macOS.
+    // Safari on macOS. Excludes pay-scan.spec.ts: WebKit ignores the
+    // Chromium fake-media flags, so getUserMedia can't resolve headlessly.
     {
       name: "webkit-desktop",
-      testIgnore: /(unauthenticated|brand-splash)\.spec\.ts/,
+      testIgnore: /(unauthenticated|brand-splash|pay-scan)\.spec\.ts/,
       use: {
         ...devices["Desktop Safari"],
         viewport: { width: 1280, height: 900 },
@@ -116,9 +136,10 @@ export default defineConfig({
     },
 
     // Mobile Safari (iPhone) - safe-area insets, dynamic toolbar quirks.
+    // Excludes pay-scan.spec.ts for the same reason as webkit-desktop.
     {
       name: "mobile-safari",
-      testIgnore: /(unauthenticated|brand-splash)\.spec\.ts/,
+      testIgnore: /(unauthenticated|brand-splash|pay-scan)\.spec\.ts/,
       use: { ...devices["iPhone 14"], storageState: AUTH_STORAGE_STATE_PATH },
       dependencies: ["setup"],
     },
