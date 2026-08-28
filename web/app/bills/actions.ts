@@ -20,6 +20,8 @@ import {
   type SupportedMime,
 } from "../../lib/bills/intake";
 import { logBillError, trackBillEvent } from "../../lib/bills/analytics";
+import { normalizeSupplierName } from "../../lib/bills/normalize";
+import { searchSuppliers, type SupplierSearchRow } from "../../lib/bills/queries";
 
 // Authoritative server-side handling for Bills & Expenses Phase 1: secure
 // upload + original preservation + lifecycle transitions. Everything that
@@ -305,6 +307,127 @@ export async function resolveBillDuplicate(
     return { ok: true, resolution: res.resolution ?? resolution };
   } catch (err) {
     logBillError("transition", err);
+    return { ok: false, error: "Something went wrong." };
+  }
+}
+
+// --- Phase 5: supplier resolution ---------------------------------
+
+export type LinkSupplierResult = { ok: true } | { ok: false; error: string };
+
+export async function linkBillSupplier(
+  documentId: string,
+  supplierId: string | null,
+): Promise<LinkSupplierResult> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!isBillsEnabled(workspaceId)) {
+    return { ok: false, error: "Bills & Expenses isn't available here." };
+  }
+  try {
+    const session = await supabaseSession();
+    const { data, error } = await session.rpc("link_bill_supplier", {
+      p_bill_document_id: documentId,
+      p_supplier_id: supplierId,
+    });
+    if (error) {
+      logBillError("transition", error);
+      return { ok: false, error: "That couldn't be applied." };
+    }
+    if (!(data as { ok: boolean }).ok) {
+      return { ok: false, error: "That supplier isn't valid here." };
+    }
+    trackBillEvent("bill_supplier_selected", {});
+    revalidatePath(`/bills/${documentId}`);
+    return { ok: true };
+  } catch (err) {
+    logBillError("transition", err);
+    return { ok: false, error: "Something went wrong." };
+  }
+}
+
+export type SupplierSearchResult =
+  | { ok: true; rows: SupplierSearchRow[] }
+  | { ok: false; error: string };
+
+export async function searchSuppliersAction(query: string): Promise<SupplierSearchResult> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!isBillsEnabled(workspaceId) || !workspaceId) {
+    return { ok: false, error: "Not available." };
+  }
+  const trimmed = query.trim();
+  if (trimmed.length < 2) return { ok: true, rows: [] };
+  try {
+    const rows = await searchSuppliers(workspaceId, trimmed);
+    return { ok: true, rows };
+  } catch (err) {
+    logBillError("record", err);
+    return { ok: false, error: "Search failed." };
+  }
+}
+
+export type CreateSupplierResult =
+  | { ok: true; supplierId: string }
+  | { ok: false; error: string; existingId?: string };
+
+export async function createSupplierForBill(
+  documentId: string,
+  input: {
+    displayName: string;
+    taxId?: string;
+    email?: string;
+    phone?: string;
+    address?: string;
+  },
+): Promise<CreateSupplierResult> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!isBillsEnabled(workspaceId) || !workspaceId) {
+    return { ok: false, error: "Bills & Expenses isn't available here." };
+  }
+  const displayName = input.displayName.trim();
+  if (displayName.length === 0) {
+    return { ok: false, error: "A supplier name is required." };
+  }
+  try {
+    const session = await supabaseSession();
+    const { data, error } = await session.rpc("create_supplier", {
+      payload: {
+        workspace_id: workspaceId,
+        display_name: displayName,
+        name_key: normalizeSupplierName(displayName) ?? displayName.toLowerCase(),
+        tax_id: input.taxId?.trim() || null,
+        email: input.email?.trim() || null,
+        phone: input.phone?.trim() || null,
+        address: input.address?.trim() || null,
+        source: "document_extracted",
+      },
+    });
+    if (error) {
+      logBillError("record", error);
+      if (/bill\.manage/i.test(error.message)) {
+        return { ok: false, error: "You don't have permission to create suppliers." };
+      }
+      return { ok: false, error: "Couldn't create that supplier." };
+    }
+    const res = data as
+      | { ok: true; id: string }
+      | { ok: false; error: string; existing_id: string };
+    if (!res.ok) {
+      if (res.error === "tax_id_exists") {
+        return {
+          ok: false,
+          error: "A supplier with that tax ID already exists.",
+          existingId: res.existing_id,
+        };
+      }
+      return { ok: false, error: "Couldn't create that supplier." };
+    }
+
+    const link = await linkBillSupplier(documentId, res.id);
+    if (!link.ok) return { ok: false, error: link.error };
+    trackBillEvent("bill_supplier_selected", { created: true });
+    return { ok: true, supplierId: res.id };
+  } catch (err) {
+    logBillError("record", err);
     return { ok: false, error: "Something went wrong." };
   }
 }

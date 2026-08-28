@@ -7,6 +7,7 @@ import { BillArchiveButton } from "../../../components/bills/BillArchiveButton";
 import { BillExtractedFields } from "../../../components/bills/BillExtractedFields";
 import { BillValidationFindings } from "../../../components/bills/BillValidationFindings";
 import { BillDuplicateCandidates } from "../../../components/bills/BillDuplicateCandidates";
+import { BillSupplierPanel } from "../../../components/bills/BillSupplierPanel";
 import { BillRetryButton } from "../../../components/bills/BillRetryButton";
 import { isBillsEnabled, isBillsExtractionEnabled } from "../../../lib/bills/gate";
 import {
@@ -14,6 +15,8 @@ import {
   getBillDocumentById,
   getBillDuplicateCandidates,
   getBillProcessingEvents,
+  getBillSupplierCandidates,
+  getBillSupplierLink,
   getCurrentBillExtraction,
   getCurrentBillValidation,
 } from "../../../lib/bills/queries";
@@ -58,6 +61,15 @@ export default async function BillDetailPage({
   const bundle = extractionEnabled ? await getCurrentBillExtraction(id) : null;
   const validation = extractionEnabled ? await getCurrentBillValidation(id) : null;
   const duplicates = extractionEnabled ? await getBillDuplicateCandidates(id) : [];
+  const [supplierLink, supplierCandidates] = extractionEnabled
+    ? await Promise.all([getBillSupplierLink(id), getBillSupplierCandidates(id)])
+    : [null, []];
+  const extractedName =
+    bundle?.fields.find((f) => f.field_key === "supplier_name")?.normalized_value ??
+    bundle?.fields.find((f) => f.field_key === "supplier_name")?.raw_value ??
+    null;
+  const extractedTaxId =
+    bundle?.fields.find((f) => f.field_key === "supplier_tax_id")?.raw_value ?? null;
   const canRetry =
     permissions.canReview &&
     (doc.status === "processing_failed" || bundle?.extraction?.status === "failed");
@@ -139,6 +151,21 @@ export default async function BillDetailPage({
           <BillValidationFindings
             validation={validation?.validation ?? null}
             findings={validation?.findings ?? []}
+          />
+        </section>
+      )}
+
+      {extractionEnabled && (
+        <section className="flex flex-col gap-3">
+          <h2 className="text-sm font-semibold text-text-secondary">Supplier</h2>
+          <BillSupplierPanel
+            documentId={doc.id}
+            linked={supplierLink}
+            candidates={supplierCandidates}
+            canReview={permissions.canReview}
+            canManage={permissions.canManage}
+            extractedName={extractedName}
+            extractedTaxId={extractedTaxId}
           />
         </section>
       )}

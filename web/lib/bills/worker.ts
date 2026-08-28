@@ -6,6 +6,7 @@ import { runValidation } from "./validation/engine";
 import type { ValidationContext, ValidationPolicy } from "./validation/types";
 import { RULESET_VERSION } from "./validation/types";
 import { scoreDuplicates, type Fingerprint } from "./duplicates/detect";
+import { normalizeSupplierName } from "./normalize";
 import { logBillError } from "./analytics";
 
 // The Bills & Expenses processing worker (master prompt §18). Invoked by
@@ -120,10 +121,15 @@ export async function runBillProcessingTick(
       const validated = await validateDocument(admin, doc.id, doc.workspace_id);
       if (validated) summary.validated += 1;
 
-      // Content-duplicate detection - non-fatal (a failure here just
-      // means no candidates are recorded this tick).
+      // Content-duplicate detection + supplier resolution - both
+      // non-fatal (a failure here just means no candidates this tick).
       try {
         await detectDuplicates(admin, doc.id, doc.workspace_id);
+      } catch (err) {
+        logBillError("record", err);
+      }
+      try {
+        await resolveSupplier(admin, doc.id, doc.workspace_id);
       } catch (err) {
         logBillError("record", err);
       }
@@ -379,5 +385,59 @@ async function detectDuplicates(
         detail: c.detail,
       })),
     },
+  });
+}
+
+async function resolveSupplier(
+  admin: Admin,
+  billDocumentId: string,
+  workspaceId: string,
+): Promise<void> {
+  const { data: doc } = await admin
+    .from("bill_documents")
+    .select("supplier_id")
+    .eq("id", billDocumentId)
+    .maybeSingle();
+  if (doc?.supplier_id) return; // a reviewer already linked one
+
+  const { data: extraction } = await admin
+    .from("bill_extractions")
+    .select("id")
+    .eq("bill_document_id", billDocumentId)
+    .eq("is_current", true)
+    .maybeSingle();
+  if (!extraction) return;
+
+  const { data: fieldRows } = await admin
+    .from("bill_extracted_fields")
+    .select("field_key, normalized_value, raw_value")
+    .eq("extraction_id", extraction.id)
+    .in("field_key", ["supplier_name", "supplier_tax_id"]);
+
+  const name = fieldValue(fieldRows, "supplier_name");
+  const taxId = fieldValue(fieldRows, "supplier_tax_id");
+  if (!name && !taxId) return;
+
+  const { data: matches, error } = await admin.rpc("search_suppliers", {
+    p_workspace_id: workspaceId,
+    p_query: name ? normalizeSupplierName(name) : null,
+    p_tax_id: taxId,
+    p_limit: 8,
+  });
+  if (error) {
+    logBillError("record", error);
+    return;
+  }
+
+  const candidates = ((matches ?? []) as Array<{ id: string; score: number; match_reasons: string[] }>)
+    .filter((m) => Number(m.score) >= 0.5)
+    .map((m) => ({
+      supplier_id: m.id,
+      score: Number(m.score),
+      match_reasons: m.match_reasons ?? [],
+    }));
+
+  await admin.rpc("record_bill_supplier_candidates", {
+    payload: { bill_document_id: billDocumentId, workspace_id: workspaceId, candidates },
   });
 }

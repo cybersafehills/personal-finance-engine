@@ -5,7 +5,7 @@ internal implementation plan the master prompt asks for in §1: relevant
 existing architecture, proposed architecture, the phased delivery, the
 security model, the testing strategy, and the deferred set.
 
-Status: **Phases 1–3 built** (on `main` after Phases S–U).
+Status: **Phases 1–5 built** (on `main` after Phases S–U).
 Phase 1 — `20260922000000_bills_phase_1_intake_and_lifecycle.sql` +
 `web/lib/bills/**`, `web/app/bills/**`, `web/app/api/bills/**`.
 Phase 2 — `20260923000000_bills_phase_2_extraction.sql` +
@@ -15,7 +15,10 @@ Phase 3 — `20260924000000_bills_phase_3_validation.sql` +
 `web/lib/bills/validation/**` (pure rule engine), wired into the worker.
 Phase 4 — `20260925000000_bills_phase_4_duplicates.sql` +
 `web/lib/bills/duplicates/detect.ts` (pure scorer), wired into the worker.
-Phases 5–8 are designed here and architected-for; none of their code
+Phase 5 — `20260926000000_bills_phase_5_suppliers.sql` + `search_suppliers`
+ranking in SQL, `web/components/bills/BillSupplierPanel.tsx`, wired into
+the worker.
+Phases 6–8 are designed here and architected-for; none of their code
 exists yet.
 
 ---
@@ -373,14 +376,32 @@ idempotency key + one transaction — is Phase 6.
 
 ---
 
-## 10. Supplier resolution (Phase 5)
+## 10. Supplier resolution (Phase 5 — built)
 
-Search tenant-scoped `suppliers` by TIN, exact normalized name, aliases,
-contacts, bank/payment details, historical document info. Ranked
-candidates with match explanations. Never auto-merge on name similarity.
-Creating a supplier needs `bill.manage` (or a dedicated `supplier.create`
-capability), validates required fields, preserves the extracted source,
-and is audited. Supplier corrections never rewrite historical documents.
+`suppliers` (tenant-scoped supplier of record; `name_key` is a
+comparison key and is **deliberately not unique** so two genuinely
+different suppliers that normalise the same are never silently merged; a
+`tax_id`, when present, *is* unique per workspace), `supplier_aliases`,
+and `bill_supplier_candidates` (is_current). `bill_documents.supplier_id`
+is the reviewer-confirmed link — never set automatically.
+
+- `search_suppliers(workspace, query, tax_id, limit)` — ranked in SQL:
+  exact TIN 0.99, exact `name_key` 0.90, alias 0.75, prefix 0.70,
+  contains 0.55; member-gated; also called by the worker.
+- `create_supplier(payload)` — `bill.manage`-gated; refuses a duplicate
+  active TIN in the workspace (returns `existing_id`); writes a
+  `bill.supplier_created` Space audit event; never merges.
+- `link_bill_supplier(document, supplier | null)` — `bill.review`-gated;
+  sets/clears `bill_documents.supplier_id`, journals it.
+- `record_bill_supplier_candidates(payload)` — service_role-only; the
+  worker calls `search_suppliers` with the normalised extracted supplier
+  name + TIN after duplicate detection and records ranked candidates
+  (`supplier_candidate_generated` event). It never links.
+
+`BillSupplierPanel` (client) on the detail page: shows the linked
+supplier, or ranked candidates with match reasons + a search box + (with
+`bill.manage`) a create form. Supplier corrections never rewrite
+historical documents.
 
 ---
 
@@ -442,7 +463,7 @@ rejected filters.
 | **2 — Classification & extraction** *(built)* | `bill_extractions` / `bill_extracted_fields` / `bill_line_items`; `record_bill_extraction` + `system_transition_bill_document` + `retry_bill_extraction` RPCs; `lib/bills/extraction/**` (provider abstraction incl. `mock`, strict schema, injection-hardened prompt) + `lib/bills/normalize.ts`; cron worker `queued → … → needs_review`; read-only extracted-fields on the detail page. **PDF/image rendering is client-side in Phase 7 (pdf.js), so no server preview/thumbnail generation.** | Behind `BILLS_EXTRACTION_ENABLED` |
 | **3 — Validation & exception detection** *(built)* | `bill_validations` (is_current) / `bill_validation_findings`; service_role-only `record_bill_validation`; `record_bill_extraction` re-issued to land at `validating`; the pure `web/lib/bills/validation/` rule engine wired into the worker; read-only "Checks" section on the detail page. Per-workspace policy *edits* (`bill.configure` UI) deferred to Phase 7. | Behind `BILLS_EXTRACTION_ENABLED` |
 | **4 — Duplicate detection** *(built)* | `bill_duplicate_candidates` (is_current); service_role-only `get_bill_document_fingerprints` + `record_bill_duplicate_candidates`; `bill.review`-gated `resolve_bill_duplicate_candidate`; pure `web/lib/bills/duplicates/detect.ts` (document-number / supplier+date+amount / recurring signals) wired into the worker; "Possible duplicates" section on the detail page. Perceptual matching + idempotent posting are Phase 6. | Behind `BILLS_EXTRACTION_ENABLED` |
-| **5 — Supplier resolution** | `suppliers` / `supplier_aliases` / `bill_supplier_candidates`; ranked search; permissioned creation | Behind flag |
+| **5 — Supplier resolution** *(built)* | `suppliers` (name_key non-unique, TIN unique) / `supplier_aliases` / `bill_supplier_candidates`; `bill_documents.supplier_id`; SQL-ranked `search_suppliers`; `bill.manage`-gated `create_supplier` (TIN guard, never merges); `bill.review`-gated `link_bill_supplier`; service_role-only `record_bill_supplier_candidates` wired into the worker; `BillSupplierPanel` on the detail page. | Behind `BILLS_EXTRACTION_ENABLED` |
 | **6 — Transaction matching & posting** | `bills` / `bill_transaction_links` / `bill_ledger_links`; ranked match candidates; `approve_bill` (limits, no self-approval, stale-guard); idempotent `post_bill` | **Yes** |
 | **7 — Review workspace & UX** | Full split-pane review UI; draft/approve/reject/clarify; corrected-value provenance; responsive + a11y; landing-page filters; nav placement | **Yes** |
 | **8 — Notifications, monitoring, rollout hardening** | Notifications via existing infra + prefs; analytics events; monitoring (upload success, queue depth, extraction success, provider latency/error, correction rate, approval turnaround, posting failure, match-confirm rate, unauthorized-access attempts); WCAG 2.1 AA pass; staged flag rollout internal → beta → GA; migration validation on realistic data; security + performance review; runbooks + ADR follow-ups | **Yes** |
@@ -463,8 +484,8 @@ activation. The disabled state is `notFound()` for pages,
   authenticated-callable; `kind='original'` artifact immutability;
   cross-workspace RLS isolation; the capability matrix. Privilege-
   regression counts updated in lock-step (on `main` after Phases S–U:
-  81 tables, 126 `authenticated` table grants, 75 `authenticated`-callable
-  functions). Full-chain harness: **251 assertions**, 32 of them Bills.
+  84 tables, 129 `authenticated` table grants, 78 `authenticated`-callable
+  functions). Full-chain harness: **260 assertions**, 41 of them Bills.
 - **Unit** (Deno, `web/lib/bills/**/*_test.ts`): `intake.ts` — magic-byte
   sniffing vs a spoofed extension, size cap, filename sanitisation,
   storage-key opacity, PDF page count, encrypted/truncated rejection,

@@ -600,7 +600,9 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # Phase 3 (20260924000000) adds 2 more (bill_validations,
 # bill_validation_findings) - 80 tables, 79 with RLS. Phase 4
 # (20260925000000) adds bill_duplicate_candidates - 81 tables, 80 with RLS.
-if [ "$TABLE_COUNT" = "81" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Phase 5 (20260926000000) adds 3 (suppliers, supplier_aliases,
+# bill_supplier_candidates) - 84 tables, 83 with RLS.
+if [ "$TABLE_COUNT" = "84" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -692,11 +694,12 @@ AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from inform
 # (bill_extractions, bill_extracted_fields, bill_line_items). Phase 3
 # (20260924000000) adds 2 select-only (bill_validations,
 # bill_validation_findings). Phase 4 (20260925000000) adds 1 select-only
-# (bill_duplicate_candidates). 115 + 11 = 126.
-if [ "$AUTHENTICATED_GRANT_COUNT" = "126" ]; then
-  pass "authenticated holds exactly the 126 table grants expected, no more"
+# (bill_duplicate_candidates). Phase 5 (20260926000000) adds 3 select-only
+# (suppliers, supplier_aliases, bill_supplier_candidates). 115 + 14 = 129.
+if [ "$AUTHENTICATED_GRANT_COUNT" = "129" ]; then
+  pass "authenticated holds exactly the 129 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 126 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 129 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -839,10 +842,13 @@ AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_p
 # preserved). Still 74. Phase 4 (20260925000000) adds 1:
 # resolve_bill_duplicate_candidate (get_bill_document_fingerprints and
 # record_bill_duplicate_candidates are service_role-only). 74 + 1 = 75.
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "75" ]; then
-  pass "authenticated holds EXECUTE on exactly the 75 functions expected, no more"
+# Phase 5 (20260926000000) adds 3: search_suppliers, create_supplier,
+# link_bill_supplier (record_bill_supplier_candidates is service_role-only).
+# 75 + 3 = 78.
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "78" ]; then
+  pass "authenticated holds EXECUTE on exactly the 78 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 75 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 78 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -3801,6 +3807,102 @@ if [ "$BILL4_B_SEES" = "0" ]; then
   pass "Bills Phase 4: a non-member cannot read another workspace's duplicate candidates"
 else
   fail "Bills Phase 4: RLS isolation breach on bill_duplicate_candidates"
+fi
+
+# ===========================================================================
+# Bills & Expenses Phase 5 (20260926000000): create_supplier being
+# bill.manage-gated + its TIN guard, search_suppliers ranking + member
+# gate, link_bill_supplier being bill.review-gated,
+# record_bill_supplier_candidates being service_role-only, and
+# cross-workspace RLS. Reuses pfe_rls + USER_A / USER_B / BILL_WS_A /
+# BILL4A_ID.
+# ===========================================================================
+echo "=== Bills Phase 5: supplier resolution ==="
+
+if as_user "$USER_A" "select public.record_bill_supplier_candidates('{}'::jsonb);" >/dev/null 2>$ARTIFACT_DIR/pfe_b5.log; then
+  fail "Bills Phase 5: record_bill_supplier_candidates was authenticated-callable"
+else
+  pass "Bills Phase 5: record_bill_supplier_candidates is service_role-only"
+fi
+rm -f $ARTIFACT_DIR/pfe_b5.log
+
+# create_supplier (USER_A is a personal-workspace owner -> holds bill.manage).
+BILL5_SUP="$(as_user "$USER_A" "select (public.create_supplier(jsonb_build_object(
+  'workspace_id','$BILL_WS_A','display_name','Kigali Office Supplies Ltd',
+  'name_key','kigali office supplies','tax_id','TIN123','email','ops@kos.example')))->>'id';")"
+if [ -n "$BILL5_SUP" ] && [ "$BILL5_SUP" != "" ]; then
+  pass "Bills Phase 5: create_supplier creates a supplier for a bill.manage holder"
+else
+  fail "Bills Phase 5: create_supplier returned no id ($BILL5_SUP)"
+fi
+
+# A second create with the same TIN is refused (returns existing id).
+BILL5_DUP="$(as_user "$USER_A" "select (public.create_supplier(jsonb_build_object(
+  'workspace_id','$BILL_WS_A','display_name','KOS again','name_key','kos again','tax_id','tin123')))->>'error';")"
+BILL5_SUP_COUNT="$(psql -d pfe_rls -t -A -c "select count(*) from public.suppliers where workspace_id = '$BILL_WS_A' and lower(tax_id) = 'tin123';")"
+if [ "$BILL5_DUP" = "tax_id_exists" ] && [ "$BILL5_SUP_COUNT" = "1" ]; then
+  pass "Bills Phase 5: create_supplier refuses a duplicate TIN and never merges"
+else
+  fail "Bills Phase 5: TIN guard wrong (err=$BILL5_DUP count=$BILL5_SUP_COUNT)"
+fi
+
+# search_suppliers ranking.
+BILL5_S_NAME="$(psql -d pfe_rls -t -A \
+  -c "set role authenticated" \
+  -c "select set_config('request.jwt.claim.sub','$USER_A',false)" \
+  -c "select score from public.search_suppliers('$BILL_WS_A', 'kigali office supplies', null, 10) limit 1" | tail -1)"
+BILL5_S_TIN="$(psql -d pfe_rls -t -A \
+  -c "set role authenticated" \
+  -c "select set_config('request.jwt.claim.sub','$USER_A',false)" \
+  -c "select score from public.search_suppliers('$BILL_WS_A', null, 'TIN123', 10) limit 1" | tail -1)"
+if awk "BEGIN{exit !($BILL5_S_NAME >= 0.89 && $BILL5_S_NAME <= 1)}" \
+   && awk "BEGIN{exit !($BILL5_S_TIN >= 0.98 && $BILL5_S_TIN <= 1)}"; then
+  pass "Bills Phase 5: search_suppliers ranks an exact name_key ~0.9 and an exact TIN ~0.99"
+else
+  fail "Bills Phase 5: search_suppliers ranking wrong (name=$BILL5_S_NAME tin=$BILL5_S_TIN)"
+fi
+
+# search_suppliers refuses a non-member.
+if as_user "$USER_B" "select * from public.search_suppliers('$BILL_WS_A', 'kigali', null, 5);" >/dev/null 2>$ARTIFACT_DIR/pfe_b5b.log; then
+  fail "Bills Phase 5: search_suppliers ran for a non-member"
+else
+  pass "Bills Phase 5: search_suppliers refuses a non-member"
+fi
+rm -f $ARTIFACT_DIR/pfe_b5b.log
+
+# link_bill_supplier: bill.review holder links; non-member refused.
+if as_user "$USER_B" "select public.link_bill_supplier('$BILL4A_ID', '$BILL5_SUP');" >/dev/null 2>$ARTIFACT_DIR/pfe_b5c.log; then
+  fail "Bills Phase 5: a non-member linked a supplier"
+else
+  pass "Bills Phase 5: link_bill_supplier refuses a non-member"
+fi
+rm -f $ARTIFACT_DIR/pfe_b5c.log
+BILL5_LINK="$(as_user "$USER_A" "select (public.link_bill_supplier('$BILL4A_ID', '$BILL5_SUP'))->>'ok';")"
+BILL5_LINKED="$(psql -d pfe_rls -t -A -c "select supplier_id from public.bill_documents where id = '$BILL4A_ID';")"
+BILL5_LINK_EVT="$(psql -d pfe_rls -t -A -c "select count(*) from public.bill_processing_events where bill_document_id = '$BILL4A_ID' and event_type = 'supplier_linked';")"
+if [ "$BILL5_LINK" = "true" ] && [ "$BILL5_LINKED" = "$BILL5_SUP" ] && [ "$BILL5_LINK_EVT" = "1" ]; then
+  pass "Bills Phase 5: link_bill_supplier sets bill_documents.supplier_id and journals it"
+else
+  fail "Bills Phase 5: link wrong (ok=$BILL5_LINK linked=$BILL5_LINKED evt=$BILL5_LINK_EVT)"
+fi
+
+# record_bill_supplier_candidates (service_role) for BILL4B_ID.
+BILL5_REC="$(psql -d pfe_rls -t -A -c "set role service_role; select (public.record_bill_supplier_candidates(jsonb_build_object(
+  'bill_document_id','$BILL4B_ID','workspace_id','$BILL_WS_A',
+  'candidates', jsonb_build_array(jsonb_build_object('supplier_id','$BILL5_SUP','score',0.9,'match_reasons',jsonb_build_array('name_exact'))))))->>'candidates';" | tail -1)"
+BILL5_CAND="$(psql -d pfe_rls -t -A -c "select count(*) from public.bill_supplier_candidates where bill_document_id = '$BILL4B_ID' and is_current;")"
+if [ "$BILL5_REC" = "1" ] && [ "$BILL5_CAND" = "1" ]; then
+  pass "Bills Phase 5: record_bill_supplier_candidates writes the candidate set"
+else
+  fail "Bills Phase 5: candidate write wrong (rec=$BILL5_REC cand=$BILL5_CAND)"
+fi
+
+# Cross-workspace RLS.
+BILL5_B_SEES="$(as_user "$USER_B" "select count(*) from public.suppliers where workspace_id = '$BILL_WS_A';")"
+if [ "$BILL5_B_SEES" = "0" ]; then
+  pass "Bills Phase 5: a non-member cannot read another workspace's suppliers"
+else
+  fail "Bills Phase 5: RLS isolation breach on suppliers"
 fi
 
 echo ""
