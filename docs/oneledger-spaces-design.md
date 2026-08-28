@@ -1296,6 +1296,39 @@ crossing) with no caller; this adds one and wires it to notifications.
 non-member refusal). Full suite: **248 passed / 0 failed**. `deno check` /
 `deno test ingest-momo` (78) / `deno fmt` green.
 
+
+---
+
+## 11u. Phase V PR4b — as built (migration `20261004000000` + web)
+
+Per-member source visibility for **household** scheduled reports
+(decision 2026-08-28: each member's report shows only what they can see).
+
+- **`visible_source_ids_for_user(p_workspace_id, p_user_id)`** — `SECURITY
+  DEFINER` / `STABLE`, `service_role`-only. Returns the `financial_sources`
+  the user owns plus those shared into that Space via an active
+  `source_space_link` (`share_transactions` / `share_account`). The
+  `auth.uid()`-free counterpart of `can_view_source_in_space`, since the
+  report generator runs as `service_role`. `authenticated` fn count
+  **unchanged (76)**.
+- **`web/lib/report-generation.ts`** — `resolveSourceVisibility()` runs
+  once per candidate: `null` for a personal / organization Space (member
+  sees everything), otherwise `{ sourceIds }` from the RPC for a
+  household. `fetchSettledTransactions` / `fetchBalanceBefore` apply it as
+  `financial_source_id in (…) or financial_source_id is null`
+  (source-less legacy rows always included). A household lookup failure
+  logs and falls back to unfiltered — a report is informational, not an
+  authorization boundary. Both also carry the PR4a
+  `.neq("dedupe_state", "merged")`.
+
+3-assertion "Phase V PR4b" migration block (owned + shared-in per user,
+another member's unshared source hidden, service-role lockdown). Full
+suite: **250 passed / 0 failed**. `next build` ✓, `eslint` 0.
+
+**Phase V complete.** PR1/PR1b (notification store + surface), PR2 (budget
+alerts), PR3 (email drainer, dark pending secrets), PR4a/PR4b (report
+`merged`-exclusion + household visibility).
+
 ---
 
 ## 11s. Phase V PR3 — as built (migration `20261003000000` + Edge fn)

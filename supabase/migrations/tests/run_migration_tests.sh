@@ -3769,6 +3769,39 @@ else
 fi
 rm -f $ARTIFACT_DIR/pfe_v_pr3.log
 
+# Phase V PR4b: visible_source_ids_for_user - the auth.uid()-free source
+# visibility the scheduled-report generator uses for household members.
+# Fresh household V4_HH: USER_A owner, USER_R member; V4_SRC_A (USER_A's,
+# shared in) and V4_SRC_R (USER_R's, not shared).
+# ===========================================================================
+echo "=== Phase V PR4b: report source visibility ==="
+
+V4_HH="$(as_user "$USER_A" "select public.create_household_workspace('V4 Household');")"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.workspace_invites (workspace_id, email, role, token_hash, token_prefix, invited_by) values ('$V4_HH', 'r-invitee@example.com', 'member', 'v4-token-1', 'v4-pref-1', '$USER_A');" >/dev/null
+as_user "$USER_R" "select public.accept_workspace_invite('v4-token-1');" >/dev/null
+
+V4_SRC_A="$(psql -d pfe_rls -t -A -c "set role service_role; insert into public.financial_sources (owner_user_id, provider, source_type, display_name, currency) values ('$USER_A', 'mtn_momo', 'mobile_money', 'A shared src (V4)', 'RWF') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+V4_SRC_R="$(psql -d pfe_rls -t -A -c "set role service_role; insert into public.financial_sources (owner_user_id, provider, source_type, display_name, currency) values ('$USER_R', 'mtn_momo', 'mobile_money', 'R private src (V4)', 'RWF') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+as_user "$USER_A" "select public.allocate_source_to_space('$V4_SRC_A', '$V4_HH', 'share_transactions', false, now());" >/dev/null
+
+V4_A_SEES_SHARED="$(psql -d pfe_rls -t -A -c "set role service_role; select count(*) from public.visible_source_ids_for_user('$V4_HH', '$USER_A') s(id) where s.id = '$V4_SRC_A';" | tail -1)"
+V4_A_SEES_PRIVATE="$(psql -d pfe_rls -t -A -c "set role service_role; select count(*) from public.visible_source_ids_for_user('$V4_HH', '$USER_A') s(id) where s.id = '$V4_SRC_R';" | tail -1)"
+V4_R_SEES_OWN="$(psql -d pfe_rls -t -A -c "set role service_role; select count(*) from public.visible_source_ids_for_user('$V4_HH', '$USER_R') s(id) where s.id = '$V4_SRC_R';" | tail -1)"
+V4_R_SEES_SHARED="$(psql -d pfe_rls -t -A -c "set role service_role; select count(*) from public.visible_source_ids_for_user('$V4_HH', '$USER_R') s(id) where s.id = '$V4_SRC_A';" | tail -1)"
+if [ "$V4_A_SEES_SHARED" = "1" ] && [ "$V4_A_SEES_PRIVATE" = "0" ] && [ "$V4_R_SEES_OWN" = "1" ] && [ "$V4_R_SEES_SHARED" = "1" ]; then
+  pass "Phase V PR4b: visible_source_ids_for_user returns owned + shared-in sources per user, and hides another member's unshared source"
+else
+  fail "Phase V PR4b: visibility wrong (A shared=$V4_A_SEES_SHARED A private=$V4_A_SEES_PRIVATE R own=$V4_R_SEES_OWN R shared=$V4_R_SEES_SHARED)"
+fi
+
+# service-role-only.
+if as_user "$USER_A" "select public.visible_source_ids_for_user('$V4_HH', '$USER_A');" >/dev/null 2>$ARTIFACT_DIR/pfe_v_pr4b.log; then
+  fail "Phase V PR4b: visible_source_ids_for_user was callable by an authenticated user"
+else
+  pass "Phase V PR4b: visible_source_ids_for_user is service-role-only"
+fi
+rm -f $ARTIFACT_DIR/pfe_v_pr4b.log
+
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="
 if [ "$FAIL_COUNT" -ne 0 ]; then
