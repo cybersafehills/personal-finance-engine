@@ -119,8 +119,12 @@ non-numeric `merchant_id`, an expired / replayed payload, or
 isn't available". The seeded MTN pay-merchant code
 (`20260911000000_scan_merchant_pay_codes.sql`) is **published but
 unverified** — the review shows the "Not officially verified" warning and
-the full dial string, same as scanning `mtn-momo-send` today. Airtel is
-not seeded (its pay-code path is unconfirmed).
+the full dial string, same as scanning `mtn-momo-send` today. Public
+sources (2026-08) corroborate the `*182*8*1#` entry point + prompts and
+5–6-digit merchant codes, but **not** the concatenated
+`*182*8*1*{merchant}*{amount}#` form used here — a real-device check is
+the blocker for `verified_at` (see the migration header and the
+runbook §4.7). Airtel is not seeded (its pay-code path is unconfirmed).
 
 Trust model, supported/unsupported formats, and the client/server split
 are ADR **`docs/adr/0006-qr-scan-payload-trust.md`**. Key points: no

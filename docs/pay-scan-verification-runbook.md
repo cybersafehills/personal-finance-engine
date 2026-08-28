@@ -107,6 +107,14 @@ for iOS Safari.
    payload → "only continue a scanned payment in RWF". A
    `"provider":"equity"` payload → "no verified USSD path for this
    provider yet". A `"merchant_id":"KGL-COFFEE"` → same (non-numeric).
+   - **This path is not MTN-verified.** Public sources confirm the
+     `*182*8*1#` entry point + prompts, not the one-line
+     `*182*8*1*code*amount#` form. On a real MTN handset, actually run
+     the dialled string to a **1 RWF** test merchant (or a merchant you
+     control) and confirm it completes in one step. If MTN shows the
+     step-by-step prompts instead, do **not** mark the code verified —
+     file to replace it with the literal `*182*8*1#` entry + steps. Do
+     the same real-device check for `mtn-momo-send` (also unverified).
 
 ## 5. Payload safety spot-checks
 

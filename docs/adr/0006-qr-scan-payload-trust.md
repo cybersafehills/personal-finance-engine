@@ -112,6 +112,17 @@ everything (directory row, captured params, normalized msisdn) from
     seeded until its path is confirmed. Cross-session `nonce` replay
     is not persisted yet — the payload `expires_at` and the deterministic
     idempotency key are the current guards.
+  - **Verification (public sources, 2026-08):** the entry point
+    `*182*8*1#` for pay-a-merchant-by-code, then prompts for the code
+    and the amount, and 5–6-digit merchant codes, are corroborated by
+    several Rwanda MoMo guides and a post on MoMo Rwanda's official
+    Facebook page. The **concatenated** `*182*8*1*{merchant}*{amount}#`
+    form is **not MTN-documented anywhere found** — every source shows
+    step-by-step prompts. Before an admin sets `verified_at`, a real MTN
+    handset must confirm the one-line form dials straight through; if it
+    doesn't, the directory should hold the literal `*182*8*1#` entry +
+    steps and the scanner would present the code + amount for the user
+    to type at the prompts.
 - **provider_link / emv_merchant / non-RWF OneLedger** → shown, not
   actionable.
 
