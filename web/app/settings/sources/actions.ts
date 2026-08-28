@@ -2,8 +2,15 @@
 
 import { revalidatePath } from "next/cache";
 import { supabaseSession } from "../../../lib/supabase-session-server";
+import { getActiveWorkspaceId } from "../../../lib/queries";
+import { isSpacesEnabled } from "../../../lib/spaces/gate";
 
 export type SourceActionResult = { ok: true } | { ok: false; error: string };
+
+const SPACES_OFF: SourceActionResult = {
+  ok: false,
+  error: "Shared accounts aren't available yet.",
+};
 
 const VISIBILITY_MODES = [
   "personal_only",
@@ -44,6 +51,8 @@ export async function setSourceVisibility(
     return { ok: false, error: "Unrecognized sharing option." };
   }
 
+  if (!isSpacesEnabled(await getActiveWorkspaceId())) return SPACES_OFF;
+
   const supabase = await supabaseSession();
   const { error } = await supabase.rpc("set_source_visibility", {
     p_source_id: sourceId,
@@ -66,6 +75,8 @@ export async function allocateSourceToSpace(
   if (!isShareMode(mode)) {
     return { ok: false, error: "Choose what this Space can see." };
   }
+
+  if (!isSpacesEnabled(await getActiveWorkspaceId())) return SPACES_OFF;
 
   const supabase = await supabaseSession();
   const { error } = await supabase.rpc("allocate_source_to_space", {
@@ -90,6 +101,8 @@ export async function setShareLinkStatus(
   if (!isLinkStatus(status)) {
     return { ok: false, error: "Unrecognized status." };
   }
+
+  if (!isSpacesEnabled(await getActiveWorkspaceId())) return SPACES_OFF;
 
   const supabase = await supabaseSession();
   const { error } = await supabase.rpc("set_source_space_link_status", {

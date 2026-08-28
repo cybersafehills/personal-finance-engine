@@ -1,8 +1,10 @@
 import {
   getActiveWorkspace,
+  getActiveWorkspaceId,
   getWorkspaceInvites,
   getWorkspaceMembers,
 } from "../../../lib/queries";
+import { isSpacesEnabled } from "../../../lib/spaces/gate";
 import { PageHeader } from "../../../components/PageHeader";
 import { EmptyState } from "../../../components/EmptyState";
 import { MemberItem } from "../../../components/MemberItem";
@@ -26,6 +28,7 @@ export default async function WorkspacePage() {
   }
 
   if (workspace.kind === "personal") {
+    const householdsEnabled = isSpacesEnabled(await getActiveWorkspaceId());
     return (
       <div>
         <PageHeader
@@ -33,13 +36,13 @@ export default async function WorkspacePage() {
           subtitle="Personal is yours alone. Create a shared Space to collaborate."
         />
         <div className="flex flex-col gap-4">
-          <CreateHouseholdForm />
+          {householdsEnabled && <CreateHouseholdForm />}
 
           <div className="flex flex-col gap-3">
             <p className="text-sm text-text-muted">
-              Running a business or a group instead? An organization Space
-              shares one ledger — every account, transaction, and budget —
-              with everyone you invite.
+              {householdsEnabled
+                ? "Running a business or a group instead? An organization Space shares one ledger — every account, transaction, and budget — with everyone you invite."
+                : "An organization Space shares one ledger — every account, transaction, and budget — with everyone you invite."}
             </p>
             <CreateOrganizationForm />
           </div>

@@ -1371,6 +1371,38 @@ Activation checklist (ops, one-time): set `RESEND_API_KEY` +
 
 Phase V remaining: **PR4** — Space-scoped scheduled reports.
 
+
+---
+
+## 11v. Phase W PR1 — as built (web)
+
+Phase W (hardening) opens with the **feature-flag gate** — Spaces ships
+dark and rolls out internal → beta → GA.
+
+- **`web/lib/spaces/gate.ts`** — `server-only`, mirrors `lib/pay/gate.ts`.
+  `SPACES_ENABLED` is **opt-in** (`=== "true"`, the `SCAN_TO_PAY_ENABLED`
+  convention); `SPACES_WORKSPACE_ALLOWLIST` scopes a staged beta.
+  `isSpacesEnabled(workspaceId)` / `assertSpacesEnabled` (reuses pay's
+  `FeatureDisabledError`).
+- **Server actions gated** (blocked, not just hidden): `createHousehold`
+  (silent no-op, matching its existing error path); `setSourceVisibility`
+  / `allocateSourceToSpace` / `setShareLinkStatus` return a friendly
+  `{ ok: false }`.
+- **UI gated**: `CreateHouseholdForm` on `/settings/workspace` (personal
+  view drops to just the organization option); `/settings/sources`
+  retitles to "Accounts" with sharing copy removed and
+  `getShareableHouseholds` skipped. **Not gated** — statement import, the
+  `/notifications` inbox, and duplicate review all work for personal
+  workspaces and stay on.
+- **`web/.env.local.example`** documents both vars; **`ci.yml`** sets
+  `SPACES_ENABLED=true` for the e2e job so `spaces-household.spec.ts`
+  still runs.
+
+`next build` ✓, `eslint` 0. No migration.
+
+Phase W remaining: W2 state matrix · W3 onboarding/help · W4 analytics ·
+W5 monitoring · W6 migration validation + security/perf review.
+
 ---
 
 ## 12. Testing strategy (per phase, aggregated here)
