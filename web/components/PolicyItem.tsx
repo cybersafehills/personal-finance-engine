@@ -36,7 +36,13 @@ function conditionSummary(policy: CategorizationPolicyRow): string {
   return parts.length > 0 ? parts.join(" · ") : "No conditions";
 }
 
-export function PolicyItem({ policy }: { policy: CategorizationPolicyRow }) {
+export function PolicyItem(
+  { policy, scopeSourceLabel = null }: {
+    policy: CategorizationPolicyRow;
+    /** Display label for policy.scope_source_id when scope_type === "source". */
+    scopeSourceLabel?: string | null;
+  },
+) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -79,6 +85,11 @@ export function PolicyItem({ policy }: { policy: CategorizationPolicyRow }) {
         </div>
         <div className="flex items-center gap-1.5">
           {!policy.is_active && <Badge variant="attention">Paused</Badge>}
+          {policy.scope_type === "source" && (
+            <Badge variant="neutral">
+              {scopeSourceLabel ?? "One account"}
+            </Badge>
+          )}
           <Badge variant="neutral">{policy.rule_source}</Badge>
         </div>
       </div>
