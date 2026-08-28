@@ -181,7 +181,14 @@ Expenses Phase 5** - `20260926000000`: `create_supplier` being
 `search_suppliers` ranking + member gate, `link_bill_supplier` being
 `bill.review`-gated, `record_bill_supplier_candidates` being
 `service_role`-only, and cross-workspace RLS on `suppliers` /
-`bill_supplier_candidates`). The privilege-regression counts (public
+`bill_supplier_candidates`; then **Bills & Expenses Phase 6** -
+`20260927000000`: `approve_bill`'s blocking-finding / unresolved-duplicate
+/ no-self-approval-in-a-multi-member-workspace guards, idempotent
+`post_bill` (a repeat with the same key is a no-op; a different key after
+posting is rejected; link → matched, no link → posted),
+`get_bill_transaction_search_set` /
+`record_bill_transaction_match_candidates` being `service_role`-only, and
+cross-workspace RLS on `bills`). The privilege-regression counts (public
 table count, `authenticated` table-grant count, `authenticated`
 function-EXECUTE count) are asserted exactly and must be updated in
 lock-step with any migration that adds a table, an `authenticated` grant,

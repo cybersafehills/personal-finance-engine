@@ -5,7 +5,7 @@ internal implementation plan the master prompt asks for in §1: relevant
 existing architecture, proposed architecture, the phased delivery, the
 security model, the testing strategy, and the deferred set.
 
-Status: **Phases 1–5 built** (on `main` after Phases S–U).
+Status: **Phases 1–6 built** (on `main` after Phases S–U).
 Phase 1 — `20260922000000_bills_phase_1_intake_and_lifecycle.sql` +
 `web/lib/bills/**`, `web/app/bills/**`, `web/app/api/bills/**`.
 Phase 2 — `20260923000000_bills_phase_2_extraction.sql` +
@@ -18,7 +18,10 @@ Phase 4 — `20260925000000_bills_phase_4_duplicates.sql` +
 Phase 5 — `20260926000000_bills_phase_5_suppliers.sql` + `search_suppliers`
 ranking in SQL, `web/components/bills/BillSupplierPanel.tsx`, wired into
 the worker.
-Phases 6–8 are designed here and architected-for; none of their code
+Phase 6 — `20260927000000_bills_phase_6_matching_posting.sql` +
+`web/lib/bills/matching/score.ts` (pure scorer),
+`web/components/bills/BillLedgerPanel.tsx`, wired into the worker.
+Phases 7–8 are designed here and architected-for; none of their code
 exists yet.
 
 ---
@@ -405,22 +408,45 @@ historical documents.
 
 ---
 
-## 11. Transaction matching & posting (Phase 6)
+## 11. Transaction matching & posting (Phase 6 — built)
 
-Compare an **approved** document to existing `transactions` (from MoMo
-SMS, bank, manual, API). Signals: amount (exact / near), currency, date
-proximity, supplier/recipient, payment/MoMo/bank reference, account,
-method, description similarity, historical supplier behaviour, existing
-links. Present ranked candidates with reasons *for* and *against*;
-confirm / reject / manual-search / leave-unmatched. `approve_bill`
-enforces amount limits + separation-of-duties (no self-approval) + a
-stale-validation guard; `post_bill` is idempotent. Cases handled: 1:1,
-one invoice paid by several transactions, one transaction covering several
-receipts, receipt-before-ingestion, unpaid bill, transaction with no
-document, currency-conversion diff, fee diff — via allocations where the
-model supports them, else an explicit "reconcile later" marker. **No
-second expense is created when a document supports an existing
-transaction.**
+The `bills` obligation entity (one per document, `bills_one_per_document`),
+`bill_transaction_links` (many-to-many bill ↔ `transactions`), and
+`bill_transaction_match_candidates` (is_current, `reasons_for` /
+`reasons_against`). **`transactions` is only ever read — never written.**
+
+- The worker (after supplier resolution, for a `needs_review` document
+  with a total) calls the service-role-only `get_bill_transaction_search_set`
+  (outgoing successful workspace transactions ±30 days of the issue date,
+  excluding any already linked to a bill), scores them with the pure
+  `web/lib/bills/matching/score.ts` (exact amount 0.5 / within 2% 0.3;
+  currency match +0.15 / mismatch −0.3; date proximity; recipient matches
+  supplier +0.2; reference matches invoice number +0.25), and records
+  ranked candidates with reasons for and against.
+- **`approve_bill`** (`bill.approve`) — guards: reviewable status, **no
+  validation finding with `blocks_approval`**, **no unresolved
+  exact/probable duplicate**, **no self-approval in a multi-member
+  workspace** (`created_by = auth.uid()` blocked when the workspace has
+  >1 active member), currency + total present. Creates the `bills` row
+  from the current extraction and moves the document to `approved`.
+  Idempotent (returns the existing bill).
+- **`post_bill`** (`bill.post`) — **idempotent on `idempotency_key`** (a
+  deterministic hash of document + sorted transaction ids in the action);
+  a repeat with the same key is a no-op returning the existing result, a
+  different key after posting is rejected. `transaction_ids` given →
+  `bill_transaction_links` + document → `matched`; none given → unpaid
+  obligation + document → `posted`. A transaction already linked to a
+  different bill is refused.
+- `confirm_bill_transaction_match` / `unlink_bill_transaction`
+  (`bill.review`) — post-hoc link adjustments.
+- `BillLedgerPanel` (client) on the detail page: Approve → pick matching
+  transactions (checkboxes, with the for/against reasons) or "Post as
+  unpaid bill" → ledger summary with linked transactions and unlink.
+
+**No second expense is created when a document supports an existing
+transaction** — it is linked. Allocations (`allocation_minor` column) and
+currency-diff / fee-diff cases are shape-ready; the full allocation UI is
+a follow-up.
 
 ---
 
@@ -464,7 +490,7 @@ rejected filters.
 | **3 — Validation & exception detection** *(built)* | `bill_validations` (is_current) / `bill_validation_findings`; service_role-only `record_bill_validation`; `record_bill_extraction` re-issued to land at `validating`; the pure `web/lib/bills/validation/` rule engine wired into the worker; read-only "Checks" section on the detail page. Per-workspace policy *edits* (`bill.configure` UI) deferred to Phase 7. | Behind `BILLS_EXTRACTION_ENABLED` |
 | **4 — Duplicate detection** *(built)* | `bill_duplicate_candidates` (is_current); service_role-only `get_bill_document_fingerprints` + `record_bill_duplicate_candidates`; `bill.review`-gated `resolve_bill_duplicate_candidate`; pure `web/lib/bills/duplicates/detect.ts` (document-number / supplier+date+amount / recurring signals) wired into the worker; "Possible duplicates" section on the detail page. Perceptual matching + idempotent posting are Phase 6. | Behind `BILLS_EXTRACTION_ENABLED` |
 | **5 — Supplier resolution** *(built)* | `suppliers` (name_key non-unique, TIN unique) / `supplier_aliases` / `bill_supplier_candidates`; `bill_documents.supplier_id`; SQL-ranked `search_suppliers`; `bill.manage`-gated `create_supplier` (TIN guard, never merges); `bill.review`-gated `link_bill_supplier`; service_role-only `record_bill_supplier_candidates` wired into the worker; `BillSupplierPanel` on the detail page. | Behind `BILLS_EXTRACTION_ENABLED` |
-| **6 — Transaction matching & posting** | `bills` / `bill_transaction_links` / `bill_ledger_links`; ranked match candidates; `approve_bill` (limits, no self-approval, stale-guard); idempotent `post_bill` | **Yes** |
+| **6 — Transaction matching & posting** *(built)* | `bills` (one per document) / `bill_transaction_links` / `bill_transaction_match_candidates`; service_role-only `get_bill_transaction_search_set` + `record_bill_transaction_match_candidates`; pure `web/lib/bills/matching/score.ts` wired into the worker; `approve_bill` (blocking-finding + unresolved-duplicate + no-self-approval guards); idempotent `post_bill` (→ matched / posted); `confirm`/`unlink` link adjustments; `BillLedgerPanel`. `transactions` is only read. | **Yes** |
 | **7 — Review workspace & UX** | Full split-pane review UI; draft/approve/reject/clarify; corrected-value provenance; responsive + a11y; landing-page filters; nav placement | **Yes** |
 | **8 — Notifications, monitoring, rollout hardening** | Notifications via existing infra + prefs; analytics events; monitoring (upload success, queue depth, extraction success, provider latency/error, correction rate, approval turnaround, posting failure, match-confirm rate, unauthorized-access attempts); WCAG 2.1 AA pass; staged flag rollout internal → beta → GA; migration validation on realistic data; security + performance review; runbooks + ADR follow-ups | **Yes** |
 
@@ -484,8 +510,8 @@ activation. The disabled state is `notFound()` for pages,
   authenticated-callable; `kind='original'` artifact immutability;
   cross-workspace RLS isolation; the capability matrix. Privilege-
   regression counts updated in lock-step (on `main` after Phases S–U:
-  84 tables, 129 `authenticated` table grants, 78 `authenticated`-callable
-  functions). Full-chain harness: **260 assertions**, 41 of them Bills.
+  87 tables, 132 `authenticated` table grants, 82 `authenticated`-callable
+  functions). Full-chain harness: **270 assertions**, 51 of them Bills.
 - **Unit** (Deno, `web/lib/bills/**/*_test.ts`): `intake.ts` — magic-byte
   sniffing vs a spoofed extension, size cap, filename sanitisation,
   storage-key opacity, PDF page count, encrypted/truncated rejection,

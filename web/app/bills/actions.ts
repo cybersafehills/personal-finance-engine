@@ -431,3 +431,133 @@ export async function createSupplierForBill(
     return { ok: false, error: "Something went wrong." };
   }
 }
+
+// --- Phase 6: approval, matching & posting -----------------------
+
+const APPROVE_ERRORS: Record<string, string> = {
+  blocking_findings: "There's a blocking issue in the Checks section. Resolve it first.",
+  unresolved_duplicate:
+    "There's an unresolved likely-duplicate. Resolve it in Possible duplicates first.",
+  self_approval_forbidden: "You can't approve a document you uploaded. Ask another approver.",
+  not_reviewable: "This document isn't in a state that can be approved.",
+  missing_currency_or_total: "The currency or total is missing. Add it before approving.",
+};
+
+export type ApproveBillResult = { ok: true; billId: string } | { ok: false; error: string };
+
+export async function approveBillAction(
+  documentId: string,
+  input: { category?: string; notes?: string } = {},
+): Promise<ApproveBillResult> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!isBillsEnabled(workspaceId)) {
+    return { ok: false, error: "Bills & Expenses isn't available here." };
+  }
+  try {
+    const session = await supabaseSession();
+    const { data, error } = await session.rpc("approve_bill", {
+      payload: {
+        bill_document_id: documentId,
+        category: input.category?.trim() || null,
+        notes: input.notes?.trim() || null,
+      },
+    });
+    if (error) {
+      logBillError("transition", error);
+      if (/bill\.approve/i.test(error.message)) {
+        return { ok: false, error: "You don't have permission to approve documents." };
+      }
+      return { ok: false, error: "Approval failed." };
+    }
+    const res = data as { ok: boolean; bill_id?: string; error?: string };
+    if (!res.ok) {
+      return { ok: false, error: APPROVE_ERRORS[res.error ?? ""] ?? "Approval was refused." };
+    }
+    trackBillEvent("bill_approved", {});
+    revalidatePath("/bills");
+    revalidatePath(`/bills/${documentId}`);
+    return { ok: true, billId: res.bill_id! };
+  } catch (err) {
+    logBillError("transition", err);
+    return { ok: false, error: "Something went wrong." };
+  }
+}
+
+export type PostBillResult =
+  | { ok: true; status: string; links: number }
+  | { ok: false; error: string };
+
+export async function postBillAction(
+  documentId: string,
+  transactionIds: string[],
+  paidState?: "unpaid" | "partial" | "paid",
+): Promise<PostBillResult> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!isBillsEnabled(workspaceId)) {
+    return { ok: false, error: "Bills & Expenses isn't available here." };
+  }
+  const ids = [...new Set(transactionIds)].sort();
+  // Deterministic key so a double-click / retry posts exactly once.
+  const idempotencyKey = await sha256Hex(
+    new TextEncoder().encode(`${documentId}|${ids.join(",")}|${paidState ?? ""}`),
+  );
+  try {
+    const session = await supabaseSession();
+    const { data, error } = await session.rpc("post_bill", {
+      payload: {
+        bill_document_id: documentId,
+        idempotency_key: idempotencyKey,
+        transaction_ids: ids,
+        paid_state: paidState ?? null,
+      },
+    });
+    if (error) {
+      logBillError("transition", error);
+      if (/bill\.post/i.test(error.message)) {
+        return { ok: false, error: "You don't have permission to post documents." };
+      }
+      if (/transaction_already_linked/i.test(error.message)) {
+        return { ok: false, error: "One of those transactions is already linked to another bill." };
+      }
+      return { ok: false, error: "Posting failed." };
+    }
+    const res = data as { ok: boolean; status?: string; links?: number; error?: string };
+    if (!res.ok) {
+      if (res.error === "not_approved") return { ok: false, error: "Approve the document first." };
+      if (res.error === "already_posted") return { ok: false, error: "This document was already posted." };
+      return { ok: false, error: "Posting was refused." };
+    }
+    trackBillEvent("bill_posting_completed", { status: res.status ?? "" });
+    revalidatePath("/bills");
+    revalidatePath(`/bills/${documentId}`);
+    return { ok: true, status: res.status ?? "posted", links: res.links ?? 0 };
+  } catch (err) {
+    logBillError("transition", err);
+    return { ok: false, error: "Something went wrong." };
+  }
+}
+
+export async function unlinkBillTransactionAction(
+  linkId: string,
+  documentId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!isBillsEnabled(workspaceId)) {
+    return { ok: false, error: "Bills & Expenses isn't available here." };
+  }
+  try {
+    const session = await supabaseSession();
+    const { data, error } = await session.rpc("unlink_bill_transaction", { p_link_id: linkId });
+    if (error) {
+      logBillError("transition", error);
+      return { ok: false, error: "That couldn't be unlinked." };
+    }
+    if (!(data as { ok: boolean }).ok) return { ok: false, error: "That couldn't be unlinked." };
+    trackBillEvent("bill_match_rejected", {});
+    revalidatePath(`/bills/${documentId}`);
+    return { ok: true };
+  } catch (err) {
+    logBillError("transition", err);
+    return { ok: false, error: "Something went wrong." };
+  }
+}

@@ -504,6 +504,110 @@ export async function getBillSupplierCandidates(
   });
 }
 
+// --- Phase 6: matching & posting --------------------------------
+
+export type BillObligationRow = {
+  id: string;
+  currency: string;
+  total_minor: number;
+  tax_minor: number | null;
+  issue_date: string | null;
+  due_date: string | null;
+  paid_state: "unpaid" | "partial" | "paid";
+  status: "open" | "void";
+  category: string | null;
+  notes: string | null;
+  approved_at: string;
+  posted_at: string | null;
+};
+
+export type BillLinkRow = {
+  id: string;
+  transaction_id: string;
+  occurredAt: string | null;
+  amountMinor: number | null;
+  currency: string | null;
+  counterparty: string | null;
+};
+
+export type BillTxnMatchRow = {
+  id: string;
+  transaction_id: string;
+  score: number;
+  reasons_for: string[];
+  reasons_against: string[];
+  occurredAt: string | null;
+  amountMinor: number | null;
+  currency: string | null;
+  counterparty: string | null;
+};
+
+export type BillLedgerBundle = {
+  bill: BillObligationRow | null;
+  links: BillLinkRow[];
+  candidates: BillTxnMatchRow[];
+};
+
+export async function getBillLedger(billDocumentId: string): Promise<BillLedgerBundle> {
+  const supabase = await supabaseSession();
+
+  const { data: bill } = await supabase
+    .from("bills")
+    .select(
+      "id, currency, total_minor, tax_minor, issue_date, due_date, paid_state, status, category, notes, approved_at, posted_at",
+    )
+    .eq("bill_document_id", billDocumentId)
+    .maybeSingle();
+
+  let links: BillLinkRow[] = [];
+  if (bill) {
+    const { data: linkRows } = await supabase
+      .from("bill_transaction_links")
+      .select("id, transaction_id, transactions(occurred_at, amount_rwf, currency, counterparty_name)")
+      .eq("bill_id", bill.id);
+    links = ((linkRows ?? []) as Array<Record<string, unknown>>).map((r) => {
+      const t = r.transactions as Record<string, unknown> | null;
+      return {
+        id: r.id as string,
+        transaction_id: r.transaction_id as string,
+        occurredAt: (t?.occurred_at as string) ?? null,
+        amountMinor: (t?.amount_rwf as number) ?? null,
+        currency: (t?.currency as string) ?? null,
+        counterparty: (t?.counterparty_name as string) ?? null,
+      };
+    });
+  }
+
+  const { data: candRows } = await supabase
+    .from("bill_transaction_match_candidates")
+    .select(
+      "id, transaction_id, score, reasons_for, reasons_against, transactions(occurred_at, amount_rwf, currency, counterparty_name)",
+    )
+    .eq("bill_document_id", billDocumentId)
+    .eq("is_current", true)
+    .order("score", { ascending: false });
+
+  const linkedTxnIds = new Set(links.map((l) => l.transaction_id));
+  const candidates: BillTxnMatchRow[] = ((candRows ?? []) as Array<Record<string, unknown>>)
+    .filter((r) => !linkedTxnIds.has(r.transaction_id as string))
+    .map((r) => {
+      const t = r.transactions as Record<string, unknown> | null;
+      return {
+        id: r.id as string,
+        transaction_id: r.transaction_id as string,
+        score: Number(r.score),
+        reasons_for: (r.reasons_for as string[]) ?? [],
+        reasons_against: (r.reasons_against as string[]) ?? [],
+        occurredAt: (t?.occurred_at as string) ?? null,
+        amountMinor: (t?.amount_rwf as number) ?? null,
+        currency: (t?.currency as string) ?? null,
+        counterparty: (t?.counterparty_name as string) ?? null,
+      };
+    });
+
+  return { bill: (bill as BillObligationRow | null) ?? null, links, candidates };
+}
+
 export async function searchSuppliers(
   workspaceId: string,
   query: string,
