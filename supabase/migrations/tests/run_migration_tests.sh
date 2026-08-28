@@ -801,11 +801,15 @@ fi
 # (record_budget_threshold_crossing is service-role-only). = 65.
 # Phase T PR4 (20260919000000) adds upsert_workspace_category and
 # set_workspace_category_archived (both category.manage-gated). = 67.
+# Phase U PR1 (20260920000000) adds transaction_duplicate_candidates and
+# merge_duplicate_transaction (the review-UI reconcile surface). Its
+# compute_transaction_fingerprint and resolve_ingestion_target are
+# ingestion-only (service_role grant, no authenticated). = 69.
 AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname = 'authenticated' where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "67" ]; then
-  pass "authenticated holds EXECUTE on exactly the 67 functions expected, no more"
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "69" ]; then
+  pass "authenticated holds EXECUTE on exactly the 69 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 67 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 69 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -3286,6 +3290,82 @@ if [ "$T4_MEMBER_SEES" -ge "1" ]; then
 else
   fail "Phase T PR4: a member could not read workspace_categories (got $T4_MEMBER_SEES)"
 fi
+
+# ===========================================================================
+# Phase U PR1: ingestion routing + duplicate-detection primitives.
+# compute_transaction_fingerprint / resolve_ingestion_target (ingestion-
+# only) and transaction_duplicate_candidates / merge_duplicate_transaction
+# (review UI). Continues in pfe_rls - USER_A owns WORKSPACE_A (personal);
+# Q_HH is the Phase Q household; USER_B is not a member of either.
+# ===========================================================================
+echo "=== Phase U PR1: ingestion + dedup primitives ==="
+
+# --- compute_transaction_fingerprint: deterministic --------------------
+
+U_FP1="$(psql -d pfe_rls -t -A -c "set role service_role; select public.compute_transaction_fingerprint('mtn_momo', '250-788-***-482', 15000, 'rwf', 'OUT', '  Simba  Supermarket ', '2026-08-27T18:42:11Z'::timestamptz);")"
+U_FP2="$(psql -d pfe_rls -t -A -c "set role service_role; select public.compute_transaction_fingerprint('mtn_momo', '250788482', 15000, 'RWF', 'out', 'Simba Supermarket', '2026-08-27T18:42:49Z'::timestamptz);")"
+U_FP3="$(psql -d pfe_rls -t -A -c "set role service_role; select public.compute_transaction_fingerprint('mtn_momo', '250788482', 16000, 'RWF', 'out', 'Simba Supermarket', '2026-08-27T18:42:11Z'::timestamptz);")"
+if [ -n "$U_FP1" ] && [ "$U_FP1" = "$U_FP2" ] && [ "$U_FP1" != "$U_FP3" ]; then
+  pass "Phase U PR1: compute_transaction_fingerprint normalises punctuation/case/whitespace and rounds to the minute, but a different amount changes it"
+else
+  fail "Phase U PR1: fingerprint wrong (fp1='$U_FP1' fp2='$U_FP2' fp3='$U_FP3')"
+fi
+
+# --- resolve_ingestion_target ----------------------------------------
+
+U_SRC="$(psql -d pfe_rls -t -A -c "set role service_role; insert into public.financial_sources (owner_user_id, provider, source_type, display_name, currency) values ('$USER_A', 'mtn_momo', 'mobile_money', 'Alice MoMo (U)', 'RWF') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+U_ACCT="$(psql -d pfe_rls -t -A -c "set role service_role; insert into public.accounts (workspace_id, name, provider, currency, financial_source_id) values ('$WORKSPACE_A', 'Alice MoMo acct (U)', 'mtn_momo', 'RWF', '$U_SRC') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+U_CONN="$(psql -d pfe_rls -t -A -c "set role service_role; insert into public.ingestion_connections (workspace_id, account_id, label, credential_hash, credential_prefix, created_by) values ('$WORKSPACE_A', '$U_ACCT', 'Alice phone (U)', 'u-cred-hash-1', 'pfe_uuuu', '$USER_A') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+
+U_TGT_DEFAULT="$(psql -d pfe_rls -t -A -c "set role service_role; select workspace_id || ',' || financial_source_id from public.resolve_ingestion_target('$U_CONN', now());" | tail -1)"
+# Now point the source's default target at the household, with a window
+# that opened a day ago.
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.source_space_links (financial_source_id, workspace_id, visibility_mode, is_default_target, status, effective_from) values ('$U_SRC', '$Q_HH', 'share_transactions', true, 'active', now() - interval '1 day');" >/dev/null
+U_TGT_LINK="$(psql -d pfe_rls -t -A -c "set role service_role; select workspace_id || ',' || financial_source_id from public.resolve_ingestion_target('$U_CONN', now());" | tail -1)"
+U_TGT_RETRO="$(psql -d pfe_rls -t -A -c "set role service_role; select workspace_id || ',' || financial_source_id from public.resolve_ingestion_target('$U_CONN', now() - interval '2 days');" | tail -1)"
+
+if [ "$U_TGT_DEFAULT" = "$WORKSPACE_A,$U_SRC" ] && [ "$U_TGT_LINK" = "$Q_HH,$U_SRC" ] && [ "$U_TGT_RETRO" = "$WORKSPACE_A,$U_SRC" ]; then
+  pass "Phase U PR1: resolve_ingestion_target routes to the connection's workspace by default, to an opened is_default_target link otherwise, and never before the link's effective_from"
+else
+  fail "Phase U PR1: routing wrong (default=$U_TGT_DEFAULT link=$U_TGT_LINK retro=$U_TGT_RETRO)"
+fi
+
+# --- duplicate candidates + merge ----------------------------------
+
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.transactions (id, source, financial_source_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version, dedupe_fingerprint) values
+    ('00000000-0000-0000-0000-0000000000c7', 'manual', '$U_SRC', '$U_ACCT', '$WORKSPACE_A', 'merchant_payment', 'out', 'success', 15000, 0, now(), 'test', 'u-fp-dup-1'),
+    ('00000000-0000-0000-0000-0000000000c8', 'manual', '$U_SRC', '$U_ACCT', '$WORKSPACE_A', 'merchant_payment', 'out', 'success', 15000, 0, now(), 'test', 'u-fp-dup-1');
+" >/dev/null
+
+U_CAND_BEFORE="$(as_user "$USER_A" "select count(*) from public.transaction_duplicate_candidates('u-fp-dup-1', '00000000-0000-0000-0000-0000000000c7');")"
+as_user "$USER_A" "select public.merge_duplicate_transaction('00000000-0000-0000-0000-0000000000c8', '00000000-0000-0000-0000-0000000000c7');" >/dev/null
+U_MERGED="$(psql -d pfe_rls -t -A -c "select count(*) from public.transactions where id = '00000000-0000-0000-0000-0000000000c8' and dedupe_state = 'merged' and merged_into_transaction_id = '00000000-0000-0000-0000-0000000000c7';")"
+U_MERGE_AUDIT="$(psql -d pfe_rls -t -A -c "select count(*) from public.space_audit_events where workspace_id = '$WORKSPACE_A' and event_type = 'transaction.duplicate_merged' and resource_id = '00000000-0000-0000-0000-0000000000c8';")"
+U_CAND_AFTER="$(as_user "$USER_A" "select count(*) from public.transaction_duplicate_candidates('u-fp-dup-1', '00000000-0000-0000-0000-0000000000c7');")"
+
+if [ "$U_CAND_BEFORE" = "1" ] && [ "$U_MERGED" = "1" ] && [ "$U_MERGE_AUDIT" = "1" ] && [ "$U_CAND_AFTER" = "0" ]; then
+  pass "Phase U PR1: a duplicate is found, merged (row kept, state='merged', audited), then no longer a candidate"
+else
+  fail "Phase U PR1: dedup flow wrong (before=$U_CAND_BEFORE merged=$U_MERGED audit=$U_MERGE_AUDIT after=$U_CAND_AFTER)"
+fi
+
+# The merged row still exists (evidence preserved).
+U_ROW_KEPT="$(psql -d pfe_rls -t -A -c "select count(*) from public.transactions where id = '00000000-0000-0000-0000-0000000000c8';")"
+if [ "$U_ROW_KEPT" = "1" ]; then
+  pass "Phase U PR1: merge_duplicate_transaction never deletes the duplicate row"
+else
+  fail "Phase U PR1: the merged duplicate row was removed"
+fi
+
+# A non-member cannot merge.
+if as_user "$USER_B" "select public.merge_duplicate_transaction('00000000-0000-0000-0000-0000000000c7', '00000000-0000-0000-0000-0000000000c8');" >/dev/null 2>$ARTIFACT_DIR/pfe_u_merge.log; then
+  fail "Phase U PR1: a non-member merged transactions"
+else
+  pass "Phase U PR1: merge_duplicate_transaction refuses a caller without transaction.categorize"
+fi
+rm -f $ARTIFACT_DIR/pfe_u_merge.log
 
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="
