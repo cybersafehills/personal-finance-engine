@@ -583,6 +583,7 @@ Deno.serve(async (req: Request) => {
       amountRwf: parsed.amount_rwf,
       counterpartyName: parsed.counterparty_name,
       occurredAt: parsed.occurred_at,
+      financialSourceId: resolvedFinancialSourceId,
     });
     const evaluationMs = performance.now() - evaluationStartedAt;
 
