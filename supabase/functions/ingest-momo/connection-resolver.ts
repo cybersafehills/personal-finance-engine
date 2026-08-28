@@ -30,6 +30,13 @@ export type AccountRow = {
   workspace_id: string;
   is_active: boolean;
   archived_at: string | null;
+  // Phase U (PR2): the financial_sources row this account was linked to by
+  // the Phase Q backfill, plus its masked identifier - carried through so
+  // ingestion can stamp transactions.financial_source_id and feed the
+  // duplicate-detection fingerprint. Nullable: the seed account created by
+  // migrations alone has no source, and pre-Phase-Q accounts may not yet.
+  financial_source_id?: string | null;
+  source_masked_identifier?: string | null;
 };
 
 export type AuthenticateCredentialDeps = {
@@ -71,6 +78,8 @@ export type ResolvedIngestionRoute = {
   accountId: string;
   workspaceId: string;
   ingestionConnectionId: string;
+  financialSourceId: string | null;
+  sourceMaskedIdentifier: string | null;
 };
 
 export type ResolveAccountRouteResult =
@@ -97,6 +106,8 @@ export async function resolveAccountRoute(
       accountId: account.id,
       workspaceId: account.workspace_id,
       ingestionConnectionId: connection.id,
+      financialSourceId: account.financial_source_id ?? null,
+      sourceMaskedIdentifier: account.source_masked_identifier ?? null,
     },
   };
 }
