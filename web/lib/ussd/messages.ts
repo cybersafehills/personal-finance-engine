@@ -21,6 +21,7 @@ const en = {
     launcherTitle: "Pay & Services",
     launcherSubtitle: "Prepare a payment or find a verified USSD code.",
     close: "Close",
+    closeSheet: "Close Pay & Services",
     comingSoon: "Coming in a later update",
     primary: {
       person: "Pay a person",
@@ -35,6 +36,45 @@ const en = {
       activity: "View payment activity",
       template: "Use a payment template",
       scan: "Scan payment QR",
+    },
+    // Phase R1: the "Scan to pay" entry + camera scanner SHELL. No QR
+    // decoding / payload parsing / handoff yet - the copy is deliberately
+    // honest that this build only proves the camera works on the device.
+    scan: {
+      entryLabel: "Scan to pay",
+      entryHint: "Scan a merchant payment QR code.",
+      opening: "Opening scanner…",
+      title: "Scan to pay",
+      guidance:
+        "Point your camera at the merchant's payment QR code and hold steady inside the frame.",
+      back: "Back to payment options",
+      backLabel: "Back",
+      starting: "Starting the camera…",
+      live: "Camera is on. Position the QR code inside the frame.",
+      // R1 only - remove once the decoder lands.
+      shellNotice:
+        "Reading a code isn't part of this build yet. The preview is here so we can confirm the camera works on your device.",
+      torchOn: "Turn on flashlight",
+      torchOff: "Turn off flashlight",
+      retry: "Try again",
+      permissionHelp: "How to enable camera access",
+      permissionHelpBody:
+        "Open your browser or device settings, allow camera access for this site, then return here and try again.",
+      errors: {
+        denied:
+          "OneLedger doesn't have permission to use the camera. Enable camera access for this site, then try again.",
+        dismissed:
+          "Camera access wasn't granted. Try again, or go back to the other payment options.",
+        noCamera:
+          "No camera was found on this device. You can still use the other payment options.",
+        inUse:
+          "The camera is in use by another app. Close that app, then try again.",
+        insecure: "The camera only works over a secure (HTTPS) connection.",
+        unsupported:
+          "This browser can't open the camera. Try a recent version of Safari or Chrome.",
+        generic:
+          "The camera couldn't start. Try again, or go back to the other payment options.",
+      },
     },
     favourites: "Favourites",
     recent: "Recently used",

@@ -26,6 +26,64 @@ custody (see `docs/adr/0001-non-custodial-boundary.md`).
 | UI chrome strings (translation-ready) | `web/lib/ussd/messages.ts` |
 | e2e | `web/e2e/pay-ussd.spec.ts` |
 
+## Launcher shell UX
+
+`web/components/pay/PayLauncher.tsx` is a bottom sheet on mobile and a
+centred dialog on desktop. Full modal semantics: focus moves into the
+panel on open, Tab is trapped, background scroll is locked, focus is
+restored to the trigger on close.
+
+The panel is a three-part column — a static header, a single
+`overflow-y-auto` content region, and a **pinned footer** that stays put
+while the content scrolls. The footer holds the one closing control: a
+centred X + "Close" (`aria-label` "Close Pay & Services", `min-h-11`,
+`focus-visible` background) with `env(safe-area-inset-bottom)` padding so
+it clears the home indicator. There is deliberately no header close
+action — a long favourites / recent list must never push the way out
+off-screen.
+
+Every dismissal path — the footer control, the dimmed overlay, `Esc`,
+and a navigation that closes the sheet — runs through one guarded
+`requestClose()` so a double activation can't fire `onClose` twice.
+
+## Scan to pay (Phase R1)
+
+`SCAN_TO_PAY_ENABLED=true` (opt-in, off otherwise — same convention as
+`SMS_RECONCILIATION_ENABLED`) adds a **"Scan to pay"** entry at the top
+of the launcher. It swaps the sheet body for a camera scanner
+(`web/components/pay/ScanToPay.tsx`, `lazy`-loaded so no camera/decoder
+code is in the initial bundle). The header shows a Back control; the
+pinned footer close stays.
+
+**R1 is the camera shell only.** It opens the rear camera
+(`facingMode: environment`, retried unconstrained on `OverconstrainedError`),
+shows a live preview + viewfinder + an `aria-live` status line, and
+offers a torch toggle where `getCapabilities().torch` is present. It
+does **not** decode a QR code, parse a payload, or hand off to any
+payment channel — the on-screen notice says so, and later phases add
+that behind their own flags.
+
+Guarantees:
+
+- `getUserMedia` is called only from `ScanToPay`, i.e. only after an
+  explicit "Scan to pay" tap (the component is lazy-mounted by that tap).
+  Never on app start or when the sheet merely opens.
+- The `MediaStream` is released on unmount, on error, when the tab is
+  hidden (`visibilitychange`), and whenever a fresh start supersedes an
+  in-flight one (a monotonic start token).
+- Every failure is a distinct, actionable state: permission `denied` vs
+  `dismissed` (told apart via the Permissions API where available),
+  `noCamera`, `inUse`, `insecure` context, `unsupported` browser,
+  `generic`. A browser-level denial is never described as an app bug.
+
+| Concern | Location |
+|---|---|
+| Feature gate | `isScanToPayEnabled` / `assertScanToPayEnabled` in `web/lib/pay/gate.ts` |
+| Wiring | `web/app/layout.tsx` → `web/components/AppShell.tsx` → `web/components/pay/PayProvider.tsx` → `PayLauncher` |
+| Scanner | `web/components/pay/ScanToPay.tsx` |
+| Privacy-safe events (no payload/PII ever) | `web/lib/pay/scan-analytics.ts` (+ `scan-analytics_test.ts`) |
+| e2e | `web/e2e/pay-scan.spec.ts` (skipped unless `SCAN_TO_PAY_ENABLED=true` + a fake camera — see the file header) |
+
 ## Data model
 
 Global (not workspace-scoped) directory content, plus per-user tables:

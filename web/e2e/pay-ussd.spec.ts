@@ -33,6 +33,26 @@ test("the global Pay action opens the launcher and is fully keyboard-dismissable
   await expect(payButton).toBeFocused();
 });
 
+test("the launcher closes from the pinned bottom control, not a header action", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const payButton = page.locator("header").getByRole("button", { name: "Pay", exact: true });
+  await payButton.click();
+
+  const dialog = page.getByRole("dialog", { name: "Pay & Services" });
+  await expect(dialog).toBeVisible();
+
+  // The header no longer carries its own close action; the single
+  // closing control is the labelled X in the pinned footer.
+  const close = dialog.getByRole("button", { name: "Close Pay & Services" });
+  await expect(close).toBeVisible();
+
+  await close.click();
+  await expect(dialog).toBeHidden();
+  await expect(payButton).toBeFocused();
+});
+
 test("the launcher routes to the USSD directory", async ({ page }) => {
   await page.goto("/");
   await page.locator("header").getByRole("button", { name: "Pay", exact: true }).click();
