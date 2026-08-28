@@ -1049,8 +1049,33 @@ now visible from both ends.
 
 `next build` ✓, `eslint` 0. No migration, no test-suite change.
 
-Still deferred: statement (CSV/PDF) reconciliation; rule `scope` /
-precedence / explainability.
+---
+
+## 11m. Phase U PR6b — as built (web)
+
+The policy-form surface for PR6's scope. **Web only, no migration.**
+
+- **`getCategorizationPolicies` / `getCategorizationPolicyById`** now
+  return `scope_type` / `scope_source_id` (added to
+  `CATEGORIZATION_POLICY_COLUMNS` and `CategorizationPolicyRow`).
+- **`PolicyForm`** gains an "Applies to" fieldset — *Every account in this
+  Space* (default) vs *One account only* + a `<select>` of the caller's
+  financial sources (`financialSourceOptions()` over
+  `getMyFinancialSources()`). Hidden entirely when the caller has no
+  sources. `upsertPolicy` gains `scopeType` / `scopeSourceId`, validates
+  the pair (source requires an id), and writes `scope_type` /
+  `scope_source_id` (null for space).
+- **`PolicyItem`** shows a neutral badge with the source label (or "One
+  account") for a `source`-scoped rule; the rules list resolves the label
+  from one `getMyFinancialSources()` call.
+- New tiny helper `web/lib/financial-source-options.ts` (shared by the
+  three rules pages).
+
+`next build` ✓, `eslint` 0. Rule scope/precedence/explainability is now
+complete (PR6 backend + PR6b web).
+
+Still deferred: **statement (CSV/PDF) reconciliation** — blocked on a
+product decision (which bank formats first; CSV-only acceptable for v1?).
 
 ---
 
