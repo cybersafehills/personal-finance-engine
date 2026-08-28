@@ -12,6 +12,56 @@ function revalidateReviewRoutes(transactionId: string) {
   revalidatePath("/categories");
 }
 
+// Merging or dismissing a duplicate changes what counts as live spend, so
+// the dashboard and budgets need re-rendering too.
+function revalidateAggregateRoutes() {
+  revalidatePath("/");
+  revalidatePath("/budgets");
+}
+
+/**
+ * Marks `duplicateId` as merged into `canonicalId` (Phase U PR1's
+ * merge_duplicate_transaction): the duplicate row is kept for evidence,
+ * flagged `merged`, and dropped from every total and listing. Both must
+ * be in the same Space and the caller needs transaction.categorize there.
+ */
+export async function mergeDuplicateTransaction(
+  duplicateId: string,
+  canonicalId: string,
+): Promise<SimpleActionResult> {
+  const supabase = await supabaseSession();
+  const { error } = await supabase.rpc("merge_duplicate_transaction", {
+    p_duplicate_id: duplicateId,
+    p_canonical_id: canonicalId,
+  });
+
+  if (error) {
+    return { ok: false, error: "Could not merge these transactions." };
+  }
+
+  revalidateReviewRoutes(duplicateId);
+  revalidatePath(`/transactions/${canonicalId}`);
+  revalidateAggregateRoutes();
+  return { ok: true };
+}
+
+/** "Not a duplicate" - moves a possible_duplicate transaction back to unique. */
+export async function dismissPossibleDuplicate(
+  transactionId: string,
+): Promise<SimpleActionResult> {
+  const supabase = await supabaseSession();
+  const { error } = await supabase.rpc("dismiss_possible_duplicate", {
+    p_transaction_id: transactionId,
+  });
+
+  if (error) {
+    return { ok: false, error: "Could not update this transaction." };
+  }
+
+  revalidateReviewRoutes(transactionId);
+  return { ok: true };
+}
+
 /**
  * Accepts a 'provisional' or 'suggested' transaction's category as-is -
  * for 'suggested' this promotes suggested_category into category for the

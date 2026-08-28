@@ -950,6 +950,45 @@ enables — so the two ship together).
 
 ---
 
+## 11i. Phase U PR3b — as built (web)
+
+The consumer for PR3's RPCs, plus the aggregation correction that must
+ride with the merge button. **Web only — no migration.**
+
+- **`getSpaceDuplicateReview()`** (`web/lib/queries.ts`) calls
+  `space_duplicate_review(active_workspace)` and groups the flat rows into
+  one `DuplicateReviewCluster` per fingerprint.
+- **`/transactions/review`** gets a "Possible duplicates (N)" section
+  above the existing needs-attribution / category-review ones, rendered by
+  the new client `DuplicateReviewList`. Per cluster: transactions listed
+  oldest-first, a radio to pick the "original" (defaults to the earliest),
+  and for every still-`possible_duplicate` sibling **Merge into original**
+  (`merge_duplicate_transaction`) / **Not a duplicate**
+  (`dismiss_possible_duplicate`). Resolved (`unique`) siblings stay shown,
+  badged, no actions. `router.refresh()` after each action.
+- **Aggregation sweep** — `.neq("dedupe_state", "merged")` added to every
+  `web/lib/queries.ts` helper that sums or lists live transactions:
+  `getCurrentBalance`, `getTodayTotals`, `getRecentTransactions`,
+  `getTransactions`, `getCategoryTotals`, `getBudgetActuals` (both the
+  out and in legs; `getDashboardBudgetSummary` inherits it),
+  `getVariableIncomeMonths`, `getHouseholdSpendingBreakdown`. Review /
+  needs-attribution / transfer / history / detail-by-id reads are left
+  untouched (a merged row is rare there, and a direct link to one should
+  still resolve). No shipped SQL RPC aggregates `transactions` spend
+  (budget/goal SUMs are over `budget_allocations` / `goal_contributions`),
+  so nothing on the DB side needed the same change.
+- The merge action also revalidates `/` and `/budgets` (a merge changes
+  what counts as live spend).
+
+`next build` ✓, `eslint` 0. No migration, no test-suite change (PR3's
+7-assertion block already covers the RPC contract).
+
+Still deferred: statement (CSV/PDF) reconciliation; device-management UX;
+rule `scope` / precedence / explainability; a "merged duplicates" section
+on the canonical transaction's detail page.
+
+---
+
 ## 12. Testing strategy (per phase, aggregated here)
 
 - **Unit**: role→capability, `can_view_source_in_space` truth table,

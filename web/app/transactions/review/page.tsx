@@ -2,22 +2,27 @@ import Link from "next/link";
 import {
   getNeedsAttributionTransactions,
   getReviewQueueTransactions,
+  getSpaceDuplicateReview,
 } from "../../../lib/queries";
 import { formatDateTime, formatRwf } from "../../../lib/format";
 import { PageHeader } from "../../../components/PageHeader";
 import { EmptyState } from "../../../components/EmptyState";
 import { ReviewQueueList } from "../../../components/ReviewQueueList";
+import { DuplicateReviewList } from "../../../components/DuplicateReviewList";
 
 export const dynamic = "force-dynamic";
 
 export default async function ReviewQueuePage() {
-  const [transactions, needsAttribution] = await Promise.all([
+  const [transactions, needsAttribution, duplicateClusters] = await Promise.all([
     getReviewQueueTransactions(),
     getNeedsAttributionTransactions(),
+    getSpaceDuplicateReview(),
   ]);
 
   const nothingToDo =
-    transactions.length === 0 && needsAttribution.length === 0;
+    transactions.length === 0 &&
+    needsAttribution.length === 0 &&
+    duplicateClusters.length === 0;
 
   return (
     <div>
@@ -34,6 +39,15 @@ export default async function ReviewQueuePage() {
         />
       ) : (
         <div className="flex flex-col gap-6">
+          {duplicateClusters.length > 0 && (
+            <section aria-label="Possible duplicates">
+              <h2 className="mb-2 text-sm font-medium text-text-primary">
+                Possible duplicates ({duplicateClusters.length})
+              </h2>
+              <DuplicateReviewList clusters={duplicateClusters} />
+            </section>
+          )}
+
           {needsAttribution.length > 0 && (
             <section aria-label="Needs attribution">
               <h2 className="mb-2 text-sm font-medium text-text-primary">
@@ -68,7 +82,8 @@ export default async function ReviewQueuePage() {
 
           {transactions.length > 0 && (
             <section aria-label="Category review">
-              {needsAttribution.length > 0 && (
+              {(needsAttribution.length > 0 ||
+                duplicateClusters.length > 0) && (
                 <h2 className="mb-2 text-sm font-medium text-text-primary">
                   Category review ({transactions.length})
                 </h2>

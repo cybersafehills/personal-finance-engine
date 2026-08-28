@@ -70,6 +70,10 @@ export async function getCurrentBalance(): Promise<CurrentBalance | null> {
     .from("transactions")
     .select("balance_after_rwf, occurred_at")
     .not("balance_after_rwf", "is", null)
+    // Phase U: a transaction merged into its canonical duplicate is kept
+    // for evidence but is never a live transaction - here it must not be
+    // mistaken for the latest balance snapshot.
+    .neq("dedupe_state", "merged")
     .order("occurred_at", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(1)
@@ -99,6 +103,9 @@ export async function getTodayTotals(): Promise<TodayTotals> {
     .from("transactions")
     .select("direction, principal_effect_rwf, fee_effect_rwf")
     .eq("settlement_state", "settled")
+    // Phase U: exclude rows merged into a canonical duplicate (kept for
+    // evidence, never counted).
+    .neq("dedupe_state", "merged")
     .gte("occurred_at", startUtc.toISOString())
     .lte("occurred_at", endUtc.toISOString());
 
@@ -129,6 +136,9 @@ export async function getRecentTransactions(
   const { data, error } = await supabase
     .from("transactions")
     .select(TRANSACTION_COLUMNS)
+    // Phase U: merged duplicates stay in the DB as evidence but never in a
+    // ledger listing.
+    .neq("dedupe_state", "merged")
     .order("occurred_at", { ascending: false })
     .limit(limit);
 
@@ -151,6 +161,9 @@ export async function getTransactions(
   let query = supabase
     .from("transactions")
     .select(TRANSACTION_COLUMNS)
+    // Phase U: merged duplicates stay in the DB as evidence but never in a
+    // ledger listing.
+    .neq("dedupe_state", "merged")
     .order("occurred_at", { ascending: false })
     .range(offset, offset + limit - 1);
 
@@ -401,6 +414,94 @@ export async function getNeedsAttributionTransactions(): Promise<
   }));
 }
 
+// ===========================================================================
+// Duplicate review (Phase U PR3). space_duplicate_review /
+// dismiss_possible_duplicate live in
+// supabase/migrations/20260922000000_phase_u_duplicate_resolution.sql;
+// merge_duplicate_transaction is Phase U PR1's. Ingestion (Phase U PR2)
+// stamps transactions.dedupe_state = 'possible_duplicate' when a new
+// transaction matches an existing fingerprint.
+// ===========================================================================
+
+export type DuplicateReviewTxn = {
+  transactionId: string;
+  dedupeState: "unique" | "possible_duplicate" | "confirmed_duplicate";
+  counterparty: string | null;
+  amountMinor: number;
+  currency: string;
+  direction: string;
+  occurredAt: string;
+  source: string;
+  category: string | null;
+  createdAt: string;
+};
+
+export type DuplicateReviewCluster = {
+  fingerprint: string;
+  transactions: DuplicateReviewTxn[];
+};
+
+/**
+ * Possible-duplicate transactions in the caller's active Space, grouped
+ * into clusters (one per fingerprint) for the review UI. Every cluster
+ * has at least one `possible_duplicate` row; already-resolved (`unique`)
+ * siblings are still returned so the reviewer sees the whole set. Empty
+ * unless there's an active workspace and the caller can see the rows.
+ */
+export async function getSpaceDuplicateReview(): Promise<
+  DuplicateReviewCluster[]
+> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!workspaceId) return [];
+
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase.rpc("space_duplicate_review", {
+    p_workspace_id: workspaceId,
+  });
+
+  if (error) {
+    console.error("getSpaceDuplicateReview failed:", error.message);
+    return [];
+  }
+
+  const rows = (data ?? []) as unknown as Array<{
+    fingerprint: string;
+    transaction_id: string;
+    dedupe_state: DuplicateReviewTxn["dedupeState"];
+    counterparty: string | null;
+    amount_minor: number;
+    currency: string;
+    direction: string;
+    occurred_at: string;
+    source: string;
+    category: string | null;
+    created_at: string;
+  }>;
+
+  const byFingerprint = new Map<string, DuplicateReviewCluster>();
+  for (const r of rows) {
+    let cluster = byFingerprint.get(r.fingerprint);
+    if (!cluster) {
+      cluster = { fingerprint: r.fingerprint, transactions: [] };
+      byFingerprint.set(r.fingerprint, cluster);
+    }
+    cluster.transactions.push({
+      transactionId: r.transaction_id,
+      dedupeState: r.dedupe_state,
+      counterparty: r.counterparty,
+      amountMinor: r.amount_minor,
+      currency: r.currency,
+      direction: r.direction,
+      occurredAt: r.occurred_at,
+      source: r.source,
+      category: r.category,
+      createdAt: r.created_at,
+    });
+  }
+
+  return Array.from(byFingerprint.values());
+}
+
 export type CategoryTotal = {
   category: string; // "Uncategorized" for null
   totalRwf: number;
@@ -413,7 +514,9 @@ export async function getCategoryTotals(): Promise<CategoryTotal[]> {
     .from("transactions")
     .select("category, principal_effect_rwf, fee_effect_rwf")
     .eq("direction", "out")
-    .eq("settlement_state", "settled");
+    .eq("settlement_state", "settled")
+    // Phase U: exclude rows merged into a canonical duplicate.
+    .neq("dedupe_state", "merged");
 
   if (error) {
     console.error("getCategoryTotals failed:", error.message);
@@ -898,6 +1001,8 @@ export async function getBudgetActuals(
       .eq("currency", budget.currency)
       .eq("direction", "out")
       .eq("settlement_state", "settled")
+      // Phase U: a merged duplicate is kept for evidence, never counted.
+      .neq("dedupe_state", "merged")
       .gte("occurred_at", startUtc.toISOString())
       .lte("occurred_at", endUtc.toISOString()),
     supabase
@@ -906,6 +1011,7 @@ export async function getBudgetActuals(
       .eq("currency", budget.currency)
       .eq("direction", "in")
       .eq("settlement_state", "settled")
+      .neq("dedupe_state", "merged")
       .gte("occurred_at", startUtc.toISOString())
       .lte("occurred_at", endUtc.toISOString()),
     supabase
@@ -1883,6 +1989,8 @@ export async function getVariableIncomeMonths(
     .eq("currency", currency)
     .eq("direction", "in")
     .eq("settlement_state", "settled")
+    // Phase U: exclude rows merged into a canonical duplicate.
+    .neq("dedupe_state", "merged")
     .gte("occurred_at", startUtc.toISOString())
     .lte("occurred_at", endUtc.toISOString())
     .order("occurred_at", { ascending: true });
@@ -2192,6 +2300,8 @@ export async function getHouseholdSpendingBreakdown(): Promise<HouseholdSpendBre
     )
     .eq("direction", "out")
     .eq("settlement_state", "settled")
+    // Phase U: a merged duplicate is kept for evidence, never counted.
+    .neq("dedupe_state", "merged")
     .gte("occurred_at", startUtc)
     .lt("occurred_at", endUtc);
 
