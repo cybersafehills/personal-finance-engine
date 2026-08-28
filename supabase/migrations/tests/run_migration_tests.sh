@@ -780,11 +780,16 @@ fi
 # Phase S PR2b (20260914000000) adds space_member_directory (the
 # co-member display-name lookup the attribution UI needs, past
 # profiles_select_own). = 61 total.
+# Phase T PR1 (20260916000000) adds should_notify (the notification
+# delivery-decision primitive) and notification_event_catalog (the
+# settings-UI toggle list). Its two IMMUTABLE helpers
+# (notification_event_is_security_notable, notification_default_enabled)
+# are `revoke all from public` - called only from should_notify. = 63.
 AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname = 'authenticated' where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "61" ]; then
-  pass "authenticated holds EXECUTE on exactly the 61 functions expected, no more"
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "63" ]; then
+  pass "authenticated holds EXECUTE on exactly the 63 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 61 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 63 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -3055,6 +3060,52 @@ else
   pass "Phase S PR2d: set_member_role still refuses to demote the final Owner"
 fi
 rm -f $ARTIFACT_DIR/pfe_d_lastowner.log
+
+# ===========================================================================
+# Phase T PR1: notification-preference resolution. should_notify() +
+# notification_event_catalog(). Continues in pfe_rls on Q_HH - USER_E is
+# an active member (joined via invite in the PR2d block), USER_B is not.
+# ===========================================================================
+echo "=== Phase T PR1: notification-preference resolution ==="
+
+# A non-member is never notified.
+T_NONMEMBER="$(as_user "$USER_B" "select public.should_notify('$Q_HH', '$USER_B', 'budget.exceeded', 'in_app');")"
+# A member with no stored preference gets the event/channel default.
+T_DEFAULT_ON="$(as_user "$USER_E" "select public.should_notify('$Q_HH', '$USER_E', 'budget.exceeded', 'in_app');")"
+T_DEFAULT_OFF="$(as_user "$USER_E" "select public.should_notify('$Q_HH', '$USER_E', 'report.daily', 'in_app');")"
+if [ "$T_NONMEMBER" = "f" ] && [ "$T_DEFAULT_ON" = "t" ] && [ "$T_DEFAULT_OFF" = "f" ]; then
+  pass "Phase T PR1: should_notify is false for a non-member, and follows the event/channel default for a member with no stored preference"
+else
+  fail "Phase T PR1: should_notify defaults wrong (nonmember=$T_NONMEMBER default_on=$T_DEFAULT_ON default_off=$T_DEFAULT_OFF)"
+fi
+
+# A stored preference overrides the default.
+as_user "$USER_E" "insert into public.space_member_notification_prefs (workspace_id, user_id, event_key, channel, enabled) values ('$Q_HH', '$USER_E', 'budget.exceeded', 'in_app', false);" >/dev/null
+T_OVERRIDE="$(as_user "$USER_E" "select public.should_notify('$Q_HH', '$USER_E', 'budget.exceeded', 'in_app');")"
+if [ "$T_OVERRIDE" = "f" ]; then
+  pass "Phase T PR1: a member's stored preference overrides the default"
+else
+  fail "Phase T PR1: stored preference not honoured (got $T_OVERRIDE)"
+fi
+
+# A security-notable event cannot be suppressed - even with a disabling row.
+T_SEC_DEFAULT="$(as_user "$USER_E" "select public.should_notify('$Q_HH', '$USER_E', 'owner.transferred', 'email');")"
+as_user "$USER_E" "insert into public.space_member_notification_prefs (workspace_id, user_id, event_key, channel, enabled) values ('$Q_HH', '$USER_E', 'owner.transferred', 'email', false);" >/dev/null
+T_SEC_FORCED="$(as_user "$USER_E" "select public.should_notify('$Q_HH', '$USER_E', 'owner.transferred', 'email');")"
+if [ "$T_SEC_DEFAULT" = "t" ] && [ "$T_SEC_FORCED" = "t" ]; then
+  pass "Phase T PR1: a security-notable event stays on regardless of a disabling preference row"
+else
+  fail "Phase T PR1: security-notable override wrong (default=$T_SEC_DEFAULT with_disabling_row=$T_SEC_FORCED)"
+fi
+
+# The catalog is populated and includes a known event.
+T_CATALOG="$(as_user "$USER_E" "select count(*) from public.notification_event_catalog();")"
+T_CATALOG_HAS="$(as_user "$USER_E" "select count(*) from public.notification_event_catalog() where event_key = 'budget.exceeded' and security_notable = false;")"
+if [ "$T_CATALOG" -ge "8" ] && [ "$T_CATALOG_HAS" = "1" ]; then
+  pass "Phase T PR1: notification_event_catalog returns the configurable events"
+else
+  fail "Phase T PR1: notification_event_catalog wrong (count=$T_CATALOG has_budget_exceeded=$T_CATALOG_HAS)"
+fi
 
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="

@@ -45,6 +45,13 @@ const SETTINGS_LINKS = [
     Icon: UsersIcon,
   },
   {
+    href: "/settings/notifications",
+    title: "Notifications",
+    description:
+      "Choose what a shared Space tells you about — budgets, goals, members, and reports.",
+    Icon: DocumentIcon,
+  },
+  {
     href: "/reports",
     title: "Reports",
     description: "View your generated daily financial reports.",

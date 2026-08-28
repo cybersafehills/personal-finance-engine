@@ -440,7 +440,7 @@ additive migration(s) → stacked PRs → migration-test block → e2e.
 | **Q** — Foundation ✅ *migration written* | 1 | `kind='household'` + `create_household_workspace`; `financial_sources`, `source_space_links`, `raw_financial_events`, `can_view_source_in_space()` / `is_financial_source_visible()` / `owns_financial_source()`; nullable `transactions` provenance/attribution cols; `space_activity` / `space_audit_events` / `space_member_notification_prefs` / `workspace_categories` tables; **RLS refactor for `household`** (Phase C ledger loosening reverted for this kind via the source-visibility gate); backfill migration; indexes | No |
 | **R** — Security & authz ✅ *migration written* | 2 | capability layer (`space_role_has_capability` matrix + `space_member_capability_grants` + `has_space_capability()` primitive + `grant`/`revoke_space_capability` RPCs); audit-write primitives (`record_space_activity` / `record_space_audit_event`); `workspace_invites.accepted_by`; `accept_workspace_invite` / `set_member_role` / `remove_member` / `create_household_workspace` re-issued to write audit + activity rows; **14-assertion security test block** (capability matrix, grant/revoke, audit visibility, invite re-use/revoke rejection, post-removal access revocation, last-owner guard, internal-helper lockdown, service-role bypass) | No |
 | **S** — Shared ledger | 3 | **PR1 ✅:** `transaction_member_attributions` + the five sharing/attribution/reallocation RPCs. **PR2a ✅:** household creation (`/settings/workspace`), "Shared accounts" (`/settings/sources`). **PR2b ✅:** `space_member_directory` fn; transaction detail gets a "Where this came from" provenance panel + a household "Whose spending" attribution panel (shared / member / split / unassigned) + a needs-attention banner; review queue gets a "Needs attribution" section. **PR2c ✅:** household dashboard block (name header + `HouseholdSpendingCard` — spending-this-month by member, neutral framing) on `/`; upgraded Space switcher (kind-labelled list + "Create a Space" in the account menu, current-Space chip in the header). **PR2d ✅:** household/organization **Admin** can now manage members — `workspace_invites` RLS + `set_member_role` / `remove_member` re-issued from Owner-only to `has_space_capability(_, 'members.manage')`, with anything touching an Owner staying Owner-only and the last-owner guard intact. **PR2e ✅:** `e2e/spaces-household.spec.ts` — single-user Playwright flow (create household → share a source via `/settings/sources` → dashboard household block → resolve an unattributed transaction on `/transactions/[id]`) + a `/settings/sources` a11y check. **Phase S essentially complete.** Deferred to a later refinement: "available across shared accounts" balance semantics; optional `/spaces/{id}/…` routes; a two-user attribution e2e (the suite currently shares one identity) | Yes |
-| **T** — Financial planning | 4 | Space-aware category scope; rule `scope_type` + deterministic precedence + explainability; shared budgets (space/category/member scopes) reusing `budget-math.ts`; threshold state-transition alerts (no per-txn spam); shared goals as first-class Space resources; per-member notification prefs | Yes |
+| **T** — Financial planning | 4 | **PR1 ✅:** per-member notification prefs — `should_notify()` / `notification_event_catalog()` resolution primitives + `/settings/notifications`. **PR2+ (not started):** Space-aware category scope; rule `scope_type` + deterministic precedence + explainability; shared budgets (space/category/member scopes) reusing `budget-math.ts`; threshold state-transition alerts (no per-txn spam); shared goals as first-class Space resources | Yes |
 | **U** — Ingestion & reconciliation | 5 | `raw_financial_events` cutover for `ingest-momo` + SMS path; source routing (`is_default_target`); dedupe confidence engine + auto-merge + review cards; **statement (CSV/PDF) reconciliation** vs ledger + import summary; device management UX (rename / pause / reconnect / remove, history preserved) | Yes |
 | **V** — Reporting & intelligence | 6 | `workspace_id` scope on `report_*`; Household report template + attribution summaries; scheduler recipient filtering (exclude former members); AI Space-scope boundary + Household insights; dashboard projections | Yes |
 | **W** — UX hardening & production readiness | 7 | Responsive + a11y pass (no colour-only budget status); loading/empty/error/permission-denied/removed-member/expired-invite states; onboarding + help/tooltip/seeded-content updates; analytics events; monitoring (migration failures, RLS denials, reconciliation failures, dashboard latency); feature-flag rollout (internal → beta → GA); migration validation on realistic data; security + performance review | Yes |
@@ -679,6 +679,42 @@ With this, **Phase S is functionally complete** across schema (PR1),
 the settings surfaces (PR2a), transaction provenance/attribution (PR2b),
 the household dashboard + Space switcher (PR2c), Admin member-management
 (PR2d), and e2e (PR2e).
+
+---
+
+## 11a. Phase T PR1 — as built (migration `20260916000000` + web)
+
+Per-member notification preferences. `space_member_notification_prefs`
+(Phase Q) already stores the overrides with full authenticated CRUD; this
+PR adds the read side and the settings UI.
+
+- **`should_notify(workspace, user, event_key, channel) → boolean`** —
+  `SECURITY DEFINER` / `STABLE`, the primitive Phase V's report /
+  notification jobs compose with. `false` for a non-member or former
+  member (§41); `true` unconditionally for a **security-notable** event
+  (§38: member add/remove, ownership transfer, sharing change,
+  permission/integration change, trusted-device connect) on either
+  channel; otherwise the member's stored `enabled`, or the event/channel
+  default.
+- **`notification_default_enabled` / `notification_event_is_security_notable`**
+  — pure `IMMUTABLE` helpers, `revoke all from public`, called only from
+  `should_notify`.
+- **`notification_event_catalog()`** — the 12-event toggle list the
+  settings UI renders from (defaults + which are security-notable),
+  inlined as a `values` list so it needs no nested EXECUTE grants.
+- **`/settings/notifications`** — per-event in-app / email checkboxes for
+  the active Space; security-notable rows show "Always on" and are
+  disabled. Toggling `upsert`s / deletes a `space_member_notification_prefs`
+  row through the caller's own RLS. Hidden for a Personal Space.
+
+`authenticated` function-EXECUTE count → 63 (`should_notify` +
+`notification_event_catalog`). 4-assertion "Phase T PR1" migration-test
+block (non-member → false; default follow-through; stored override;
+security-notable can't be suppressed; catalog populated). Full suite:
+203 passed / 0 failed. `next build` ✓, `eslint` 0 errors.
+
+No delivery path is wired yet — `should_notify` has no caller until
+Phase V. Nothing about notifications changes for existing users.
 
 ---
 

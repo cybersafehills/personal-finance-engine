@@ -1893,6 +1893,82 @@ export async function getActiveWorkspace(): Promise<WorkspaceSummary | null> {
 }
 
 // ===========================================================================
+// Per-member notification preferences for the active Space. See Phase Q
+// (space_member_notification_prefs) and Phase T PR1
+// (20260916000000_phase_t_notification_resolution.sql: notification_event_
+// catalog / should_notify). Security-notable events are always on.
+// ===========================================================================
+
+export type NotificationEventSetting = {
+  eventKey: string;
+  label: string;
+  securityNotable: boolean;
+  inApp: boolean;
+  email: boolean;
+};
+
+export type NotificationSettings = {
+  workspaceId: string;
+  workspaceName: string;
+  events: NotificationEventSetting[];
+};
+
+export async function getNotificationSettings(): Promise<NotificationSettings | null> {
+  const workspace = await getActiveWorkspace();
+  if (!workspace || workspace.kind === "personal") return null;
+
+  const supabase = await supabaseSession();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  const [{ data: catalog }, { data: prefs }] = await Promise.all([
+    supabase.rpc("notification_event_catalog"),
+    supabase
+      .from("space_member_notification_prefs")
+      .select("event_key, channel, enabled")
+      .eq("workspace_id", workspace.id)
+      .eq("user_id", user.id),
+  ]);
+
+  const prefMap = new Map<string, boolean>();
+  for (const p of (prefs ?? []) as unknown as Array<{
+    event_key: string;
+    channel: string;
+    enabled: boolean;
+  }>) {
+    prefMap.set(`${p.event_key}:${p.channel}`, p.enabled);
+  }
+
+  const rows = (catalog ?? []) as unknown as Array<{
+    event_key: string;
+    label: string;
+    default_in_app: boolean;
+    default_email: boolean;
+    security_notable: boolean;
+  }>;
+
+  return {
+    workspaceId: workspace.id,
+    workspaceName: workspace.name,
+    events: rows.map((row) => {
+      const resolve = (channel: "in_app" | "email", dflt: boolean) =>
+        row.security_notable
+          ? true
+          : (prefMap.get(`${row.event_key}:${channel}`) ?? dflt);
+      return {
+        eventKey: row.event_key,
+        label: row.label,
+        securityNotable: row.security_notable,
+        inApp: resolve("in_app", row.default_in_app),
+        email: resolve("email", row.default_email),
+      };
+    }),
+  };
+}
+
+// ===========================================================================
 // Household dashboard: spending this month, split by member. Neutral
 // framing (master prompt §22) - a breakdown, never a "who spent more"
 // comparison. Only computed when the active Space is a household.
