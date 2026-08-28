@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { supabaseSession } from "../../../lib/supabase-session-server";
 import { hashToken } from "../../../lib/credentials";
 import { setActiveWorkspace } from "../../settings/workspace/actions";
+import { logSpacesError } from "../../../lib/spaces/monitoring";
 
 export type AcceptInviteResult = { ok: true } | { ok: false; error: string };
 
@@ -17,6 +18,7 @@ export async function acceptInvite(token: string): Promise<AcceptInviteResult> {
   );
 
   if (error || !workspaceId) {
+    if (error) logSpacesError("accept_invite", error);
     return { ok: false, error: "This invite is invalid or has expired." };
   }
 

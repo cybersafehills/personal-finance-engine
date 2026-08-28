@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { supabaseSession } from "../../../lib/supabase-session-server";
 import { getActiveWorkspaceId } from "../../../lib/queries";
 import { isSpacesEnabled } from "../../../lib/spaces/gate";
+import { logSpacesError } from "../../../lib/spaces/monitoring";
 
 export type SourceActionResult = { ok: true } | { ok: false; error: string };
 
@@ -59,7 +60,10 @@ export async function setSourceVisibility(
     p_visibility_mode: mode,
   });
 
-  if (error) return { ok: false, error: friendlyError(error.message) };
+  if (error) {
+    logSpacesError("source_share", error);
+    return { ok: false, error: friendlyError(error.message) };
+  }
 
   revalidatePath("/settings/sources");
   return { ok: true };
@@ -86,7 +90,10 @@ export async function allocateSourceToSpace(
     p_is_default: isDefault,
   });
 
-  if (error) return { ok: false, error: friendlyError(error.message) };
+  if (error) {
+    logSpacesError("source_share", error);
+    return { ok: false, error: friendlyError(error.message) };
+  }
 
   revalidatePath("/settings/sources");
   return { ok: true };
@@ -111,7 +118,10 @@ export async function setShareLinkStatus(
     p_status: status,
   });
 
-  if (error) return { ok: false, error: friendlyError(error.message) };
+  if (error) {
+    logSpacesError("source_share", error);
+    return { ok: false, error: friendlyError(error.message) };
+  }
 
   revalidatePath("/settings/sources");
   return { ok: true };

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { supabaseSession } from "../../../../lib/supabase-session-server";
+import { logSpacesError } from "../../../../lib/spaces/monitoring";
 import type { NormalizedStatementRow } from "../../../../lib/statement-import";
 
 export type ImportStatementResult =
@@ -69,7 +70,7 @@ export async function importStatement(
   });
 
   if (error) {
-    console.error("importStatement failed:", error.message);
+    logSpacesError("statement_import", error);
     return {
       ok: false,
       error: error.message.includes("own")

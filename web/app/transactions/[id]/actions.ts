@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { logSpacesError } from "../../../lib/spaces/monitoring";
 import { supabaseSession } from "../../../lib/supabase-session-server";
 
 export type AttributionActionResult = { ok: true } | { ok: false; error: string };
@@ -50,7 +51,10 @@ export async function setTransactionAttribution(
         : null,
   });
 
-  if (error) return { ok: false, error: friendlyError(error.message) };
+  if (error) {
+    logSpacesError("attribution", error);
+    return { ok: false, error: friendlyError(error.message) };
+  }
 
   revalidatePath(`/transactions/${transactionId}`);
   revalidatePath("/transactions/review");

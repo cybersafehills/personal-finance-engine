@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { supabaseSession } from "../../../lib/supabase-session-server";
+import { logSpacesError } from "../../../lib/spaces/monitoring";
 
 export type SimpleActionResult = { ok: true } | { ok: false; error: string };
 
@@ -36,6 +37,7 @@ export async function mergeDuplicateTransaction(
   });
 
   if (error) {
+    logSpacesError("duplicate_resolve", error);
     return { ok: false, error: "Could not merge these transactions." };
   }
 
@@ -55,6 +57,7 @@ export async function dismissPossibleDuplicate(
   });
 
   if (error) {
+    logSpacesError("duplicate_resolve", error);
     return { ok: false, error: "Could not update this transaction." };
   }
 
