@@ -3743,6 +3743,32 @@ else
 fi
 rm -f $ARTIFACT_DIR/pfe_v_pr2.log
 
+# ===========================================================================
+# Phase V PR3: email outbox read/ack RPCs (pending_notification_emails +
+# mark_notification_emails_delivered). The V PR1 member.joined fan-out
+# already left channel='email' rows for members with email defaults on.
+# ===========================================================================
+echo "=== Phase V PR3: email outbox ==="
+
+V3_PENDING="$(psql -d pfe_rls -t -A -c "set role service_role; select count(*) from public.pending_notification_emails(100);" | tail -1)"
+V3_HAS_EMAIL="$(psql -d pfe_rls -t -A -c "set role service_role; select count(*) from public.pending_notification_emails(100) where email is null or email = '';" | tail -1)"
+V3_IDS="$(psql -d pfe_rls -t -A -c "set role service_role; select string_agg(id::text, ',') from (select id from public.pending_notification_emails(100)) s;" | tail -1)"
+V3_MARKED="$(psql -d pfe_rls -t -A -c "set role service_role; select public.mark_notification_emails_delivered(string_to_array('$V3_IDS', ',')::uuid[]);" | tail -1)"
+V3_PENDING_AFTER="$(psql -d pfe_rls -t -A -c "set role service_role; select count(*) from public.pending_notification_emails(100);" | tail -1)"
+if [ "$V3_PENDING" -ge 1 ] && [ "$V3_HAS_EMAIL" = "0" ] && [ "$V3_MARKED" = "$V3_PENDING" ] && [ "$V3_PENDING_AFTER" = "0" ]; then
+  pass "Phase V PR3: pending_notification_emails joins the recipient email; mark_notification_emails_delivered stamps the batch and drains the queue"
+else
+  fail "Phase V PR3: outbox drain wrong (pending=$V3_PENDING no_email=$V3_HAS_EMAIL marked=$V3_MARKED after=$V3_PENDING_AFTER)"
+fi
+
+# Both RPCs are service-role-only.
+if as_user "$USER_A" "select public.pending_notification_emails(10);" >/dev/null 2>$ARTIFACT_DIR/pfe_v_pr3.log; then
+  fail "Phase V PR3: pending_notification_emails was callable by an authenticated user"
+else
+  pass "Phase V PR3: pending_notification_emails / mark_notification_emails_delivered are service-role-only"
+fi
+rm -f $ARTIFACT_DIR/pfe_v_pr3.log
+
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="
 if [ "$FAIL_COUNT" -ne 0 ]; then

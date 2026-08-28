@@ -59,6 +59,9 @@ jobs:
       - name: deno check (ingest-momo entry point)
         run: deno check supabase/functions/ingest-momo/index.ts
 
+      - name: deno check (send-notifications entry point)
+        run: deno check supabase/functions/send-notifications/index.ts
+
       - name: deno check (_shared entry points)
         run: |
           set -euo pipefail
@@ -68,6 +71,9 @@ jobs:
 
       - name: deno test (ingest-momo)
         run: deno test supabase/functions/ingest-momo/tests
+
+      - name: deno test (send-notifications)
+        run: deno test supabase/functions/send-notifications/tests
 
       - name: deno test (_shared)
         run: deno test supabase/functions/_shared/tests
