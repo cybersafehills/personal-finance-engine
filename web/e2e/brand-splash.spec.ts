@@ -140,6 +140,13 @@ test("iOS PWA launch images are wired up and publicly served", async ({
   const links = head.match(/rel="apple-touch-startup-image"/g) ?? [];
   expect(links.length).toBeGreaterThanOrEqual(10);
 
+  // iOS Safari only honours those links when the LEGACY capable tag is
+  // present; Next 16 emits only the modern `mobile-web-app-capable`, so
+  // app/layout.tsx adds this one explicitly. Its absence = black launch.
+  expect(head).toMatch(
+    /<meta name="apple-mobile-web-app-capable" content="yes"\/?>/,
+  );
+
   // The images live under /brand/** and MUST NOT be gated by proxy.ts -
   // a 307 to /login here = black launch screen for logged-out visitors.
   const href = head.match(

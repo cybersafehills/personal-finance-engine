@@ -44,8 +44,18 @@ export const metadata: Metadata = {
   description: "MoMo balance, transactions, and categories.",
   applicationName: "OneLedger",
   appleWebApp: {
+    capable: true,
     title: "OneLedger",
+    statusBarStyle: "default",
     startupImage: IOS_STARTUP_IMAGES,
+  },
+  other: {
+    // Next 16 only emits the modern `mobile-web-app-capable`. iOS Safari
+    // still gates `apple-touch-startup-image` (the branded PWA launch
+    // screen, below) on the legacy Apple-prefixed tag, so without this
+    // an installed PWA ignores all of IOS_STARTUP_IMAGES and shows solid
+    // black for the whole cold start. Emit it explicitly.
+    "apple-mobile-web-app-capable": "yes",
   },
   openGraph: {
     title: "OneLedger",
