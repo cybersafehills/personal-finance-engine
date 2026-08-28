@@ -810,11 +810,13 @@ fi
 # merge_duplicate_transaction (the review-UI reconcile surface). Its
 # compute_transaction_fingerprint and resolve_ingestion_target are
 # ingestion-only (service_role grant, no authenticated). = 69.
+# Phase U PR3 (20260922000000) adds space_duplicate_review (the review
+# feed) and dismiss_possible_duplicate ("not a duplicate"). = 71.
 AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname = 'authenticated' where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "69" ]; then
-  pass "authenticated holds EXECUTE on exactly the 69 functions expected, no more"
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "71" ]; then
+  pass "authenticated holds EXECUTE on exactly the 71 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 69 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 71 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -3371,6 +3373,83 @@ else
   pass "Phase U PR1: merge_duplicate_transaction refuses a caller without transaction.categorize"
 fi
 rm -f $ARTIFACT_DIR/pfe_u_merge.log
+
+# ===========================================================================
+# Phase U PR3: space_duplicate_review (the review feed) +
+# dismiss_possible_duplicate ("not a duplicate"). Still in pfe_rls -
+# USER_A owns WORKSPACE_A, USER_B is not a member. Seeds a fresh cluster
+# (fp 'u-fp-pr3'): fa already in the ledger (unique), fb just ingested and
+# flagged (possible_duplicate), fc a second flagged row for the permission
+# check.
+# ===========================================================================
+echo "=== Phase U PR3: duplicate review + dismiss ==="
+
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.transactions (id, source, financial_source_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version, dedupe_fingerprint, dedupe_state) values
+    ('00000000-0000-0000-0000-0000000000fa', 'manual', '$U_SRC', '$U_ACCT', '$WORKSPACE_A', 'merchant_payment', 'out', 'success', 8000, 0, now() - interval '3 minutes', 'test', 'u-fp-pr3', 'unique'),
+    ('00000000-0000-0000-0000-0000000000fb', 'manual', '$U_SRC', '$U_ACCT', '$WORKSPACE_A', 'merchant_payment', 'out', 'success', 8000, 0, now(), 'test', 'u-fp-pr3', 'possible_duplicate'),
+    ('00000000-0000-0000-0000-0000000000fc', 'manual', '$U_SRC', '$U_ACCT', '$WORKSPACE_A', 'merchant_payment', 'out', 'success', 8000, 0, now(), 'test', 'u-fp-pr3', 'possible_duplicate');
+" >/dev/null
+
+# The feed returns the whole cluster (all 3 non-merged rows sharing the
+# flagged fingerprint), and nothing from clusters with no possible_duplicate
+# (the PR1 'u-fp-dup-1' cluster: one unique + one merged).
+U_PR3_ROWS="$(as_user "$USER_A" "select count(*) from public.space_duplicate_review('$WORKSPACE_A');")"
+U_PR3_CLUSTER="$(as_user "$USER_A" "select count(*) from public.space_duplicate_review('$WORKSPACE_A') where fingerprint = 'u-fp-pr3';")"
+U_PR3_MERGED_HIDDEN="$(as_user "$USER_A" "select count(*) from public.space_duplicate_review('$WORKSPACE_A') where transaction_id = '00000000-0000-0000-0000-0000000000c8';")"
+if [ "$U_PR3_ROWS" = "3" ] && [ "$U_PR3_CLUSTER" = "3" ] && [ "$U_PR3_MERGED_HIDDEN" = "0" ]; then
+  pass "Phase U PR3: space_duplicate_review returns the full flagged cluster, excludes merged rows, and skips clusters with no possible_duplicate"
+else
+  fail "Phase U PR3: review feed wrong (rows=$U_PR3_ROWS cluster=$U_PR3_CLUSTER merged_hidden=$U_PR3_MERGED_HIDDEN)"
+fi
+
+# A non-member sees nothing.
+U_PR3_NONMEMBER="$(as_user "$USER_B" "select count(*) from public.space_duplicate_review('$WORKSPACE_A');")"
+if [ "$U_PR3_NONMEMBER" = "0" ]; then
+  pass "Phase U PR3: space_duplicate_review returns nothing to a non-member"
+else
+  fail "Phase U PR3: a non-member saw $U_PR3_NONMEMBER review row(s)"
+fi
+
+# Dismiss fb: possible_duplicate -> unique, audited. The cluster stays
+# visible in full (fa + fb + fc = 3) because fc is still flagged - a
+# reviewer working a cluster keeps seeing every member, including one just
+# marked "not a duplicate".
+as_user "$USER_A" "select public.dismiss_possible_duplicate('00000000-0000-0000-0000-0000000000fb');" >/dev/null
+U_PR3_FB_STATE="$(psql -d pfe_rls -t -A -c "select dedupe_state from public.transactions where id = '00000000-0000-0000-0000-0000000000fb';")"
+U_PR3_DISMISS_AUDIT="$(psql -d pfe_rls -t -A -c "select count(*) from public.space_audit_events where workspace_id = '$WORKSPACE_A' and event_type = 'transaction.duplicate_dismissed' and resource_id = '00000000-0000-0000-0000-0000000000fb';")"
+U_PR3_ROWS_AFTER="$(as_user "$USER_A" "select count(*) from public.space_duplicate_review('$WORKSPACE_A');")"
+if [ "$U_PR3_FB_STATE" = "unique" ] && [ "$U_PR3_DISMISS_AUDIT" = "1" ] && [ "$U_PR3_ROWS_AFTER" = "3" ]; then
+  pass "Phase U PR3: dismiss_possible_duplicate moves the row to unique, audits it, and the still-flagged cluster stays visible in full"
+else
+  fail "Phase U PR3: dismiss wrong (fb_state=$U_PR3_FB_STATE audit=$U_PR3_DISMISS_AUDIT rows_after=$U_PR3_ROWS_AFTER)"
+fi
+
+# Dismissing a row that is not possible_duplicate is refused (fa is unique).
+if as_user "$USER_A" "select public.dismiss_possible_duplicate('00000000-0000-0000-0000-0000000000fa');" >/dev/null 2>$ARTIFACT_DIR/pfe_u_pr3.log; then
+  fail "Phase U PR3: dismiss_possible_duplicate accepted a non-possible_duplicate row"
+else
+  pass "Phase U PR3: dismiss_possible_duplicate refuses any row not in possible_duplicate state"
+fi
+
+# A non-member cannot dismiss the still-flagged fc.
+if as_user "$USER_B" "select public.dismiss_possible_duplicate('00000000-0000-0000-0000-0000000000fc');" >/dev/null 2>$ARTIFACT_DIR/pfe_u_pr3.log; then
+  fail "Phase U PR3: a non-member dismissed a possible duplicate"
+else
+  pass "Phase U PR3: dismiss_possible_duplicate refuses a caller without transaction.categorize"
+fi
+
+# With fc dismissed too, the cluster has no possible_duplicate left and
+# disappears from the feed entirely.
+as_user "$USER_A" "select public.dismiss_possible_duplicate('00000000-0000-0000-0000-0000000000fc');" >/dev/null
+U_PR3_ROWS_CLEARED="$(as_user "$USER_A" "select count(*) from public.space_duplicate_review('$WORKSPACE_A') where fingerprint = 'u-fp-pr3';")"
+if [ "$U_PR3_ROWS_CLEARED" = "0" ]; then
+  pass "Phase U PR3: once no row in a cluster is possible_duplicate, the cluster leaves the review feed"
+else
+  fail "Phase U PR3: cluster still surfaced $U_PR3_ROWS_CLEARED row(s) after all its members were dismissed"
+fi
+rm -f $ARTIFACT_DIR/pfe_u_pr3.log
 
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="

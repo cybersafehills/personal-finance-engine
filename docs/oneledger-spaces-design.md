@@ -910,6 +910,46 @@ device-management UX; rule `scope` / precedence / explainability.
 
 ---
 
+## 11h. Phase U PR3 — as built (migration `20260922000000`, backend)
+
+The read + dismiss half of duplicate resolution — the surface for the
+`possible_duplicate` rows PR2 ingestion now produces in production (the
+merge half, `merge_duplicate_transaction`, already shipped in PR1).
+**Migration only — two functions, no table, no column.**
+
+- **`space_duplicate_review(p_workspace_id)`** — `SECURITY DEFINER` /
+  `STABLE`, `authenticated` + `service_role`. Flat feed (one row per
+  transaction) of every non-`merged` transaction that shares a
+  `dedupe_fingerprint` with at least one `possible_duplicate` row in the
+  Space **and** that the caller can see (`can_view_source_in_space`, which
+  already folds in membership + per-source household visibility; the
+  `auth.uid() is null` branch is the service-role reconciler path, same as
+  `transaction_duplicate_candidates`). The caller groups by `fingerprint`
+  to render one review card per cluster. A cluster stays in the feed in
+  full — including rows already marked `unique` — until **no** member is
+  `possible_duplicate` any more.
+- **`dismiss_possible_duplicate(p_transaction_id)`** — `SECURITY DEFINER`,
+  `authenticated` + `service_role`. `possible_duplicate` → `unique` only
+  (raises on any other state; never touches `merged` / `confirmed`, never
+  deletes). `transaction.categorize` in the row's Space for an
+  authenticated caller. Audited `transaction.duplicate_dismissed`
+  (old/new `dedupe_state` in the payload).
+
+`authenticated` function count → 71. No table / table-grant change.
+7-assertion "Phase U PR3" block (cluster shape, merged-exclusion,
+non-member blindness, dismiss + audit + feed transition, wrong-state
+refusal, capability refusal, cluster clears when fully resolved). Full
+suite: **229 passed / 0 failed**.
+
+Deferred to **PR3b (web)**: the `/transactions/review` "Possible
+duplicates" card surface wired to `space_duplicate_review` +
+`merge_duplicate_transaction` + `dismiss_possible_duplicate`, and the
+budget/report/dashboard aggregation sweep to exclude `dedupe_state =
+'merged'` (no live effect until a merge happens, which only this surface
+enables — so the two ship together).
+
+---
+
 ## 12. Testing strategy (per phase, aggregated here)
 
 - **Unit**: role→capability, `can_view_source_in_space` truth table,
