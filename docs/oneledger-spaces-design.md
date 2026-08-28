@@ -1026,6 +1026,34 @@ canonical transaction's detail page.
 
 ---
 
+## 11k. Phase U PR5 — as built (web)
+
+The duplicate-resolution trail on `/transactions/[id]`. **Web only — no
+migration**, no new grant. Closes the loop opened by PR3/PR3b: a merge is
+now visible from both ends.
+
+- **`getTransactionDuplicateContext(id)`** (`web/lib/queries.ts`) — one
+  read of the row's `dedupe_state` / `merged_into_transaction_id`, then
+  (only if relevant) the canonical it was merged into and the rows merged
+  into it. Returns null only if the transaction itself can't be read.
+  `getTransactionById` deliberately still resolves a `merged` row (its
+  `TRANSACTION_COLUMNS` read was never given the PR3b `.neq` filter), so a
+  direct link keeps working.
+- **`TransactionDuplicateSection`** (server component) renders nothing for
+  an ordinary `unique` row with no merged children. Otherwise a
+  "Duplicates" card: a "flagged as a possible duplicate → Review it" line
+  for `possible_duplicate`; a "merged into another transaction … → Open
+  the kept transaction" line for a `merged` row; and a list of the
+  transactions merged **into** this one ("kept as a record, left out of
+  every total"), each linking to its own detail page.
+
+`next build` ✓, `eslint` 0. No migration, no test-suite change.
+
+Still deferred: statement (CSV/PDF) reconciliation; rule `scope` /
+precedence / explainability.
+
+---
+
 ## 12. Testing strategy (per phase, aggregated here)
 
 - **Unit**: role→capability, `can_view_source_in_space` truth table,
