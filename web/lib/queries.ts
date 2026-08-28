@@ -228,6 +228,179 @@ export async function getTransactionById(
   return data;
 }
 
+// ===========================================================================
+// Space provenance + attribution for one transaction (household ledger).
+// See Phase Q/S migrations: transactions gained financial_source_id /
+// performed_by_user_id / attribution_type / attributed_user_id /
+// allocation_status; 20260913000000 added set_transaction_attribution and
+// transaction_member_attributions; 20260914000000 added
+// space_member_directory (co-member display names past profiles' own RLS).
+// ===========================================================================
+
+export type SpaceMember = {
+  userId: string;
+  displayName: string | null;
+  role: WorkspaceRole;
+};
+
+/** Active members of a Space, with display names - only if the caller is a member. */
+export async function getSpaceMemberDirectory(
+  workspaceId: string,
+): Promise<SpaceMember[]> {
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase.rpc("space_member_directory", {
+    p_workspace_id: workspaceId,
+  });
+
+  if (error) {
+    console.error("getSpaceMemberDirectory failed:", error.message);
+    return [];
+  }
+
+  return ((data ?? []) as unknown as Array<{
+    user_id: string;
+    display_name: string | null;
+    role: WorkspaceRole;
+  }>).map((row) => ({
+    userId: row.user_id,
+    displayName: row.display_name,
+    role: row.role,
+  }));
+}
+
+/** The signed-in user's id, or null. */
+export async function getAuthUserId(): Promise<string | null> {
+  const supabase = await supabaseSession();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  return user?.id ?? null;
+}
+
+export type TransactionAttributionType =
+  | "shared"
+  | "member"
+  | "split"
+  | "unassigned";
+
+export type TransactionSpaceContext = {
+  workspaceId: string;
+  workspaceName: string | null;
+  workspaceKind: WorkspaceKind;
+  sourceName: string | null;
+  sourceProvider: string | null;
+  sourceMaskedIdentifier: string | null;
+  sourceOwnerUserId: string | null;
+  performedByUserId: string | null;
+  recordCreatedByUserId: string | null;
+  ingestionConnectionLabel: string | null;
+  attributionType: TransactionAttributionType | null;
+  attributedUserId: string | null;
+  allocationStatus: "allocated" | "needs_space" | "needs_attribution";
+  memberSplits: Array<{ userId: string; shareBps: number }>;
+};
+
+export async function getTransactionSpaceContext(
+  id: string,
+): Promise<TransactionSpaceContext | null> {
+  const supabase = await supabaseSession();
+
+  const { data, error } = await supabase
+    .from("transactions")
+    .select(
+      "workspace_id, performed_by_user_id, record_created_by_user_id, attribution_type, attributed_user_id, allocation_status, workspaces(name, kind), financial_sources(display_name, provider, masked_identifier, owner_user_id), ingestion_connections(label)",
+    )
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error || !data) {
+    if (error) console.error("getTransactionSpaceContext failed:", error.message);
+    return null;
+  }
+
+  const row = data as unknown as {
+    workspace_id: string;
+    performed_by_user_id: string | null;
+    record_created_by_user_id: string | null;
+    attribution_type: TransactionAttributionType | null;
+    attributed_user_id: string | null;
+    allocation_status: "allocated" | "needs_space" | "needs_attribution";
+    workspaces: { name: string; kind: WorkspaceKind } | null;
+    financial_sources: {
+      display_name: string;
+      provider: string;
+      masked_identifier: string | null;
+      owner_user_id: string;
+    } | null;
+    ingestion_connections: { label: string } | null;
+  };
+
+  let memberSplits: Array<{ userId: string; shareBps: number }> = [];
+  if (row.attribution_type === "split") {
+    const { data: splitRows } = await supabase
+      .from("transaction_member_attributions")
+      .select("user_id, share_bps")
+      .eq("transaction_id", id);
+    memberSplits = ((splitRows ?? []) as unknown as Array<{
+      user_id: string;
+      share_bps: number;
+    }>).map((s) => ({ userId: s.user_id, shareBps: s.share_bps }));
+  }
+
+  return {
+    workspaceId: row.workspace_id,
+    workspaceName: row.workspaces?.name ?? null,
+    workspaceKind: row.workspaces?.kind ?? "personal",
+    sourceName: row.financial_sources?.display_name ?? null,
+    sourceProvider: row.financial_sources?.provider ?? null,
+    sourceMaskedIdentifier: row.financial_sources?.masked_identifier ?? null,
+    sourceOwnerUserId: row.financial_sources?.owner_user_id ?? null,
+    performedByUserId: row.performed_by_user_id,
+    recordCreatedByUserId: row.record_created_by_user_id,
+    ingestionConnectionLabel: row.ingestion_connections?.label ?? null,
+    attributionType: row.attribution_type,
+    attributedUserId: row.attributed_user_id,
+    allocationStatus: row.allocation_status,
+    memberSplits,
+  };
+}
+
+/** Household transactions the caller can see that still need an attribution. */
+export async function getNeedsAttributionTransactions(): Promise<
+  Array<{ id: string; occurredAt: string; amountRwf: number; direction: string; counterpartyName: string | null; workspaceName: string | null }>
+> {
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("transactions")
+    .select(
+      "id, occurred_at, amount_rwf, direction, counterparty_name, workspaces(name)",
+    )
+    .eq("allocation_status", "needs_attribution")
+    .order("occurred_at", { ascending: false })
+    .limit(50);
+
+  if (error) {
+    console.error("getNeedsAttributionTransactions failed:", error.message);
+    return [];
+  }
+
+  return ((data ?? []) as unknown as Array<{
+    id: string;
+    occurred_at: string;
+    amount_rwf: number;
+    direction: string;
+    counterparty_name: string | null;
+    workspaces: { name: string } | null;
+  }>).map((row) => ({
+    id: row.id,
+    occurredAt: row.occurred_at,
+    amountRwf: row.amount_rwf,
+    direction: row.direction,
+    counterpartyName: row.counterparty_name,
+    workspaceName: row.workspaces?.name ?? null,
+  }));
+}
+
 export type CategoryTotal = {
   category: string; // "Uncategorized" for null
   totalRwf: number;

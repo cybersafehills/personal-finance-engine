@@ -777,11 +777,14 @@ fi
 # reallocate_transaction. Its validate_transaction_member_attributions
 # constraint-trigger function is `revoke all from public` (runs as owner
 # from the trigger). = 60 total.
+# Phase S PR2b (20260914000000) adds space_member_directory (the
+# co-member display-name lookup the attribution UI needs, past
+# profiles_select_own). = 61 total.
 AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname = 'authenticated' where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "60" ]; then
-  pass "authenticated holds EXECUTE on exactly the 60 functions expected, no more"
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "61" ]; then
+  pass "authenticated holds EXECUTE on exactly the 61 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 60 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 61 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -2962,6 +2965,19 @@ if [ "$S_R_BEFORE" = "1" ] && [ "$S_R_AFTER" = "0" ] && [ "$S_LINK_REVOKED" = "r
   pass "Phase S: set_source_visibility('personal_only') revokes every share link and immediately cuts co-member access"
 else
   fail "Phase S: visibility narrowing wrong (before=$S_R_BEFORE after=$S_R_AFTER link=$S_LINK_REVOKED ceiling=$S_CEIL2)"
+fi
+
+# --- Phase S PR2b: space_member_directory -----------------------------
+
+# USER_A and USER_R are active members of Q_HH (USER_R was promoted to
+# admin in the Phase R block); USER_B was removed.
+S_DIR_MEMBER="$(as_user "$USER_A" "select count(*) from public.space_member_directory('$Q_HH');")"
+S_DIR_HAS_R="$(as_user "$USER_A" "select count(*) from public.space_member_directory('$Q_HH') where user_id = '$USER_R';")"
+S_DIR_NONMEMBER="$(as_user "$USER_B" "select count(*) from public.space_member_directory('$Q_HH');")"
+if [ "$S_DIR_MEMBER" -ge "2" ] && [ "$S_DIR_HAS_R" = "1" ] && [ "$S_DIR_NONMEMBER" = "0" ]; then
+  pass "Phase S PR2b: space_member_directory lists active co-members to a member, and nothing to a non-member"
+else
+  fail "Phase S PR2b: space_member_directory wrong (member_sees=$S_DIR_MEMBER has_R=$S_DIR_HAS_R nonmember_sees=$S_DIR_NONMEMBER)"
 fi
 
 echo ""

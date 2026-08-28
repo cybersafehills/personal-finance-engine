@@ -1,7 +1,10 @@
 import { notFound } from "next/navigation";
 import {
+  getAuthUserId,
   getCategoryHistory,
+  getSpaceMemberDirectory,
   getTransactionById,
+  getTransactionSpaceContext,
   getTransactionSplits,
 } from "../../../lib/queries";
 import { formatFullDateTime, formatRwf } from "../../../lib/format";
@@ -14,8 +17,19 @@ import { MoneyAmount } from "../../../components/MoneyAmount";
 import { Badge } from "../../../components/Badge";
 import { CategoryCorrectionForm } from "../../../components/CategoryCorrectionForm";
 import { TransactionSplitForm } from "../../../components/TransactionSplitForm";
+import { TransactionAttributionPanel } from "../../../components/TransactionAttributionPanel";
 
 export const dynamic = "force-dynamic";
+
+const SOURCE_PROVIDER_LABELS: Record<string, string> = {
+  mtn_momo: "MTN MoMo",
+  airtel_money: "Airtel Money",
+  bank: "Bank",
+  card: "Card",
+  cash: "Cash",
+  statement: "Imported statement",
+  other: "Other",
+};
 
 function reasonToSentence(source: string | null): string {
   if (source === "manual") return "You corrected this category.";
@@ -43,6 +57,24 @@ export default async function TransactionDetailPage({
   const paymentLink = await getPaymentLinkForTransaction(id);
   const categoryHistory = await getCategoryHistory(id);
   const latestDecision = categoryHistory[0] ?? null;
+
+  const spaceContext = await getTransactionSpaceContext(id);
+  const isHousehold = spaceContext?.workspaceKind === "household";
+  const [selfUserId, spaceMembers] = isHousehold
+    ? await Promise.all([
+        getAuthUserId(),
+        getSpaceMemberDirectory(spaceContext!.workspaceId),
+      ])
+    : [null, []];
+  const memberName = (userId: string | null): string => {
+    if (!userId) return "Someone";
+    const m = spaceMembers.find((x) => x.userId === userId);
+    if (m?.displayName) return m.displayName;
+    if (userId === selfUserId) return "You";
+    return "A member";
+  };
+  const needsAttention =
+    spaceContext != null && spaceContext.allocationStatus !== "allocated";
   const transactionEffectMinor = canSplit
     ? Math.abs(Number(transaction.principal_effect_rwf) + Number(transaction.fee_effect_rwf))
     : 0;
@@ -87,6 +119,71 @@ export default async function TransactionDetailPage({
           >
             {messages().pay.assisted.recon.preparedWithPay} →
           </Link>
+        </section>
+      )}
+
+      {needsAttention && spaceContext && (
+        <section
+          role="status"
+          className="rounded-card border border-attention-bg bg-attention-bg p-3 text-sm text-attention"
+        >
+          {spaceContext.allocationStatus === "needs_attribution"
+            ? "This household transaction needs an attribution — say whose spending it was below."
+            : "This transaction's Space couldn't be determined automatically."}
+        </section>
+      )}
+
+      {spaceContext && (
+        <section
+          aria-label="Where this came from"
+          className="rounded-card border border-border-subtle bg-surface p-4"
+        >
+          <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+            Where this came from
+          </p>
+          <dl className="mt-1.5 flex flex-col divide-y divide-border-subtle text-sm">
+            {spaceContext.workspaceName && (
+              <Row label="Space" value={spaceContext.workspaceName} />
+            )}
+            {spaceContext.sourceName && (
+              <Row
+                label="From"
+                value={
+                  (SOURCE_PROVIDER_LABELS[spaceContext.sourceProvider ?? ""] ??
+                    spaceContext.sourceName) +
+                  (spaceContext.sourceMaskedIdentifier
+                    ? ` · ${spaceContext.sourceMaskedIdentifier}`
+                    : "") +
+                  (isHousehold &&
+                  spaceContext.sourceOwnerUserId &&
+                  spaceContext.sourceOwnerUserId !== selfUserId
+                    ? ` · ${memberName(spaceContext.sourceOwnerUserId)}'s account`
+                    : "")
+                }
+              />
+            )}
+            {isHousehold && spaceContext.performedByUserId && (
+              <Row
+                label="Paid by"
+                value={memberName(spaceContext.performedByUserId)}
+              />
+            )}
+            {isHousehold &&
+              spaceContext.recordCreatedByUserId &&
+              spaceContext.recordCreatedByUserId !==
+                spaceContext.performedByUserId && (
+                <Row
+                  label="Added by"
+                  value={memberName(spaceContext.recordCreatedByUserId)}
+                />
+              )}
+            {spaceContext.ingestionConnectionLabel && (
+              <Row
+                label="Imported via"
+                value={spaceContext.ingestionConnectionLabel}
+              />
+            )}
+          </dl>
         </section>
       )}
 
@@ -168,6 +265,29 @@ export default async function TransactionDetailPage({
           </div>
         )}
       </section>
+
+      {isHousehold && spaceContext && (
+        <section
+          aria-label="Attribution"
+          className="rounded-card border border-border-subtle bg-surface p-4"
+        >
+          <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+            Whose spending
+          </p>
+          <p className="mt-1 mb-2 text-sm text-text-muted">
+            Household reports split spending by member. This doesn&apos;t
+            move any money — it only changes how this expense is counted.
+          </p>
+          <TransactionAttributionPanel
+            transactionId={transaction.id}
+            members={spaceMembers}
+            selfUserId={selfUserId}
+            currentType={spaceContext.attributionType}
+            currentAttributedUserId={spaceContext.attributedUserId}
+            currentSplits={spaceContext.memberSplits}
+          />
+        </section>
+      )}
 
       {canSplit && isSupportedCurrency(transaction.currency) && (
         <section

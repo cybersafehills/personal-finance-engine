@@ -439,7 +439,7 @@ additive migration(s) → stacked PRs → migration-test block → e2e.
 |---|---|---|---|
 | **Q** — Foundation ✅ *migration written* | 1 | `kind='household'` + `create_household_workspace`; `financial_sources`, `source_space_links`, `raw_financial_events`, `can_view_source_in_space()` / `is_financial_source_visible()` / `owns_financial_source()`; nullable `transactions` provenance/attribution cols; `space_activity` / `space_audit_events` / `space_member_notification_prefs` / `workspace_categories` tables; **RLS refactor for `household`** (Phase C ledger loosening reverted for this kind via the source-visibility gate); backfill migration; indexes | No |
 | **R** — Security & authz ✅ *migration written* | 2 | capability layer (`space_role_has_capability` matrix + `space_member_capability_grants` + `has_space_capability()` primitive + `grant`/`revoke_space_capability` RPCs); audit-write primitives (`record_space_activity` / `record_space_audit_event`); `workspace_invites.accepted_by`; `accept_workspace_invite` / `set_member_role` / `remove_member` / `create_household_workspace` re-issued to write audit + activity rows; **14-assertion security test block** (capability matrix, grant/revoke, audit visibility, invite re-use/revoke rejection, post-removal access revocation, last-owner guard, internal-helper lockdown, service-role bypass) | No |
-| **S** — Shared ledger | 3 | **PR1 ✅:** `transaction_member_attributions` + `set_source_visibility` / `allocate_source_to_space` / `set_source_space_link_status` / `set_transaction_attribution` / `reallocate_transaction` RPCs. **PR2a ✅:** household creation (`/settings/workspace`), the "Shared accounts" surface (`/settings/sources`) — per-source visibility + share/pause/resume/revoke into households. **PR2b (not started):** transaction provenance detail view + attribution UI on `/transactions/[id]`; review-queue `needs_space` / `needs_attribution` reasons; household dashboard; upgraded Space switcher; e2e; optional `/spaces/{id}/…` routes | Yes |
+| **S** — Shared ledger | 3 | **PR1 ✅:** `transaction_member_attributions` + the five sharing/attribution/reallocation RPCs. **PR2a ✅:** household creation (`/settings/workspace`), "Shared accounts" (`/settings/sources`). **PR2b ✅:** `space_member_directory` fn; transaction detail gets a "Where this came from" provenance panel + a household "Whose spending" attribution panel (shared / member / split / unassigned) + a needs-attention banner; review queue gets a "Needs attribution" section. **PR2c (not started):** household dashboard; upgraded Space switcher; `/settings/sources` + attribution e2e; household **admin** member-management; optional `/spaces/{id}/…` routes | Yes |
 | **T** — Financial planning | 4 | Space-aware category scope; rule `scope_type` + deterministic precedence + explainability; shared budgets (space/category/member scopes) reusing `budget-math.ts`; threshold state-transition alerts (no per-txn spam); shared goals as first-class Space resources; per-member notification prefs | Yes |
 | **U** — Ingestion & reconciliation | 5 | `raw_financial_events` cutover for `ingest-momo` + SMS path; source routing (`is_default_target`); dedupe confidence engine + auto-merge + review cards; **statement (CSV/PDF) reconciliation** vs ledger + import summary; device management UX (rename / pause / reconnect / remove, history preserved) | Yes |
 | **V** — Reporting & intelligence | 6 | `workspace_id` scope on `report_*`; Household report template + attribution summaries; scheduler recipient filtering (exclude former members); AI Space-scope boundary + Household insights; dashboard projections | Yes |
@@ -578,7 +578,37 @@ Members-management for a household is still owner-only (the Phase C
 `has_space_capability(_, 'members.manage')` so a household **admin** can
 manage members is a small follow-up. No e2e added here — the RPC layer is
 covered by the migration suite; a `/settings/sources` Playwright spec is a
-PR2b item.
+PR2c item.
+
+### Phase S PR2b — as built (migration `20260914000000` + web)
+
+- **`space_member_directory(workspace_id)`** — `SECURITY DEFINER` /
+  `STABLE`, returns `(user_id, display_name, role)` for active members,
+  gated so only an active member of that Space gets rows (bounded
+  disclosure past `profiles_select_own`). The one place a co-member's
+  display name is exposed; the attribution UI needs it. `authenticated`
+  function-EXECUTE count → 61. One migration-test assertion.
+- **`/transactions/[id]`** gains, for any transaction that resolves a
+  Space context: a **"Where this came from"** panel (Space · From
+  \<source + provider + masked id, "· X's account" when the source owner
+  isn't you\> · Paid by · Added by · Imported via) and, when the Space is
+  a household, a **needs-attention banner** (`allocation_status !==
+  'allocated'`) and a **"Whose spending"** attribution panel —
+  `TransactionAttributionPanel` (shared / one member / basis-point split /
+  unassigned), driven by `set_transaction_attribution`. Split editor is
+  in whole percents, converted to bps, submit gated on a 100 % total.
+- **Queries:** `getTransactionSpaceContext`, `getSpaceMemberDirectory`,
+  `getNeedsAttributionTransactions`, `getAuthUserId` in `lib/queries.ts`.
+  `TransactionRow` / `TRANSACTION_COLUMNS` deliberately left untouched —
+  the Space fields are read through the dedicated context query.
+- **`/transactions/review`** gains a **"Needs attribution (N)"** section
+  above the category-review list — plain links into
+  `/transactions/[id]`, where the attribution panel resolves them. The
+  existing category-review machinery is untouched (its confirm/dismiss/
+  bulk flow does not apply to attribution).
+
+`next build` ✓ compiled, `eslint` 0 errors. Full migration suite: 192
+passed / 0 failed.
 
 ---
 
