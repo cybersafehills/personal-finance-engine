@@ -117,14 +117,15 @@ scan. Non-RWF payloads, a provider with no seeded pay-merchant code, a
 non-numeric `merchant_id`, an expired / replayed payload, or
 `provider_link` / `emv_merchant` still show the details and "continuing
 isn't available". The seeded MTN pay-merchant code
-(`20260913000100_scan_merchant_pay_codes.sql`) is **published but
-unverified** — the review shows the "Not officially verified" warning and
-the full dial string, same as scanning `mtn-momo-send` today. Public
-sources (2026-08) corroborate the `*182*8*1#` entry point + prompts and
-5–6-digit merchant codes, but **not** the concatenated
-`*182*8*1*{merchant}*{amount}#` form used here — a real-device check is
-the blocker for `verified_at` (see the migration header and the
-runbook §4.7). Airtel is not seeded (its pay-code path is unconfirmed).
+(`20260913000100_scan_merchant_pay_codes.sql`) ships `verified_at = null`
+(ship-time state), but the operator has **confirmed the concatenated
+`*182*8*1*{merchant}*{amount}#` dial format works** on a real MTN
+handset — same as `*182*1*1*{phone}*{amount}#` for `mtn-momo-send`. The
+outstanding step is a directory admin stamping `verified_at` on those
+rows in production via the "Mark verified against source" flow (a
+runtime data op, not a migration); once stamped, the "Not officially
+verified" review warning clears. Airtel is not seeded (its pay-code path
+is still unconfirmed).
 
 Trust model, supported/unsupported formats, and the client/server split
 are ADR **`docs/adr/0006-qr-scan-payload-trust.md`**. Key points: no

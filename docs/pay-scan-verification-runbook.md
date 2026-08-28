@@ -101,19 +101,16 @@ for iOS Safari.
    (no amount). Review shows the merchant (masked), "OneLedger can't
    confirm this merchant's identity", and an **amount field**. Enter
    `5000` → Prepare → Open USSD → the dialer opens
-   `*182*8*1*123456*5000#` (the seeded *unverified* pay-merchant code —
-   the "Not officially verified" warning is shown). A `"currency":"USD"`
-   payload → "only continue a scanned payment in RWF". A
-   `"provider":"equity"` payload → "no verified USSD path for this
-   provider yet". A `"merchant_id":"KGL-COFFEE"` → same (non-numeric).
-   - **This path is not MTN-verified.** Public sources confirm the
-     `*182*8*1#` entry point + prompts, not the one-line
-     `*182*8*1*code*amount#` form. On a real MTN handset, actually run
-     the dialled string to a **1 RWF** test merchant (or a merchant you
-     control) and confirm it completes in one step. If MTN shows the
-     step-by-step prompts instead, do **not** mark the code verified —
-     file to replace it with the literal `*182*8*1#` entry + steps. Do
-     the same real-device check for `mtn-momo-send` (also unverified).
+   `*182*8*1*123456*5000#`. A `"currency":"USD"` payload → "only continue
+   a scanned payment in RWF". A `"provider":"equity"` payload → "no
+   verified USSD path for this provider yet". A `"merchant_id":"KGL-COFFEE"`
+   → same (non-numeric).
+   - **Dial format confirmed by the operator** on a real MTN handset
+     (concatenated `*182*8*1*code*amount#`, and `*182*1*1*phone*amount#`
+     for `mtn-momo-send`). To clear the "Not officially verified" review
+     warning, a directory admin stamps `verified_at` on
+     `mtn-momo-pay-merchant` (and `mtn-momo-send`) in production via
+     **Mark verified against source**.
 
 ## 5. Payload safety spot-checks
 

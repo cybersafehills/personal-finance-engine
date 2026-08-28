@@ -105,24 +105,21 @@ everything (directory row, captured params, normalized msisdn) from
   `merchant_code` field), or an expired / replayed payload all
   dead-end in the review.
   - The seeded MTN pay-merchant code
-    (`20260913000100_scan_merchant_pay_codes.sql`) is **`published` with
-    `verified_at = null`** — same provenance bar as the Phase M
-    `send_money` seeds. The review surfaces "Not officially verified"
-    and the full dial string before the user opens it. Airtel is not
-    seeded until its path is confirmed. Cross-session `nonce` replay
-    is not persisted yet — the payload `expires_at` and the deterministic
-    idempotency key are the current guards.
-  - **Verification (public sources, 2026-08):** the entry point
-    `*182*8*1#` for pay-a-merchant-by-code, then prompts for the code
-    and the amount, and 5–6-digit merchant codes, are corroborated by
-    several Rwanda MoMo guides and a post on MoMo Rwanda's official
-    Facebook page. The **concatenated** `*182*8*1*{merchant}*{amount}#`
-    form is **not MTN-documented anywhere found** — every source shows
-    step-by-step prompts. Before an admin sets `verified_at`, a real MTN
-    handset must confirm the one-line form dials straight through; if it
-    doesn't, the directory should hold the literal `*182*8*1#` entry +
-    steps and the scanner would present the code + amount for the user
-    to type at the prompts.
+    (`20260913000100_scan_merchant_pay_codes.sql`) ships `verified_at =
+    null` — same provenance bar as the Phase M `send_money` seeds. The
+    review surfaces "Not officially verified" and the full dial string
+    while that holds. Airtel is not seeded until its path is confirmed.
+    Cross-session `nonce` replay is not persisted yet — the payload
+    `expires_at` and the deterministic idempotency key are the current
+    guards.
+  - **Verification:** public sources (2026-08) corroborated the
+    `*182*8*1#` entry point + prompts and 5–6-digit merchant codes but
+    not the concatenated `*182*8*1*{merchant}*{amount}#` form. The
+    operator has since **confirmed the concatenated form dials straight
+    through on a real MTN handset** (likewise `*182*1*1*{phone}*{amount}#`
+    for `mtn-momo-send`). Remaining: a directory admin stamps
+    `verified_at` on those rows in production ("Mark verified against
+    source"); the review warning then clears.
 - **provider_link / emv_merchant / non-RWF OneLedger** → shown, not
   actionable.
 
