@@ -5938,6 +5938,102 @@ else
   fail "Bills Phase 4: RLS isolation breach on bill_duplicate_candidates"
 fi
 
+# ===========================================================================
+# Bills & Expenses Phase 5 (20260926000000): create_supplier being
+# bill.manage-gated + its TIN guard, search_suppliers ranking + member
+# gate, link_bill_supplier being bill.review-gated,
+# record_bill_supplier_candidates being service_role-only, and
+# cross-workspace RLS. Reuses pfe_rls + USER_A / USER_B / BILL_WS_A /
+# BILL4A_ID.
+# ===========================================================================
+echo "=== Bills Phase 5: supplier resolution ==="
+
+if as_user "$USER_A" "select public.record_bill_supplier_candidates('{}'::jsonb);" >/dev/null 2>$ARTIFACT_DIR/pfe_b5.log; then
+  fail "Bills Phase 5: record_bill_supplier_candidates was authenticated-callable"
+else
+  pass "Bills Phase 5: record_bill_supplier_candidates is service_role-only"
+fi
+rm -f $ARTIFACT_DIR/pfe_b5.log
+
+# create_supplier (USER_A is a personal-workspace owner -> holds bill.manage).
+BILL5_SUP="$(as_user "$USER_A" "select (public.create_supplier(jsonb_build_object(
+  'workspace_id','$BILL_WS_A','display_name','Kigali Office Supplies Ltd',
+  'name_key','kigali office supplies','tax_id','TIN123','email','ops@kos.example')))->>'id';")"
+if [ -n "$BILL5_SUP" ] && [ "$BILL5_SUP" != "" ]; then
+  pass "Bills Phase 5: create_supplier creates a supplier for a bill.manage holder"
+else
+  fail "Bills Phase 5: create_supplier returned no id ($BILL5_SUP)"
+fi
+
+# A second create with the same TIN is refused (returns existing id).
+BILL5_DUP="$(as_user "$USER_A" "select (public.create_supplier(jsonb_build_object(
+  'workspace_id','$BILL_WS_A','display_name','KOS again','name_key','kos again','tax_id','tin123')))->>'error';")"
+BILL5_SUP_COUNT="$(psql -d pfe_rls -t -A -c "select count(*) from public.suppliers where workspace_id = '$BILL_WS_A' and lower(tax_id) = 'tin123';")"
+if [ "$BILL5_DUP" = "tax_id_exists" ] && [ "$BILL5_SUP_COUNT" = "1" ]; then
+  pass "Bills Phase 5: create_supplier refuses a duplicate TIN and never merges"
+else
+  fail "Bills Phase 5: TIN guard wrong (err=$BILL5_DUP count=$BILL5_SUP_COUNT)"
+fi
+
+# search_suppliers ranking.
+BILL5_S_NAME="$(psql -d pfe_rls -t -A \
+  -c "set role authenticated" \
+  -c "select set_config('request.jwt.claim.sub','$USER_A',false)" \
+  -c "select score from public.search_suppliers('$BILL_WS_A', 'kigali office supplies', null, 10) limit 1" | tail -1)"
+BILL5_S_TIN="$(psql -d pfe_rls -t -A \
+  -c "set role authenticated" \
+  -c "select set_config('request.jwt.claim.sub','$USER_A',false)" \
+  -c "select score from public.search_suppliers('$BILL_WS_A', null, 'TIN123', 10) limit 1" | tail -1)"
+if awk "BEGIN{exit !($BILL5_S_NAME >= 0.89 && $BILL5_S_NAME <= 1)}" \
+   && awk "BEGIN{exit !($BILL5_S_TIN >= 0.98 && $BILL5_S_TIN <= 1)}"; then
+  pass "Bills Phase 5: search_suppliers ranks an exact name_key ~0.9 and an exact TIN ~0.99"
+else
+  fail "Bills Phase 5: search_suppliers ranking wrong (name=$BILL5_S_NAME tin=$BILL5_S_TIN)"
+fi
+
+# search_suppliers refuses a non-member.
+if as_user "$USER_B" "select * from public.search_suppliers('$BILL_WS_A', 'kigali', null, 5);" >/dev/null 2>$ARTIFACT_DIR/pfe_b5b.log; then
+  fail "Bills Phase 5: search_suppliers ran for a non-member"
+else
+  pass "Bills Phase 5: search_suppliers refuses a non-member"
+fi
+rm -f $ARTIFACT_DIR/pfe_b5b.log
+
+# link_bill_supplier: bill.review holder links; non-member refused.
+if as_user "$USER_B" "select public.link_bill_supplier('$BILL4A_ID', '$BILL5_SUP');" >/dev/null 2>$ARTIFACT_DIR/pfe_b5c.log; then
+  fail "Bills Phase 5: a non-member linked a supplier"
+else
+  pass "Bills Phase 5: link_bill_supplier refuses a non-member"
+fi
+rm -f $ARTIFACT_DIR/pfe_b5c.log
+BILL5_LINK="$(as_user "$USER_A" "select (public.link_bill_supplier('$BILL4A_ID', '$BILL5_SUP'))->>'ok';")"
+BILL5_LINKED="$(psql -d pfe_rls -t -A -c "select supplier_id from public.bill_documents where id = '$BILL4A_ID';")"
+BILL5_LINK_EVT="$(psql -d pfe_rls -t -A -c "select count(*) from public.bill_processing_events where bill_document_id = '$BILL4A_ID' and event_type = 'supplier_linked';")"
+if [ "$BILL5_LINK" = "true" ] && [ "$BILL5_LINKED" = "$BILL5_SUP" ] && [ "$BILL5_LINK_EVT" = "1" ]; then
+  pass "Bills Phase 5: link_bill_supplier sets bill_documents.supplier_id and journals it"
+else
+  fail "Bills Phase 5: link wrong (ok=$BILL5_LINK linked=$BILL5_LINKED evt=$BILL5_LINK_EVT)"
+fi
+
+# record_bill_supplier_candidates (service_role) for BILL4B_ID.
+BILL5_REC="$(psql -d pfe_rls -t -A -c "set role service_role; select (public.record_bill_supplier_candidates(jsonb_build_object(
+  'bill_document_id','$BILL4B_ID','workspace_id','$BILL_WS_A',
+  'candidates', jsonb_build_array(jsonb_build_object('supplier_id','$BILL5_SUP','score',0.9,'match_reasons',jsonb_build_array('name_exact'))))))->>'candidates';" | tail -1)"
+BILL5_CAND="$(psql -d pfe_rls -t -A -c "select count(*) from public.bill_supplier_candidates where bill_document_id = '$BILL4B_ID' and is_current;")"
+if [ "$BILL5_REC" = "1" ] && [ "$BILL5_CAND" = "1" ]; then
+  pass "Bills Phase 5: record_bill_supplier_candidates writes the candidate set"
+else
+  fail "Bills Phase 5: candidate write wrong (rec=$BILL5_REC cand=$BILL5_CAND)"
+fi
+
+# Cross-workspace RLS.
+BILL5_B_SEES="$(as_user "$USER_B" "select count(*) from public.suppliers where workspace_id = '$BILL_WS_A';")"
+if [ "$BILL5_B_SEES" = "0" ]; then
+  pass "Bills Phase 5: a non-member cannot read another workspace's suppliers"
+else
+  fail "Bills Phase 5: RLS isolation breach on suppliers"
+fi
+
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="
 if [ "$FAIL_COUNT" -ne 0 ]; then

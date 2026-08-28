@@ -440,3 +440,91 @@ export async function getBillDuplicateCandidates(
     };
   });
 }
+
+// --- Phase 5: supplier resolution --------------------------------
+
+export type BillSupplierLink = { id: string; displayName: string } | null;
+
+export type BillSupplierCandidateRow = {
+  id: string;
+  supplier_id: string;
+  score: number;
+  match_reasons: string[];
+  displayName: string;
+  taxId: string | null;
+};
+
+export type SupplierSearchRow = {
+  id: string;
+  displayName: string;
+  taxId: string | null;
+  email: string | null;
+  score: number;
+  matchReasons: string[];
+};
+
+export async function getBillSupplierLink(
+  billDocumentId: string,
+): Promise<BillSupplierLink> {
+  const supabase = await supabaseSession();
+  const { data } = await supabase
+    .from("bill_documents")
+    .select("supplier_id, suppliers(id, display_name)")
+    .eq("id", billDocumentId)
+    .maybeSingle();
+  const s = data?.suppliers as { id: string; display_name: string } | null | undefined;
+  return s ? { id: s.id, displayName: s.display_name } : null;
+}
+
+export async function getBillSupplierCandidates(
+  billDocumentId: string,
+): Promise<BillSupplierCandidateRow[]> {
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("bill_supplier_candidates")
+    .select("id, supplier_id, score, match_reasons, suppliers(display_name, tax_id)")
+    .eq("bill_document_id", billDocumentId)
+    .eq("is_current", true)
+    .order("score", { ascending: false });
+
+  if (error) {
+    console.error("getBillSupplierCandidates failed:", error.message);
+    return [];
+  }
+  return ((data ?? []) as Array<Record<string, unknown>>).map((r) => {
+    const s = r.suppliers as { display_name: string; tax_id: string | null } | null;
+    return {
+      id: r.id as string,
+      supplier_id: r.supplier_id as string,
+      score: Number(r.score),
+      match_reasons: (r.match_reasons as string[]) ?? [],
+      displayName: s?.display_name ?? "(unknown)",
+      taxId: s?.tax_id ?? null,
+    };
+  });
+}
+
+export async function searchSuppliers(
+  workspaceId: string,
+  query: string,
+): Promise<SupplierSearchRow[]> {
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase.rpc("search_suppliers", {
+    p_workspace_id: workspaceId,
+    p_query: query,
+    p_tax_id: null,
+    p_limit: 10,
+  });
+  if (error) {
+    console.error("searchSuppliers failed:", error.message);
+    return [];
+  }
+  return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
+    id: r.id as string,
+    displayName: r.display_name as string,
+    taxId: (r.tax_id as string | null) ?? null,
+    email: (r.email as string | null) ?? null,
+    score: Number(r.score),
+    matchReasons: (r.match_reasons as string[]) ?? [],
+  }));
+}
