@@ -10,6 +10,7 @@ import {
 } from "../app/settings/connections/actions";
 import { Badge } from "./Badge";
 import { RevealedSecret } from "./RevealedSecret";
+import { ConnectionDetails, ShortcutKeyInstructions } from "./ConnectionDetails";
 import { formatDateTime } from "../lib/format";
 import type { IngestionConnectionRow } from "../lib/queries";
 
@@ -45,8 +46,10 @@ function connectionStatus(
 
 export function ConnectionItem({
   connection,
+  ingestEndpointUrl,
 }: {
   connection: IngestionConnectionRow;
+  ingestEndpointUrl: string | null;
 }) {
   const [confirmingRevoke, setConfirmingRevoke] = useState(false);
   const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
@@ -77,19 +80,7 @@ export function ConnectionItem({
         secret={revealedSecret}
         onDismiss={() => setRevealedSecret(null)}
         instructions={
-          <>
-            <p className="font-medium text-text-primary">
-              iPhone Shortcut setup
-            </p>
-            <p className="mt-1">
-              In your MTN MoMo forwarding Shortcut, set the{" "}
-              <code className="rounded bg-surface px-1 py-0.5">
-                x-ingest-key
-              </code>{" "}
-              header to the value above, then save. Existing forwarded
-              messages are unaffected.
-            </p>
-          </>
+          <ShortcutKeyInstructions endpointUrl={ingestEndpointUrl} />
         }
       />
     );
@@ -117,6 +108,13 @@ export function ConnectionItem({
           ? `Last used ${formatDateTime(connection.last_used_at)}`
           : "Never used yet"}
       </p>
+
+      {!isRevoked && (
+        <ConnectionDetails
+          endpointUrl={ingestEndpointUrl}
+          defaultOpen={!connection.last_used_at && connection.status === "active"}
+        />
+      )}
 
       {isPaused && !renaming && (
         <p className="text-xs text-text-secondary">
