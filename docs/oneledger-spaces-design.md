@@ -439,7 +439,7 @@ additive migration(s) → stacked PRs → migration-test block → e2e.
 |---|---|---|---|
 | **Q** — Foundation ✅ *migration written* | 1 | `kind='household'` + `create_household_workspace`; `financial_sources`, `source_space_links`, `raw_financial_events`, `can_view_source_in_space()` / `is_financial_source_visible()` / `owns_financial_source()`; nullable `transactions` provenance/attribution cols; `space_activity` / `space_audit_events` / `space_member_notification_prefs` / `workspace_categories` tables; **RLS refactor for `household`** (Phase C ledger loosening reverted for this kind via the source-visibility gate); backfill migration; indexes | No |
 | **R** — Security & authz ✅ *migration written* | 2 | capability layer (`space_role_has_capability` matrix + `space_member_capability_grants` + `has_space_capability()` primitive + `grant`/`revoke_space_capability` RPCs); audit-write primitives (`record_space_activity` / `record_space_audit_event`); `workspace_invites.accepted_by`; `accept_workspace_invite` / `set_member_role` / `remove_member` / `create_household_workspace` re-issued to write audit + activity rows; **14-assertion security test block** (capability matrix, grant/revoke, audit visibility, invite re-use/revoke rejection, post-removal access revocation, last-owner guard, internal-helper lockdown, service-role bypass) | No |
-| **S** — Shared ledger | 3 | **PR1 ✅:** `transaction_member_attributions` + the five sharing/attribution/reallocation RPCs. **PR2a ✅:** household creation (`/settings/workspace`), "Shared accounts" (`/settings/sources`). **PR2b ✅:** `space_member_directory` fn; transaction detail gets a "Where this came from" provenance panel + a household "Whose spending" attribution panel (shared / member / split / unassigned) + a needs-attention banner; review queue gets a "Needs attribution" section. **PR2c ✅:** household dashboard block (name header + `HouseholdSpendingCard` — spending-this-month by member, neutral framing) on `/`; upgraded Space switcher (kind-labelled list + "Create a Space" in the account menu, current-Space chip in the header). **PR2d (not started):** `/settings/sources` + attribution Playwright e2e; household **admin** member-management; "available across shared accounts" balance semantics; optional `/spaces/{id}/…` routes | Yes |
+| **S** — Shared ledger | 3 | **PR1 ✅:** `transaction_member_attributions` + the five sharing/attribution/reallocation RPCs. **PR2a ✅:** household creation (`/settings/workspace`), "Shared accounts" (`/settings/sources`). **PR2b ✅:** `space_member_directory` fn; transaction detail gets a "Where this came from" provenance panel + a household "Whose spending" attribution panel (shared / member / split / unassigned) + a needs-attention banner; review queue gets a "Needs attribution" section. **PR2c ✅:** household dashboard block (name header + `HouseholdSpendingCard` — spending-this-month by member, neutral framing) on `/`; upgraded Space switcher (kind-labelled list + "Create a Space" in the account menu, current-Space chip in the header). **PR2d ✅:** household/organization **Admin** can now manage members — `workspace_invites` RLS + `set_member_role` / `remove_member` re-issued from Owner-only to `has_space_capability(_, 'members.manage')`, with anything touching an Owner staying Owner-only and the last-owner guard intact. **PR2e (not started):** `/settings/sources` + attribution Playwright e2e; "available across shared accounts" balance semantics; optional `/spaces/{id}/…` routes | Yes |
 | **T** — Financial planning | 4 | Space-aware category scope; rule `scope_type` + deterministic precedence + explainability; shared budgets (space/category/member scopes) reusing `budget-math.ts`; threshold state-transition alerts (no per-txn spam); shared goals as first-class Space resources; per-member notification prefs | Yes |
 | **U** — Ingestion & reconciliation | 5 | `raw_financial_events` cutover for `ingest-momo` + SMS path; source routing (`is_default_target`); dedupe confidence engine + auto-merge + review cards; **statement (CSV/PDF) reconciliation** vs ledger + import summary; device management UX (rename / pause / reconnect / remove, history preserved) | Yes |
 | **V** — Reporting & intelligence | 6 | `workspace_id` scope on `report_*`; Household report template + attribution summaries; scheduler recipient filtering (exclude former members); AI Space-scope boundary + Household insights; dashboard projections | Yes |
@@ -630,6 +630,31 @@ passed / 0 failed.
 
 No migration, no schema change. `next build` ✓ compiled, `eslint` 0
 errors.
+
+### Phase S PR2d — as built (migration `20260915000000` + web)
+
+Closes the gap where the Phase R capability matrix granted an **Admin**
+`members.manage` but the actual mutation surface was still Owner-only from
+Phase C:
+
+- `workspace_invites` `select` / `insert` / `update` policies re-issued
+  from `is_workspace_member(_, 'owner')` to
+  `has_space_capability(_, 'members.manage')` (the invite `role` CHECK
+  still forbids issuing an Owner invite, so an Admin can invite at most
+  another Admin).
+- `set_member_role` / `remove_member` (`CREATE OR REPLACE`, grants and
+  audit calls unchanged): `members.manage` to act at all; **Owner-only**
+  to promote to / demote / remove an Owner; the last-owner guard is
+  unchanged.
+- `/settings/workspace` — `canManage` now includes `role === 'admin'`,
+  so an Admin sees the invite form and member controls. Owner-only
+  operations still fail server-side with the RPC's message.
+
+No privilege-counter change (re-issues only). Migration-test coverage:
+7-assertion "Phase S PR2d" block (Admin invites; Admin changes a
+non-Owner role + audit; Admin cannot promote to Owner; Admin cannot
+remove an Owner; Admin removes a plain member; a plain member still
+cannot; last-owner guard survives). Full suite: 199 passed / 0 failed.
 
 ---
 

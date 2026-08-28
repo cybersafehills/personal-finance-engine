@@ -55,7 +55,10 @@ export default async function WorkspacePage() {
     getWorkspaceInvites(workspace.id),
   ]);
 
-  const canManage = workspace.role === "owner";
+  // Owners and Admins can invite and manage members (has_space_capability
+  // 'members.manage'). Anything touching an Owner stays Owner-only,
+  // enforced server-side by set_member_role / remove_member.
+  const canManage = workspace.role === "owner" || workspace.role === "admin";
 
   return (
     <div>

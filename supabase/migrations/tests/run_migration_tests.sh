@@ -2980,6 +2980,82 @@ else
   fail "Phase S PR2b: space_member_directory wrong (member_sees=$S_DIR_MEMBER has_R=$S_DIR_HAS_R nonmember_sees=$S_DIR_NONMEMBER)"
 fi
 
+# ===========================================================================
+# Phase S PR2d: an Admin can manage members (workspace_invites RLS +
+# set_member_role / remove_member re-issued to has_space_capability), while
+# anything touching an Owner stays Owner-only. USER_R is an Admin of Q_HH
+# (promoted in the Phase R block); USER_A is the sole Owner.
+# ===========================================================================
+echo "=== Phase S PR2d: Admin member management ==="
+
+# An Admin can issue an invite (was Owner-only through Phase C).
+D_INV="$(as_user "$USER_R" "insert into public.workspace_invites (workspace_id, email, role, token_hash, token_prefix, invited_by) values ('$Q_HH', 'd-invitee@example.com', 'member', 'd-token-hash-1', 'd-pref-1', '$USER_R') returning id;")"
+if [ -n "$D_INV" ]; then
+  pass "Phase S PR2d: an Admin can create a workspace invite"
+else
+  fail "Phase S PR2d: an Admin was blocked from creating an invite"
+fi
+
+USER_D="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('d-invitee@example.com') returning id;" | head -1)"
+as_user "$USER_D" "select public.accept_workspace_invite('d-token-hash-1');" >/dev/null
+D_MEMB="$(psql -d pfe_rls -t -A -c "select id from public.workspace_memberships where workspace_id = '$Q_HH' and user_id = '$USER_D' and status = 'active';" | head -1)"
+
+# An Admin can change a non-Owner member's role, and it is audited.
+as_user "$USER_R" "select public.set_member_role('$D_MEMB', 'viewer');" >/dev/null
+D_ROLE="$(psql -d pfe_rls -t -A -c "select role from public.workspace_memberships where id = '$D_MEMB';")"
+D_ROLE_AUDIT="$(psql -d pfe_rls -t -A -c "select count(*) from public.space_audit_events where workspace_id = '$Q_HH' and event_type = 'member.role_changed' and resource_id = '$D_MEMB';")"
+if [ "$D_ROLE" = "viewer" ] && [ "$D_ROLE_AUDIT" -ge "1" ]; then
+  pass "Phase S PR2d: an Admin can change a non-Owner member's role (audited)"
+else
+  fail "Phase S PR2d: Admin role change wrong (role=$D_ROLE audit=$D_ROLE_AUDIT)"
+fi
+
+# An Admin cannot promote anyone to Owner.
+if as_user "$USER_R" "select public.set_member_role('$D_MEMB', 'owner');" >/dev/null 2>$ARTIFACT_DIR/pfe_d_promote.log; then
+  fail "Phase S PR2d: an Admin promoted a member to Owner"
+else
+  pass "Phase S PR2d: an Admin cannot promote a member to Owner"
+fi
+rm -f $ARTIFACT_DIR/pfe_d_promote.log
+
+# An Admin cannot remove the Owner.
+A_MEMB="$(psql -d pfe_rls -t -A -c "select id from public.workspace_memberships where workspace_id = '$Q_HH' and user_id = '$USER_A' and role = 'owner' and status = 'active';" | head -1)"
+if as_user "$USER_R" "select public.remove_member('$A_MEMB');" >/dev/null 2>$ARTIFACT_DIR/pfe_d_rmowner.log; then
+  fail "Phase S PR2d: an Admin removed the Owner"
+else
+  pass "Phase S PR2d: an Admin cannot remove an Owner"
+fi
+rm -f $ARTIFACT_DIR/pfe_d_rmowner.log
+
+# An Admin can remove a plain member.
+as_user "$USER_R" "select public.remove_member('$D_MEMB');" >/dev/null
+D_STATUS="$(psql -d pfe_rls -t -A -c "select status from public.workspace_memberships where id = '$D_MEMB';")"
+if [ "$D_STATUS" = "removed" ]; then
+  pass "Phase S PR2d: an Admin can remove a non-Owner member"
+else
+  fail "Phase S PR2d: Admin removal of a member did not take effect (status=$D_STATUS)"
+fi
+
+# A plain member still cannot manage members. Bring one in via USER_D's
+# re-invite path is spent; use a fresh invite + user.
+as_user "$USER_R" "insert into public.workspace_invites (workspace_id, email, role, token_hash, token_prefix, invited_by) values ('$Q_HH', 'e-invitee@example.com', 'member', 'e-token-hash-1', 'e-pref-1', '$USER_R');" >/dev/null
+USER_E="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('e-invitee@example.com') returning id;" | head -1)"
+as_user "$USER_E" "select public.accept_workspace_invite('e-token-hash-1');" >/dev/null
+if as_user "$USER_E" "insert into public.workspace_invites (workspace_id, email, role, token_hash, token_prefix, invited_by) values ('$Q_HH', 'x@example.com', 'member', 'x-hash', 'x-pref', '$USER_E');" >/dev/null 2>$ARTIFACT_DIR/pfe_e_inv.log; then
+  fail "Phase S PR2d: a plain member created an invite"
+else
+  pass "Phase S PR2d: a plain member still cannot create invites (members.manage required)"
+fi
+rm -f $ARTIFACT_DIR/pfe_e_inv.log
+
+# The last-owner guard survives the re-issue.
+if as_user "$USER_A" "select public.set_member_role('$A_MEMB', 'member');" >/dev/null 2>$ARTIFACT_DIR/pfe_d_lastowner.log; then
+  fail "Phase S PR2d: the sole Owner demoted themselves after the re-issue"
+else
+  pass "Phase S PR2d: set_member_role still refuses to demote the final Owner"
+fi
+rm -f $ARTIFACT_DIR/pfe_d_lastowner.log
+
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="
 if [ "$FAIL_COUNT" -ne 0 ]; then
