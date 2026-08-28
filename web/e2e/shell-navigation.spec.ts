@@ -81,7 +81,10 @@ test.describe("phone bottom bar", () => {
     await expect(page).toHaveURL(/\/categories$/);
     await expect(sheet).toBeHidden();
 
-    // Reopen, Esc closes and focus returns to the trigger.
+    // Reopen, Esc closes and focus returns to the trigger. Wait for the
+    // bottom bar to re-render on the new route before clicking again - a
+    // reopen fired mid-transition gets swallowed and the dialog never opens.
+    await expect(moreBtn).toBeVisible();
     await moreBtn.click();
     await expect(page.getByRole("dialog", { name: "More" })).toBeVisible();
     await page.keyboard.press("Escape");

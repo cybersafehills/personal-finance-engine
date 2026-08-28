@@ -9,12 +9,18 @@ import AxeBuilder from "@axe-core/playwright";
 // Assumes ASSISTED_PAY_ENABLED is on (default) and the Phase M seed's
 // `mtn-momo-send` code is present (it is, on every `supabase start`).
 
-async function prepareAPersonPayment(page: import("@playwright/test").Page) {
+// Returns the new intent's id (the tail of the /pay/<uuid> URL it lands
+// on) so callers can scope later assertions to this exact intent rather
+// than a `.first()` match across the shared e2e user's whole history.
+async function prepareAPersonPayment(
+  page: import("@playwright/test").Page,
+): Promise<string> {
   await page.goto("/pay/new/pay_person");
   await page.getByPlaceholder("Phone number, e.g. 0781234567").fill("0781234567");
   await page.getByLabel(/^Amount/).fill("5000");
   await page.getByRole("button", { name: "Prepare payment" }).click();
   await expect(page).toHaveURL(/\/pay\/[0-9a-f-]{36}$/);
+  return new URL(page.url()).pathname.split("/").pop()!;
 }
 
 test("the launcher's payment actions are live and route to a typed draft", async ({ page }) => {
@@ -56,7 +62,7 @@ test("manual confirmation is labelled 'Manually confirmed', never a verified suc
   context,
 }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-  await prepareAPersonPayment(page);
+  const intentId = await prepareAPersonPayment(page);
   await page.getByRole("button", { name: "Copy code" }).click();
   await expect(page.getByText("Awaiting verification", { exact: true })).toBeVisible();
 
@@ -64,8 +70,12 @@ test("manual confirmation is labelled 'Manually confirmed', never a verified suc
   await expect(page.getByText("Manually confirmed")).toBeVisible();
   await expect(page.getByText(/hasn't independently verified/)).toBeVisible();
 
+  // The activity list uses the same honest label. Scope to this intent's
+  // own row - the shared e2e user accumulates intents across the suite,
+  // so a bare `.first()` match on "Manually confirmed" is order-dependent.
   await page.goto("/pay/activity");
-  await expect(page.getByText("Manually confirmed").first()).toBeVisible();
+  const row = page.locator(`li:has(a[href="/pay/${intentId}"])`);
+  await expect(row.getByText("Manually confirmed")).toBeVisible();
 });
 
 test("Pay again creates a fresh editable draft with a new id", async ({ page, context }) => {
