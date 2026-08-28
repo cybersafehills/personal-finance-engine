@@ -440,7 +440,7 @@ additive migration(s) → stacked PRs → migration-test block → e2e.
 | **Q** — Foundation ✅ *migration written* | 1 | `kind='household'` + `create_household_workspace`; `financial_sources`, `source_space_links`, `raw_financial_events`, `can_view_source_in_space()` / `is_financial_source_visible()` / `owns_financial_source()`; nullable `transactions` provenance/attribution cols; `space_activity` / `space_audit_events` / `space_member_notification_prefs` / `workspace_categories` tables; **RLS refactor for `household`** (Phase C ledger loosening reverted for this kind via the source-visibility gate); backfill migration; indexes | No |
 | **R** — Security & authz ✅ *migration written* | 2 | capability layer (`space_role_has_capability` matrix + `space_member_capability_grants` + `has_space_capability()` primitive + `grant`/`revoke_space_capability` RPCs); audit-write primitives (`record_space_activity` / `record_space_audit_event`); `workspace_invites.accepted_by`; `accept_workspace_invite` / `set_member_role` / `remove_member` / `create_household_workspace` re-issued to write audit + activity rows; **14-assertion security test block** (capability matrix, grant/revoke, audit visibility, invite re-use/revoke rejection, post-removal access revocation, last-owner guard, internal-helper lockdown, service-role bypass) | No |
 | **S** — Shared ledger | 3 | **PR1 ✅:** `transaction_member_attributions` + the five sharing/attribution/reallocation RPCs. **PR2a ✅:** household creation (`/settings/workspace`), "Shared accounts" (`/settings/sources`). **PR2b ✅:** `space_member_directory` fn; transaction detail gets a "Where this came from" provenance panel + a household "Whose spending" attribution panel (shared / member / split / unassigned) + a needs-attention banner; review queue gets a "Needs attribution" section. **PR2c ✅:** household dashboard block (name header + `HouseholdSpendingCard` — spending-this-month by member, neutral framing) on `/`; upgraded Space switcher (kind-labelled list + "Create a Space" in the account menu, current-Space chip in the header). **PR2d ✅:** household/organization **Admin** can now manage members — `workspace_invites` RLS + `set_member_role` / `remove_member` re-issued from Owner-only to `has_space_capability(_, 'members.manage')`, with anything touching an Owner staying Owner-only and the last-owner guard intact. **PR2e ✅:** `e2e/spaces-household.spec.ts` — single-user Playwright flow (create household → share a source via `/settings/sources` → dashboard household block → resolve an unattributed transaction on `/transactions/[id]`) + a `/settings/sources` a11y check. **Phase S essentially complete.** Deferred to a later refinement: "available across shared accounts" balance semantics; optional `/spaces/{id}/…` routes; a two-user attribution e2e (the suite currently shares one identity) | Yes |
-| **T** — Financial planning | 4 | **PR1 ✅:** per-member notification prefs — `should_notify()` / `notification_event_catalog()` + `/settings/notifications`. **PR2 ✅:** budget threshold-crossing state — `budget_threshold_state` + `record_budget_threshold_crossing()` (one alert per upward crossing, not per transaction; service-role-only, Phase V consumes it). **PR3 ✅:** shared goals — `financial_goals` / `goal_contributions` writes moved to the capability model (Admin can manage goals; any member can contribute), `financial_goals.linked_account_id` / `.monthly_contribution_target_minor`, `goal_participants` table, `set_goal_participants()` + `goal_progress()` (the §26 computed metrics). **PR3b ✅:** goal detail page gets a `GoalProgressCard` (remaining / needed-per-month / observed rate / projected completion / on-track) + `GoalParticipants` (participant list; owner/admin edit via a member checklist → `set_goal_participants`). **PR4+ (not started):** Space-aware category scope; rule `scope_type` + deterministic precedence + explainability | Yes |
+| **T** — Financial planning | 4 | **PR1 ✅:** per-member notification prefs — `should_notify()` / `notification_event_catalog()` + `/settings/notifications`. **PR2 ✅:** budget threshold-crossing state — `budget_threshold_state` + `record_budget_threshold_crossing()` (one alert per upward crossing, not per transaction; service-role-only, Phase V consumes it). **PR3 ✅:** shared goals — `financial_goals` / `goal_contributions` writes moved to the capability model (Admin can manage goals; any member can contribute), `financial_goals.linked_account_id` / `.monthly_contribution_target_minor`, `goal_participants` table, `set_goal_participants()` + `goal_progress()` (the §26 computed metrics). **PR3b ✅:** goal detail page gets a `GoalProgressCard` (remaining / needed-per-month / observed rate / projected completion / on-track) + `GoalParticipants` (participant list; owner/admin edit via a member checklist → `set_goal_participants`). **PR4 ✅:** Space category vocabulary — `workspace_categories` writes routed through `upsert_workspace_category` / `set_workspace_category_archived` (`category.manage`-gated, audited; direct authenticated writes revoked); `/categories` gets a "This Space's categories" panel (owner/admin add/archive/restore) and the category-correction form offers the Space labels ∪ seen names as a `<datalist>`. **PR5 (not started):** rule `scope_type` + deterministic precedence + explainability (cross-cutting into the ingestion `policy-engine.ts` — deferred to Phase U's ingestion cutover) | Yes |
 | **U** — Ingestion & reconciliation | 5 | `raw_financial_events` cutover for `ingest-momo` + SMS path; source routing (`is_default_target`); dedupe confidence engine + auto-merge + review cards; **statement (CSV/PDF) reconciliation** vs ledger + import summary; device management UX (rename / pause / reconnect / remove, history preserved) | Yes |
 | **V** — Reporting & intelligence | 6 | `workspace_id` scope on `report_*`; Household report template + attribution summaries; scheduler recipient filtering (exclude former members); AI Space-scope boundary + Household insights; dashboard projections | Yes |
 | **W** — UX hardening & production readiness | 7 | Responsive + a11y pass (no colour-only budget status); loading/empty/error/permission-denied/removed-member/expired-invite states; onboarding + help/tooltip/seeded-content updates; analytics events; monitoring (migration failures, RLS denials, reconciliation failures, dashboard latency); feature-flag rollout (internal → beta → GA); migration validation on realistic data; security + performance review | Yes |
@@ -795,6 +795,34 @@ participant picker) is PR3b.
 New queries: `getGoalProgress`, `getGoalCollaboration` in
 `lib/queries.ts`; `setGoalParticipants` action. No migration, no schema
 change. `next build` ✓ compiled, `eslint` 0 errors.
+
+## 11e. Phase T PR4 — as built (migration `20260919000000` + web)
+
+`workspace_categories` (Phase Q) had a table but no write RPCs and no
+consumer. This makes it a real per-Space *vocabulary* — add / relabel /
+archive preferred names, offered as suggestions. Categories on
+transactions stay free-text (§27).
+
+- **Writes routed through RPCs** (matching the `space_activity` /
+  `goal_participants` pattern): `workspace_categories_insert_admin` /
+  `_update_admin` dropped, `authenticated`'s `insert`/`update` grants
+  revoked (SELECT stays). `upsert_workspace_category(workspace, key,
+  label, parent_key)` and `set_workspace_category_archived(workspace,
+  key, archived)` — both `category.manage`-gated, audited
+  (`category.upserted` / `.archived` / `.restored`); re-adding an
+  archived key un-archives it; key validated `^[a-z0-9][a-z0-9_-]{0,48}$`.
+- **`/categories`** gains a "This Space's categories" panel (shown for
+  household / organization Spaces): the list, plus an add field and
+  archive/restore for an Owner/Admin. `getSpaceCategoryManagement()`.
+- **Category-correction form** gets a `<datalist>` — the Space's
+  non-archived labels first, then any category name already seen on a
+  transaction (`getCategorySuggestions()`). Free typing still works.
+
+`authenticated` table grants → 115 (−2, the revoked insert/update);
+`authenticated` function count → 67 (+`upsert_workspace_category` +
+`set_workspace_category_archived`); table count unchanged. 6-assertion
+"Phase T PR4" block. Full suite: 218 passed / 0 failed. `next build` ✓,
+`eslint` 0 errors.
 
 ---
 

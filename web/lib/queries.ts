@@ -440,6 +440,95 @@ export async function getCategoryTotals(): Promise<CategoryTotal[]> {
     .sort((a, b) => b.totalRwf - a.totalRwf);
 }
 
+// ===========================================================================
+// Space category vocabulary (Phase T PR4). workspace_categories +
+// upsert_workspace_category / set_workspace_category_archived live in
+// supabase/migrations/20260919000000_phase_t_workspace_categories.sql.
+// Free-text category names on transactions are unchanged; this is a
+// per-Space list of preferred names, offered as suggestions.
+// ===========================================================================
+
+export type SpaceCategory = {
+  key: string;
+  label: string;
+  parentKey: string | null;
+  isArchived: boolean;
+};
+
+export type SpaceCategoryManagement = {
+  workspaceId: string;
+  canManage: boolean;
+  categories: SpaceCategory[];
+};
+
+/**
+ * The active Space's category vocabulary + whether the caller can edit
+ * it. Returns null for a Personal Space (no shared vocabulary there).
+ */
+export async function getSpaceCategoryManagement(
+  includeArchived = false,
+): Promise<SpaceCategoryManagement | null> {
+  const workspace = await getActiveWorkspace();
+  if (!workspace || workspace.kind === "personal") return null;
+
+  const supabase = await supabaseSession();
+  let query = supabase
+    .from("workspace_categories")
+    .select("key, label, parent_key, is_archived")
+    .eq("workspace_id", workspace.id)
+    .order("label", { ascending: true });
+  if (!includeArchived) query = query.eq("is_archived", false);
+
+  const { data, error } = await query;
+  if (error) {
+    console.error("getSpaceCategoryManagement failed:", error.message);
+    return null;
+  }
+
+  return {
+    workspaceId: workspace.id,
+    canManage: workspace.role === "owner" || workspace.role === "admin",
+    categories: (
+      (data ?? []) as unknown as Array<{
+        key: string;
+        label: string;
+        parent_key: string | null;
+        is_archived: boolean;
+      }>
+    ).map((r) => ({
+      key: r.key,
+      label: r.label,
+      parentKey: r.parent_key,
+      isArchived: r.is_archived,
+    })),
+  };
+}
+
+/**
+ * Category-name suggestions for the correction form: the active Space's
+ * (non-archived) preferred labels first, then any category name already
+ * seen on a transaction. Deduplicated, order-preserving.
+ */
+export async function getCategorySuggestions(): Promise<string[]> {
+  const [spaceMgmt, totals] = await Promise.all([
+    getSpaceCategoryManagement(false),
+    getCategoryTotals(),
+  ]);
+
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const add = (name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed || trimmed === "Uncategorized" || seen.has(trimmed)) return;
+    seen.add(trimmed);
+    out.push(trimmed);
+  };
+
+  for (const c of spaceMgmt?.categories ?? []) add(c.label);
+  for (const t of totals) add(t.category);
+  return out;
+}
+
 /**
  * The workspace every workspace-scoped read/write in this app should use
  * for the current request - the caller's explicitly chosen workspace if

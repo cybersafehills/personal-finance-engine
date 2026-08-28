@@ -668,11 +668,14 @@ fi
 # only - written exclusively by set_transaction_attribution). 115 + 1 = 116.
 # Phase T PR3 (20260918000000) adds goal_participants (select only -
 # written exclusively by set_goal_participants). 116 + 1 = 117.
+# Phase T PR4 (20260919000000) routes workspace_categories writes through
+# RPCs and revokes authenticated's insert + update grants (keeps select).
+# 117 - 2 = 115.
 AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and grantee = 'authenticated';")"
-if [ "$AUTHENTICATED_GRANT_COUNT" = "117" ]; then
-  pass "authenticated holds exactly the 117 table grants expected, no more"
+if [ "$AUTHENTICATED_GRANT_COUNT" = "115" ]; then
+  pass "authenticated holds exactly the 115 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 117 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 115 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -796,11 +799,13 @@ fi
 # goal_progress. Its budget_bucket_for_percent counterpart is Phase T PR2;
 # nothing else here is authenticated-callable
 # (record_budget_threshold_crossing is service-role-only). = 65.
+# Phase T PR4 (20260919000000) adds upsert_workspace_category and
+# set_workspace_category_archived (both category.manage-gated). = 67.
 AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname = 'authenticated' where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "65" ]; then
-  pass "authenticated holds EXECUTE on exactly the 65 functions expected, no more"
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "67" ]; then
+  pass "authenticated holds EXECUTE on exactly the 67 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 65 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 67 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -3219,6 +3224,67 @@ if [ "$T3_PROG" = "200000/20.0" ] && [ "$T3_PROG_NONMEMBER" = "0" ]; then
   pass "Phase T PR3: goal_progress returns the computed metrics to a member and nothing to a non-member"
 else
   fail "Phase T PR3: goal_progress wrong (member='$T3_PROG' nonmember_rows=$T3_PROG_NONMEMBER)"
+fi
+
+# ===========================================================================
+# Phase T PR4: Space category vocabulary. workspace_categories writes go
+# through upsert_workspace_category / set_workspace_category_archived
+# (category.manage-gated, audited); direct authenticated writes are gone.
+# Q_HH: USER_A owner, USER_R admin, USER_E member.
+# ===========================================================================
+echo "=== Phase T PR4: Space category vocabulary ==="
+
+# An Admin can add a Space category via the RPC; it's audited.
+as_user "$USER_R" "select public.upsert_workspace_category('$Q_HH', 'weekend_food', 'Weekend food', null);" >/dev/null
+T4_ADDED="$(psql -d pfe_rls -t -A -c "select count(*) from public.workspace_categories where workspace_id = '$Q_HH' and key = 'weekend_food' and label = 'Weekend food' and not is_archived;")"
+T4_AUDIT="$(psql -d pfe_rls -t -A -c "select count(*) from public.space_audit_events where workspace_id = '$Q_HH' and event_type = 'category.upserted';")"
+if [ "$T4_ADDED" = "1" ] && [ "$T4_AUDIT" -ge "1" ]; then
+  pass "Phase T PR4: upsert_workspace_category adds a category and writes an audit event"
+else
+  fail "Phase T PR4: category upsert wrong (added=$T4_ADDED audit=$T4_AUDIT)"
+fi
+
+# A plain member cannot.
+if as_user "$USER_E" "select public.upsert_workspace_category('$Q_HH', 'nope', 'Nope', null);" >/dev/null 2>$ARTIFACT_DIR/pfe_t4_m.log; then
+  fail "Phase T PR4: a plain member added a Space category"
+else
+  pass "Phase T PR4: upsert_workspace_category refuses a caller without category.manage"
+fi
+rm -f $ARTIFACT_DIR/pfe_t4_m.log
+
+# A malformed key is rejected.
+if as_user "$USER_R" "select public.upsert_workspace_category('$Q_HH', 'Bad Key!', 'Bad', null);" >/dev/null 2>$ARTIFACT_DIR/pfe_t4_k.log; then
+  fail "Phase T PR4: a malformed category key was accepted"
+else
+  pass "Phase T PR4: upsert_workspace_category validates the key format"
+fi
+rm -f $ARTIFACT_DIR/pfe_t4_k.log
+
+# Direct authenticated writes to workspace_categories are gone (RPC-only).
+if as_user "$USER_R" "insert into public.workspace_categories (workspace_id, key, label) values ('$Q_HH', 'direct', 'Direct');" >/dev/null 2>$ARTIFACT_DIR/pfe_t4_d.log; then
+  fail "Phase T PR4: an Admin wrote workspace_categories directly (should be RPC-only now)"
+else
+  pass "Phase T PR4: direct authenticated writes to workspace_categories are revoked"
+fi
+rm -f $ARTIFACT_DIR/pfe_t4_d.log
+
+# Archive then restore; re-upserting an archived key un-archives it.
+as_user "$USER_R" "select public.set_workspace_category_archived('$Q_HH', 'weekend_food', true);" >/dev/null
+T4_ARCHIVED="$(psql -d pfe_rls -t -A -c "select is_archived from public.workspace_categories where workspace_id = '$Q_HH' and key = 'weekend_food';")"
+as_user "$USER_R" "select public.upsert_workspace_category('$Q_HH', 'weekend_food', 'Weekend food', null);" >/dev/null
+T4_UNARCHIVED="$(psql -d pfe_rls -t -A -c "select is_archived from public.workspace_categories where workspace_id = '$Q_HH' and key = 'weekend_food';")"
+if [ "$T4_ARCHIVED" = "t" ] && [ "$T4_UNARCHIVED" = "f" ]; then
+  pass "Phase T PR4: a category can be archived, and re-upserting its key restores it"
+else
+  fail "Phase T PR4: archive/restore wrong (archived=$T4_ARCHIVED after_reupsert=$T4_UNARCHIVED)"
+fi
+
+# A member can still read the Space's category list.
+T4_MEMBER_SEES="$(as_user "$USER_E" "select count(*) from public.workspace_categories where workspace_id = '$Q_HH';")"
+if [ "$T4_MEMBER_SEES" -ge "1" ]; then
+  pass "Phase T PR4: any member can read the Space's category vocabulary"
+else
+  fail "Phase T PR4: a member could not read workspace_categories (got $T4_MEMBER_SEES)"
 fi
 
 echo ""

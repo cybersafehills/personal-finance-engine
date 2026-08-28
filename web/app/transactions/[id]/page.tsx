@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import {
   getAuthUserId,
   getCategoryHistory,
+  getCategorySuggestions,
   getSpaceMemberDirectory,
   getTransactionById,
   getTransactionSpaceContext,
@@ -57,6 +58,7 @@ export default async function TransactionDetailPage({
   const paymentLink = await getPaymentLinkForTransaction(id);
   const categoryHistory = await getCategoryHistory(id);
   const latestDecision = categoryHistory[0] ?? null;
+  const categorySuggestions = await getCategorySuggestions();
 
   const spaceContext = await getTransactionSpaceContext(id);
   const isHousehold = spaceContext?.workspaceKind === "household";
@@ -242,6 +244,7 @@ export default async function TransactionDetailPage({
           currentCategory={transaction.category}
           currentSubcategory={transaction.subcategory}
           counterpartyName={transaction.counterparty_name}
+          categorySuggestions={categorySuggestions}
         />
         {categoryHistory.length > 1 && (
           <div className="mt-3 border-t border-border-subtle pt-3">
