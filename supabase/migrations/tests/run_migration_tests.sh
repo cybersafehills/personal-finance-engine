@@ -592,7 +592,9 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # - 70 tables, 69 with RLS.
 # Phase T PR3 (20260919000000) adds goal_participants (RLS enabled,
 # SELECT-only for authenticated) - 71 tables, 70 with RLS.
-if [ "$TABLE_COUNT" = "71" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Phase V PR1 (20261001000000) adds notifications (RLS enabled,
+# SELECT-own for authenticated) - 72 tables, 71 with RLS.
+if [ "$TABLE_COUNT" = "72" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -676,11 +678,13 @@ fi
 # Phase T PR4 (20260920000000) routes workspace_categories writes through
 # RPCs and revokes authenticated's insert + update grants (keeps select).
 # 117 - 2 = 115.
+# Phase V PR1 (20261001000000) adds notifications with a SELECT-only grant
+# for authenticated. 115 + 1 = 116.
 AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and grantee = 'authenticated';")"
-if [ "$AUTHENTICATED_GRANT_COUNT" = "115" ]; then
-  pass "authenticated holds exactly the 115 table grants expected, no more"
+if [ "$AUTHENTICATED_GRANT_COUNT" = "116" ]; then
+  pass "authenticated holds exactly the 116 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 115 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 116 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -814,11 +818,14 @@ fi
 # feed) and dismiss_possible_duplicate ("not a duplicate"). = 71.
 # Phase U PR7 (20260925000000) adds import_statement_transactions (the
 # generic-CSV statement import write path). = 72.
+# Phase V PR1 (20261001000000) adds mark_notification_read,
+# mark_all_notifications_read, unread_notification_count. enqueue_notification
+# is internal (no authenticated grant). = 75.
 AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname = 'authenticated' where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "72" ]; then
-  pass "authenticated holds EXECUTE on exactly the 72 functions expected, no more"
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "75" ]; then
+  pass "authenticated holds EXECUTE on exactly the 75 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 72 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 75 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -3608,6 +3615,79 @@ else
   pass "Phase U PR7: import_statement_transactions refuses a caller who does not own the source"
 fi
 rm -f $ARTIFACT_DIR/pfe_u_pr7.log
+
+# ===========================================================================
+# Phase V PR1: notification delivery spine (notifications table +
+# enqueue_notification + mark-read RPCs, wired into accept_workspace_invite
+# and remove_member). Fresh household V_HH so there is no prior noise.
+# ===========================================================================
+echo "=== Phase V PR1: notification delivery ==="
+
+V_HH="$(as_user "$USER_A" "select public.create_household_workspace('Phase V Household');")"
+V_USER="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('v-invitee@example.com') returning id;" | head -1)"
+
+# USER_R accepts an invite into V_HH -> member.joined fires for the
+# members who are NOT the joiner (just USER_A). member.joined is
+# security-notable so both channels always deliver: 1 in_app + 1 email.
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.workspace_invites (workspace_id, email, role, token_hash, token_prefix, invited_by) values ('$V_HH', 'r-invitee@example.com', 'member', 'v-token-1', 'v-pref-1', '$USER_A');" >/dev/null
+as_user "$USER_R" "select public.accept_workspace_invite('v-token-1');" >/dev/null
+
+V_A_INAPP="$(psql -d pfe_rls -t -A -c "select count(*) from public.notifications where workspace_id = '$V_HH' and user_id = '$USER_A' and event_key = 'member.joined' and channel = 'in_app';")"
+V_A_EMAIL="$(psql -d pfe_rls -t -A -c "select count(*) from public.notifications where workspace_id = '$V_HH' and user_id = '$USER_A' and event_key = 'member.joined' and channel = 'email' and delivered_at is null;")"
+V_R_SELF="$(psql -d pfe_rls -t -A -c "select count(*) from public.notifications where workspace_id = '$V_HH' and user_id = '$USER_R' and event_key = 'member.joined';")"
+if [ "$V_A_INAPP" = "1" ] && [ "$V_A_EMAIL" = "1" ] && [ "$V_R_SELF" = "0" ]; then
+  pass "Phase V PR1: accept_workspace_invite enqueues member.joined to the other members (in_app + pending email), never to the joiner"
+else
+  fail "Phase V PR1: join fan-out wrong (A in_app=$V_A_INAPP A email=$V_A_EMAIL R self=$V_R_SELF)"
+fi
+
+# unread_notification_count + mark_notification_read are own-scoped.
+V_A_UNREAD_BEFORE="$(as_user "$USER_A" "select public.unread_notification_count();")"
+V_NOTIF_ID="$(psql -d pfe_rls -t -A -c "select id from public.notifications where workspace_id = '$V_HH' and user_id = '$USER_A' and channel = 'in_app' limit 1;" | head -1)"
+# USER_R calling mark_notification_read on USER_A's row is a silent no-op.
+as_user "$USER_R" "select public.mark_notification_read('$V_NOTIF_ID');" >/dev/null
+V_STILL_UNREAD="$(psql -d pfe_rls -t -A -c "select read_at is null from public.notifications where id = '$V_NOTIF_ID';" | head -1)"
+# USER_A marking their own row does clear it.
+as_user "$USER_A" "select public.mark_notification_read('$V_NOTIF_ID');" >/dev/null
+V_NOW_READ="$(psql -d pfe_rls -t -A -c "select read_at is not null from public.notifications where id = '$V_NOTIF_ID';" | head -1)"
+V_A_UNREAD_AFTER="$(as_user "$USER_A" "select public.unread_notification_count();")"
+if [ "$V_STILL_UNREAD" = "t" ] && [ "$V_NOW_READ" = "t" ] && [ "$V_A_UNREAD_AFTER" = "$((V_A_UNREAD_BEFORE - 1))" ]; then
+  pass "Phase V PR1: mark_notification_read only clears the caller's own row; unread_notification_count reflects it"
+else
+  fail "Phase V PR1: mark-read scoping wrong (still_unread_after_R=$V_STILL_UNREAD now_read=$V_NOW_READ unread $V_A_UNREAD_BEFORE -> $V_A_UNREAD_AFTER)"
+fi
+
+# remove_member fans member.removed out to the remaining members (not the
+# removed user). USER_V joins then USER_A removes them.
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.workspace_invites (workspace_id, email, role, token_hash, token_prefix, invited_by) values ('$V_HH', 'v-invitee@example.com', 'member', 'v-token-2', 'v-pref-2', '$USER_A');" >/dev/null
+as_user "$V_USER" "select public.accept_workspace_invite('v-token-2');" >/dev/null
+V_MEMB="$(psql -d pfe_rls -t -A -c "select id from public.workspace_memberships where workspace_id = '$V_HH' and user_id = '$V_USER' and status = 'active';" | head -1)"
+as_user "$USER_A" "select public.remove_member('$V_MEMB');" >/dev/null
+
+V_REMOVED_TO_R="$(psql -d pfe_rls -t -A -c "select count(*) from public.notifications where workspace_id = '$V_HH' and user_id = '$USER_R' and event_key = 'member.removed' and channel = 'in_app';")"
+V_REMOVED_TO_SELF="$(psql -d pfe_rls -t -A -c "select count(*) from public.notifications where workspace_id = '$V_HH' and user_id = '$V_USER' and event_key = 'member.removed';")"
+if [ "$V_REMOVED_TO_R" = "1" ] && [ "$V_REMOVED_TO_SELF" = "0" ]; then
+  pass "Phase V PR1: remove_member enqueues member.removed to the remaining members, never to the removed user"
+else
+  fail "Phase V PR1: removal fan-out wrong (to R=$V_REMOVED_TO_R to removed=$V_REMOVED_TO_SELF)"
+fi
+
+# mark_all_notifications_read clears the caller's unread in_app for a Space.
+V_R_CLEARED="$(as_user "$USER_R" "select public.mark_all_notifications_read('$V_HH');")"
+V_R_UNREAD="$(psql -d pfe_rls -t -A -c "select count(*) from public.notifications where workspace_id = '$V_HH' and user_id = '$USER_R' and channel = 'in_app' and read_at is null;")"
+if [ "$V_R_CLEARED" -ge 1 ] && [ "$V_R_UNREAD" = "0" ]; then
+  pass "Phase V PR1: mark_all_notifications_read clears every unread in_app row for the caller in that Space"
+else
+  fail "Phase V PR1: mark_all wrong (cleared=$V_R_CLEARED remaining unread=$V_R_UNREAD)"
+fi
+
+# enqueue_notification is internal - not authenticated-callable.
+if as_user "$USER_A" "select public.enqueue_notification('$V_HH', null, null, 'member.joined', 'x', null, null, null, '{}'::jsonb);" >/dev/null 2>$ARTIFACT_DIR/pfe_v_pr1.log; then
+  fail "Phase V PR1: enqueue_notification was callable by an authenticated user"
+else
+  pass "Phase V PR1: enqueue_notification is not authenticated-callable (internal producer helper)"
+fi
+rm -f $ARTIFACT_DIR/pfe_v_pr1.log
 
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="
