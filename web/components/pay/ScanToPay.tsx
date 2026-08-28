@@ -12,18 +12,29 @@ import {
   isBarcodeDetectorSupported,
 } from "../../lib/pay/scan/decode.client";
 import { formatScanAmount } from "../../lib/pay/scan/money";
-import { classifyScannedCode, type ClassifyScanResult } from "../../app/pay/scan/actions";
-import { QrScanIcon } from "../icons";
+import { scanTelHref } from "../../lib/pay/scan/handoff";
+import { buildTelHref, detectDialerCapability } from "../../lib/ussd/capability";
+import {
+  classifyScannedCode,
+  prepareScanHandoff,
+  recordScanHandoff,
+  type ClassifyScanResult,
+  type PrepareScanHandoffResult,
+} from "../../app/pay/scan/actions";
+import { CopyIcon, PayIcon, QrScanIcon } from "../icons";
+import { PaymentQr } from "./PaymentQr";
 
 const t = messages().pay.scan;
 
 /**
- * Phase R1 + R2 - the "Scan to pay" scanner. It opens the rear camera,
+ * Phases R1-R3 - the "Scan to pay" scanner. It opens the rear camera,
  * models every permission / device failure, decodes a QR with the native
- * `BarcodeDetector` (camera frames or an uploaded image), and classifies
- * the payload on the server. It STOPS at "here's what we read" - the
- * full review screen and the external hand-off are R3, and the copy
- * says so.
+ * `BarcodeDetector` (camera frames or an uploaded image), classifies the
+ * payload on the server, shows a mandatory review, and - only on an
+ * explicit tap - creates a payment_intents draft (source=qr_scan) and
+ * opens the USSD instruction on the device. It never dials on detection,
+ * and it never claims the payment settled (the terminal state is
+ * "Awaiting confirmation").
  *
  * Guarantees:
  *  - getUserMedia is only ever called from here, after an explicit
@@ -33,8 +44,10 @@ const t = messages().pay.scan;
  *    in-flight one.
  *  - Camera + decode state is conveyed as text (an aria-live status
  *    line), not by the video pixels alone.
- *  - The decoded string is classified through the shared, feature-gated
- *    pipeline. Nothing is dialled or handed off.
+ *  - The decoded string is classified AND prepared for hand-off through
+ *    the shared, feature-gated server pipeline, re-parsed from the raw
+ *    string - never a client-built model. R3 continues verified USSD
+ *    instructions only.
  */
 
 type ScanErrorKind =
@@ -117,6 +130,10 @@ export default function ScanToPay({ onBack }: { onBack: () => void }) {
   const [multipleInView, setMultipleInView] = useState(false);
   const [imageMsg, setImageMsg] = useState<string | null>(null);
   const [result, setResult] = useState<ClassifyScanResult | null>(null);
+  // The raw decoded string, kept so the review can ask the server to
+  // prepare a hand-off by re-parsing it authoritatively (never a
+  // client-built model).
+  const [scannedRaw, setScannedRaw] = useState<string | null>(null);
 
   const statusId = useId();
   const guidanceId = useId();
@@ -270,6 +287,7 @@ export default function ScanToPay({ onBack }: { onBack: () => void }) {
       if (mountedRef.current) {
         setMultipleInView(false);
         setImageMsg(null);
+        setScannedRaw(value);
         setPhase("decoding");
       }
       let res: ClassifyScanResult;
@@ -289,6 +307,7 @@ export default function ScanToPay({ onBack }: { onBack: () => void }) {
   const scanAgain = useCallback(() => {
     trackScanEvent("scan_again");
     setResult(null);
+    setScannedRaw(null);
     setImageMsg(null);
     setMultipleInView(false);
     busyRef.current = false;
@@ -426,7 +445,12 @@ export default function ScanToPay({ onBack }: { onBack: () => void }) {
       )}
 
       {phase === "result" ? (
-        <ScanResultView result={result} onScanAgain={scanAgain} onBack={onBack} />
+        <ScanResultView
+          result={result}
+          raw={scannedRaw}
+          onScanAgain={scanAgain}
+          onBack={onBack}
+        />
       ) : phase === "error" ? (
         <div
           className="flex flex-col items-center gap-3 rounded-card border border-border-subtle bg-background px-4 py-6 text-center"
@@ -540,16 +564,67 @@ export default function ScanToPay({ onBack }: { onBack: () => void }) {
   );
 }
 
+function ScanNotice({
+  children,
+  onScanAgain,
+  onBack,
+}: {
+  children: React.ReactNode;
+  onScanAgain: () => void;
+  onBack: () => void;
+}) {
+  const s = messages().pay.scan;
+  return (
+    <div className="flex flex-col items-center gap-3 rounded-card border border-border-subtle bg-background px-4 py-6 text-center">
+      <QrScanIcon className="h-8 w-8 text-text-muted" />
+      <p role="status" aria-live="polite" className="text-sm text-text-primary">
+        {children}
+      </p>
+      <div className="flex flex-wrap justify-center gap-2">
+        <button
+          type="button"
+          onClick={onScanAgain}
+          className="min-h-11 rounded-control bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground"
+        >
+          {s.scanAgain}
+        </button>
+        <button
+          type="button"
+          onClick={onBack}
+          className="min-h-11 rounded-control border border-border-subtle px-4 py-2 text-sm font-medium text-text-secondary hover:bg-surface"
+        >
+          {s.back}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+type HandoffState =
+  | { step: "review" }
+  | { step: "preparing" }
+  | { step: "ready"; intentId: string | null; telHref: string }
+  | { step: "awaiting"; intentId: string | null }
+  | { step: "unavailable" }
+  | { step: "error" };
+
 function ScanResultView({
   result,
+  raw,
   onScanAgain,
   onBack,
 }: {
   result: ClassifyScanResult | null;
+  raw: string | null;
   onScanAgain: () => void;
   onBack: () => void;
 }) {
   const r = messages().pay.scan.result;
+  const s = messages().pay.scan;
+  const [handoff, setHandoff] = useState<HandoffState>({ step: "review" });
+  const [copied, setCopied] = useState(false);
+  const [showQr, setShowQr] = useState(false);
+  const submittingRef = useRef(false);
 
   const AgainAndBack = (
     <div className="flex flex-wrap justify-center gap-2">
@@ -558,29 +633,25 @@ function ScanResultView({
         onClick={onScanAgain}
         className="min-h-11 rounded-control bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground"
       >
-        {messages().pay.scan.scanAgain}
+        {s.scanAgain}
       </button>
       <button
         type="button"
         onClick={onBack}
         className="min-h-11 rounded-control border border-border-subtle px-4 py-2 text-sm font-medium text-text-secondary hover:bg-surface"
       >
-        {messages().pay.scan.back}
+        {s.back}
       </button>
     </div>
   );
 
-  if (!result || result.status === "error") {
-    return (
-      <div className="flex flex-col items-center gap-3 rounded-card border border-border-subtle bg-background px-4 py-6 text-center">
-        <p role="status" aria-live="polite" className="text-sm text-text-primary">
-          {r.genericError}
-        </p>
-        {AgainAndBack}
-      </div>
-    );
-  }
+  const notice = (body: React.ReactNode) => (
+    <ScanNotice onScanAgain={onScanAgain} onBack={onBack}>
+      {body}
+    </ScanNotice>
+  );
 
+  if (!result || result.status === "error") return notice(r.genericError);
   if (result.status === "feature_disabled") {
     return (
       <div className="flex flex-col items-center gap-3 rounded-card border border-border-subtle bg-background px-4 py-6 text-center">
@@ -592,53 +663,51 @@ function ScanResultView({
           onClick={onBack}
           className="min-h-11 rounded-control border border-border-subtle px-4 py-2 text-sm font-medium text-text-secondary hover:bg-surface"
         >
-          {messages().pay.scan.back}
+          {s.back}
         </button>
       </div>
     );
   }
 
   const scan = result.result;
-  if (!scan.ok) {
-    return (
-      <div className="flex flex-col items-center gap-3 rounded-card border border-border-subtle bg-background px-4 py-6 text-center">
-        <QrScanIcon className="h-8 w-8 text-text-muted" />
-        <p role="status" aria-live="polite" className="text-sm text-text-primary">
-          {r.reasons[scan.reason]}
-        </p>
-        {AgainAndBack}
-      </div>
-    );
-  }
+  if (!scan.ok) return notice(r.reasons[scan.reason]);
 
   const m = scan.model;
+  const isUssd = m.route.kind === "ussd" && m.route.literal != null;
+  const dial = m.route.kind === "ussd" ? (m.route.literal ?? null) : null;
+  const isMenu = isUssd && !m.amount; // a menu / inquiry code, not a payment
+  const canDial =
+    typeof navigator !== "undefined" &&
+    detectDialerCapability(navigator.userAgent).canAttemptDialer;
+
   const rows: { label: string; value: string }[] = [];
+  rows.push({ label: r.fieldRoute, value: r.classLabel[m.class] });
   if (m.providerLabel) rows.push({ label: r.fieldProvider, value: m.providerLabel });
   if (m.recipientMasked) rows.push({ label: r.fieldPays, value: m.recipientMasked });
   if (m.amount) rows.push({ label: r.fieldAmount, value: formatScanAmount(m.amount) });
   if (m.reference) rows.push({ label: r.fieldReference, value: m.reference });
+  if (dial) rows.push({ label: r.fieldCode, value: dial });
 
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="rounded-card border border-border-subtle bg-background p-4">
-        <p className="text-xs font-medium uppercase tracking-wide text-text-muted">
-          {r.readTitle}
-        </p>
-        <p className="mt-0.5 text-sm font-semibold text-text-primary">
-          {r.classLabel[m.class]}
-        </p>
-        {rows.length > 0 && (
-          <dl className="mt-2 flex flex-col gap-1">
-            {rows.map((row) => (
-              <div key={row.label} className="flex justify-between gap-3 text-sm">
-                <dt className="text-text-muted">{row.label}</dt>
-                <dd className="min-w-0 truncate text-right text-text-primary">{row.value}</dd>
-              </div>
-            ))}
-          </dl>
-        )}
-      </div>
+  const Fields = (
+    <div className="rounded-card border border-border-subtle bg-background p-4">
+      <p className="text-xs font-medium uppercase tracking-wide text-text-muted">
+        {r.readTitle}
+      </p>
+      <dl className="mt-2 flex flex-col gap-1">
+        {rows.map((row) => (
+          <div key={row.label} className="flex justify-between gap-3 text-sm">
+            <dt className="shrink-0 text-text-muted">{row.label}</dt>
+            <dd className="min-w-0 break-all text-right font-medium text-text-primary">
+              {row.value}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
 
+  const Warnings = (
+    <>
       {m.warnings.includes("merchant_unverified") && (
         <p className="rounded-control bg-background px-3 py-2 text-xs text-text-muted">
           {r.merchantUnverified}
@@ -649,24 +718,164 @@ function ScanResultView({
           {r.ussdUnverified}
         </p>
       )}
-      {(m.warnings.includes("amount_missing") || m.amountEditable) && (
+      {isMenu && (
         <p className="rounded-control bg-background px-3 py-2 text-xs text-text-muted">
-          {r.amountMissing}
+          {r.menuNote}
+        </p>
+      )}
+    </>
+  );
+
+  // R3 only continues verified USSD instructions.
+  if (!isUssd) {
+    return (
+      <div className="flex flex-col gap-3">
+        {Fields}
+        {Warnings}
+        <p className="rounded-control bg-background px-3 py-2 text-xs text-text-muted">
+          {r.handoffUnavailable}
+        </p>
+        {AgainAndBack}
+      </div>
+    );
+  }
+
+  async function onPrepare() {
+    if (submittingRef.current || !raw) return;
+    submittingRef.current = true;
+    setHandoff({ step: "preparing" });
+    let res: PrepareScanHandoffResult;
+    try {
+      res = await prepareScanHandoff(raw);
+    } catch {
+      res = { status: "error" };
+    }
+    submittingRef.current = false;
+    if (res.status === "prepared") {
+      setHandoff({ step: "ready", intentId: res.intentId, telHref: res.telHref });
+    } else if (res.status === "info_only") {
+      setHandoff({ step: "ready", intentId: null, telHref: res.telHref });
+    } else if (res.status === "unsupported") {
+      setHandoff({ step: "unavailable" });
+    } else {
+      setHandoff({ step: "error" });
+    }
+  }
+
+  function onOpened(intentId: string | null, method: "dialer" | "copy") {
+    trackScanEvent("scan_handoff_opened", { method });
+    if (intentId) {
+      void recordScanHandoff(
+        intentId,
+        method,
+        method === "dialer" ? "dialer_opened" : "copied",
+      );
+    }
+    setHandoff({ step: "awaiting", intentId });
+  }
+
+  async function onCopy(intentId: string | null) {
+    if (!dial) return;
+    try {
+      await navigator.clipboard.writeText(dial);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* ignore */
+    }
+    if (intentId) void recordScanHandoff(intentId, "copy", "copied");
+  }
+
+  if (handoff.step === "awaiting") {
+    return (
+      <div className="flex flex-col gap-3">
+        <div className="rounded-card border border-border-subtle bg-background p-4 text-center">
+          <p className="text-sm font-semibold text-text-primary">{r.awaitingTitle}</p>
+          <p className="mt-1 text-xs text-text-muted">{r.awaitingBody}</p>
+        </div>
+        {handoff.intentId && (
+          <a
+            href={`/pay/${handoff.intentId}`}
+            className="mx-auto min-h-11 rounded-control border border-border-subtle px-4 py-2 text-center text-sm font-medium text-text-secondary hover:bg-surface"
+          >
+            {r.viewActivity}
+          </a>
+        )}
+        {AgainAndBack}
+      </div>
+    );
+  }
+
+  if (handoff.step === "error") return notice(r.prepareError);
+  if (handoff.step === "unavailable") return notice(r.handoffUnavailable);
+
+  return (
+    <div className="flex flex-col gap-3">
+      {Fields}
+      {Warnings}
+      <p className="rounded-control bg-background px-3 py-2 text-xs text-text-muted">
+        {r.handoffNotice}
+      </p>
+
+      {handoff.step === "review" && (
+        <>
+          <button
+            type="button"
+            onClick={() => void onPrepare()}
+            className="min-h-11 rounded-control bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground"
+          >
+            {isMenu ? r.openMenu : r.prepareCta}
+          </button>
+          {AgainAndBack}
+        </>
+      )}
+
+      {handoff.step === "preparing" && (
+        <p role="status" aria-live="polite" className="text-center text-sm text-text-muted">
+          {r.preparing}
         </p>
       )}
 
-      <button
-        type="button"
-        disabled
-        aria-disabled="true"
-        title={r.reviewComingSoon}
-        className="min-h-11 rounded-control bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground opacity-60"
-      >
-        {r.reviewCta}
-      </button>
-      <p className="text-center text-xs text-text-muted">{r.reviewComingSoon}</p>
-
-      {AgainAndBack}
+      {handoff.step === "ready" && (
+        <>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <button
+              type="button"
+              onClick={() => void onCopy(handoff.intentId)}
+              className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-control border border-border-subtle bg-surface px-4 py-2 text-sm font-medium text-text-primary"
+            >
+              <CopyIcon className="h-4 w-4" />
+              {copied ? r.copied : r.copyCode}
+            </button>
+            {canDial ? (
+              <a
+                href={buildTelHref(dial ?? "")}
+                onClick={() => onOpened(handoff.intentId, "dialer")}
+                className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-control bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground"
+              >
+                <PayIcon className="h-4 w-4" />
+                {isMenu ? r.openMenu : r.openUssd}
+              </a>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowQr((v) => !v);
+                  onOpened(handoff.intentId, "copy");
+                }}
+                className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-control bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground"
+              >
+                {r.showQr}
+              </button>
+            )}
+          </div>
+          {!canDial && <p className="text-xs text-text-muted">{r.dialerUnavailable}</p>}
+          {showQr && dial && (
+            <PaymentQr value={scanTelHref(dial)} label={r.qrCaption} />
+          )}
+          {AgainAndBack}
+        </>
+      )}
     </div>
   );
 }

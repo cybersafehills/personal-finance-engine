@@ -79,12 +79,11 @@ const en = {
         generic:
           "The camera couldn't start. Try again, or go back to the other payment options.",
       },
-      // The decoded-and-classified result. R2 stops here - "Review &
-      // continue" is R3.
+      // The decoded-and-classified result, then (R3) the review + the
+      // external hand-off. OneLedger prepares and opens the instruction;
+      // it never claims the payment settled.
       result: {
-        readTitle: "Code read",
-        reviewCta: "Review & continue",
-        reviewComingSoon: "Reviewing and continuing to your provider is coming in the next update.",
+        readTitle: "Review this payment",
         classLabel: {
           verified_ussd: "Verified USSD code",
           provider_link: "Approved payment link",
@@ -95,10 +94,33 @@ const en = {
         ussdUnverified:
           "This USSD code is published but not officially verified.",
         amountMissing: "This code has no amount — you'd enter one before paying.",
+        menuNote: "This code opens a menu on your phone — it isn't a payment on its own.",
         fieldProvider: "Provider",
         fieldPays: "Pays",
         fieldAmount: "Amount",
         fieldReference: "Reference",
+        fieldCode: "Code",
+        fieldRoute: "Opens",
+        handoffNotice:
+          "OneLedger will open this instruction on your device. You review and authorize the payment with your mobile network or provider — OneLedger never sees your PIN and can't send money for you.",
+        prepareCta: "Prepare payment",
+        preparing: "Preparing…",
+        openUssd: "Open USSD",
+        openMenu: "Open USSD menu",
+        copyCode: "Copy code",
+        copied: "Copied",
+        showQr: "Show QR for your phone",
+        qrCaption: "Scan with the phone you'll pay from, then follow the prompts.",
+        dialerUnavailable:
+          "Dialing isn't available on this device. Copy the code or scan the QR on the phone you'll pay from.",
+        awaitingTitle: "Awaiting confirmation",
+        awaitingBody:
+          "OneLedger opened the instruction on your device. Authorize it with your provider. OneLedger marks a payment confirmed only when it sees matching evidence — opening the dialer is not proof of payment.",
+        viewActivity: "View in payment activity",
+        handoffUnavailable:
+          "OneLedger can only continue verified USSD codes from a scan right now. This code isn't one.",
+        prepareError:
+          "OneLedger couldn't prepare this payment. Try again.",
         featureDisabled:
           "Scan to pay isn't available on your account right now.",
         genericError:

@@ -46,7 +46,7 @@ Every dismissal path — the footer control, the dimmed overlay, `Esc`,
 and a navigation that closes the sheet — runs through one guarded
 `requestClose()` so a double activation can't fire `onClose` twice.
 
-## Scan to pay (Phases R1–R2)
+## Scan to pay (Phases R1–R3)
 
 `SCAN_TO_PAY_ENABLED=true` (opt-in, off otherwise — same convention as
 `SMS_RECONCILIATION_ENABLED`) adds a **"Scan to pay"** entry at the top
@@ -82,9 +82,33 @@ The decoded string goes through the shared, pure pipeline
 (`web/lib/pay/scan/pipeline.ts`) and is then re-classified
 **authoritatively on the server** (`classifyScannedCode`, feature-gated,
 resolvers bound to the RLS-scoped USSD directory + the provider
-allowlist). R2 stops at a **"here's what we read"** summary — masked
-recipient, amount, verification warnings — with a disabled "Review &
-continue". The review screen and the external hand-off are **R3**.
+allowlist). The review shows the masked recipient, amount, and
+verification warnings.
+
+### R3 — review + external hand-off
+
+`prepareScanHandoff(raw)` re-parses the raw string authoritatively (never
+a client-built model). For a **verified USSD instruction that carries an
+amount** it creates a `payment_intents` draft with **`source = 'qr_scan'`**
+(deterministic idempotency key = `qr:` + sha256 of `dial|amount`, so a
+re-scan within the TTL is the same intent, not a duplicate) and returns a
+`tel:` href. A **menu / inquiry code** (no amount) is `info_only` —
+openable, nothing persisted, because it is navigation, not a payment.
+
+The user must tap **Prepare payment**, then **Open USSD** (a real
+`<a href="tel:…">` — a user gesture, never a scripted navigation, never
+on detection). `recordScanHandoff` then records the attempt
+(`record_payment_attempt`) and moves the intent
+`draft → initiated → awaiting_verification`, mirroring `recordHandoff` in
+`assisted-actions.ts` (incl. the opt-in on-handoff SMS reconcile). The
+terminal state is **"Awaiting confirmation"** with the honest non-custody
+copy — opening the dialer is never shown as a completed payment.
+Desktop / no-telephony falls back to Copy + a locally-rendered QR
+(`PaymentQr`).
+
+**R3 continues verified USSD only.** `provider_link` (allowlist empty),
+`oneledger_payment`, and `emv_merchant` scans show their details and
+"continuing isn't available yet".
 
 Trust model, supported/unsupported formats, and the client/server split
 are ADR **`docs/adr/0006-qr-scan-payload-trust.md`**. Key points: no
@@ -93,15 +117,23 @@ are ADR **`docs/adr/0006-qr-scan-payload-trust.md`**. Key points: no
 recognised (TLV + CRC-16/CCITT) but always `emv_unsupported`; only the
 coarse `class` / `reason` is ever logged.
 
+The schema change — `payment_intents.source` + `create_payment_intent`
+learning an optional `source` key — is
+`supabase/migrations/20260910000000_phase_r3_scan_payment_source.sql`
+(additive, `default 'assisted'`). **It was verified by a manual `psql`
+apply of the full chain on PostgreSQL 16 but NOT by
+`run_migration_tests.sh` (needs pg17) — run that before merge.**
+
 | Concern | Location |
 |---|---|
 | Feature gate | `isScanToPayEnabled` / `assertScanToPayEnabled` in `web/lib/pay/gate.ts` |
 | Wiring | `web/app/layout.tsx` → `web/components/AppShell.tsx` → `web/components/pay/PayProvider.tsx` → `PayLauncher` |
 | Scanner UI | `web/components/pay/ScanToPay.tsx` |
 | QR decode (browser) | `web/lib/pay/scan/decode.client.ts` (`BarcodeDetector`) |
-| Payload pipeline (pure) | `web/lib/pay/scan/` — `normalize` · `classify` · `ussd` · `oneledger` · `emv` · `provider-link` · `money` · `pipeline` (+ `*_test.ts`) |
-| Server classification | `web/app/pay/scan/actions.ts` → `web/lib/pay/scan/resolve.server.ts` (`matchUssdInDirectory` via `getServiceDirectory`) |
-| Provider-link allowlist | `PROVIDER_LINK_ALLOWLIST` in `web/lib/pay/scan/provider-link.ts` (empty in R2) |
+| Payload pipeline (pure) | `web/lib/pay/scan/` — `normalize` · `classify` · `ussd` · `oneledger` · `emv` · `provider-link` · `money` · `redact` · `handoff` · `pipeline` (+ `*_test.ts`) |
+| Server actions | `web/app/pay/scan/actions.ts` — `classifyScannedCode` · `prepareScanHandoff` · `recordScanHandoff`; resolver `web/lib/pay/scan/resolve.server.ts` (`matchUssdInDirectory` via `getServiceDirectory`) |
+| Provider-link allowlist | `PROVIDER_LINK_ALLOWLIST` in `web/lib/pay/scan/provider-link.ts` (empty) |
+| Schema | `payment_intents.source` + `create_payment_intent` in `supabase/migrations/20260910000000_phase_r3_scan_payment_source.sql` |
 | Privacy-safe events (no payload/PII ever) | `web/lib/pay/scan-analytics.ts` (+ `scan-analytics_test.ts`) |
 | e2e | `web/e2e/pay-scan.spec.ts` (skipped unless `SCAN_TO_PAY_ENABLED=true` + a fake camera — see the file header) |
 

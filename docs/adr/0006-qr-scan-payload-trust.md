@@ -1,7 +1,7 @@
 # ADR 0006: A scanned QR is untrusted data — every payload passes a fixed classify → validate → resolve → allowlist pipeline before it can become an action
 
-- **Status:** Accepted (Pay & Services — Phase R2, "Scan to pay")
-- **Date:** 2026-08-28
+- **Status:** Accepted (Pay & Services — Phases R2–R3, "Scan to pay")
+- **Date:** 2026-08-28 (R2); amended 2026-08-28 (R3 — review & hand-off)
 - **Context:** R1 shipped the camera scanner shell. R2 adds QR *decoding*
   and turns a decoded string into a structured, display-ready payment
   instruction. A QR code is attacker-controllable: a merchant sticker
@@ -75,12 +75,53 @@ for a scan — never the raw payload, a filled USSD string, a URL, an
 amount, or a merchant/account identifier. `web/lib/pay/scan-analytics.ts`
 enforces this with the same key/value redaction as the directory module.
 
+## R3 amendment — review, hand-off, and the recorded attempt
+
+### 7. The hand-off is re-derived server-side from the raw string
+
+`prepareScanHandoff(raw)` does not trust the `ReviewModel` the client
+holds — it re-runs `parseScan` with live resolvers and rebuilds
+everything (directory row, captured params, normalized msisdn) from
+`raw`. The client keeps `raw` only to send it here.
+
+### 8. What R3 will act on: verified USSD with an amount
+
+- **verified USSD + amount** → a `payment_intents` draft is created
+  (`source = 'qr_scan'`), then the user opens a real `<a href="tel:…">`.
+  The dial string is exactly what was scanned; nothing is appended.
+- **verified USSD, no amount** (a menu / balance code) → `info_only`:
+  openable, **nothing persisted** — it is navigation, not a payment.
+- **provider_link / oneledger_payment / emv_merchant** → shown, not
+  actionable ("continuing isn't available yet").
+
+### 9. The recorded attempt is provenance, not settlement
+
+`payment_intents.source = 'qr_scan'` (new column, `default 'assisted'`,
+`check in ('assisted','qr_scan')`; `create_payment_intent` learns one
+optional payload key — otherwise byte-identical). The intent moves
+`draft → initiated → awaiting_verification` via the **existing**
+user-actor `transition_payment_intent`; `record_payment_attempt` logs the
+gesture. Reaching `successful` still requires ADR-0002's evidence
+(SMS/statement reconciliation or an explicit, separately-labelled manual
+confirmation) — opening the dialer is never proof. The UI's terminal
+state is "Awaiting confirmation".
+
+### 10. Idempotency
+
+The idempotency key is deterministic —
+`qr:` + sha256(`dial` + `|` + `amount_minor`) — so a double-tap or a
+re-scan of the same code within the TTL returns the existing draft
+(`existed: true`), never a duplicate.
+
 ## Consequences
 
-- R3 (review screen + hand-off) consumes `ReviewModel` and may assume it
-  is already validated and its identifiers already masked.
 - New supported formats or provider links are additive: a new adapter +
-  allowlist entry + fixtures, no change to the pipeline shape.
+  allowlist entry + fixtures, no change to the pipeline shape. R3
+  hand-off for a new format is a new branch in `prepareScanHandoff`.
 - A scan that can't be verified (offline, unknown code, unsupported
   format) always dead-ends in "scan again / go back" — it can never
   fall through to an external action.
+- The `create_payment_intent` change was verified by a manual full-chain
+  `psql` apply on pg16 (source defaulting, explicit `qr_scan`,
+  idempotency, CHECK rejection); `run_migration_tests.sh` (pg17) must
+  still run before merge.

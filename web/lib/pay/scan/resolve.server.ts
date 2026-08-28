@@ -27,10 +27,14 @@ export async function matchUssdInDirectory(
     if (!hit) continue;
 
     const match: UssdDirectoryMatch = {
+      id: code.id,
       slug: code.slug,
       template: code.ussd_template,
       providerLabel: code.provider?.display_name ?? null,
       verified: code.verified_at != null,
+      category: code.category ?? null,
+      intent: code.intent ?? null,
+      networks: code.supported_networks ?? [],
     };
 
     if (!code.ussd_template.includes("{")) {

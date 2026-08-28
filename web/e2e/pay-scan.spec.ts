@@ -1,13 +1,19 @@
 import { test, expect } from "./fixtures";
 import AxeBuilder from "@axe-core/playwright";
 
-// Pay & Services - Phase R1/R2 (Scan to pay). Non-custodial and
-// deliberately incomplete: the scanner opens the camera, models every
-// permission / device failure, decodes a QR (native BarcodeDetector),
-// and classifies the payload server-side - stopping at "here's what we
-// read". It does NOT show a full review screen or hand off a payment
-// (that's R3). The payload pipeline itself is covered exhaustively by
-// the Deno unit tests in web/lib/pay/scan/*_test.ts.
+// Pay & Services - Phases R1-R3 (Scan to pay). Non-custodial: the
+// scanner opens the camera, models every permission / device failure,
+// decodes a QR (native BarcodeDetector), classifies the payload
+// server-side, shows a review, and - on an explicit tap - creates a
+// payment_intents draft (source=qr_scan) and opens the USSD instruction.
+// It never dials on detection and never claims settlement.
+//
+// The payload pipeline, the amount / currency handling, and the
+// directory->intent mapping are covered exhaustively by the Deno unit
+// tests in web/lib/pay/scan/*_test.ts; the create_payment_intent schema
+// change by a manual pg16 full-chain apply. These e2e tests cover the
+// scanner *shell* (headless Chromium ships no BarcodeDetector, so a live
+// decode / review / hand-off can't run here - that's manual device QA).
 //
 // This spec needs two things the default local run does NOT set, so the
 // whole file is skipped unless they're present:
@@ -26,7 +32,7 @@ import AxeBuilder from "@axe-core/playwright";
 // assert the scanner *shell* (open / status / Back / Esc / a11y), not a
 // live decode. With neither env set, the entry point is server-gated off
 // and there is nothing to test.
-test.describe("Scan to pay (R1/R2)", () => {
+test.describe("Scan to pay (R1-R3 shell)", () => {
   test.skip(
     process.env.SCAN_TO_PAY_ENABLED !== "true",
     "SCAN_TO_PAY_ENABLED is not 'true' for this run - see file header.",

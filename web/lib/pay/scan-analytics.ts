@@ -22,7 +22,12 @@ export type ScanEventName =
   | "scan_image_selected"
   | "scan_payload_classified"
   | "scan_payload_rejected"
-  | "scan_again";
+  | "scan_again"
+  // R3 - review + external hand-off
+  | "scan_handoff_prepared"
+  | "scan_handoff_opened"
+  | "scan_handoff_unavailable"
+  | "scan_attempt_awaiting";
 
 /** Coarse outcome for `scan_camera_permission` - never a raw error
  *  string or stack. Mirrors ScanErrorKind in ScanToPay.tsx plus the

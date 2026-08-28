@@ -4,28 +4,34 @@ import type { ScanResolvers, UssdDirectoryMatch } from "./pipeline.ts";
 
 const NOW = Date.parse("2026-08-28T12:00:00Z");
 
-// A stub directory: a literal *182# code and a parameterised send-money
-// code, one verified, one merely published.
-const directory: Record<string, UssdDirectoryMatch> = {
-  "*182#": {
-    slug: "mtn-momo-menu",
+function dirMatch(over: Partial<UssdDirectoryMatch>): UssdDirectoryMatch {
+  return {
+    id: "sc-x",
+    slug: "code",
     template: "*182#",
     providerLabel: "MTN MoMo",
     verified: false,
-  },
-};
+    category: "mobile_money",
+    intent: null,
+    networks: ["mtn"],
+    ...over,
+  };
+}
+
+// A stub directory: a literal *182# menu code (unverified) and a
+// parameterised send-money code (verified).
 const resolvers: ScanResolvers = {
   now: () => NOW,
   providerAllowlist: [{ provider: "MTN MoMo", hosts: ["pay.mtn.co.rw"] }],
   matchUssd: (dial) => {
-    if (directory[dial]) return directory[dial];
+    if (dial === "*182#") return dirMatch({ slug: "mtn-momo-menu", template: "*182#" });
     if (/^\*182\*8\*1\*\d+\*\d+#$/.test(dial)) {
-      return {
+      return dirMatch({
         slug: "mtn-momo-send",
         template: "*182*8*1*{merchant}*{amount}#",
-        providerLabel: "MTN MoMo",
         verified: true,
-      };
+        intent: "send_money",
+      });
     }
     return null;
   },
@@ -51,15 +57,41 @@ Deno.test("pipeline: a directory-matched literal USSD -> verified_ussd model", a
   assert(r.model.warnings.includes("ussd_not_officially_verified"));
 });
 
-Deno.test("pipeline: a parameterised USSD match surfaces its params + amount_missing", async () => {
-  const r = await parseScan("*182*8*1*123456*5000#", resolvers);
+Deno.test("pipeline: a complete parameterised USSD scan extracts a read-only amount + masked recipient", async () => {
+  const r = await parseScan("*182*1*1*250781234567*5000#", {
+    ...resolvers,
+    matchUssd: () =>
+      dirMatch({
+        slug: "mtn-momo-send",
+        template: "*182*1*1*{phone}*{amount}#",
+        verified: true,
+        intent: "send_money",
+      }),
+  });
   assert(r.ok);
+  assertEquals(r.model.amount, { minor: 5000, currency: "RWF" });
+  assertEquals(r.model.amountEditable, false); // it's the merchant's amount
+  assertEquals(r.model.recipientMasked, "•••• ••• 4567");
   const route = r.model.route;
   assertEquals(route.kind, "ussd");
-  if (route.kind === "ussd") {
-    assertEquals(route.params.map((p) => p.key).sort(), ["amount", "merchant"]);
-  }
-  assertEquals(r.model.amountEditable, true);
+  if (route.kind === "ussd") assertEquals(route.literal, "*182*1*1*250781234567*5000#");
+});
+
+Deno.test("pipeline: a merchant-pay USSD whose captured amount is 0 is rejected", async () => {
+  const r = await parseScan("*182*8*1*123456*0#", {
+    ...resolvers,
+    matchUssd: () =>
+      dirMatch({ template: "*182*8*1*{merchant}*{amount}#", verified: true }),
+  });
+  assert(!r.ok);
+  assertEquals(r.reason, "amount_invalid");
+});
+
+Deno.test("pipeline: a menu code (no amount) is verified_ussd with amount = null", async () => {
+  const r = await parseScan("*182#", resolvers);
+  assert(r.ok);
+  assertEquals(r.model.amount, null);
+  assertEquals(r.model.amountEditable, false);
 });
 
 Deno.test("pipeline: a USSD not in the directory is unknown_ussd", async () => {

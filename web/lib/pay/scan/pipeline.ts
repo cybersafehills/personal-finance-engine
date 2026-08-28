@@ -6,14 +6,16 @@ import {
   type ProviderLinkAllowEntry,
 } from "./provider-link";
 import { recogniseEmv } from "./emv";
-import { matchesTemplate, parseUssd, templatePlaceholders } from "./ussd";
-import type {
-  PayloadClass,
-  RejectionReason,
-  ReviewModel,
-  ReviewWarning,
-  ScanResult,
-  ScanUssdParam,
+import { maskDigits } from "./redact";
+import { matchesTemplate, parseUssd } from "./ussd";
+import {
+  MAX_AMOUNT_MINOR,
+  type PayloadClass,
+  type RejectionReason,
+  type ReviewModel,
+  type ReviewWarning,
+  type ScanAmount,
+  type ScanResult,
 } from "./types";
 
 // The stage-2..8 orchestrator. Pure and injectable: the two lookups that
@@ -24,14 +26,19 @@ import type {
 
 /** A published, matched directory template. */
 export type UssdDirectoryMatch = {
+  /** service_codes.id - the FK a recorded payment_intent points at. */
+  id: string;
   slug: string;
   template: string;
   providerLabel: string | null;
   /** `verified_at` on the directory row - null => published but not
    *  officially verified. */
   verified: boolean;
-  /** Optional kind hints per placeholder key, for the R3 input. */
-  paramKinds?: Record<string, string>;
+  /** service_codes.category / .intent - drives payment_type mapping. */
+  category: string | null;
+  intent: string | null;
+  /** supported_networks (['mtn'] / ['airtel']) - drives provider. */
+  networks: string[];
 };
 
 export type ScanResolvers = {
@@ -71,33 +78,45 @@ export async function parseScan(
       const match = await resolvers.matchUssd(parsed.value.dial);
       if (!match) return reject("unsupported", "unknown_ussd");
 
-      const placeholders = templatePlaceholders(match.template);
-      const literalMatch = matchesTemplate(parsed.value.dial, match.template);
-      const isLiteral = placeholders.length === 0;
-      const params: ScanUssdParam[] = placeholders.map((key) => ({
-        key,
-        kind: match.paramKinds?.[key] ?? null,
-        required: true,
-      }));
+      // A scanned USSD is always a COMPLETE dial string. If the matched
+      // directory template is parameterised, matchesTemplate gives us
+      // the captured values; the resolver only returns a match when
+      // every placeholder lined up, so nothing is left unfilled.
+      const captured = matchesTemplate(parsed.value.dial, match.template)?.params ?? {};
+
+      // USSD directory amounts are RWF minor units == the currency itself.
+      let amount: ScanAmount | null = null;
+      const amtRaw = captured["amount"];
+      if (amtRaw != null) {
+        const a = Number(amtRaw);
+        if (!Number.isInteger(a) || a <= 0 || a >= MAX_AMOUNT_MINOR) {
+          return reject("unsupported", "amount_invalid");
+        }
+        amount = { minor: a, currency: "RWF" };
+      }
+
+      const recipRaw =
+        captured["phone"] ?? captured["msisdn"] ?? captured["recipient"] ?? null;
 
       const warnings: ReviewWarning[] = [];
       if (!match.verified) warnings.push("ussd_not_officially_verified");
-      if (!isLiteral && !literalMatch) warnings.push("amount_missing");
 
       const model: ReviewModel = {
         class: "verified_ussd",
         route: {
           kind: "ussd",
           template: match.template,
-          literal: isLiteral ? parsed.value.dial : null,
-          params,
+          literal: parsed.value.dial,
+          params: [],
           directorySlug: match.slug,
         },
         providerLabel: match.providerLabel,
         providerVerified: match.verified,
-        recipientMasked: null,
-        amount: null,
-        amountEditable: !isLiteral,
+        recipientMasked: recipRaw ? maskDigits(recipRaw) : null,
+        amount,
+        // A scanned USSD instruction is complete - the amount, if any,
+        // is the merchant's. Never user-editable.
+        amountEditable: false,
         reference: null,
         description: null,
         invoiceId: null,
