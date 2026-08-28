@@ -59,7 +59,19 @@ export default defineConfig({
     url: BASE_URL,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
-    env: { PORT: String(PORT) },
+    // BILLS_ENABLED / BILLS_EXTRACTION_ENABLED turn on the Bills &
+    // Expenses surface and its Phase 2 worker for bills-intake.spec.ts /
+    // bills-extraction.spec.ts. AI_PROVIDER=mock makes the extractor
+    // return a deterministic invoice with no API key. REPORT_CRON_SECRET
+    // lets the extraction spec drive the cron route directly. All inert
+    // for every other spec (nothing else routes to /bills or that cron).
+    env: {
+      PORT: String(PORT),
+      BILLS_ENABLED: "true",
+      BILLS_EXTRACTION_ENABLED: "true",
+      AI_PROVIDER: "mock",
+      REPORT_CRON_SECRET: "e2e-bills-cron-secret",
+    },
   },
 
   projects: [
