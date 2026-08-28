@@ -7,7 +7,7 @@ import {
   getLauncherSnapshot,
   type LauncherSnapshot,
 } from "../../app/pay/actions";
-import { PayIcon, StarIcon } from "../icons";
+import { CloseIcon, PayIcon, StarIcon } from "../icons";
 
 const t = messages().pay;
 
@@ -63,7 +63,17 @@ function LauncherPanel({
   const router = useRouter();
   const panelRef = useRef<HTMLDivElement>(null);
   const previouslyFocused = useRef<HTMLElement | null>(null);
+  // Guards every dismissal path (footer control, overlay, Esc, a nav
+  // that closes) so a double tap / Enter-repeat can't fire onClose twice
+  // or race a second history pop.
+  const closingRef = useRef(false);
   const titleId = useId();
+
+  function requestClose() {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    onClose();
+  }
   const [snapshot, setSnapshot] = useState<LauncherSnapshot | null>(null);
   const [, startLoad] = useTransition();
 
@@ -94,7 +104,7 @@ function LauncherPanel({
   function onKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Escape") {
       e.stopPropagation();
-      onClose();
+      requestClose();
       return;
     }
     if (e.key !== "Tab" || !panelRef.current) return;
@@ -112,10 +122,11 @@ function LauncherPanel({
   }
 
   function go(href: string) {
+    if (closingRef.current) return;
     // Navigate first, then close - closing unmounts this panel; doing it
     // the other way round briefly races the router.
     router.push(href);
-    onClose();
+    requestClose();
   }
 
   return (
@@ -127,7 +138,7 @@ function LauncherPanel({
         type="button"
         aria-hidden="true"
         tabIndex={-1}
-        onClick={onClose}
+        onClick={requestClose}
         className="absolute inset-0 cursor-default bg-black/40"
       />
       <div
@@ -137,101 +148,111 @@ function LauncherPanel({
         aria-labelledby={titleId}
         tabIndex={-1}
         onKeyDown={onKeyDown}
-        className="relative z-10 w-full max-w-lg rounded-t-card border border-border-subtle bg-surface p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-lg outline-none sm:rounded-card sm:pb-5"
+        className="relative z-10 flex max-h-[85dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-card border border-border-subtle bg-surface shadow-lg outline-none sm:max-h-[85vh] sm:rounded-card"
       >
-        <div className="mb-4 flex items-start justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-accent text-accent-foreground">
-              <PayIcon className="h-5 w-5" />
-            </span>
-            <div>
-              <h2 id={titleId} className="text-base font-semibold text-text-primary">
-                {t.launcherTitle}
-              </h2>
-              <p className="text-xs text-text-muted">{t.launcherSubtitle}</p>
-            </div>
+        {/* Header - static; the former top-right "Close" is gone, the
+            closing control now lives in the sticky footer below. */}
+        <div className="flex shrink-0 items-center gap-2.5 px-5 pb-3 pt-5">
+          <span className="flex h-9 w-9 items-center justify-center rounded-full bg-accent text-accent-foreground">
+            <PayIcon className="h-5 w-5" />
+          </span>
+          <div>
+            <h2 id={titleId} className="text-base font-semibold text-text-primary">
+              {t.launcherTitle}
+            </h2>
+            <p className="text-xs text-text-muted">{t.launcherSubtitle}</p>
           </div>
+        </div>
+
+        {/* Scrolls independently of the pinned footer. */}
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4">
+          <div className="grid grid-cols-2 gap-2">
+            {PRIMARY_ACTIONS.map((a) =>
+              assistedEnabled ? (
+                <button
+                  key={a.type}
+                  type="button"
+                  onClick={() => go(`/pay/new/${a.type}`)}
+                  className="flex flex-col items-start gap-1 rounded-control border border-border-subtle bg-background px-3 py-2.5 text-left hover:border-accent"
+                >
+                  <span className="text-sm font-medium text-text-primary">{a.label}</span>
+                </button>
+              ) : (
+                <button
+                  key={a.type}
+                  type="button"
+                  disabled
+                  aria-disabled="true"
+                  title={t.comingSoon}
+                  className="flex flex-col items-start gap-1 rounded-control border border-border-subtle bg-background px-3 py-2.5 text-left opacity-60"
+                >
+                  <span className="text-sm font-medium text-text-secondary">{a.label}</span>
+                  <span className="text-[11px] text-text-muted">{t.comingSoon}</span>
+                </button>
+              ),
+            )}
+          </div>
+
+          <div className="mt-3 flex flex-col gap-2 border-t border-border-subtle pt-3">
+            <button
+              type="button"
+              onClick={() => go("/pay/ussd")}
+              className="flex w-full items-center justify-between rounded-control bg-accent px-3 py-2.5 text-sm font-semibold text-accent-foreground"
+            >
+              {t.secondary.ussd}
+              <span aria-hidden="true">→</span>
+            </button>
+            {assistedEnabled && (
+              <div className="flex gap-2 text-sm">
+                <button
+                  type="button"
+                  onClick={() => go("/pay/activity")}
+                  className="flex-1 rounded-control border border-border-subtle px-3 py-2 font-medium text-text-secondary hover:bg-background"
+                >
+                  {t.secondary.activity}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => go("/pay/templates")}
+                  className="flex-1 rounded-control border border-border-subtle px-3 py-2 font-medium text-text-secondary hover:bg-background"
+                >
+                  {t.secondary.template}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {snapshot && snapshot.favourites.length > 0 && (
+            <LauncherList
+              heading={t.favourites}
+              entries={snapshot.favourites}
+              onPick={(slug) => go(`/pay/ussd/${slug}`)}
+              starred
+            />
+          )}
+          {snapshot && snapshot.recent.length > 0 && (
+            <LauncherList
+              heading={t.recent}
+              entries={snapshot.recent}
+              onPick={(slug) => go(`/pay/ussd/${slug}`)}
+            />
+          )}
+        </div>
+
+        {/* Pinned footer - stays visible while the content above scrolls,
+            clears the home indicator via safe-area padding, and carries
+            the single closing control (centred, labelled, >=44px). */}
+        <div className="shrink-0 border-t border-border-subtle bg-surface px-5 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
           <button
             type="button"
-            onClick={onClose}
-            aria-label={t.close}
-            className="rounded-control px-2 py-1 text-sm font-medium text-text-secondary hover:bg-background"
+            onClick={requestClose}
+            aria-label={t.closeSheet}
+            className="mx-auto flex min-h-11 items-center justify-center gap-1.5 rounded-control px-5 py-2.5 text-sm font-semibold text-text-secondary transition-colors hover:bg-background focus-visible:bg-background active:bg-background"
           >
+            <CloseIcon className="h-4 w-4" />
             {t.close}
           </button>
         </div>
-
-        <div className="grid grid-cols-2 gap-2">
-          {PRIMARY_ACTIONS.map((a) =>
-            assistedEnabled ? (
-              <button
-                key={a.type}
-                type="button"
-                onClick={() => go(`/pay/new/${a.type}`)}
-                className="flex flex-col items-start gap-1 rounded-control border border-border-subtle bg-background px-3 py-2.5 text-left hover:border-accent"
-              >
-                <span className="text-sm font-medium text-text-primary">{a.label}</span>
-              </button>
-            ) : (
-              <button
-                key={a.type}
-                type="button"
-                disabled
-                aria-disabled="true"
-                title={t.comingSoon}
-                className="flex flex-col items-start gap-1 rounded-control border border-border-subtle bg-background px-3 py-2.5 text-left opacity-60"
-              >
-                <span className="text-sm font-medium text-text-secondary">{a.label}</span>
-                <span className="text-[11px] text-text-muted">{t.comingSoon}</span>
-              </button>
-            ),
-          )}
-        </div>
-
-        <div className="mt-3 flex flex-col gap-2 border-t border-border-subtle pt-3">
-          <button
-            type="button"
-            onClick={() => go("/pay/ussd")}
-            className="flex w-full items-center justify-between rounded-control bg-accent px-3 py-2.5 text-sm font-semibold text-accent-foreground"
-          >
-            {t.secondary.ussd}
-            <span aria-hidden="true">→</span>
-          </button>
-          {assistedEnabled && (
-            <div className="flex gap-2 text-sm">
-              <button
-                type="button"
-                onClick={() => go("/pay/activity")}
-                className="flex-1 rounded-control border border-border-subtle px-3 py-2 font-medium text-text-secondary hover:bg-background"
-              >
-                {t.secondary.activity}
-              </button>
-              <button
-                type="button"
-                onClick={() => go("/pay/templates")}
-                className="flex-1 rounded-control border border-border-subtle px-3 py-2 font-medium text-text-secondary hover:bg-background"
-              >
-                {t.secondary.template}
-              </button>
-            </div>
-          )}
-        </div>
-
-        {snapshot && snapshot.favourites.length > 0 && (
-          <LauncherList
-            heading={t.favourites}
-            entries={snapshot.favourites}
-            onPick={(slug) => go(`/pay/ussd/${slug}`)}
-            starred
-          />
-        )}
-        {snapshot && snapshot.recent.length > 0 && (
-          <LauncherList
-            heading={t.recent}
-            entries={snapshot.recent}
-            onPick={(slug) => go(`/pay/ussd/${slug}`)}
-          />
-        )}
       </div>
     </div>
   );

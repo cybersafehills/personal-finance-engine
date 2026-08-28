@@ -21,6 +21,7 @@ const en = {
     launcherTitle: "Pay & Services",
     launcherSubtitle: "Prepare a payment or find a verified USSD code.",
     close: "Close",
+    closeSheet: "Close Pay & Services",
     comingSoon: "Coming in a later update",
     primary: {
       person: "Pay a person",
