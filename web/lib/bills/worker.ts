@@ -5,6 +5,7 @@ import { buildExtractionRecordPayload } from "./extraction";
 import { revalidateBillDocument } from "./revalidate";
 import { scoreDuplicates, type Fingerprint } from "./duplicates/detect";
 import { scoreTransactionMatches, type TxnCandidate } from "./matching/score";
+import { notifyBillReadyForReview } from "./notify";
 import { normalizeSupplierName } from "./normalize";
 import { logBillError } from "./analytics";
 
@@ -25,6 +26,11 @@ import { logBillError } from "./analytics";
 const DEFAULT_BATCH = 5;
 const ORIGINAL_BUCKET = "bill-documents";
 
+function configuredBatch(): number {
+  const raw = Number(process.env.BILL_WORKER_BATCH_SIZE);
+  return Number.isFinite(raw) && raw > 0 && raw <= 50 ? Math.floor(raw) : DEFAULT_BATCH;
+}
+
 export type BillProcessingTickSummary = {
   claimed: number;
   succeeded: number;
@@ -41,7 +47,7 @@ function envEnabledOptIn(name: string): boolean {
 type Admin = ReturnType<typeof supabaseServer>;
 
 export async function runBillProcessingTick(
-  batchSize = DEFAULT_BATCH,
+  batchSize = configuredBatch(),
 ): Promise<BillProcessingTickSummary> {
   const summary: BillProcessingTickSummary = {
     claimed: 0,
@@ -136,6 +142,13 @@ export async function runBillProcessingTick(
         await matchTransactions(admin, doc.id, doc.workspace_id);
       } catch (err) {
         logBillError("record", err);
+      }
+      if (validated.ok) {
+        try {
+          await notifyBillReadyForReview(admin, doc.id, doc.workspace_id);
+        } catch (err) {
+          logBillError("record", err);
+        }
       }
 
       summary.succeeded += 1;

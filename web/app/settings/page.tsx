@@ -9,6 +9,8 @@ import {
   GearIcon,
   EyeIcon,
 } from "../../components/icons";
+import { isBillsEnabled } from "../../lib/bills/gate";
+import { getActiveWorkspaceId } from "../../lib/queries";
 
 export const dynamic = "force-dynamic";
 
@@ -77,13 +79,26 @@ const SETTINGS_LINKS = [
   },
 ] as const;
 
-export default function SettingsPage() {
+export default async function SettingsPage() {
+  const billsEnabled = isBillsEnabled(await getActiveWorkspaceId());
+  const links = billsEnabled
+    ? [
+        ...SETTINGS_LINKS,
+        {
+          href: "/bills",
+          title: "Bills & Expenses",
+          description: "Upload invoices and receipts and review them into the ledger.",
+          Icon: DocumentIcon,
+        } as const,
+      ]
+    : SETTINGS_LINKS;
+
   return (
     <div>
       <PageHeader title="Settings" />
 
       <div className="flex flex-col gap-3">
-        {SETTINGS_LINKS.map(({ href, title, description, Icon }) => (
+        {links.map(({ href, title, description, Icon }) => (
           <Link
             key={href}
             href={href}

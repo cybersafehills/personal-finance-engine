@@ -5,7 +5,7 @@ internal implementation plan the master prompt asks for in §1: relevant
 existing architecture, proposed architecture, the phased delivery, the
 security model, the testing strategy, and the deferred set.
 
-Status: **Phases 1–7 built** (on `main` after Phases S–U).
+Status: **Phases 1–8 built** — the whole program (on `main` after Phases S–U).
 Phase 1 — `20260922000000_bills_phase_1_intake_and_lifecycle.sql` +
 `web/lib/bills/**`, `web/app/bills/**`, `web/app/api/bills/**`.
 Phase 2 — `20260923000000_bills_phase_2_extraction.sql` +
@@ -26,8 +26,11 @@ Phase 7 — `20260928000000_bills_phase_7_review.sql` +
 `web/components/bills/BillFieldsEditor.tsx` / `BillDocumentPreview.tsx` /
 `BillComments.tsx` / `BillListFilters.tsx`, and the two-column review
 layout in `web/app/bills/[id]/page.tsx`.
-Phase 8 is designed here and architected-for; none of its code exists
-yet.
+Phase 8 — no migration: `web/lib/bills/notify.ts` (worker-wired,
+flag-gated, redacted) + `web/lib/bills/monitoring.ts` +
+`web/app/api/cron/bill-monitoring/`, `supabase/scheduling/activate_bill_workers.sql`
+(manual), `docs/bills-verification-runbook.md`, a Settings link, and
+`web/e2e/bills-a11y.spec.ts` (responsive axe + keyboard).
 
 ---
 
@@ -499,7 +502,7 @@ request-clarification flow; nav placement (`MOVABLE_NAV_KEYS`).
 | **5 — Supplier resolution** *(built)* | `suppliers` (name_key non-unique, TIN unique) / `supplier_aliases` / `bill_supplier_candidates`; `bill_documents.supplier_id`; SQL-ranked `search_suppliers`; `bill.manage`-gated `create_supplier` (TIN guard, never merges); `bill.review`-gated `link_bill_supplier`; service_role-only `record_bill_supplier_candidates` wired into the worker; `BillSupplierPanel` on the detail page. | Behind `BILLS_EXTRACTION_ENABLED` |
 | **6 — Transaction matching & posting** *(built)* | `bills` (one per document) / `bill_transaction_links` / `bill_transaction_match_candidates`; service_role-only `get_bill_transaction_search_set` + `record_bill_transaction_match_candidates`; pure `web/lib/bills/matching/score.ts` wired into the worker; `approve_bill` (blocking-finding + unresolved-duplicate + no-self-approval guards); idempotent `post_bill` (→ matched / posted); `confirm`/`unlink` link adjustments; `BillLedgerPanel`. `transactions` is only read. | **Yes** |
 | **7 — Review workspace & UX** *(built)* | `bill_comments` + `review_revision` columns; `bill.review`-gated `correct_bill_field` (raw/normalised preserved, bumps `review_revision`) + `add_bill_comment`; `record_bill_validation` re-issued to stamp the revision; **`approve_bill` re-issued with a `stale_validation` guard** (no approving a check older than the last correction) that prefers a user correction over the model value; shared `web/lib/bills/revalidate.ts`; two-column document-alongside-review layout with inline field editing + auto re-check, `BillDocumentPreview` (native `<object>` / `<img>` from the signed-URL route), notes, and status filter chips on the landing page. | **Yes** |
-| **8 — Notifications, monitoring, rollout hardening** | Notifications via existing infra + prefs; analytics events; monitoring (upload success, queue depth, extraction success, provider latency/error, correction rate, approval turnaround, posting failure, match-confirm rate, unauthorized-access attempts); WCAG 2.1 AA pass; staged flag rollout internal → beta → GA; migration validation on realistic data; security + performance review; runbooks + ADR follow-ups | **Yes** |
+| **8 — Notifications, monitoring, rollout hardening** *(built)* | `notify.ts` — the worker emails owner/admin + `bill.review` grantees "a document is ready" (link only, no supplier/amount/OCR text; `BILLS_NOTIFICATIONS_ENABLED`, de-duped per document). `monitoring.ts` + `/api/cron/bill-monitoring` — coarse `[bill-metrics]` aggregate logs (queue depth, in-flight, needs-review, failed, posted/matched 24h, oldest-review age, approval turnaround). `activate_bill_workers.sql` — manual pg_cron activation (reuses `REPORT_CRON_SECRET`). `bills-verification-runbook.md` — release order, config table, e2e verification, failure-recovery, rollback. `bills-a11y.spec.ts` — serious/critical axe on `/bills` + `/bills/[id]` at 1280 and 390 px + keyboard filters. Settings link (gated on `isBillsEnabled`). | **Yes** |
 
 Release order per phase (master prompt §24): additive migration bakes →
 backend services → worker → provider config → API → frontend → feature
@@ -568,31 +571,101 @@ accounting-suite functionality.
 
 ---
 
-## 16. Documented deviations from the master prompt (Phase 1)
+## 16. Documented deviations from the master prompt (§33)
 
 1. **Background processing** — §18 wants durable queued jobs; this repo
-   has no queue, only pg_cron + `app/api/cron/*`. The Phase 2 worker
-   follows that pattern (idempotent, correlation-id'd, bounded retries).
+   has no queue, only pg_cron + `app/api/cron/*`. The worker follows that
+   pattern (idempotent, bounded, re-claims stale `queued`/`validating`).
    Constraint: pg_cron cadence, not sub-second. Follow-up: revisit if
    volume demands a real queue.
 2. **Malware scanning** — no infrastructure exists; `security_scan_status`
    is a documented integration point defaulting to `skipped`. Accepted
    debt for a pre-GA decision.
-3. **Upload rate limiting** — §5 wants request rate limiting; Phase 1
+3. **Upload rate limiting** — §5 wants request rate limiting; the module
    relies on the per-workspace checksum-uniqueness guard to stop repeated
-   identical submissions and defers a true per-user upload rate limit to
-   Phase 8 (there is no existing per-action rate-limit primitive in
+   identical submissions. A true per-user upload rate limit is a
+   follow-up (there is no existing per-action rate-limit primitive in
    `web/` to reuse).
 4. **Auto-approval** — intentionally architected-only and dark for the
    entire first release; the product has no explicit safe requirement for
    it yet (§2).
-5. **Document rendering** (Phase 2) — no server-side PDF rasteriser and a
+5. **Document rendering** — no server-side PDF rasteriser and a
    serverless deploy, so there is no preview/thumbnail generation. The
-   Phase 7 review workspace renders PDFs client-side with pdf.js and shows
-   images directly from the signed original URL. The `bill-derivatives`
-   bucket and the `preview_image` / `thumbnail` artifact kinds stay
-   declared for a future server-side option.
+   Phase 7 review workspace renders PDFs in a native `<object>` and
+   images with `<img>` from the signed original URL. A client-side pdf.js
+   viewer with per-page navigation and source-region (bbox) highlighting
+   is a follow-up; the `bill-derivatives` bucket and the `preview_image`
+   / `thumbnail` artifact kinds stay declared for it.
 6. **OpenAI + PDF** (Phase 2) — `chat.completions` image input does not
    accept PDFs; that combination degrades to `null` →
    `processing_failed` (a reviewer retries after switching `AI_PROVIDER`
    to `anthropic`). Wiring the OpenAI Responses/Files API is a follow-up.
+7. **Notification preferences** (Phase 8) — §23 wants per-user prefs.
+   Recipients are owner/admin + explicit `bill.review` grantees, gated by
+   the global `BILLS_NOTIFICATIONS_ENABLED` flag and de-duped per
+   document via a `bill_documents.metadata` marker. Per-member opt-out
+   through `space_member_notification_prefs` is a follow-up (avoids a
+   Phase 8 migration).
+8. **Monitoring sink** (Phase 8) — no APM in this repo; metrics are
+   structured `[bill-metrics]` log lines to the platform drain (the same
+   choice the reporting engine and the scan module made).
+
+---
+
+## 17. Handoff summary (master prompt §35)
+
+**Fully implemented** — end to end, behind `BILLS_ENABLED`
+(+ `BILLS_EXTRACTION_ENABLED` for everything past intake):
+
+1. Secure intake (magic-byte type, size/page caps, encrypted/corrupt-PDF
+   rejection, sanitised names, opaque tenant-prefixed keys, SHA-256,
+   exact-duplicate DB guard) and immutable original preservation in a
+   private bucket with signed-URL-only access.
+2. An 18-state server-enforced lifecycle + an append-only processing
+   journal; material user actions mirrored into `space_audit_events`.
+3. Eight `bill.*` capabilities in the Spaces matrix; every RPC + API
+   route re-checks server-side.
+4. AI classification + structured extraction (`anthropic` / `openai` /
+   `mock`) with locale-aware normalisation, document text hard-framed as
+   untrusted data, per-field confidence, and a deterministic
+   degrade-to-failed path.
+5. A deterministic, explainable validation engine (~20 rules) separate
+   from and authoritative over the AI.
+6. Content-duplicate detection (fingerprint scoring, reviewer resolution,
+   never auto-merged).
+7. Supplier resolution — first supplier-of-record entity, SQL-ranked
+   search, permissioned creation with a TIN guard.
+8. The `bills` obligation entity + transaction matching (linked, never
+   double-counted; `transactions` only read) + `approve_bill`
+   (blocking-finding / unresolved-duplicate / no-self-approval /
+   stale-validation guards) + **idempotent** `post_bill`.
+9. The review workspace — document alongside inline-editable fields with
+   corrected-value provenance and auto re-check, findings, supplier /
+   duplicate / match panels, notes, history, landing-page filters.
+10. Best-effort redacted notifications, aggregate monitoring, a manual
+    scheduler-activation script, and a verification/failure-recovery
+    runbook.
+
+**Verification run** (each phase): `npx tsc --noEmit` + `npm run lint`
+clean; **69 Deno unit tests** (intake, normalize, extraction
+schema/prompt/payload, validation engine, duplicate + transaction
+scorers); the pg17 migration harness green — full Phase A–U + Bills 1–7
+chain, **276 assertions**, 57 of them Bills, including idempotent
+posting, separation-of-duties, the stale-validation guard, and
+cross-workspace RLS on every new table; `npm run build` clean.
+Privilege-regression counts locked at **88 tables / 133 `authenticated`
+table grants / 84 `authenticated`-callable functions**.
+
+**Not run here:** the Playwright e2e suite (`bills-intake`,
+`bills-extraction`, `bills-a11y`) needs a local `supabase start` stack.
+
+**Deferred** (see §15 + the deviations above): autonomous approval, AP
+payment execution, PO/procurement, supplier portals, tax filing,
+forensic fraud detection; plus the follow-ups — a client-side pdf.js
+viewer with bbox highlighting, split-allocation UI, per-member
+notification prefs, a real job queue, malware scanning, and an
+upload rate limit.
+
+**Requires product / deployment approval:** turning any flag on in
+production; running `supabase/scheduling/activate_bill_workers.sql`;
+adding `bills` to primary navigation at GA.
