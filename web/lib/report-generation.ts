@@ -129,19 +129,53 @@ type SettledTransactionRow = {
 const SETTLED_TRANSACTION_COLUMNS =
   "id, direction, principal_effect_rwf, fee_effect_rwf, category, counterparty_name, occurred_at";
 
+/**
+ * Phase V PR4b: which financial sources this report may include.
+ * `null` = no filter (personal / organization Space, where a member sees
+ * everything). `{ sourceIds }` = a household member's report, restricted
+ * to sources they own or that are shared into the household; source-less
+ * legacy rows are always included.
+ */
+export type SourceVisibility = { sourceIds: string[] } | null;
+
+// The Supabase filter-builder type is not exported in a usable generic
+// form; both call sites feed it a real PostgrestFilterBuilder.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function withSourceVisibility<T extends { or: any; is: any }>(
+  query: T,
+  visibility: SourceVisibility,
+): T {
+  if (!visibility) return query;
+  if (visibility.sourceIds.length > 0) {
+    return query.or(
+      `financial_source_id.in.(${
+        visibility.sourceIds.join(",")
+      }),financial_source_id.is.null`,
+    );
+  }
+  return query.is("financial_source_id", null);
+}
+
 async function fetchSettledTransactions(
   supabase: ServiceClient,
   workspaceId: string,
   startUtc: Date,
   endUtc: Date,
+  visibility: SourceVisibility,
 ): Promise<SettledTransactionRow[]> {
-  const { data, error } = await supabase
-    .from("transactions")
-    .select(SETTLED_TRANSACTION_COLUMNS)
-    .eq("workspace_id", workspaceId)
-    .eq("settlement_state", "settled")
-    .gte("occurred_at", startUtc.toISOString())
-    .lt("occurred_at", endUtc.toISOString());
+  const { data, error } = await withSourceVisibility(
+    supabase
+      .from("transactions")
+      .select(SETTLED_TRANSACTION_COLUMNS)
+      .eq("workspace_id", workspaceId)
+      .eq("settlement_state", "settled")
+      // Phase V: a transaction merged into its canonical duplicate is kept
+      // for evidence but must never be counted in a report.
+      .neq("dedupe_state", "merged")
+      .gte("occurred_at", startUtc.toISOString())
+      .lt("occurred_at", endUtc.toISOString()),
+    visibility,
+  );
 
   if (error) {
     throw new Error(`fetchSettledTransactions failed: ${error.message}`);
@@ -173,13 +207,18 @@ async function fetchBalanceBefore(
   supabase: ServiceClient,
   workspaceId: string,
   beforeUtc: Date,
+  visibility: SourceVisibility,
 ): Promise<number | null> {
-  const { data, error } = await supabase
-    .from("transactions")
-    .select("balance_after_rwf")
-    .eq("workspace_id", workspaceId)
-    .not("balance_after_rwf", "is", null)
-    .lt("occurred_at", beforeUtc.toISOString())
+  const { data, error } = await withSourceVisibility(
+    supabase
+      .from("transactions")
+      .select("balance_after_rwf")
+      .eq("workspace_id", workspaceId)
+      .not("balance_after_rwf", "is", null)
+      .neq("dedupe_state", "merged")
+      .lt("occurred_at", beforeUtc.toISOString()),
+    visibility,
+  )
     .order("occurred_at", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(1)
@@ -189,6 +228,44 @@ async function fetchBalanceBefore(
     throw new Error(`fetchBalanceBefore failed: ${error.message}`);
   }
   return data?.balance_after_rwf ?? null;
+}
+
+/**
+ * The source-visibility filter for one report candidate. Only household
+ * Spaces are filtered - each member's report is restricted to what they
+ * can see. On a lookup failure for a household we log and fall back to
+ * unfiltered rather than emit an empty report; a report is informational,
+ * not an authorization boundary.
+ */
+async function resolveSourceVisibility(
+  supabase: ServiceClient,
+  candidate: ReportPreferenceCandidate,
+): Promise<SourceVisibility> {
+  const { data: ws, error: wsError } = await supabase
+    .from("workspaces")
+    .select("kind")
+    .eq("id", candidate.workspace_id)
+    .maybeSingle();
+
+  if (wsError || !ws || ws.kind !== "household") {
+    return null;
+  }
+
+  const { data, error } = await supabase.rpc("visible_source_ids_for_user", {
+    p_workspace_id: candidate.workspace_id,
+    p_user_id: candidate.user_id,
+  });
+
+  if (error) {
+    console.error(
+      `resolveSourceVisibility: household source lookup failed for ` +
+        `${candidate.workspace_id}/${candidate.user_id}, using unfiltered:`,
+      error.message,
+    );
+    return null;
+  }
+
+  return { sourceIds: (data ?? []) as string[] };
 }
 
 type PriorReportPayload = {
@@ -559,6 +636,8 @@ export async function generateDailyReportForCandidate(
       return { status: "already_exists", reportRunId: existing.id };
     }
 
+    const visibility = await resolveSourceVisibility(supabase, candidate);
+
     const [
       rawTransactions,
       openingBalanceRwf,
@@ -570,9 +649,20 @@ export async function generateDailyReportForCandidate(
         candidate.workspace_id,
         periodStartUtc,
         periodEndUtc,
+        visibility,
       ),
-      fetchBalanceBefore(supabase, candidate.workspace_id, periodStartUtc),
-      fetchBalanceBefore(supabase, candidate.workspace_id, periodEndUtc),
+      fetchBalanceBefore(
+        supabase,
+        candidate.workspace_id,
+        periodStartUtc,
+        visibility,
+      ),
+      fetchBalanceBefore(
+        supabase,
+        candidate.workspace_id,
+        periodEndUtc,
+        visibility,
+      ),
       fetchPriorReportPayloads(
         supabase,
         candidate.workspace_id,
