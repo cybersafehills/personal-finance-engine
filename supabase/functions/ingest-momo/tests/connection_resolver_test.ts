@@ -129,7 +129,28 @@ Deno.test("resolveAccountRoute: an active connection resolves to its own bound a
       accountId: "acct-a",
       workspaceId: "ws-a",
       ingestionConnectionId: "conn-1",
+      financialSourceId: null,
+      sourceMaskedIdentifier: null,
     });
+  }
+});
+
+Deno.test("resolveAccountRoute: carries the routed account's linked financial source + masked identifier through to the route (Phase U provenance)", async () => {
+  const result = await resolveAccountRoute(ACTIVE_CONNECTION, {
+    findActiveAccountById: () =>
+      Promise.resolve({
+        ...ACTIVE_ACCOUNT,
+        financial_source_id: "src-a",
+        source_masked_identifier: "MTN ...4821",
+      }),
+  });
+  assertEquals(result.ok, true);
+  if (result.ok) {
+    assertEquals(result.route.financialSourceId, "src-a");
+    assertEquals(result.route.sourceMaskedIdentifier, "MTN ...4821");
+    // Routing itself is unchanged - still the connection's bound account.
+    assertEquals(result.route.accountId, "acct-a");
+    assertEquals(result.route.workspaceId, "ws-a");
   }
 });
 

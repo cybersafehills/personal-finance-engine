@@ -5,6 +5,11 @@ import { normalizeMessage, sha256 } from "./parser-utils.ts";
 import { jsonResponse } from "./responses.ts";
 import { computeAccountingEffect } from "../_shared/accounting.ts";
 import {
+  buildRawFinancialEvent,
+  deriveDedupeState,
+  fingerprintArgs,
+} from "./raw-event.ts";
+import {
   authenticateCredential,
   type IngestionConnectionRow,
   resolveAccountRoute,
@@ -267,6 +272,67 @@ Deno.serve(async (req: Request) => {
     }
 
     // ========================================================
+    // RAW FINANCIAL EVENT (Phase U: the evidence spine)
+    // ========================================================
+    //
+    // Every inbound SMS is recorded as a raw_financial_events row -
+    // upstream of, and independent from, whatever canonical transaction it
+    // does or doesn't become (design doc §4.5: "evidence, never
+    // discarded"). It is deduped on the SAME normalized-message hash
+    // momo_messages uses, so the same SMS from two devices collapses to
+    // one evidence row (payload_hash is UNIQUE - on conflict we reuse the
+    // existing row). This is best-effort: a failure to write or reuse the
+    // evidence row must never turn away an ingestion that otherwise
+    // succeeds, so we log and carry on with a null id (parse_status is
+    // advanced later, only if we have one).
+
+    let rawFinancialEventId: string | null = null;
+
+    {
+      const rawEvent = buildRawFinancialEvent({
+        rawMessage,
+        payloadHash: fingerprint,
+        deviceReceivedAt,
+        ingestionConnectionId: connection.id,
+        momoMessageId,
+        parserVersion: PARSER_VERSION,
+        now: new Date().toISOString(),
+      });
+
+      const { data: insertedEvent, error: rawEventInsertError } = await supabase
+        .from("raw_financial_events")
+        .insert(rawEvent)
+        .select("id")
+        .maybeSingle();
+
+      if (insertedEvent?.id) {
+        rawFinancialEventId = insertedEvent.id;
+      } else if (rawEventInsertError?.code === "23505") {
+        // Same evidence already recorded (retry, or redelivery): reuse it.
+        const { data: existingEvent, error: existingEventError } =
+          await supabase
+            .from("raw_financial_events")
+            .select("id")
+            .eq("payload_hash", fingerprint)
+            .maybeSingle();
+
+        if (existingEvent?.id) {
+          rawFinancialEventId = existingEvent.id;
+        } else if (existingEventError) {
+          console.error(
+            "Raw financial event re-lookup error (non-fatal):",
+            existingEventError,
+          );
+        }
+      } else if (rawEventInsertError) {
+        console.error(
+          "Raw financial event insert error (non-fatal):",
+          rawEventInsertError,
+        );
+      }
+    }
+
+    // ========================================================
     // DETERMINISTIC TRANSACTION PARSING
     // ========================================================
 
@@ -279,6 +345,13 @@ Deno.serve(async (req: Request) => {
           processing_status: "needs_review",
         })
         .eq("id", momoMessageId);
+
+      if (rawFinancialEventId) {
+        await supabase
+          .from("raw_financial_events")
+          .update({ parse_status: "rejected" })
+          .eq("id", rawFinancialEventId);
+      }
 
       await supabase
         .from("processing_errors")
@@ -337,6 +410,16 @@ Deno.serve(async (req: Request) => {
             processing_status: "processed",
           })
           .eq("id", momoMessageId);
+
+        if (rawFinancialEventId) {
+          await supabase
+            .from("raw_financial_events")
+            .update({
+              parse_status: "superseded",
+              canonical_transaction_id: existingTransaction.id,
+            })
+            .eq("id", rawFinancialEventId);
+        }
 
         return jsonResponse({
           ok: true,
@@ -414,7 +497,9 @@ Deno.serve(async (req: Request) => {
       findActiveAccountById: async (accountId) => {
         const { data, error } = await supabase
           .from("accounts")
-          .select("id, workspace_id, is_active, archived_at")
+          .select(
+            "id, workspace_id, is_active, archived_at, financial_source_id, financial_sources(masked_identifier)",
+          )
           .eq("id", accountId)
           .maybeSingle();
 
@@ -422,7 +507,30 @@ Deno.serve(async (req: Request) => {
           console.error("Account lookup error:", error);
         }
 
-        return data ?? null;
+        if (!data) {
+          return null;
+        }
+
+        // PostgREST returns the embedded to-one either as an object or,
+        // depending on how it resolves the relationship, a one-element
+        // array - normalise both, and tolerate its absence entirely
+        // (the seed account has no linked source).
+        const embedded = (data as Record<string, unknown>).financial_sources;
+        const source = Array.isArray(embedded) ? embedded[0] : embedded;
+        const sourceMaskedIdentifier =
+          source && typeof source === "object" && "masked_identifier" in source
+            ? ((source as { masked_identifier: string | null })
+              .masked_identifier ?? null)
+            : null;
+
+        return {
+          id: data.id,
+          workspace_id: data.workspace_id,
+          is_active: data.is_active,
+          archived_at: data.archived_at,
+          financial_source_id: data.financial_source_id ?? null,
+          source_masked_identifier: sourceMaskedIdentifier,
+        };
       },
     });
 
@@ -455,6 +563,9 @@ Deno.serve(async (req: Request) => {
     const resolvedAccountId = routeResult.route.accountId;
     const resolvedWorkspaceId = routeResult.route.workspaceId;
     const ingestionConnectionId = routeResult.route.ingestionConnectionId;
+    const resolvedFinancialSourceId = routeResult.route.financialSourceId;
+    const resolvedSourceMaskedIdentifier =
+      routeResult.route.sourceMaskedIdentifier;
 
     // ========================================================
     // CATEGORIZATION POLICY EVALUATION
@@ -489,6 +600,68 @@ Deno.serve(async (req: Request) => {
     }));
 
     // ========================================================
+    // TRANSACTION-LEVEL DUPLICATE DETECTION (Phase U)
+    // ========================================================
+    //
+    // A normalized fingerprint (source + masked id + amount + currency +
+    // direction + counterparty + occurred-at-to-the-minute) computed by
+    // the same IMMUTABLE SQL function a reconciler would use. If another
+    // non-merged transaction the ingestion role can see already carries
+    // it, this row is stamped `possible_duplicate` and surfaced for human
+    // review later - it is NEVER auto-merged or blocked here. The MTN
+    // transaction-id check above still runs first and still short-circuits
+    // exact redeliveries; this catches the near-duplicates that check
+    // can't (e.g. the same payment seen once by SMS and once by a
+    // statement import). Entirely best-effort: any RPC failure leaves the
+    // row `unique` with a null fingerprint rather than failing ingestion.
+
+    let dedupeFingerprint: string | null = null;
+    let dedupeState: "unique" | "possible_duplicate" = "unique";
+
+    try {
+      const { data: fp, error: fpError } = await supabase.rpc(
+        "compute_transaction_fingerprint",
+        fingerprintArgs(parsed, {
+          maskedIdentifier: resolvedSourceMaskedIdentifier,
+        }),
+      );
+
+      if (fpError) {
+        console.error("Fingerprint computation error (non-fatal):", fpError);
+      } else if (typeof fp === "string" && fp.length > 0) {
+        dedupeFingerprint = fp;
+
+        const { data: candidates, error: candidatesError } = await supabase.rpc(
+          "transaction_duplicate_candidates",
+          { p_fingerprint: fp, p_exclude_id: null },
+        );
+
+        if (candidatesError) {
+          console.error(
+            "Duplicate-candidate lookup error (non-fatal):",
+            candidatesError,
+          );
+        } else {
+          dedupeState = deriveDedupeState(
+            Array.isArray(candidates) ? candidates.length : 0,
+          );
+        }
+      }
+    } catch (fingerprintException) {
+      console.error(
+        "Duplicate detection threw (non-fatal):",
+        fingerprintException,
+      );
+    }
+
+    if (dedupeState === "possible_duplicate") {
+      console.log(JSON.stringify({
+        event: "possible_duplicate_ingested",
+        dedupe_fingerprint: dedupeFingerprint,
+      }));
+    }
+
+    // ========================================================
     // STRUCTURED FINANCIAL LEDGER INSERT
     // ========================================================
     //
@@ -512,6 +685,12 @@ Deno.serve(async (req: Request) => {
           account_id: resolvedAccountId,
           workspace_id: resolvedWorkspaceId,
           ingestion_connection_id: ingestionConnectionId,
+          // Phase U: provenance + duplicate-detection state. Routing is
+          // unchanged - financial_source_id is the source the routed
+          // account was linked to (nullable), not a new routing decision.
+          financial_source_id: resolvedFinancialSourceId,
+          dedupe_fingerprint: dedupeFingerprint,
+          dedupe_state: dedupeState,
           external_transaction_id: parsed.external_transaction_id,
           source: "mtn_momo",
           transaction_type: parsed.transaction_type,
@@ -578,6 +757,32 @@ Deno.serve(async (req: Request) => {
         },
         500,
       );
+    }
+
+    // ========================================================
+    // FINALISE THE RAW FINANCIAL EVENT (best-effort, non-fatal)
+    // ========================================================
+    //
+    // The canonical transaction now exists; point the evidence row at it
+    // and mark it normalized. The transaction is already durably stored -
+    // a failure to update the evidence link must never undo or fail it.
+
+    if (rawFinancialEventId) {
+      const { error: rawEventFinalizeError } = await supabase
+        .from("raw_financial_events")
+        .update({
+          parse_status: "normalized",
+          canonical_transaction_id: insertedTransaction.id,
+          financial_source_id: resolvedFinancialSourceId,
+        })
+        .eq("id", rawFinancialEventId);
+
+      if (rawEventFinalizeError) {
+        console.error(
+          "Raw financial event finalize error (non-fatal):",
+          rawEventFinalizeError,
+        );
+      }
     }
 
     // ========================================================

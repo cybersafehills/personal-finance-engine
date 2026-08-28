@@ -859,6 +859,57 @@ PR1" block. Full suite: 223 passed / 0 failed.
 
 ---
 
+## 11g. Phase U PR2 — as built (Deno: `ingest-momo`)
+
+The `ingest-momo` cutover onto the PR1 primitives. **Deno only — no
+migration, no new grant.** Routing and balance maths are untouched by
+design (§ "no balance/routing changes unless fixing a bug"): the canonical
+transaction still lands in the connection's bound workspace/account. What
+changed is that ingestion now (a) records evidence in
+`raw_financial_events` and (b) stamps duplicate-detection state.
+
+- **New `supabase/functions/ingest-momo/raw-event.ts`** — pure builders,
+  unit-tested in isolation because `index.ts` has no harness:
+  `buildRawFinancialEvent` (the `channel='sms'` evidence row),
+  `fingerprintArgs` (RWF is zero-decimal, so `amount_rwf` is already the
+  minor unit; source defaults to `mtn_momo`; threads the source's
+  `masked_identifier` when the routed account has one),
+  `deriveDedupeState` (`>0` visible same-fingerprint peers ⇒
+  `possible_duplicate`; **anything else, including a failed lookup, stays
+  `unique` — ingestion is never blocked by dedupe**).
+- **`raw_financial_events` write** happens right after the `momo_messages`
+  row, before parsing — deduped on the *same* normalised-message SHA-256
+  `momo_messages` uses (`payload_hash` UNIQUE ⇒ reuse the existing row on
+  `23505`). Best-effort: any failure logs and continues with a null id.
+  `parse_status` then tracks the outcome — `rejected` (parser miss),
+  `superseded` (MTN transaction-id duplicate, linked to the existing
+  transaction), or `normalized` + `canonical_transaction_id` +
+  `financial_source_id` on success. A routing/insert failure leaves it
+  `pending` (retryable — the retry reuses it via the `23505` path).
+- **`connection-resolver.ts`** now carries the routed account's
+  `financial_source_id` + the source's `masked_identifier` through
+  `ResolvedIngestionRoute` (via a PostgREST embed on the account lookup).
+  Routing is unchanged — this is provenance, not a new decision.
+- **Transaction insert** gains `financial_source_id` (the routed account's
+  linked source, nullable — the seed account has none),
+  `dedupe_fingerprint` (from `compute_transaction_fingerprint`), and
+  `dedupe_state`. `possible_duplicate` rows are logged
+  (`possible_duplicate_ingested`) and surfaced for review in a later PR —
+  **never auto-merged here**. The existing MTN transaction-id check still
+  runs first and still short-circuits exact redeliveries.
+
+Tests: new `tests/raw_event_test.ts` (7 cases) + a `connection_resolver`
+case for the source/masked-id passthrough. `deno fmt --check` / `deno
+lint` / `deno check ingest-momo` / `deno test ingest-momo` (74) / `deno
+test _shared` (71) all green.
+
+Deferred to PR3+: `resolve_ingestion_target` space-override routing
+(`is_default_target`); duplicate review cards + auto-merge; aggregation
+(budgets/reports) excluding `merged`; statement (CSV/PDF) reconciliation;
+device-management UX; rule `scope` / precedence / explainability.
+
+---
+
 ## 12. Testing strategy (per phase, aggregated here)
 
 - **Unit**: role→capability, `can_view_source_in_space` truth table,
