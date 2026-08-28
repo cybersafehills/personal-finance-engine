@@ -95,6 +95,13 @@ export const config = {
   // cron call was redirected to /login before the route handler's own
   // secret check ever ran (discovered via a manual curl smoke test
   // returning a 307 to /login instead of reaching the route).
+  //
+  // /brand/* is excluded: it is nothing but static public brand artwork
+  // (logo, mark, favicons, and the iOS PWA launch images). Gating it did
+  // no security work - the files are world-readable in public/ - but it
+  // did 307 every one of those images to /login for a logged-out
+  // visitor, so an installed iOS PWA never got its apple-touch-startup-
+  // image and fell back to a black launch screen.
   matcher:
-    "/((?!_next/static|_next/image|favicon.ico|icon.png|apple-icon.png|api/cron).*)",
+    "/((?!_next/static|_next/image|favicon.ico|icon.png|apple-icon.png|api/cron|brand/).*)",
 };
