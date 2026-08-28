@@ -821,11 +821,12 @@ fi
 # Phase V PR1 (20261001000000) adds mark_notification_read,
 # mark_all_notifications_read, unread_notification_count. enqueue_notification
 # is internal (no authenticated grant). = 75.
+# Phase V PR2 (20261002000000) adds sweep_budget_thresholds. = 76.
 AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname = 'authenticated' where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "75" ]; then
-  pass "authenticated holds EXECUTE on exactly the 75 functions expected, no more"
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "76" ]; then
+  pass "authenticated holds EXECUTE on exactly the 76 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 75 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 76 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -3688,6 +3689,59 @@ else
   pass "Phase V PR1: enqueue_notification is not authenticated-callable (internal producer helper)"
 fi
 rm -f $ARTIFACT_DIR/pfe_v_pr1.log
+
+# ===========================================================================
+# Phase V PR2: budget threshold sweep (sweep_budget_thresholds ->
+# record_budget_threshold_crossing -> enqueue_notification). Fresh active
+# budget in WORKSPACE_A (personal; USER_A is its sole member, so
+# should_notify approves budget.threshold_90 in_app by default).
+# ===========================================================================
+echo "=== Phase V PR2: budget threshold sweep ==="
+
+# Retire any earlier active RWF budget (Phase D / T PR2 fixtures) so this
+# one can be the workspace's single active RWF budget.
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; update public.budgets set status = 'archived' where workspace_id = '$WORKSPACE_A' and currency = 'RWF' and status = 'active';" >/dev/null
+V2_BUDGET="$(psql -d pfe_rls -t -A -c "set role service_role; insert into public.budgets (workspace_id, name, currency, period_start, period_end, income_amount_minor, normalized_monthly_income_minor, normalized_annual_income_minor, income_frequency, income_mode, status) values ('$WORKSPACE_A', 'V2 Budget', 'RWF', current_date - 5, current_date + 25, 100000, 100000, 1200000, 'monthly', 'fixed', 'draft') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.budget_allocations (budget_id, workspace_id, allocation_type, percentage, target_amount_minor) values ('$V2_BUDGET', '$WORKSPACE_A', 'ESSENTIALS', 100.00, 100000);" >/dev/null
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; update public.budgets set status = 'active', activated_at = now() where id = '$V2_BUDGET';" >/dev/null
+
+# ~92% of the budget's income (100000) in settled outflow this period.
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.transactions (id, source, account_id, workspace_id, transaction_type, direction, status, currency, amount_rwf, fee_rwf, occurred_at, parser_version, principal_effect_rwf, fee_effect_rwf, settlement_state, affects_balance, effect_reason)
+  values ('00000000-0000-0000-0000-0000000000e6', 'manual', '$U_ACCT', '$WORKSPACE_A', 'merchant_payment', 'out', 'success', 'RWF', 92000, 0, now(), 'test', -92000, 0, 'settled', true, 'test');
+" >/dev/null
+
+V2_SWEEP_1="$(as_user "$USER_A" "select public.sweep_budget_thresholds('$WORKSPACE_A');")"
+V2_AT_RISK_NOTIF="$(psql -d pfe_rls -t -A -c "select count(*) from public.notifications where workspace_id = '$WORKSPACE_A' and user_id = '$USER_A' and event_key = 'budget.threshold_90' and channel = 'in_app' and resource_id = '$V2_BUDGET';")"
+V2_SWEEP_2="$(as_user "$USER_A" "select public.sweep_budget_thresholds('$WORKSPACE_A');")"
+if [ "$V2_SWEEP_1" = "1" ] && [ "$V2_AT_RISK_NOTIF" = "1" ] && [ "$V2_SWEEP_2" = "0" ]; then
+  pass "Phase V PR2: a budget crossing 90% enqueues one budget.threshold_90 notification; a second sweep with no new crossing enqueues nothing"
+else
+  fail "Phase V PR2: sweep wrong (sweep1=$V2_SWEEP_1 notif=$V2_AT_RISK_NOTIF sweep2=$V2_SWEEP_2)"
+fi
+
+# Push the same budget over 100% -> a fresh upward crossing -> budget.exceeded.
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.transactions (id, source, account_id, workspace_id, transaction_type, direction, status, currency, amount_rwf, fee_rwf, occurred_at, parser_version, principal_effect_rwf, fee_effect_rwf, settlement_state, affects_balance, effect_reason)
+  values ('00000000-0000-0000-0000-0000000000e7', 'manual', '$U_ACCT', '$WORKSPACE_A', 'merchant_payment', 'out', 'success', 'RWF', 15000, 0, now(), 'test', -15000, 0, 'settled', true, 'test');
+" >/dev/null
+V2_SWEEP_3="$(as_user "$USER_A" "select public.sweep_budget_thresholds('$WORKSPACE_A');")"
+V2_EXCEEDED_NOTIF="$(psql -d pfe_rls -t -A -c "select count(*) from public.notifications where workspace_id = '$WORKSPACE_A' and user_id = '$USER_A' and event_key = 'budget.exceeded' and resource_id = '$V2_BUDGET';")"
+if [ "$V2_SWEEP_3" = "1" ] && [ "$V2_EXCEEDED_NOTIF" -ge 1 ]; then
+  pass "Phase V PR2: pushing the same budget past 100% is a fresh upward crossing and enqueues budget.exceeded"
+else
+  fail "Phase V PR2: over-100% crossing wrong (sweep3=$V2_SWEEP_3 exceeded_notif=$V2_EXCEEDED_NOTIF)"
+fi
+
+# A non-member cannot sweep another Space's budgets.
+if as_user "$USER_B" "select public.sweep_budget_thresholds('$WORKSPACE_A');" >/dev/null 2>$ARTIFACT_DIR/pfe_v_pr2.log; then
+  fail "Phase V PR2: a non-member ran sweep_budget_thresholds for another Space"
+else
+  pass "Phase V PR2: sweep_budget_thresholds refuses a non-member of the Space"
+fi
+rm -f $ARTIFACT_DIR/pfe_v_pr2.log
 
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="

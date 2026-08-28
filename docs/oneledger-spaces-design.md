@@ -1240,6 +1240,37 @@ via Resend); **PR4** — Space-scoped scheduled reports.
 
 ---
 
+## 11r. Phase V PR2 — as built (migration `20261002000000` + Deno)
+
+The budget threshold-crossing producer. Phase T PR2 shipped
+`record_budget_threshold_crossing` (one alert per strictly-upward bucket
+crossing) with no caller; this adds one and wires it to notifications.
+
+- **`sweep_budget_thresholds(p_workspace_id)`** — `SECURITY DEFINER`,
+  `authenticated` + `service_role`, member-gated per Space. For every
+  `status = 'active'` budget whose period covers today (workspace
+  timezone): compute a **total** spend % as
+  `100 · Σ settled outflow (this currency + period, excluding `merged`
+  and linked self-transfers) ÷ income_amount_minor`, feed it to
+  `record_budget_threshold_crossing(budget, '__total__', pct)`, and on a
+  non-null (upward-crossing) bucket `enqueue_notification` with
+  `budget.threshold_75` / `budget.threshold_90` / `budget.exceeded`
+  (`watch` / `at_risk` / `exceeded`+`over`). Returns the alert count.
+  Deliberately a coarse total, not the per-allocation
+  `getBudgetActuals()` breakdown.
+- **`ingest-momo`** calls it after each successful transaction insert
+  (best-effort, non-fatal, alongside the existing SMS-reconciliation and
+  `last_used_at` calls) — so a new outflow that tips a budget over a
+  threshold notifies within the same ingest.
+
+`authenticated` function count → **76**. No new table / table-grant.
+3-assertion "Phase V PR2" migration block (90% crossing → one
+`budget.threshold_90`, quiet re-sweep, 100% crossing → `budget.exceeded`,
+non-member refusal). Full suite: **248 passed / 0 failed**. `deno check` /
+`deno test ingest-momo` (78) / `deno fmt` green.
+
+---
+
 ## 12. Testing strategy (per phase, aggregated here)
 
 - **Unit**: role→capability, `can_view_source_in_space` truth table,
