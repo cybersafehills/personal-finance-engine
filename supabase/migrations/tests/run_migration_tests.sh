@@ -597,7 +597,9 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # bill_processing_policies) and Phase 2 (20260923000000) adds 3 more
 # (bill_extractions, bill_extracted_fields, bill_line_items) - 78 tables,
 # 77 with RLS, the same one intentional gap (auth_login_attempts).
-if [ "$TABLE_COUNT" = "78" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Phase 3 (20260924000000) adds 2 more (bill_validations,
+# bill_validation_findings) - 80 tables, 79 with RLS.
+if [ "$TABLE_COUNT" = "80" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -686,11 +688,13 @@ AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from inform
 # bill_document_artifacts, bill_processing_events (select only - every
 # write is via a SECURITY DEFINER RPC or service_role) + bill_processing_
 # policies (select, update). Phase 2 (20260923000000) adds 3 select-only
-# (bill_extractions, bill_extracted_fields, bill_line_items). 115 + 8 = 123.
-if [ "$AUTHENTICATED_GRANT_COUNT" = "123" ]; then
-  pass "authenticated holds exactly the 123 table grants expected, no more"
+# (bill_extractions, bill_extracted_fields, bill_line_items). Phase 3
+# (20260924000000) adds 2 select-only (bill_validations,
+# bill_validation_findings). 115 + 10 = 125.
+if [ "$AUTHENTICATED_GRANT_COUNT" = "125" ]; then
+  pass "authenticated holds exactly the 125 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 123 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 125 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -827,7 +831,10 @@ AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_p
 # (record_bill_event, enforce_bill_original_immutable, bill_document_
 # transition_allowed) have no authenticated grant. Phase 2 (20260923000000)
 # adds 1: retry_bill_extraction (record_bill_extraction / system_transition_
-# bill_document are service_role-only). 69 + 5 = 74.
+# bill_document are service_role-only). 69 + 5 = 74. Phase 3
+# (20260924000000) adds none - record_bill_validation is service_role-only
+# and the record_bill_extraction re-issue is CREATE OR REPLACE (grant
+# preserved). Still 74.
 if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "74" ]; then
   pass "authenticated holds EXECUTE on exactly the 74 functions expected, no more"
 else
@@ -3571,9 +3578,9 @@ BILL2_DOCCLASS="$(psql -d pfe_rls -t -A -c "select doc_class from public.bill_do
 BILL2_FIELDS="$(psql -d pfe_rls -t -A -c "select count(*) from public.bill_extracted_fields where bill_document_id = '$BILL2_ID';")"
 BILL2_LINES="$(psql -d pfe_rls -t -A -c "select count(*) from public.bill_line_items where bill_document_id = '$BILL2_ID';")"
 BILL2_CURRENT="$(psql -d pfe_rls -t -A -c "select count(*) from public.bill_extractions where bill_document_id = '$BILL2_ID' and is_current;")"
-if [ "$BILL2_REC" = "needs_review" ] && [ "$BILL2_STATUS" = "needs_review" ] && [ "$BILL2_DOCCLASS" = "supplier_invoice" ] \
+if [ "$BILL2_REC" = "validating" ] && [ "$BILL2_STATUS" = "validating" ] && [ "$BILL2_DOCCLASS" = "supplier_invoice" ] \
    && [ "$BILL2_FIELDS" = "2" ] && [ "$BILL2_LINES" = "1" ] && [ "$BILL2_CURRENT" = "1" ]; then
-  pass "Bills Phase 2: record_bill_extraction writes the run + fields + lines, stamps doc_class, advances to needs_review"
+  pass "Bills Phase 2: record_bill_extraction writes the run + fields + lines, stamps doc_class, advances to validating (Phase 3 re-issue)"
 else
   fail "Bills Phase 2: extraction round-trip wrong (rec=$BILL2_REC status=$BILL2_STATUS class=$BILL2_DOCCLASS fields=$BILL2_FIELDS lines=$BILL2_LINES current=$BILL2_CURRENT)"
 fi
@@ -3617,6 +3624,75 @@ if [ "$BILL2_B_SEES" = "0" ]; then
   pass "Bills Phase 2: a non-member cannot read another workspace's extracted fields"
 else
   fail "Bills Phase 2: RLS isolation breach on bill_extracted_fields"
+fi
+
+# ===========================================================================
+# Bills & Expenses Phase 3 (20260924000000): record_bill_validation being
+# service_role-only, a full validation run inserting findings + advancing
+# validating -> needs_review, is_current supersession, and cross-workspace
+# RLS on the two validation tables. Reuses pfe_rls + USER_A / USER_B /
+# BILL_WS_A.
+# ===========================================================================
+echo "=== Bills Phase 3: deterministic validation ==="
+
+BILL3_CHK="$(printf 'e%.0s' $(seq 1 64))"
+
+if as_user "$USER_A" "select public.record_bill_validation('{}'::jsonb);" >/dev/null 2>$ARTIFACT_DIR/pfe_b3.log; then
+  fail "Bills Phase 3: record_bill_validation was callable by an authenticated user"
+else
+  pass "Bills Phase 3: record_bill_validation is service_role-only"
+fi
+rm -f $ARTIFACT_DIR/pfe_b3.log
+
+# Drive a fresh document to 'validating' via extraction, then run validation.
+BILL3_ID="$(as_user "$USER_A" "select (public.create_bill_document(jsonb_build_object(
+  'workspace_id', '$BILL_WS_A', 'original_filename', 'v.pdf', 'sanitized_filename', 'v.pdf',
+  'storage_key', '$BILL_WS_A/${BILL3_CHK}.pdf', 'mime_type', 'application/pdf',
+  'byte_size', 4096, 'checksum_sha256', '$BILL3_CHK')))->>'id';")"
+as_user "$USER_A" "select public.transition_bill_document('$BILL3_ID', 'queued');" >/dev/null
+BILL3_EXT="$(psql -d pfe_rls -t -A -c "set role service_role;
+  select public.system_transition_bill_document('$BILL3_ID', 'scanning');
+  select public.system_transition_bill_document('$BILL3_ID', 'classifying');
+  select public.system_transition_bill_document('$BILL3_ID', 'extracting');
+  select (public.record_bill_extraction(jsonb_build_object(
+    'bill_document_id','$BILL3_ID','workspace_id','$BILL_WS_A','status','succeeded',
+    'provider','mock','model','mock','doc_class','supplier_invoice',
+    'fields', jsonb_build_array(jsonb_build_object('field_key','total','value_type','money_minor','normalized_value','150000','currency','RWF','source_page',1)),
+    'line_items','[]'::jsonb)))->>'status';" | tail -1)"
+BILL3_STATUS_MID="$(psql -d pfe_rls -t -A -c "select status from public.bill_documents where id = '$BILL3_ID';")"
+
+BILL3_VAL="$(psql -d pfe_rls -t -A -c "set role service_role; select (public.record_bill_validation(jsonb_build_object(
+  'bill_document_id','$BILL3_ID','workspace_id','$BILL_WS_A','status','succeeded',
+  'findings', jsonb_build_array(
+     jsonb_build_object('rule_id','arithmetic_total_mismatch','severity','blocking','title','Totals do not add up','detail','x','affected_fields',jsonb_build_array('total','subtotal'),'blocks_approval',true),
+     jsonb_build_object('rule_id','future_issue_date','severity','warning','title','Future date','detail','y','affected_fields',jsonb_build_array('issue_date'),'blocks_approval',false))
+)))->>'blocking';" | tail -1)"
+BILL3_STATUS_END="$(psql -d pfe_rls -t -A -c "select status from public.bill_documents where id = '$BILL3_ID';")"
+BILL3_FINDINGS="$(psql -d pfe_rls -t -A -c "select count(*) from public.bill_validation_findings where bill_document_id = '$BILL3_ID';")"
+BILL3_COUNTS="$(psql -d pfe_rls -t -A -c "select blocking_count || '/' || warning_count from public.bill_validations where bill_document_id = '$BILL3_ID' and is_current;")"
+if [ "$BILL3_EXT" = "validating" ] && [ "$BILL3_STATUS_MID" = "validating" ] && [ "$BILL3_VAL" = "1" ] \
+   && [ "$BILL3_STATUS_END" = "needs_review" ] && [ "$BILL3_FINDINGS" = "2" ] && [ "$BILL3_COUNTS" = "1/1" ]; then
+  pass "Bills Phase 3: record_bill_validation inserts findings, tallies severities, advances validating -> needs_review"
+else
+  fail "Bills Phase 3: validation round-trip wrong (ext=$BILL3_EXT mid=$BILL3_STATUS_MID blk=$BILL3_VAL end=$BILL3_STATUS_END findings=$BILL3_FINDINGS counts=$BILL3_COUNTS)"
+fi
+
+# A second run supersedes the previous is_current.
+psql -d pfe_rls -t -A -c "set role service_role; select public.record_bill_validation(jsonb_build_object(
+  'bill_document_id','$BILL3_ID','workspace_id','$BILL_WS_A','status','succeeded','findings','[]'::jsonb));" >/dev/null
+BILL3_CUR="$(psql -d pfe_rls -t -A -c "select count(*) from public.bill_validations where bill_document_id = '$BILL3_ID' and is_current;")"
+BILL3_RUNS="$(psql -d pfe_rls -t -A -c "select count(*) from public.bill_validations where bill_document_id = '$BILL3_ID';")"
+if [ "$BILL3_CUR" = "1" ] && [ "$BILL3_RUNS" = "2" ]; then
+  pass "Bills Phase 3: a new validation run supersedes the previous is_current"
+else
+  fail "Bills Phase 3: is_current supersession wrong (current=$BILL3_CUR runs=$BILL3_RUNS)"
+fi
+
+BILL3_B_SEES="$(as_user "$USER_B" "select count(*) from public.bill_validation_findings where bill_document_id = '$BILL3_ID';")"
+if [ "$BILL3_B_SEES" = "0" ]; then
+  pass "Bills Phase 3: a non-member cannot read another workspace's validation findings"
+else
+  fail "Bills Phase 3: RLS isolation breach on bill_validation_findings"
 fi
 
 echo ""

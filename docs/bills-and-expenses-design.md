@@ -5,13 +5,15 @@ internal implementation plan the master prompt asks for in §1: relevant
 existing architecture, proposed architecture, the phased delivery, the
 security model, the testing strategy, and the deferred set.
 
-Status: **Phases 1–2 built** (on `main` after Phases S–U).
+Status: **Phases 1–3 built** (on `main` after Phases S–U).
 Phase 1 — `20260922000000_bills_phase_1_intake_and_lifecycle.sql` +
 `web/lib/bills/**`, `web/app/bills/**`, `web/app/api/bills/**`.
 Phase 2 — `20260923000000_bills_phase_2_extraction.sql` +
 `web/lib/bills/normalize.ts`, `web/lib/bills/extraction/**`,
 `web/lib/bills/worker.ts`, `web/app/api/cron/process-bill-documents/`.
-Phases 3–8 are designed here and architected-for; none of their code
+Phase 3 — `20260924000000_bills_phase_3_validation.sql` +
+`web/lib/bills/validation/**` (pure rule engine), wired into the worker.
+Phases 4–8 are designed here and architected-for; none of their code
 exists yet.
 
 ---
@@ -194,10 +196,14 @@ awaiting_clarification → approved | rejected → posting → posted | matched
   `rejected`/`archived`).
 - Any non-`archived` state → `archived` (authorised retention action;
   never a hard delete).
-- `processing_failed → queued` (retry).
-- Phase 1 with no AI worker: `stored → needs_review` directly. The
-  `classifying/extracting/validating` hops exist so the Phase 2 cron
-  worker is purely additive.
+- `processing_failed → queued` (retry, `retry_bill_extraction`).
+- Extraction disabled (`BILLS_EXTRACTION_ENABLED` unset): the document
+  stays at `stored` until the Phase 7 review workflow moves it. Enabled:
+  the worker walks `queued → scanning → classifying → extracting`, then
+  `record_bill_extraction` lands it at `validating`, then the worker runs
+  the deterministic rule engine and `record_bill_validation` moves it to
+  `needs_review` — all in one tick. Every document reaches human review
+  regardless of findings in the first release.
 
 ---
 
@@ -276,26 +282,51 @@ adding a vendor:
 
 ---
 
-## 8. Validation & exception detection (Phase 3)
+## 8. Validation & exception detection (Phase 3 — built)
 
-A deterministic, explainable engine (`web/lib/bills/validation/`)
-**separate from extraction**. Rules (stable `rule_id` each): missing
-supplier / date / doc number / currency / subtotal / tax / total; invalid
-/ future / implausibly-old date; due-date before issue-date; negative or
-zero total; unsupported currency; invalid or unexpected tax rate;
-arithmetic mismatch (line items → subtotal → tax/discount/charges →
-total); amount paid > total; outstanding-balance mismatch; currency /
-amount / supplier mismatch vs a candidate transaction; duplicate
-invoice/receipt number; duplicate checksum; near-duplicate content;
-same supplier+date+currency+amount already processed; existing linked
-ledger record; unusually large vs a configurable historical pattern;
-supplier details materially changed; low-quality scan; low extraction
-confidence; missing / inconsistent page numbering.
+A deterministic, explainable engine (`web/lib/bills/validation/engine.ts`,
+pure + Deno-tested), **separate from extraction** and authoritative over
+it. The worker builds a `ValidationContext` from the current extraction's
+normalised fields + line items + the workspace `bill_processing_policies`
+row (defaults when absent) + "today", runs `runValidation(ctx)`, and
+persists the result through the service-role-only `record_bill_validation`
+RPC into `bill_validations` (`is_current` partial-unique) +
+`bill_validation_findings`.
+
+Rules shipped (stable `rule_id` each, every finding names the specific
+number/date, never "unusual data"):
+
+- **Class gates** — `quotation_not_postable` (needs_specialist, blocks),
+  `unsupported_document` (blocking), `credit_note_specialist_review`.
+- **Required fields** — `missing_supplier` / `missing_issue_date` /
+  `missing_total` / `missing_currency` / `missing_subtotal` / `missing_tax`
+  / `missing_document_number`, driven by `policy.required_fields`
+  (blocking).
+- **Currency** — `currency_unsupported` vs `policy.supported_currencies`
+  (blocking).
+- **Dates** — `future_issue_date` (beyond `policy.date_tolerance_days`),
+  `implausibly_old_date` (> 10 y), `due_before_issue` (warnings).
+- **Amounts** — `negative_total` (blocking unless credit note),
+  `zero_value_total`, `arithmetic_total_mismatch`
+  (`subtotal + tax + charges − discount ≠ total`, blocking),
+  `line_items_subtotal_mismatch`, `amount_paid_exceeds_total`,
+  `outstanding_balance_mismatch` — all in exact integer minor units with a
+  ±2-unit rounding tolerance.
+- **Tax** — `unexpected_tax_rate` vs `policy.expected_tax_rates` (only
+  when that list is set).
+- **Thresholds** — `large_amount` vs
+  `policy.large_amount_threshold_minor` / `_currency`.
+- **Confidence** — `low_confidence_{supplier_name,total,issue_date}` when
+  the extractor reported < 0.5.
 
 Severity: `info` | `warning` | `blocking` | `possible_duplicate` |
-`needs_specialist`. Per-workspace thresholds in
-`bill_processing_policies`. No vague messages — every finding names the
-specific inconsistency and a suggested action.
+`needs_specialist`. `blocks_approval` is advisory in the first release
+(every document is human-reviewed) and will be honoured by the Phase 6
+`approve_bill` guard. Content-duplicate rules (`duplicate_invoice_number`,
+`same_supplier_date_amount`, near-duplicate content, existing ledger link)
+are **Phase 4** — they need cross-document queries; Phase 3 relies on the
+DB `bill_documents_checksum_unique` constraint for exact-file duplicates.
+Transaction-mismatch rules are **Phase 6**.
 
 ---
 
@@ -380,7 +411,7 @@ rejected filters.
 |---|---|---|
 | **1 — Schema, storage & intake** *(built)* | 4 tables, 2 buckets, `transition_bill_document` + `record_bill_event` + `record_bill_original_download` + `get_or_create_bill_processing_policy`, 8 new capabilities, secure upload + SHA-256 + immutable original, `lib/bills/gate.ts`, minimal list + detail UI, migration-test block, unit + e2e. **No AI, no posting.** | Behind `BILLS_ENABLED` only |
 | **2 — Classification & extraction** *(built)* | `bill_extractions` / `bill_extracted_fields` / `bill_line_items`; `record_bill_extraction` + `system_transition_bill_document` + `retry_bill_extraction` RPCs; `lib/bills/extraction/**` (provider abstraction incl. `mock`, strict schema, injection-hardened prompt) + `lib/bills/normalize.ts`; cron worker `queued → … → needs_review`; read-only extracted-fields on the detail page. **PDF/image rendering is client-side in Phase 7 (pdf.js), so no server preview/thumbnail generation.** | Behind `BILLS_EXTRACTION_ENABLED` |
-| **3 — Validation & exception detection** | `bill_validations` / `bill_validation_findings`; the deterministic rule engine; per-workspace policy edits (`bill.configure`) | Behind flag |
+| **3 — Validation & exception detection** *(built)* | `bill_validations` (is_current) / `bill_validation_findings`; service_role-only `record_bill_validation`; `record_bill_extraction` re-issued to land at `validating`; the pure `web/lib/bills/validation/` rule engine wired into the worker; read-only "Checks" section on the detail page. Per-workspace policy *edits* (`bill.configure` UI) deferred to Phase 7. | Behind `BILLS_EXTRACTION_ENABLED` |
 | **4 — Duplicate detection & idempotency** | `bill_duplicate_candidates`; the multi-signal engine; idempotency keys across the posting path | Behind flag |
 | **5 — Supplier resolution** | `suppliers` / `supplier_aliases` / `bill_supplier_candidates`; ranked search; permissioned creation | Behind flag |
 | **6 — Transaction matching & posting** | `bills` / `bill_transaction_links` / `bill_ledger_links`; ranked match candidates; `approve_bill` (limits, no self-approval, stale-guard); idempotent `post_bill` | **Yes** |
@@ -402,8 +433,9 @@ activation. The disabled state is `notFound()` for pages,
   capability gating + same-state no-op; `record_bill_event` not
   authenticated-callable; `kind='original'` artifact immutability;
   cross-workspace RLS isolation; the capability matrix. Privilege-
-  regression counts updated in lock-step (72 tables, 120 `authenticated`
-  table grants, 59 `authenticated`-callable functions).
+  regression counts updated in lock-step (on `main` after Phases S–U:
+  80 tables, 125 `authenticated` table grants, 74 `authenticated`-callable
+  functions). Full-chain harness: **244 assertions**, 25 of them Bills.
 - **Unit** (Deno, `web/lib/bills/**/*_test.ts`): `intake.ts` — magic-byte
   sniffing vs a spoofed extension, size cap, filename sanitisation,
   storage-key opacity, PDF page count, encrypted/truncated rejection,
@@ -413,16 +445,22 @@ activation. The disabled state is `notFound()` for pages,
   keys dropped, unknown class collapsed, garbage → null;
   `extraction/prompt.ts` — the injection guard is present;
   `extraction/index.ts` — a null / unparseable call → `status:'failed'`
-  payload, a good call → typed normalised rows.
+  payload, a good call → typed normalised rows; `validation/engine.ts` —
+  arithmetic mismatch is blocking and quotes both numbers, line-item /
+  balance / paid-vs-total mismatches, date rules, currency, tax-rate
+  (only with a policy expectation), large-amount threshold, low
+  confidence, quotation-blocks-approval, credit-note vs invoice negative
+  total, a clean invoice → zero findings, never throws on empty input.
 - **e2e** (Playwright + axe): `bills-intake.spec.ts` (`BILLS_ENABLED=true`)
   — upload a valid PDF → stored, listed, processing event recorded;
   identical re-upload → duplicate message, one row; a disguised non-PDF →
   rejected on content; `/bills` + `/bills/[id]` axe clean; keyboard-only
   upload. `bills-extraction.spec.ts` (`BILLS_EXTRACTION_ENABLED=true`,
   `AI_PROVIDER=mock`) — upload → POST the cron route with the shared
-  secret → document reaches `needs_review` with `doc_class` and the
-  extracted supplier / total / date visible; the cron route 401s without
-  the secret.
+  secret → in one tick the document runs extraction **and** validation
+  and reaches `needs_review` with `doc_class`, the extracted supplier /
+  total / date, and a "Checks" section (the self-consistent mock invoice
+  → no findings); the cron route 401s without the secret.
 - Later phases add the extraction-pipeline, validation-rule,
   duplicate-scoring, matching, approval-policy, permission, idempotency
   and provider-response-validation suites, plus the master-prompt §29
