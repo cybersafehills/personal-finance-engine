@@ -582,7 +582,10 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # enabled, SELECT-only for authenticated) - 68 tables, 67 with RLS.
 # Phase S (20260913000000) adds transaction_member_attributions (RLS
 # enabled, SELECT-only for authenticated) - 69 tables, 68 with RLS.
-if [ "$TABLE_COUNT" = "69" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Phase T PR2 (20260917000000) adds budget_threshold_state (RLS enabled,
+# service-role-only, no authenticated policy - like raw_financial_events)
+# - 70 tables, 69 with RLS.
+if [ "$TABLE_COUNT" = "70" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -3106,6 +3109,41 @@ if [ "$T_CATALOG" -ge "8" ] && [ "$T_CATALOG_HAS" = "1" ]; then
 else
   fail "Phase T PR1: notification_event_catalog wrong (count=$T_CATALOG has_budget_exceeded=$T_CATALOG_HAS)"
 fi
+
+# ===========================================================================
+# Phase T PR2: budget threshold-crossing state. record_budget_threshold_
+# crossing() returns a bucket name only on an upward crossing (one alert
+# per crossing, not per transaction). Service-role-only.
+# ===========================================================================
+echo "=== Phase T PR2: budget threshold-crossing state ==="
+
+T2_BUDGET="$(psql -d pfe_rls -t -A -c "set role service_role; insert into public.budgets (workspace_id, name, currency, period_start, period_end, income_amount_minor, normalized_monthly_income_minor, normalized_annual_income_minor, income_frequency) values ('$Q_HH', 'T2 Threshold Budget', 'RWF', '2026-08-01', '2026-08-31', 100000, 100000, 1200000, 'monthly') returning id;" | grep -Eo '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)"
+
+cross() {
+  psql -d pfe_rls -t -A -c "set role service_role; select coalesce(public.record_budget_threshold_crossing('$T2_BUDGET', '__total__', $1), 'NULL');" | tail -1
+}
+
+T2_A="$(cross 50)"    # ok -> ok
+T2_B="$(cross 80)"    # ok -> watch (upward)
+T2_C="$(cross 82)"    # watch -> watch (no re-alert)
+T2_D="$(cross 95)"    # watch -> at_risk (upward)
+T2_E="$(cross 60)"    # at_risk -> ok (downward, silent)
+T2_F="$(cross 92)"    # ok -> at_risk (re-crossing after a drop)
+T2_FINAL="$(psql -d pfe_rls -t -A -c "select last_bucket from public.budget_threshold_state where budget_id = '$T2_BUDGET' and scope = '__total__';")"
+
+if [ "$T2_A" = "NULL" ] && [ "$T2_B" = "watch" ] && [ "$T2_C" = "NULL" ] && [ "$T2_D" = "at_risk" ] && [ "$T2_E" = "NULL" ] && [ "$T2_F" = "at_risk" ] && [ "$T2_FINAL" = "at_risk" ]; then
+  pass "Phase T PR2: record_budget_threshold_crossing alerts once per upward crossing, stays quiet within a bucket, and re-alerts after a drop"
+else
+  fail "Phase T PR2: crossing sequence wrong (50=$T2_A 80=$T2_B 82=$T2_C 95=$T2_D 60=$T2_E 92=$T2_F final=$T2_FINAL)"
+fi
+
+# Not authenticated-callable.
+if as_user "$USER_A" "select public.record_budget_threshold_crossing('$T2_BUDGET', '__total__', 100);" >/dev/null 2>$ARTIFACT_DIR/pfe_t2.log; then
+  fail "Phase T PR2: record_budget_threshold_crossing was callable by an authenticated user"
+else
+  pass "Phase T PR2: record_budget_threshold_crossing is service-role-only"
+fi
+rm -f $ARTIFACT_DIR/pfe_t2.log
 
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="
