@@ -1026,6 +1026,56 @@ canonical transaction's detail page.
 
 ---
 
+## 11k. Phase U PR5 — as built (web)
+
+The duplicate-resolution trail on `/transactions/[id]`. **Web only — no
+migration**, no new grant. Closes the loop opened by PR3/PR3b: a merge is
+now visible from both ends.
+
+- **`getTransactionDuplicateContext(id)`** (`web/lib/queries.ts`) — one
+  read of the row's `dedupe_state` / `merged_into_transaction_id`, then
+  (only if relevant) the canonical it was merged into and the rows merged
+  into it. Returns null only if the transaction itself can't be read.
+  `getTransactionById` deliberately still resolves a `merged` row (its
+  `TRANSACTION_COLUMNS` read was never given the PR3b `.neq` filter), so a
+  direct link keeps working.
+- **`TransactionDuplicateSection`** (server component) renders nothing for
+  an ordinary `unique` row with no merged children. Otherwise a
+  "Duplicates" card: a "flagged as a possible duplicate → Review it" line
+  for `possible_duplicate`; a "merged into another transaction … → Open
+  the kept transaction" line for a `merged` row; and a list of the
+  transactions merged **into** this one ("kept as a record, left out of
+  every total"), each linking to its own detail page.
+
+`next build` ✓, `eslint` 0. No migration, no test-suite change.
+
+---
+
+## 11m. Phase U PR6b — as built (web)
+
+The policy-form surface for PR6's scope. **Web only, no migration.**
+
+- **`getCategorizationPolicies` / `getCategorizationPolicyById`** now
+  return `scope_type` / `scope_source_id` (added to
+  `CATEGORIZATION_POLICY_COLUMNS` and `CategorizationPolicyRow`).
+- **`PolicyForm`** gains an "Applies to" fieldset — *Every account in this
+  Space* (default) vs *One account only* + a `<select>` of the caller's
+  financial sources (`financialSourceOptions()` over
+  `getMyFinancialSources()`). Hidden entirely when the caller has no
+  sources. `upsertPolicy` gains `scopeType` / `scopeSourceId`, validates
+  the pair (source requires an id), and writes `scope_type` /
+  `scope_source_id` (null for space).
+- **`PolicyItem`** shows a neutral badge with the source label (or "One
+  account") for a `source`-scoped rule; the rules list resolves the label
+  from one `getMyFinancialSources()` call.
+- New tiny helper `web/lib/financial-source-options.ts` (shared by the
+  three rules pages).
+
+`next build` ✓, `eslint` 0. Rule scope/precedence/explainability is now
+complete (PR6 backend + PR6b web).
+
+---
+
 ## 11o. Phase U PR7b — as built (web)
 
 The upload/mapping/preview flow that calls `import_statement_transactions`

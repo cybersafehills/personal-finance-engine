@@ -44,6 +44,8 @@ export type PolicyFormInput = {
   timeStart: string; // "" or "HH:MM"
   timeEnd: string;
   priority: string;
+  scopeType: string; // "space" | "source"
+  scopeSourceId: string; // "" unless scopeType === "source"
 };
 
 /**
@@ -105,6 +107,14 @@ export async function upsertPolicy(
     return { ok: false, error: "Priority must be a whole number." };
   }
 
+  const scopeType = input.scopeType === "source" ? "source" : "space";
+  const scopeSourceId = scopeType === "source"
+    ? input.scopeSourceId.trim()
+    : "";
+  if (scopeType === "source" && !scopeSourceId) {
+    return { ok: false, error: "Choose which account this rule applies to." };
+  }
+
   const workspaceId = await getActiveWorkspaceId();
   if (!workspaceId) {
     return { ok: false, error: "Could not resolve your workspace." };
@@ -126,6 +136,8 @@ export async function upsertPolicy(
     time_start: timeStart,
     time_end: timeEnd,
     priority: priorityParsed,
+    scope_type: scopeType,
+    scope_source_id: scopeType === "source" ? scopeSourceId : null,
   };
 
   if (policyId) {

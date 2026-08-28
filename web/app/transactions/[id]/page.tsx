@@ -5,6 +5,7 @@ import {
   getCategorySuggestions,
   getSpaceMemberDirectory,
   getTransactionById,
+  getTransactionDuplicateContext,
   getTransactionSpaceContext,
   getTransactionSplits,
 } from "../../../lib/queries";
@@ -19,6 +20,7 @@ import { Badge } from "../../../components/Badge";
 import { CategoryCorrectionForm } from "../../../components/CategoryCorrectionForm";
 import { TransactionSplitForm } from "../../../components/TransactionSplitForm";
 import { TransactionAttributionPanel } from "../../../components/TransactionAttributionPanel";
+import { TransactionDuplicateSection } from "../../../components/TransactionDuplicateSection";
 
 export const dynamic = "force-dynamic";
 
@@ -60,6 +62,7 @@ export default async function TransactionDetailPage({
   const latestDecision = categoryHistory[0] ?? null;
   const categorySuggestions = await getCategorySuggestions();
 
+  const duplicateContext = await getTransactionDuplicateContext(id);
   const spaceContext = await getTransactionSpaceContext(id);
   const isHousehold = spaceContext?.workspaceKind === "household";
   const [selfUserId, spaceMembers] = isHousehold
@@ -133,6 +136,10 @@ export default async function TransactionDetailPage({
             ? "This household transaction needs an attribution — say whose spending it was below."
             : "This transaction's Space couldn't be determined automatically."}
         </section>
+      )}
+
+      {duplicateContext && (
+        <TransactionDuplicateSection context={duplicateContext} />
       )}
 
       {spaceContext && (
