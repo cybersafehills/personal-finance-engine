@@ -1566,10 +1566,12 @@ export async function getVariableIncomeMonths(
 
 export type WorkspaceRole = "owner" | "admin" | "member" | "viewer";
 
+export type WorkspaceKind = "personal" | "organization" | "household";
+
 export type WorkspaceSummary = {
   id: string;
   name: string;
-  kind: "personal" | "organization";
+  kind: WorkspaceKind;
   role: WorkspaceRole;
 };
 
@@ -1589,13 +1591,123 @@ export async function getUserWorkspaces(): Promise<WorkspaceSummary[]> {
 
   return (data ?? []).flatMap((row) => {
     const workspace = row.workspaces as unknown as
-      | { id: string; name: string; kind: "personal" | "organization" }
+      | { id: string; name: string; kind: WorkspaceKind }
       | null;
     if (!workspace) return [];
     return [
       { id: workspace.id, name: workspace.name, kind: workspace.kind, role: row.role },
     ] as WorkspaceSummary[];
   });
+}
+
+// ===========================================================================
+// Financial sources and their per-Space sharing. See Phase Q/S migrations
+// (20260910000000 financial_sources / source_space_links, 20260913000000
+// the sharing RPCs). "Source" is the user-facing name for a person-owned
+// financial_sources row; a household member decides, per source, what each
+// Space they belong to may see of it.
+// ===========================================================================
+
+export type SourceVisibilityMode =
+  | "personal_only"
+  | "share_transactions"
+  | "share_account";
+
+export type SourceSpaceLink = {
+  workspaceId: string;
+  workspaceName: string | null;
+  visibilityMode: "share_transactions" | "share_account";
+  status: "active" | "paused" | "revoked";
+  isDefaultTarget: boolean;
+};
+
+export type FinancialSourceRow = {
+  id: string;
+  displayName: string;
+  provider: string;
+  sourceType: string;
+  currency: string;
+  maskedIdentifier: string | null;
+  visibilityMode: SourceVisibilityMode;
+  status: "active" | "paused" | "archived";
+  links: SourceSpaceLink[];
+};
+
+/**
+ * The financial sources the caller *owns* (not ones merely shared with
+ * them), each with its collaborative Space allocations. financial_sources'
+ * RLS also returns sources shared into the caller's Spaces, so this
+ * filters to owner_user_id = the caller explicitly.
+ */
+export async function getMyFinancialSources(): Promise<FinancialSourceRow[]> {
+  const supabase = await supabaseSession();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return [];
+
+  const { data, error } = await supabase
+    .from("financial_sources")
+    .select(
+      "id, display_name, provider, source_type, currency, masked_identifier, visibility_mode, status, source_space_links(workspace_id, visibility_mode, status, is_default_target, workspaces(name))",
+    )
+    .eq("owner_user_id", user.id)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    console.error("getMyFinancialSources failed:", error.message);
+    return [];
+  }
+
+  type RawLink = {
+    workspace_id: string;
+    visibility_mode: "share_transactions" | "share_account";
+    status: "active" | "paused" | "revoked";
+    is_default_target: boolean;
+    workspaces: { name: string } | null;
+  };
+  type RawSource = {
+    id: string;
+    display_name: string;
+    provider: string;
+    source_type: string;
+    currency: string;
+    masked_identifier: string | null;
+    visibility_mode: SourceVisibilityMode;
+    status: "active" | "paused" | "archived";
+    source_space_links: RawLink[] | null;
+  };
+
+  return ((data ?? []) as unknown as RawSource[]).map((row) => ({
+    id: row.id,
+    displayName: row.display_name,
+    provider: row.provider,
+    sourceType: row.source_type,
+    currency: row.currency,
+    maskedIdentifier: row.masked_identifier ?? null,
+    visibilityMode: row.visibility_mode,
+    status: row.status,
+    links: (row.source_space_links ?? [])
+      .filter((link) => link.status !== "revoked")
+      .map((link) => ({
+        workspaceId: link.workspace_id,
+        workspaceName: link.workspaces?.name ?? null,
+        visibilityMode: link.visibility_mode,
+        status: link.status,
+        isDefaultTarget: link.is_default_target,
+      })),
+  }));
+}
+
+/**
+ * Households the caller can share a source into - every active household
+ * membership above 'viewer' (allocate_source_to_space requires 'member').
+ */
+export async function getShareableHouseholds(): Promise<WorkspaceSummary[]> {
+  const workspaces = await getUserWorkspaces();
+  return workspaces.filter(
+    (workspace) => workspace.kind === "household" && workspace.role !== "viewer",
+  );
 }
 
 /** The active workspace's own id/name/kind/the caller's role in it - for the workspace settings page and the switcher's current-selection label. */

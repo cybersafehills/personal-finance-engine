@@ -439,7 +439,7 @@ additive migration(s) → stacked PRs → migration-test block → e2e.
 |---|---|---|---|
 | **Q** — Foundation ✅ *migration written* | 1 | `kind='household'` + `create_household_workspace`; `financial_sources`, `source_space_links`, `raw_financial_events`, `can_view_source_in_space()` / `is_financial_source_visible()` / `owns_financial_source()`; nullable `transactions` provenance/attribution cols; `space_activity` / `space_audit_events` / `space_member_notification_prefs` / `workspace_categories` tables; **RLS refactor for `household`** (Phase C ledger loosening reverted for this kind via the source-visibility gate); backfill migration; indexes | No |
 | **R** — Security & authz ✅ *migration written* | 2 | capability layer (`space_role_has_capability` matrix + `space_member_capability_grants` + `has_space_capability()` primitive + `grant`/`revoke_space_capability` RPCs); audit-write primitives (`record_space_activity` / `record_space_audit_event`); `workspace_invites.accepted_by`; `accept_workspace_invite` / `set_member_role` / `remove_member` / `create_household_workspace` re-issued to write audit + activity rows; **14-assertion security test block** (capability matrix, grant/revoke, audit visibility, invite re-use/revoke rejection, post-removal access revocation, last-owner guard, internal-helper lockdown, service-role bypass) | No |
-| **S** — Shared ledger | 3 | Split into PR1 (backend) + PR2 (web UI). **PR1 ✅ *migration written*:** `transaction_member_attributions` table + `set_source_visibility` / `allocate_source_to_space` / `set_source_space_link_status` / `set_transaction_attribution` / `reallocate_transaction` RPCs. **PR2 (not started):** household creation + onboarding; upgraded Space switcher; invites/members UI; per-source visibility sheet ("How should this account be used?"); provenance detail view; attribution UI; review-queue `needs_space` / `needs_attribution` reasons; optional `/spaces/{id}/…` routes | Yes |
+| **S** — Shared ledger | 3 | **PR1 ✅:** `transaction_member_attributions` + `set_source_visibility` / `allocate_source_to_space` / `set_source_space_link_status` / `set_transaction_attribution` / `reallocate_transaction` RPCs. **PR2a ✅:** household creation (`/settings/workspace`), the "Shared accounts" surface (`/settings/sources`) — per-source visibility + share/pause/resume/revoke into households. **PR2b (not started):** transaction provenance detail view + attribution UI on `/transactions/[id]`; review-queue `needs_space` / `needs_attribution` reasons; household dashboard; upgraded Space switcher; e2e; optional `/spaces/{id}/…` routes | Yes |
 | **T** — Financial planning | 4 | Space-aware category scope; rule `scope_type` + deterministic precedence + explainability; shared budgets (space/category/member scopes) reusing `budget-math.ts`; threshold state-transition alerts (no per-txn spam); shared goals as first-class Space resources; per-member notification prefs | Yes |
 | **U** — Ingestion & reconciliation | 5 | `raw_financial_events` cutover for `ingest-momo` + SMS path; source routing (`is_default_target`); dedupe confidence engine + auto-merge + review cards; **statement (CSV/PDF) reconciliation** vs ledger + import summary; device management UX (rename / pause / reconnect / remove, history preserved) | Yes |
 | **V** — Reporting & intelligence | 6 | `workspace_id` scope on `report_*`; Household report template + attribution summaries; scheduler recipient filtering (exclude former members); AI Space-scope boundary + Household insights; dashboard projections | Yes |
@@ -548,6 +548,37 @@ their existing model).
 Migration-test coverage: 15-assertion "Phase S" block. Privilege counters
 move to 69 tables / 116 `authenticated` table grants / 60 `authenticated`
 function grants.
+
+### Phase S PR2a — as built (web)
+
+First user-visible Spaces UI. Two surfaces, both under Settings — no new
+top-level nav (master prompt §48):
+
+- **`/settings/workspace`** — the personal-workspace view now leads with
+  "Start a household" (`create_household_workspace`); organization
+  creation stays as the secondary option. A household's member/invite
+  view reuses the existing kind-agnostic components and points members at
+  Shared accounts for per-source sharing. `WorkspaceSummary.kind` gains
+  `"household"`.
+- **`/settings/sources`** ("Shared accounts") — lists the sources the
+  caller *owns* (`getMyFinancialSources`, filtered to `owner_user_id`),
+  each showing its visibility ceiling and its active/paused share links.
+  Per source: **Share with a household** (pick household + "Transactions
+  only" / "Balance & transactions" + optional default-target) →
+  `allocate_source_to_space`; **Pause / Resume / Stop sharing** per link →
+  `set_source_space_link_status`; **Make private** (confirm) →
+  `set_source_visibility('personal_only')`. Every mutation is a
+  `"use server"` action that only calls the RPC — ownership and household
+  checks live in the RPC, never the client. Plain-language copy
+  throughout ("Nothing is shared until you say so").
+
+Members-management for a household is still owner-only (the Phase C
+`workspace_invites` / `set_member_role` / `remove_member` RLS is
+`is_workspace_member(_, 'owner')`); wiring those to
+`has_space_capability(_, 'members.manage')` so a household **admin** can
+manage members is a small follow-up. No e2e added here — the RPC layer is
+covered by the migration suite; a `/settings/sources` Playwright spec is a
+PR2b item.
 
 ---
 
