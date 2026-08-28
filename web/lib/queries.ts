@@ -2296,6 +2296,78 @@ export type NotificationSettings = {
   events: NotificationEventSetting[];
 };
 
+// ===========================================================================
+// Notifications (Phase V PR1). notifications table + enqueue_notification /
+// mark_notification_read / mark_all_notifications_read /
+// unread_notification_count live in
+// supabase/migrations/20261001000000_phase_v_notifications.sql.
+// ===========================================================================
+
+export type NotificationRow = {
+  id: string;
+  workspaceId: string;
+  eventKey: string;
+  title: string;
+  body: string | null;
+  resourceType: string | null;
+  resourceId: string | null;
+  readAt: string | null;
+  createdAt: string;
+};
+
+/** The caller's unread in-app notification count, for the header bell. 0 on any error. */
+export async function getUnreadNotificationCount(): Promise<number> {
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase.rpc("unread_notification_count");
+  if (error) {
+    console.error("getUnreadNotificationCount failed:", error.message);
+    return 0;
+  }
+  return Number(data ?? 0);
+}
+
+/** The caller's in-app notifications, newest first (RLS scopes to own rows). */
+export async function getNotifications(limit = 50): Promise<NotificationRow[]> {
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("notifications")
+    .select(
+      "id, workspace_id, event_key, title, body, resource_type, resource_id, read_at, created_at",
+    )
+    .eq("channel", "in_app")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    console.error("getNotifications failed:", error.message);
+    return [];
+  }
+
+  return (
+    (data ?? []) as unknown as Array<{
+      id: string;
+      workspace_id: string;
+      event_key: string;
+      title: string;
+      body: string | null;
+      resource_type: string | null;
+      resource_id: string | null;
+      read_at: string | null;
+      created_at: string;
+    }>
+  ).map((r) => ({
+    id: r.id,
+    workspaceId: r.workspace_id,
+    eventKey: r.event_key,
+    title: r.title,
+    body: r.body,
+    resourceType: r.resource_type,
+    resourceId: r.resource_id,
+    readAt: r.read_at,
+    createdAt: r.created_at,
+  }));
+}
+
 export async function getNotificationSettings(): Promise<NotificationSettings | null> {
   const workspace = await getActiveWorkspace();
   if (!workspace || workspace.kind === "personal") return null;
