@@ -1435,6 +1435,32 @@ W6 migration validation + security/perf review.
 
 ---
 
+## 11x. Phase W PR3 — as built (web)
+
+Onboarding / help copy. **Web only, no migration.** The codebase already
+carries inline explanatory copy on nearly every Spaces control; this
+fills the last gaps:
+
+- **Household member page** — the one-line sharing note is now a
+  `<details>` **"How households work"** disclosure (native, no JS): each
+  person keeps their own accounts, sharing is per-account and opt-in, and
+  attribution only changes how reports count a transaction, never moves
+  money.
+- **`/settings/sources`** — a primer above the list (when Spaces is on):
+  sharing is per-account and off by default, what "Transactions only" vs
+  "Balance & transactions" means, and that it can be paused any time.
+- **`/transactions/review`** — a line under "Possible duplicates"
+  explaining what they are (same payment recorded twice, e.g. SMS +
+  statement) and that merging keeps one and files the rest away, never
+  deletes.
+
+`next build` ✓, `eslint` 0.
+
+Phase W remaining: W4 analytics · W5 monitoring · W6 migration validation +
+security/perf review.
+
+---
+
 ## 12. Testing strategy (per phase, aggregated here)
 
 - **Unit**: role→capability, `can_view_source_in_space` truth table,
