@@ -1,4 +1,5 @@
 import { getAccounts, getIngestionConnections } from "../../../lib/queries";
+import { buildIngestEndpointUrl } from "../../../lib/ingest";
 import { PageHeader } from "../../../components/PageHeader";
 import { EmptyState } from "../../../components/EmptyState";
 import { ConnectionItem } from "../../../components/ConnectionItem";
@@ -12,6 +13,14 @@ export default async function ConnectionsPage() {
     getAccounts(),
   ]);
   const activeAccounts = accounts.filter((account) => account.is_active);
+
+  // Resolved once, server-side, from the same host the Supabase client
+  // already uses - the components never touch env directly. SUPABASE_URL
+  // is the always-present server var; NEXT_PUBLIC_SUPABASE_URL is only a
+  // fallback for setups that set that one instead.
+  const ingestEndpointUrl = buildIngestEndpointUrl(
+    process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL,
+  );
 
   return (
     <div>
@@ -28,11 +37,18 @@ export default async function ConnectionsPage() {
           />
         ) : (
           connections.map((connection) => (
-            <ConnectionItem key={connection.id} connection={connection} />
+            <ConnectionItem
+              key={connection.id}
+              connection={connection}
+              ingestEndpointUrl={ingestEndpointUrl}
+            />
           ))
         )}
 
-        <CreateConnectionForm accounts={activeAccounts} />
+        <CreateConnectionForm
+          accounts={activeAccounts}
+          ingestEndpointUrl={ingestEndpointUrl}
+        />
       </div>
     </div>
   );
