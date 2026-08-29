@@ -1461,6 +1461,34 @@ security/perf review.
 
 ---
 
+## 11y. Phase W PR4 — as built (web)
+
+Product-analytics events for the Spaces surface. **Web only, no
+migration, no new dependency** - this codebase has no analytics provider
+(see `lib/pay/scan-analytics.ts` / `lib/directory/analytics.ts`).
+
+- **`web/lib/spaces/analytics.ts`** — `SpacesEventName` union (13 coarse
+  events), `sanitizeSpacesEventProps` (drops `*_id` / `name` / `amount` /
+  `counterparty` / … keys, scrubs uuid / long-digit / email / URL values
+  even under an allowed key, caps counts and string length),
+  `trackSpacesEvent(name, props?)` — the single sink attach point,
+  `console.debug` in non-prod, wrapped so a tracking failure never breaks
+  the action. `analytics_test.ts` (4 cases).
+- **Wired into the server actions** at each success point:
+  `household_created`, `member_invited` `{role}`, `invite_accepted`,
+  `member_role_changed` `{role}`, `member_removed`, `source_shared`
+  `{mode, is_default}`, `source_share_status_changed` `{status}`,
+  `source_visibility_narrowed`, `transaction_attributed` `{type}`,
+  `duplicate_merged`, `duplicate_dismissed`, `statement_imported`
+  `{created, flagged, skipped}`, `rule_scope_set` `{scope:"source"}`.
+
+`next build` ✓, `eslint` 0, `deno test` 4/0.
+
+Phase W remaining: W5 monitoring · W6 migration validation + security/perf
+review.
+
+---
+
 ## 12. Testing strategy (per phase, aggregated here)
 
 - **Unit**: role→capability, `can_view_source_in_space` truth table,
