@@ -8,6 +8,7 @@ import { generateInviteToken } from "../../../lib/credentials";
 import { sendInviteEmail } from "../../../lib/emails";
 import { siteUrl } from "../../../lib/site-url";
 import { isSpacesEnabled } from "../../../lib/spaces/gate";
+import { trackSpacesEvent } from "../../../lib/spaces/analytics";
 import { getActiveWorkspaceId, type WorkspaceRole } from "../../../lib/queries";
 import { logSpacesError } from "../../../lib/spaces/monitoring";
 
@@ -77,6 +78,7 @@ export async function createOrganization(name: string): Promise<void> {
     return;
   }
 
+  trackSpacesEvent("household_created");
   await setActiveWorkspace(workspaceId);
   revalidatePath("/settings/workspace");
   redirect("/settings/workspace");
@@ -106,6 +108,7 @@ export async function createHousehold(name: string): Promise<void> {
 
   if (error || !workspaceId) return;
 
+  trackSpacesEvent("household_created");
   await setActiveWorkspace(workspaceId);
   revalidatePath("/settings/workspace");
   redirect("/settings/workspace");
@@ -161,6 +164,8 @@ export async function createInvite(
     return { ok: false, error: "Could not create the invite." };
   }
 
+  trackSpacesEvent("member_invited", { role });
+
   const link = `${siteUrl()}/invite/${token.secret}`;
   const { ok: emailSent } = await sendInviteEmail({
     to: trimmedEmail,
@@ -206,6 +211,7 @@ export async function changeMemberRole(
     return { ok: false, error: error.message };
   }
 
+  trackSpacesEvent("member_role_changed", { role });
   revalidatePath("/settings/workspace");
   return { ok: true };
 }
@@ -223,6 +229,7 @@ export async function removeMember(
     return { ok: false, error: error.message };
   }
 
+  trackSpacesEvent("member_removed");
   revalidatePath("/settings/workspace");
   return { ok: true };
 }

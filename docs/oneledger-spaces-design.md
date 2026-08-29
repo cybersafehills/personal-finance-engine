@@ -1406,6 +1406,89 @@ W5 monitoring · W6 migration validation + security/perf review.
 
 ---
 
+## 11w. Phase W PR2 — as built (migration `20261005000000` + web)
+
+State-matrix pass over the Spaces surfaces.
+
+- **Removed-member notice** — `remove_member` re-issued (re-issue only) to
+  also `enqueue_notification` a **"You were removed from this Space"** to
+  the departing member, `metadata.self = true`, placed *before* the
+  status flip so `enqueue_notification`'s active-member filter still
+  reaches them. Closes the gap where `getActiveWorkspaceId()` silently
+  dropped a removed member back to Personal with no explanation.
+- **`loading.tsx`** added for `/notifications`,
+  `/settings/sources/import`, `/transactions/review`,
+  `/settings/workspace` (Skeleton + `aria-busy`, matching the existing
+  `settings/sources` / `settings/notifications` pattern).
+- Audited and already covered: invite-accept states (`invite_preview` →
+  `notFound` / "no longer valid" / valid / signed-out); root
+  `app/error.tsx` + `app/global-error.tsx`; empty states on every new
+  surface; stale-cookie fallback in `getActiveWorkspaceId`.
+
+Counters unchanged (re-issue only). The Phase V PR1 removal-fan-out
+assertion now checks both the remaining-member and the self-flagged
+removed-member notification. Full suite: **252 passed / 0 failed**.
+`next build` ✓, `eslint` 0.
+
+Phase W remaining: W3 onboarding/help · W4 analytics · W5 monitoring ·
+W6 migration validation + security/perf review.
+
+---
+
+## 11x. Phase W PR3 — as built (web)
+
+Onboarding / help copy. **Web only, no migration.** The codebase already
+carries inline explanatory copy on nearly every Spaces control; this
+fills the last gaps:
+
+- **Household member page** — the one-line sharing note is now a
+  `<details>` **"How households work"** disclosure (native, no JS): each
+  person keeps their own accounts, sharing is per-account and opt-in, and
+  attribution only changes how reports count a transaction, never moves
+  money.
+- **`/settings/sources`** — a primer above the list (when Spaces is on):
+  sharing is per-account and off by default, what "Transactions only" vs
+  "Balance & transactions" means, and that it can be paused any time.
+- **`/transactions/review`** — a line under "Possible duplicates"
+  explaining what they are (same payment recorded twice, e.g. SMS +
+  statement) and that merging keeps one and files the rest away, never
+  deletes.
+
+`next build` ✓, `eslint` 0.
+
+Phase W remaining: W4 analytics · W5 monitoring · W6 migration validation +
+security/perf review.
+
+---
+
+## 11y. Phase W PR4 — as built (web)
+
+Product-analytics events for the Spaces surface. **Web only, no
+migration, no new dependency** - this codebase has no analytics provider
+(see `lib/pay/scan-analytics.ts` / `lib/directory/analytics.ts`).
+
+- **`web/lib/spaces/analytics.ts`** — `SpacesEventName` union (13 coarse
+  events), `sanitizeSpacesEventProps` (drops `*_id` / `name` / `amount` /
+  `counterparty` / … keys, scrubs uuid / long-digit / email / URL values
+  even under an allowed key, caps counts and string length),
+  `trackSpacesEvent(name, props?)` — the single sink attach point,
+  `console.debug` in non-prod, wrapped so a tracking failure never breaks
+  the action. `analytics_test.ts` (4 cases).
+- **Wired into the server actions** at each success point:
+  `household_created`, `member_invited` `{role}`, `invite_accepted`,
+  `member_role_changed` `{role}`, `member_removed`, `source_shared`
+  `{mode, is_default}`, `source_share_status_changed` `{status}`,
+  `source_visibility_narrowed`, `transaction_attributed` `{type}`,
+  `duplicate_merged`, `duplicate_dismissed`, `statement_imported`
+  `{created, flagged, skipped}`, `rule_scope_set` `{scope:"source"}`.
+
+`next build` ✓, `eslint` 0, `deno test` 4/0.
+
+Phase W remaining: W5 monitoring · W6 migration validation + security/perf
+review.
+
+---
+
 ## 11z. Phase W PR5 — as built (web)
 
 Structured error monitoring for the Spaces surface. **Web only, no

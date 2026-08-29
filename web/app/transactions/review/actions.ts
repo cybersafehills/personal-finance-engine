@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { supabaseSession } from "../../../lib/supabase-session-server";
+import { trackSpacesEvent } from "../../../lib/spaces/analytics";
 import { logSpacesError } from "../../../lib/spaces/monitoring";
 
 export type SimpleActionResult = { ok: true } | { ok: false; error: string };
@@ -41,6 +42,7 @@ export async function mergeDuplicateTransaction(
     return { ok: false, error: "Could not merge these transactions." };
   }
 
+  trackSpacesEvent("duplicate_merged");
   revalidateReviewRoutes(duplicateId);
   revalidatePath(`/transactions/${canonicalId}`);
   revalidateAggregateRoutes();
@@ -61,6 +63,7 @@ export async function dismissPossibleDuplicate(
     return { ok: false, error: "Could not update this transaction." };
   }
 
+  trackSpacesEvent("duplicate_dismissed");
   revalidateReviewRoutes(transactionId);
   return { ok: true };
 }

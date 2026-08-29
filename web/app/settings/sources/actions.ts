@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { supabaseSession } from "../../../lib/supabase-session-server";
 import { getActiveWorkspaceId } from "../../../lib/queries";
 import { isSpacesEnabled } from "../../../lib/spaces/gate";
+import { trackSpacesEvent } from "../../../lib/spaces/analytics";
 import { logSpacesError } from "../../../lib/spaces/monitoring";
 
 export type SourceActionResult = { ok: true } | { ok: false; error: string };
@@ -65,6 +66,7 @@ export async function setSourceVisibility(
     return { ok: false, error: friendlyError(error.message) };
   }
 
+  if (mode === "personal_only") trackSpacesEvent("source_visibility_narrowed");
   revalidatePath("/settings/sources");
   return { ok: true };
 }
@@ -95,6 +97,7 @@ export async function allocateSourceToSpace(
     return { ok: false, error: friendlyError(error.message) };
   }
 
+  trackSpacesEvent("source_shared", { mode, is_default: isDefault });
   revalidatePath("/settings/sources");
   return { ok: true };
 }
@@ -123,6 +126,7 @@ export async function setShareLinkStatus(
     return { ok: false, error: friendlyError(error.message) };
   }
 
+  trackSpacesEvent("source_share_status_changed", { status });
   revalidatePath("/settings/sources");
   return { ok: true };
 }

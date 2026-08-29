@@ -72,15 +72,31 @@ export default async function WorkspacePage() {
 
       <div className="flex flex-col gap-3">
         {workspace.kind === "household" && (
-          <p className="text-sm text-text-muted">
-            Everyone here has their own OneLedger account. What each person
-            shares — nothing, transactions only, or the full balance — is
-            set per account under{" "}
-            <span className="font-medium text-text-secondary">
-              Settings → Shared accounts
-            </span>
-            .
-          </p>
+          <details className="rounded-card border border-border-subtle bg-surface p-4 text-sm text-text-muted [&_summary]:cursor-pointer">
+            <summary className="font-medium text-text-primary">
+              How households work
+            </summary>
+            <div className="mt-2 flex flex-col gap-2">
+              <p>
+                Everyone here keeps their own OneLedger account and their own
+                private transactions. Nothing is shared automatically.
+              </p>
+              <p>
+                You choose, per account, what this household sees — nothing,
+                transactions only, or the full balance — under{" "}
+                <span className="font-medium text-text-secondary">
+                  Settings → Shared accounts
+                </span>
+                .
+              </p>
+              <p>
+                Every shared transaction can be marked as one person&apos;s
+                spending, split between people, or shared by the household.
+                This only changes how the household&apos;s reports count it —
+                it never moves money.
+              </p>
+            </div>
+          </details>
         )}
 
         {members.map((member) => (

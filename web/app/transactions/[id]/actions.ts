@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { trackSpacesEvent } from "../../../lib/spaces/analytics";
 import { logSpacesError } from "../../../lib/spaces/monitoring";
 import { supabaseSession } from "../../../lib/supabase-session-server";
 
@@ -56,6 +57,7 @@ export async function setTransactionAttribution(
     return { ok: false, error: friendlyError(error.message) };
   }
 
+  trackSpacesEvent("transaction_attributed", { type });
   revalidatePath(`/transactions/${transactionId}`);
   revalidatePath("/transactions/review");
   return { ok: true };
