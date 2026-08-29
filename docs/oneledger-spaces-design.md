@@ -1489,6 +1489,39 @@ review.
 
 ---
 
+## 11z. Phase W PR5 — as built (web)
+
+Structured error monitoring for the Spaces surface. **Web only, no
+migration, no dependency** - this codebase has no APM/Sentry; the
+platform log drain is the sink (mirrors `logScanError` in
+`lib/pay/scan-analytics.ts`).
+
+- **`web/lib/spaces/monitoring.ts`** — `SpacesErrorStage` (10 stages),
+  `redactErrorText(err)` (scrubs row ids / emails / URLs / long digit
+  runs from an `Error.message` or PostgREST error string, caps at 240,
+  never logs a stack), `logSpacesError(stage, err)` — one
+  `console.error("[spaces-error] stage=…", …)`, never throws.
+  `monitoring_test.ts` (3 cases).
+- **Wired into the error branches** that previously swallowed failures
+  silently: `createHousehold`, `createInvite`, `revokeInvite`,
+  `changeMemberRole` / `removeMember` (`member_manage`), the three
+  source-share actions (`source_share`), `mergeDuplicateTransaction` /
+  `dismissPossibleDuplicate` (`duplicate_resolve`), `acceptInvite`,
+  `setTransactionAttribution` (`attribution`), `importStatement`
+  (`statement_import`). A denied RLS write or refused RPC now leaves a
+  greppable `[spaces-error]` line.
+- Already covered: `ingest-momo`'s best-effort calls
+  (`sweep_budget_thresholds`, raw-event, reconciliation) and
+  `send-notifications` each `console.error` their own failures with a
+  stable prefix.
+
+`next build` ✓, `eslint` 0, `deno test` 3/0.
+
+Phase W remaining: W6 — migration validation on realistic data +
+security/perf review checklist.
+
+---
+
 ## 12. Testing strategy (per phase, aggregated here)
 
 - **Unit**: role→capability, `can_view_source_in_space` truth table,

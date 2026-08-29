@@ -10,6 +10,7 @@ import { siteUrl } from "../../../lib/site-url";
 import { isSpacesEnabled } from "../../../lib/spaces/gate";
 import { trackSpacesEvent } from "../../../lib/spaces/analytics";
 import { getActiveWorkspaceId, type WorkspaceRole } from "../../../lib/queries";
+import { logSpacesError } from "../../../lib/spaces/monitoring";
 
 export type WorkspaceActionResult = { ok: true } | { ok: false; error: string };
 export type CreateInviteResult =
@@ -72,7 +73,10 @@ export async function createOrganization(name: string): Promise<void> {
     { p_name: trimmedName },
   );
 
-  if (error || !workspaceId) return;
+  if (error || !workspaceId) {
+    if (error) logSpacesError("create_household", error);
+    return;
+  }
 
   trackSpacesEvent("household_created");
   await setActiveWorkspace(workspaceId);
@@ -156,6 +160,7 @@ export async function createInvite(
   });
 
   if (error) {
+    logSpacesError("invite", error);
     return { ok: false, error: "Could not create the invite." };
   }
 
@@ -183,6 +188,7 @@ export async function revokeInvite(
     .eq("id", inviteId);
 
   if (error) {
+    logSpacesError("invite", error);
     return { ok: false, error: "Could not revoke the invite." };
   }
 
@@ -201,6 +207,7 @@ export async function changeMemberRole(
   });
 
   if (error) {
+    logSpacesError("member_manage", error);
     return { ok: false, error: error.message };
   }
 
@@ -218,6 +225,7 @@ export async function removeMember(
   });
 
   if (error) {
+    logSpacesError("member_manage", error);
     return { ok: false, error: error.message };
   }
 

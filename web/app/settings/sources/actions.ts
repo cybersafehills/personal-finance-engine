@@ -5,6 +5,7 @@ import { supabaseSession } from "../../../lib/supabase-session-server";
 import { getActiveWorkspaceId } from "../../../lib/queries";
 import { isSpacesEnabled } from "../../../lib/spaces/gate";
 import { trackSpacesEvent } from "../../../lib/spaces/analytics";
+import { logSpacesError } from "../../../lib/spaces/monitoring";
 
 export type SourceActionResult = { ok: true } | { ok: false; error: string };
 
@@ -60,7 +61,10 @@ export async function setSourceVisibility(
     p_visibility_mode: mode,
   });
 
-  if (error) return { ok: false, error: friendlyError(error.message) };
+  if (error) {
+    logSpacesError("source_share", error);
+    return { ok: false, error: friendlyError(error.message) };
+  }
 
   if (mode === "personal_only") trackSpacesEvent("source_visibility_narrowed");
   revalidatePath("/settings/sources");
@@ -88,7 +92,10 @@ export async function allocateSourceToSpace(
     p_is_default: isDefault,
   });
 
-  if (error) return { ok: false, error: friendlyError(error.message) };
+  if (error) {
+    logSpacesError("source_share", error);
+    return { ok: false, error: friendlyError(error.message) };
+  }
 
   trackSpacesEvent("source_shared", { mode, is_default: isDefault });
   revalidatePath("/settings/sources");
@@ -114,7 +121,10 @@ export async function setShareLinkStatus(
     p_status: status,
   });
 
-  if (error) return { ok: false, error: friendlyError(error.message) };
+  if (error) {
+    logSpacesError("source_share", error);
+    return { ok: false, error: friendlyError(error.message) };
+  }
 
   trackSpacesEvent("source_share_status_changed", { status });
   revalidatePath("/settings/sources");
