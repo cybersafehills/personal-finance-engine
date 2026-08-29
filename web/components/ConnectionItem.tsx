@@ -11,6 +11,7 @@ import {
 import { Badge } from "./Badge";
 import { RevealedSecret } from "./RevealedSecret";
 import { ConnectionDetails, ShortcutKeyInstructions } from "./ConnectionDetails";
+import { ConnectionReadinessProbe } from "./ConnectionReadinessProbe";
 import { formatDateTime } from "../lib/format";
 import type { IngestionConnectionRow } from "../lib/queries";
 
@@ -114,6 +115,10 @@ export function ConnectionItem({
           endpointUrl={ingestEndpointUrl}
           defaultOpen={!connection.last_used_at && connection.status === "active"}
         />
+      )}
+
+      {connection.status === "active" && !connection.last_used_at && (
+        <ConnectionReadinessProbe connectionId={connection.id} />
       )}
 
       {isPaused && !renaming && (

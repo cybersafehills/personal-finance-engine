@@ -69,6 +69,11 @@ test("a new connection surfaces the full ingest contract, not just the key", asy
   await expect(row).toContainText("401");
   await expect(row).toContainText("422");
 
+  // PR3: a fresh connection shows the "waiting for the first message"
+  // readiness probe (it has never ingested anything).
+  await expect(row.getByText(/Waiting for the first forwarded message/))
+    .toBeVisible();
+
   // PR2: the panel links to the full step-by-step guide.
   await row.getByRole("link", { name: /step-by-step Shortcut guide/i }).click();
   await expect(page).toHaveURL(/\/settings\/connections\/setup$/);

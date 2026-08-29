@@ -124,3 +124,50 @@ unconfirmed (placeholder + `MOMO_SMS_SENDER` override in place).
   out with `rel="noopener noreferrer"`.
 - `deno test web/lib/shortcut-guide_test.ts` passes; lint / tsc / build
   clean.
+
+---
+
+## PR3 — "Is it working yet?" — readiness probe, not a synthetic send
+
+**Problem.** A user who has just built the Shortcut has no feedback loop:
+did it work? The brief's first choice was a "Test this connection" button
+that POSTs a canned SMS to the live endpoint.
+
+**Decision: live-poll, no synthetic send.** The brief sanctioned this
+fallback, and here it is the *right* call, not just the easy one:
+
+- `ingest-momo` accepts only `{ message, received_at }` — no test-message
+  passthrough. Any synthetic POST that parses would create a **real
+  ledger transaction**; one that doesn't parse lands in the **review
+  queue**. Both pollute. Keeping them out needs an Edge Function change +
+  deploy, which is out of scope for a web PR (and `main` CI is currently
+  red, so functions don't deploy anyway).
+- A synthetic POST also bypasses the user's Shortcut entirely, so it
+  proves almost nothing about *their* setup.
+
+**Implementation.**
+
+- `probeConnectionReadiness(connectionId)` — read-only server action,
+  returns `{ status, lastUsedAt }` (RLS-scoped). No writes, no
+  `revalidatePath`.
+- `ConnectionReadinessProbe` — client component rendered by
+  `ConnectionItem` only while a connection is `active` with
+  `last_used_at === null`. Polls every 5s, gives up after 3 min. On the
+  first real message it flips to a success line and calls
+  `router.refresh()` so the row re-renders as "Ready".
+- Complements the existing `LiveDataSync` realtime refresh (which covers
+  `transactions` but not `ingestion_connections`), so a `needs_review`
+  first message still flips the UI.
+
+**Data model / flags.** None.
+
+**Manual verification.**
+
+- Create a connection → the row shows "Waiting for the first forwarded
+  message…" with a pulsing dot.
+- Send a real MoMo SMS through a wired Shortcut → within ~5s the line
+  becomes "First message received — this connection is live." and the
+  badge turns "Ready".
+- Leave it 3 min with nothing → it degrades to the "No message yet"
+  hint linking the setup guide.
+- lint / tsc / build clean.
