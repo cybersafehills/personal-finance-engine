@@ -2624,6 +2624,8 @@ export type WorkspaceInviteRow = {
   tokenPrefix: string;
   createdAt: string;
   expiresAt: string;
+  /** expires_at is in the past (server-evaluated at query time). */
+  expired: boolean;
 };
 
 export async function getWorkspaceInvites(
@@ -2642,6 +2644,7 @@ export async function getWorkspaceInvites(
     return [];
   }
 
+  const now = Date.now();
   return (data ?? []).map((row) => ({
     id: row.id,
     email: row.email,
@@ -2650,6 +2653,7 @@ export async function getWorkspaceInvites(
     tokenPrefix: row.token_prefix,
     createdAt: row.created_at,
     expiresAt: row.expires_at,
+    expired: new Date(row.expires_at).getTime() < now,
   }));
 }
 
@@ -2870,7 +2874,8 @@ function onboardingChecklistEnabled(workspaceId: string | null): boolean {
  * when the flag is off so callers can treat it uniformly.
  */
 export async function getOnboardingState(): Promise<OnboardingSnapshot> {
-  const workspaceId = await getActiveWorkspaceId();
+  const workspace = await getActiveWorkspace();
+  const workspaceId = workspace?.id ?? null;
   const enabled = onboardingChecklistEnabled(workspaceId);
 
   const base = deriveOnboardingState({
@@ -2880,7 +2885,15 @@ export async function getOnboardingState(): Promise<OnboardingSnapshot> {
     liveConnectionCount: 0,
   });
 
-  if (!enabled || !workspaceId) {
+  // An organization Space shares one ledger; a plain member/viewer has no
+  // account or device of their own to set up, so the checklist doesn't
+  // apply to them. Household members DO each wire their own device, and
+  // personal workspaces / org owners+admins get the full checklist.
+  // (Rule to confirm with the maintainer - see the PR6 design note.)
+  const orgNonManager = workspace?.kind === "organization" &&
+    (workspace.role === "member" || workspace.role === "viewer");
+
+  if (!enabled || !workspaceId || orgNonManager) {
     return { ...base, enabled: false, dismissed: false, showNudge: false };
   }
 

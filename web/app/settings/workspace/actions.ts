@@ -162,6 +162,57 @@ export async function createInvite(
     workspaceName,
     role,
     link,
+    invitedByEmail: user.email ?? null,
+  });
+
+  revalidatePath("/settings/workspace");
+  return { ok: true, link, emailSent };
+}
+
+/**
+ * Re-sends a still-pending invite. The original token's plaintext was
+ * never stored (only its hash), so "resend" ROTATES the token: a fresh
+ * link replaces the old one (which stops working immediately) and the
+ * 7-day expiry restarts. RLS (workspace_invites_update_owner) confines
+ * this to invites in a workspace the caller owns; the extra
+ * `.eq("status", "pending")` refuses to revive a revoked or already
+ * accepted invite.
+ */
+export async function resendInvite(
+  inviteId: string,
+): Promise<CreateInviteResult> {
+  const token = await generateInviteToken();
+  const supabase = await supabaseSession();
+
+  const { data: updated, error } = await supabase
+    .from("workspace_invites")
+    .update({
+      token_hash: token.hash,
+      token_prefix: token.prefix,
+      expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+    })
+    .eq("id", inviteId)
+    .eq("status", "pending")
+    .select("email, role, workspace_id")
+    .maybeSingle();
+
+  if (error || !updated) {
+    return { ok: false, error: "Could not resend this invite." };
+  }
+
+  const [{ data: ws }, { data: { user } }] = await Promise.all([
+    supabase.from("workspaces").select("name").eq("id", updated.workspace_id)
+      .maybeSingle(),
+    supabase.auth.getUser(),
+  ]);
+
+  const link = `${siteUrl()}/invite/${token.secret}`;
+  const { ok: emailSent } = await sendInviteEmail({
+    to: updated.email,
+    workspaceName: ws?.name ?? "the workspace",
+    role: updated.role,
+    link,
+    invitedByEmail: user?.email ?? null,
   });
 
   revalidatePath("/settings/workspace");

@@ -104,14 +104,19 @@ export async function sendInviteEmail(params: {
   workspaceName: string;
   role: string;
   link: string;
+  /** The inviting user's email, named in the body when available. */
+  invitedByEmail?: string | null;
 }): Promise<{ ok: boolean }> {
+  const roleText = params.role === "admin" ? "an admin" : `a ${params.role}`;
+  const byLine = params.invitedByEmail
+    ? `<p>${params.invitedByEmail} invited you.</p>`
+    : "";
   const result = await send(
     params.to,
     `You've been invited to ${params.workspaceName}`,
     `
-      <p>You've been invited to join <strong>${params.workspaceName}</strong> as ${
-      params.role === "admin" ? "an admin" : `a ${params.role}`
-    }.</p>
+      ${byLine}
+      <p>You've been invited to join <strong>${params.workspaceName}</strong> as ${roleText}.</p>
       <p><a href="${params.link}">Accept the invite</a></p>
       <p>This link expires in 7 days. If you weren't expecting this, you can ignore it.</p>
     `,

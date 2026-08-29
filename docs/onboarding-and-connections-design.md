@@ -287,3 +287,70 @@ its own task — noted for later.
   send", and a `[email-send] outcome=skipped … code=missing_api_key`
   line is logged.
 - `deno test web/lib/email-health-rules_test.ts`, lint, tsc, build clean.
+
+---
+
+## PR6 — Invite flow polish for households
+
+**Audit (the RPC layer is sound).**
+`supabase/migrations/20260827000000_organization_workspaces.sql`:
+
+- **Expiry** — `accept_workspace_invite` and `invite_preview` both filter
+  `status = 'pending' AND expires_at > now()`. The `'expired'` status
+  value is never written (no cron), but a past-expiry `pending` row is
+  already treated as invalid everywhere. ✓
+- **Single-use** — accept flips `status = 'accepted'`; the
+  `where status = 'pending'` guard fails a second attempt. ✓
+- **Role** — taken from the invite row; the table CHECK forbids `owner`. ✓
+- **Email match** — *deliberately none* (token-only bearer model,
+  documented in the migration header). "Invite to an address that already
+  has an account" / "accepted while logged in as someone else" ⇒ whoever
+  holds the link and is authenticated joins. `CreateInviteForm` already
+  says exactly this ("Anyone with this link can join…"). Left as-is.
+- **Already a member** — `accept` does `ON CONFLICT (workspace_id,
+  user_id) DO UPDATE`, re-activating and setting the invite's role.
+  Low-risk (owner-issued); noted, not changed.
+- **Workspace deleted before acceptance** — `workspace_id … on delete
+  cascade` removes the invite row ⇒ `invite_preview` returns nothing ⇒
+  the page 404s. ✓
+
+**Changes (the gaps were small).**
+
+1. **Resend.** `InviteItem` had only Revoke. The plaintext token was
+   never stored, so `resendInvite(inviteId)` **rotates** it: new
+   `token_hash`/`token_prefix`, expiry restarted, email re-sent, fresh
+   link shown once via `RevealedSecret`. The old link dies immediately.
+   `.eq("status","pending")` refuses to revive a revoked/accepted invite;
+   RLS confines it to owned workspaces.
+2. **"Expired" label.** `getWorkspaceInvites` now returns a
+   server-evaluated `expired` boolean; `InviteItem` shows "expired" and
+   relabels Resend → "Send a new link".
+3. **Inviter named in the email.** `sendInviteEmail` takes an optional
+   `invitedByEmail`; `createInvite` / `resendInvite` pass the caller's
+   address. Links already used `siteUrl()` and stated the role.
+4. **Invitee-scoped onboarding.** `getOnboardingState()` now reads the
+   workspace kind + role: an **organization** `member`/`viewer` (shared
+   ledger, nothing of their own to set up) gets the checklist **disabled**
+   — no nudge, `/get-started` forwards to the dashboard. **Household**
+   members, **personal** workspaces, and org **owners/admins** keep the
+   full checklist. `acceptInvite` now redirects to `/get-started` (which
+   self-forwards for the disabled case) instead of `/`.
+
+**Decision to confirm with the maintainer.** The rule in (4) — org
+member/viewer sees no checklist, household member sees the full one — is a
+judgement call. If household members should also skip "Add a financial
+account" (because they may already have one from personal signup), the
+derive already reflects that: the step shows done when `accountCount > 0`.
+
+**Manual verification.**
+
+- `/settings/workspace` on a household you own: a pending invite shows
+  Resend + Revoke; Resend produces a new one-time link and a "previous
+  link no longer works" note; an expired invite shows "expired" +
+  "Send a new link".
+- Invite email names the inviter and the role, links to the real domain.
+- Accept an org `member` invite → land on the dashboard (no checklist).
+  Accept a household invite → `/get-started` with the checklist.
+- e2e: `spaces-household.spec.ts` "household invites: create, then
+  rotate the link with Resend".
+- lint, tsc, build, `deno test web/lib` all clean.
