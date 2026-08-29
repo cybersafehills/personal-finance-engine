@@ -278,6 +278,8 @@ viewer — a separate effort). No new e2e: the suite doesn't currently
 exercise the signup-email flow, and standing that up against inbucket is
 its own task — noted for later.
 
+_Both follow-ups landed in PR7 below._
+
 **Manual verification.**
 
 - `GET /api/health/email` with the cron secret: 200 + `ok:true` on a
@@ -382,6 +384,14 @@ invites / confirmations is worth the small table.
 4. **`GET /api/admin/email-log`** — operator route, same
    `X-Report-Cron-Secret` gate as `/api/health/email`. `?limit=` (1–200,
    default 50) and `?outcome=sent|skipped|failed`.
+
+**Also in PR7: signup-email e2e.** `web/e2e/signup-email.spec.ts` — runs
+unauthenticated (overrides the project storageState; the proxy bounces a
+signed-in user off `/signup`), signs up a throwaway user through the real
+form, polls the local mail catcher (Mailpit JSON API on
+`[local_smtp] port` 54324) for the confirmation email, follows its link,
+and asserts the redirect lands on `/get-started`. `afterEach` deletes the
+user. CI-only (needs the local stack).
 
 **Manual verification.**
 
