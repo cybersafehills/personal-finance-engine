@@ -158,7 +158,10 @@ test("household: create a Space, share a source into it, attribute a transaction
   // "Transactions only" is the default radio; just submit.
   await page.getByRole("button", { name: "Share", exact: true }).click();
 
-  await expect(page.getByText("Transactions only")).toBeVisible();
+  // exact: the /settings/sources primer copy (Phase W PR3) also contains
+  // the phrase "Transactions only"; this asserts the share-link row label.
+  await expect(page.getByText("Transactions only", { exact: true }))
+    .toBeVisible();
 
   const { data: link } = await db
     .from("source_space_links")
