@@ -163,6 +163,7 @@ export async function createInvite(
     role,
     link,
     invitedByEmail: user.email ?? null,
+    workspaceId,
   });
 
   revalidatePath("/settings/workspace");
@@ -213,6 +214,7 @@ export async function resendInvite(
     role: updated.role,
     link,
     invitedByEmail: user?.email ?? null,
+    workspaceId: updated.workspace_id,
   });
 
   revalidatePath("/settings/workspace");

@@ -1,5 +1,6 @@
 import "server-only";
 import { getResendClient } from "./resend";
+import { recordEmailSend } from "./email-log";
 import { formatRwf, formatSignedRwf } from "./format";
 
 // Every function here is best-effort: a failed or skipped send is logged
@@ -52,18 +53,35 @@ function logSend(
  * alternative), since it's long enough that an auto-stripped fallback
  * would read poorly.
  */
+type SendMeta = { category: string; workspaceId?: string | null };
+
 async function send(
   to: string,
   subject: string,
   html: string,
   text?: string,
+  meta: SendMeta = { category: "other" },
 ): Promise<SendResult> {
+  const domain = recipientDomain(to);
+  const audit = (
+    outcome: "sent" | "skipped" | "failed",
+    extra: { providerMessageId?: string | null; errorCode?: string | null },
+  ) =>
+    void recordEmailSend({
+      outcome,
+      category: meta.category,
+      recipientDomain: domain,
+      workspaceId: meta.workspaceId ?? null,
+      ...extra,
+    });
+
   const client = getResendClient();
   if (!client) {
     console.error(
       `Skipped sending "${subject}" to ${to}: RESEND_API_KEY is not set.`,
     );
     logSend(subject, to, "skipped", { code: "missing_api_key" });
+    audit("skipped", { errorCode: "missing_api_key" });
     return { ok: false, errorCode: "provider_not_configured" };
   }
 
@@ -77,6 +95,7 @@ async function send(
         "address on it.",
     );
     logSend(subject, to, "skipped", { code: "missing_from" });
+    audit("skipped", { errorCode: "missing_from" });
     return { ok: false, errorCode: "provider_not_configured" };
   }
 
@@ -90,11 +109,13 @@ async function send(
     });
     if (error) throw error;
     logSend(subject, to, "sent", { messageId: data?.id ?? null });
+    audit("sent", { providerMessageId: data?.id ?? null });
     return { ok: true, providerMessageId: data?.id ?? null };
   } catch (error) {
     console.error(`Failed sending "${subject}" to ${to}:`, error);
     const code = error instanceof Error && error.name ? error.name : "send_failed";
     logSend(subject, to, "failed", { code });
+    audit("failed", { errorCode: code });
     return { ok: false, errorCode: "send_failed" };
   }
 }
@@ -106,6 +127,8 @@ export async function sendInviteEmail(params: {
   link: string;
   /** The inviting user's email, named in the body when available. */
   invitedByEmail?: string | null;
+  /** For the email_send_log row; not shown to the recipient. */
+  workspaceId?: string | null;
 }): Promise<{ ok: boolean }> {
   const roleText = params.role === "admin" ? "an admin" : `a ${params.role}`;
   const byLine = params.invitedByEmail
@@ -120,6 +143,8 @@ export async function sendInviteEmail(params: {
       <p><a href="${params.link}">Accept the invite</a></p>
       <p>This link expires in 7 days. If you weren't expecting this, you can ignore it.</p>
     `,
+    undefined,
+    { category: "invite", workspaceId: params.workspaceId ?? null },
   );
   return { ok: result.ok };
 }
@@ -134,6 +159,8 @@ export async function sendNewSignInEmail(to: string): Promise<void> {
       password right away from the sign-in page's "Forgot your
       password?" link.</p>
     `,
+    undefined,
+    { category: "sign_in" },
   );
 }
 
@@ -148,6 +175,8 @@ export async function sendLockoutAlertEmail(to: string): Promise<void> {
       wasn't, your password may be compromised - reset it from the
       sign-in page's "Forgot your password?" link.</p>
     `,
+    undefined,
+    { category: "lockout" },
   );
 }
 
@@ -180,6 +209,8 @@ export async function sendDailyReportEmail(params: {
   budgetSummaryLines: string[];
   /** Pre-formatted one-line alert sentences (from report-math.ts's deterministic alerts). Empty when nothing notable. */
   watchOutLines: string[];
+  /** For the email_send_log row; not shown to the recipient. */
+  workspaceId?: string | null;
 }): Promise<DailyReportEmailResult> {
   const closingBalanceText = params.closingBalanceRwf !== null
     ? formatRwf(params.closingBalanceRwf)
@@ -255,6 +286,7 @@ export async function sendDailyReportEmail(params: {
     `Your OneLedger report for ${params.dateLabel}`,
     html,
     text,
+    { category: "daily_report", workspaceId: params.workspaceId ?? null },
   );
   return result.ok
     ? { ok: true, providerMessageId: result.providerMessageId }

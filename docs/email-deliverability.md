@@ -58,9 +58,24 @@ The pure env-shape rules (`web/lib/email-health-rules.ts`) are unit-tested
 
 Recipient **domain only** — never the full address. `outcome=skipped`
 means the provider isn't configured; `failed` carries the Resend error
-name. There is no `email_send_log` table yet; if per-recipient delivery
-history is needed later, add one behind an admin viewer (out of scope
-here — structured logs cover the "was it sent?" question).
+name.
+
+### `email_send_log`
+
+The same attempts are also written to `public.email_send_log`
+(`20261007000000_email_send_log.sql`) via `web/lib/email-log.ts` —
+best-effort, never blocking a send. The row holds `outcome`, `category`
+(`invite` / `sign_in` / `lockout` / `daily_report` / `other`),
+`recipient_domain`, an optional `workspace_id`, and the provider message
+id or error code. **No address, subject, or body.** The table is
+`service_role`-only (RLS on, zero `authenticated`/`anon` policies).
+
+Read it with the operator route (same `X-Report-Cron-Secret` gate):
+
+```bash
+curl -H "X-Report-Cron-Secret: $REPORT_CRON_SECRET" \
+  "https://www.oneledger.me/api/admin/email-log?outcome=failed&limit=50"
+```
 
 ## Local dev
 

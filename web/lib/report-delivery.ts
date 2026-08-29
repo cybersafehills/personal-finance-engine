@@ -222,6 +222,7 @@ export async function deliverReportForCandidate(
       netMovementRwf: payload.financialSnapshot.netMovementRwf,
       budgetSummaryLines: buildBudgetSummaryLines(payload.budget),
       watchOutLines: buildWatchOutLines(payload),
+      workspaceId: candidate.workspace_id,
     });
 
     if (emailResult.ok) {

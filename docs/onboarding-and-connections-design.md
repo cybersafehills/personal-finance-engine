@@ -354,3 +354,40 @@ derive already reflects that: the step shows done when `accountCount > 0`.
 - e2e: `spaces-household.spec.ts` "household invites: create, then
   rotate the link with Resend".
 - lint, tsc, build, `deno test web/lib` all clean.
+
+---
+
+## PR7 — `email_send_log` (PR5 follow-up)
+
+**Why.** PR5 deferred a table ("structured logs cover 'was it sent?'"),
+but a log line rolls off; a persisted, queryable trail of *failed*
+invites / confirmations is worth the small table.
+
+**Changes.**
+
+1. **Migration `20261007000000_email_send_log.sql`** — `outcome` /
+   `category` / `recipient_domain` / nullable `workspace_id` /
+   `provider_message_id` / `error_code`. **No address, subject, or body.**
+   RLS on with **zero** `authenticated`/`anon` policies; `service_role`
+   gets `select, insert`. Two indexes (`created_at`, `outcome,created_at`).
+2. **`web/lib/email-log.ts`** — `recordEmailSend()`, a lazy service-role
+   client built the `resend.ts` way (no import-time throw, since
+   `emails.ts` is on the login path). Fully best-effort: a missing key or
+   an insert error is swallowed.
+3. **`lib/emails.ts` `send()`** — new optional `meta: { category,
+   workspaceId }`; each exit path fire-and-forgets a `recordEmailSend`
+   alongside the existing `[email-send]` log line. The four wrappers pass
+   their category; invite + daily-report also thread `workspaceId`
+   (`createInvite` / `resendInvite` / `report-delivery.ts`).
+4. **`GET /api/admin/email-log`** — operator route, same
+   `X-Report-Cron-Secret` gate as `/api/health/email`. `?limit=` (1–200,
+   default 50) and `?outcome=sent|skipped|failed`.
+
+**Manual verification.**
+
+- Create an invite with a working Resend config → a `sent` row with
+  `category=invite` and the workspace id; unset `RESEND_API_KEY` → a
+  `skipped` row with `error_code=missing_api_key`.
+- `GET /api/admin/email-log?outcome=failed` with the cron secret returns
+  `{ count, rows }`; without it, 401.
+- tsc, build, eslint, `deno test web/lib` clean.
