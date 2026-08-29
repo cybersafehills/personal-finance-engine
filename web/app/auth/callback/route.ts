@@ -8,7 +8,15 @@ import { supabaseSession } from "../../../lib/supabase-session-server";
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/";
+  const rawNext = searchParams.get("next");
+
+  // A signup-confirmation link carries no `next` (or just "/"); send
+  // those first-run users to the onboarding checklist. Links that DO
+  // carry a `next` - password reset (/auth/reset-password/confirm), an
+  // invite (/invite/<token>) - are followed verbatim. /get-started
+  // itself redirects to "/" when the checklist flag is off, so this is
+  // always safe.
+  const next = rawNext && rawNext !== "/" ? rawNext : "/get-started";
 
   if (code) {
     const supabase = await supabaseSession();

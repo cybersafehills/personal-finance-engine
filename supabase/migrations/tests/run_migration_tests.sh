@@ -594,7 +594,10 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # SELECT-only for authenticated) - 71 tables, 70 with RLS.
 # Phase V PR1 (20261001000000) adds notifications (RLS enabled,
 # SELECT-own for authenticated) - 72 tables, 71 with RLS.
-if [ "$TABLE_COUNT" = "72" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Onboarding PR7 (20261007000000) adds email_send_log (RLS enabled,
+# service-role-only, no authenticated policy - like raw_financial_events
+# / budget_threshold_state) - 73 tables, 72 with RLS.
+if [ "$TABLE_COUNT" = "73" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"

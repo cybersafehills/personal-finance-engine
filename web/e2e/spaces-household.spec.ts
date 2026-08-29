@@ -215,3 +215,37 @@ test("/settings/sources has no serious/critical accessibility violations", async
   );
   expect(seriousOrWorse, JSON.stringify(seriousOrWorse, null, 2)).toEqual([]);
 });
+
+test("household invites: create, then rotate the link with Resend", async ({
+  page,
+}) => {
+  // PR6 (onboarding work): the pending-invite row exposes Resend
+  // (token rotation) alongside Revoke, and Resend surfaces a fresh
+  // one-time link. Cleanup is the shared afterEach (deleting the
+  // household cascades workspace_invites).
+  await page.goto("/settings/workspace");
+  await page.getByLabel("Household name").fill(HOUSEHOLD_NAME);
+  await page.getByRole("button", { name: "Create household" }).click();
+  await expect(page.getByRole("heading", { name: HOUSEHOLD_NAME })).toBeVisible();
+
+  await page.getByRole("button", { name: "Invite someone" }).click();
+  await page.getByLabel("Email").fill("housemate@example.com");
+  await page.getByRole("button", { name: "Create invite" }).click();
+
+  // First reveal (from creation).
+  await expect(page.getByText(/Copy this now/)).toBeVisible();
+  await page.getByRole("button", { name: "Done" }).click();
+
+  const row = page
+    .locator("div.rounded-card")
+    .filter({ hasText: "housemate@example.com" })
+    .first();
+  await expect(row.getByRole("button", { name: "Resend" })).toBeVisible();
+  await expect(row.getByRole("button", { name: "Revoke" })).toBeVisible();
+
+  await row.getByRole("button", { name: "Resend" }).click();
+
+  // A fresh one-time link, and a note that the old one is dead.
+  await expect(page.getByText(/Copy this now/)).toBeVisible();
+  await expect(page.getByText(/previous link no longer works/)).toBeVisible();
+});

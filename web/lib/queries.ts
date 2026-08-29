@@ -2624,6 +2624,8 @@ export type WorkspaceInviteRow = {
   tokenPrefix: string;
   createdAt: string;
   expiresAt: string;
+  /** expires_at is in the past (server-evaluated at query time). */
+  expired: boolean;
 };
 
 export async function getWorkspaceInvites(
@@ -2642,6 +2644,7 @@ export async function getWorkspaceInvites(
     return [];
   }
 
+  const now = Date.now();
   return (data ?? []).map((row) => ({
     id: row.id,
     email: row.email,
@@ -2650,6 +2653,7 @@ export async function getWorkspaceInvites(
     tokenPrefix: row.token_prefix,
     createdAt: row.created_at,
     expiresAt: row.expires_at,
+    expired: new Date(row.expires_at).getTime() < now,
   }));
 }
 
@@ -2828,5 +2832,101 @@ export async function getUiPreferences(): Promise<UiPreferencesRow> {
     hideBalance: data.hide_balance,
     privacyMode: data.privacy_mode,
     reportsRelocationNoticeDismissed: data.reports_relocation_notice_dismissed,
+  };
+}
+
+// ===========================================================================
+// Onboarding checklist (onboarding work PR4). Step completion is derived
+// live here from existing signals; only the "dismissed" flag is stored
+// (ui_preferences.onboarding_dismissed,
+// 20261006000000_onboarding_checklist_dismissed.sql). Pure step logic +
+// types live in ./onboarding.ts (Deno-tested).
+// ===========================================================================
+
+import { deriveOnboardingState, type OnboardingState } from "./onboarding";
+
+export type OnboardingSnapshot = OnboardingState & {
+  /** Feature flag + workspace allowlist both passed. */
+  enabled: boolean;
+  /** The user has dismissed the reminder in this workspace. */
+  dismissed: boolean;
+  /** Show the dashboard nudge: enabled, not dismissed, not complete. */
+  showNudge: boolean;
+};
+
+function onboardingChecklistEnabled(workspaceId: string | null): boolean {
+  // Same convention as the Pay/Reports flags: on unless the exact string
+  // "false", plus an optional comma-separated workspace allowlist.
+  if (process.env.ONBOARDING_CHECKLIST_ENABLED === "false") return false;
+  const raw = process.env.ONBOARDING_CHECKLIST_WORKSPACE_ALLOWLIST?.trim();
+  if (!raw) return true;
+  if (!workspaceId) return false;
+  return raw.split(",").map((s) => s.trim()).filter(Boolean).includes(
+    workspaceId,
+  );
+}
+
+/**
+ * The onboarding checklist for the caller's active workspace: which of
+ * the four setup steps are done, what to do next, and whether to show the
+ * dashboard nudge. Safe to call on every dashboard render - three small
+ * indexed reads, all RLS-scoped. Returns a disabled, all-false snapshot
+ * when the flag is off so callers can treat it uniformly.
+ */
+export async function getOnboardingState(): Promise<OnboardingSnapshot> {
+  const workspace = await getActiveWorkspace();
+  const workspaceId = workspace?.id ?? null;
+  const enabled = onboardingChecklistEnabled(workspaceId);
+
+  const base = deriveOnboardingState({
+    emailConfirmed: false,
+    accountCount: 0,
+    activeConnectionCount: 0,
+    liveConnectionCount: 0,
+  });
+
+  // An organization Space shares one ledger; a plain member/viewer has no
+  // account or device of their own to set up, so the checklist doesn't
+  // apply to them. Household members DO each wire their own device, and
+  // personal workspaces / org owners+admins get the full checklist.
+  // (Rule to confirm with the maintainer - see the PR6 design note.)
+  const orgNonManager = workspace?.kind === "organization" &&
+    (workspace.role === "member" || workspace.role === "viewer");
+
+  if (!enabled || !workspaceId || orgNonManager) {
+    return { ...base, enabled: false, dismissed: false, showNudge: false };
+  }
+
+  const supabase = await supabaseSession();
+  const [{ data: { user } }, accountsRes, connectionsRes, prefsRes] =
+    await Promise.all([
+      supabase.auth.getUser(),
+      supabase.from("accounts").select("id, is_active, archived_at"),
+      supabase.from("ingestion_connections").select("status, last_used_at"),
+      supabase
+        .from("ui_preferences")
+        .select("onboarding_dismissed")
+        .eq("workspace_id", workspaceId)
+        .maybeSingle(),
+    ]);
+
+  const accounts = accountsRes.data ?? [];
+  const connections = connectionsRes.data ?? [];
+
+  const state = deriveOnboardingState({
+    emailConfirmed: Boolean(user?.email_confirmed_at),
+    accountCount: accounts.filter((a) => a.is_active && !a.archived_at).length,
+    activeConnectionCount:
+      connections.filter((c) => c.status === "active").length,
+    liveConnectionCount: connections.filter((c) => c.last_used_at != null).length,
+  });
+
+  const dismissed = Boolean(prefsRes.data?.onboarding_dismissed);
+
+  return {
+    ...state,
+    enabled: true,
+    dismissed,
+    showNudge: !dismissed && !state.complete,
   };
 }

@@ -163,6 +163,47 @@ export async function resumeConnection(
   return { ok: true };
 }
 
+export type ConnectionReadinessResult =
+  | {
+    ok: true;
+    status: "active" | "paused" | "revoked";
+    lastUsedAt: string | null;
+  }
+  | { ok: false; error: string };
+
+/**
+ * Read-only poll behind the "waiting for your first message" state on a
+ * freshly-created connection. The UI calls this every few seconds until
+ * last_used_at is set (ingest-momo stamps it on the first accepted
+ * message) or the connection leaves 'active'.
+ *
+ * There is deliberately no synthetic-send "test" here: the only honest
+ * test of the wiring is a real MoMo SMS through the user's own Shortcut,
+ * and ingest-momo has no test-message passthrough that would keep a
+ * fabricated transaction out of the ledger. See
+ * docs/onboarding-and-connections-design.md (PR3).
+ */
+export async function probeConnectionReadiness(
+  connectionId: string,
+): Promise<ConnectionReadinessResult> {
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("ingestion_connections")
+    .select("status, last_used_at")
+    .eq("id", connectionId)
+    .maybeSingle();
+
+  if (error || !data) {
+    return { ok: false, error: "Could not check this connection." };
+  }
+
+  return {
+    ok: true,
+    status: data.status as "active" | "paused" | "revoked",
+    lastUsedAt: (data.last_used_at as string | null) ?? null,
+  };
+}
+
 /** Renames a connection. Label only - the bound account and credential are unchanged. */
 export async function renameConnection(
   connectionId: string,

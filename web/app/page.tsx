@@ -4,10 +4,12 @@ import {
   getCurrentBalance,
   getDashboardBudgetSummary,
   getHouseholdSpendingBreakdown,
+  getOnboardingState,
   getRecentTransactions,
   getTodayTotals,
 } from "../lib/queries";
 import { BalanceCard } from "../components/BalanceCard";
+import { OnboardingCard } from "../components/OnboardingCard";
 import { SummaryMetric } from "../components/SummaryMetric";
 import { BudgetStatusCard } from "../components/BudgetStatusCard";
 import { AttentionItemsCard } from "../components/AttentionItemsCard";
@@ -29,6 +31,7 @@ export default async function HomePage() {
     budgetSummary,
     attentionItems,
     householdSpending,
+    onboarding,
   ] = await Promise.all([
     getCurrentBalance(),
     getTodayTotals(),
@@ -36,6 +39,7 @@ export default async function HomePage() {
     getDashboardBudgetSummary(),
     getAttentionItems(),
     getHouseholdSpendingBreakdown(),
+    getOnboardingState(),
   ]);
 
   // Whether the secondary (right) column has anything to show at all -
@@ -67,6 +71,12 @@ export default async function HomePage() {
           column, so document/reading order stays identical across
           breakpoints and only the visual position changes. */}
       <div className="flex flex-col gap-5 lg:grid lg:grid-cols-3 lg:items-start lg:gap-5">
+      {onboarding.showNudge && (
+        <div className={`lg:col-start-1 ${mainColumnSpan}`}>
+          <OnboardingCard snapshot={onboarding} />
+        </div>
+      )}
+
       <div className={`lg:col-start-1 ${mainColumnSpan}`}>
         <BalanceCard balanceRwf={balance?.amountRwf ?? null} asOfIso={balance?.asOfIso ?? null} />
       </div>

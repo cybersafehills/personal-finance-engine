@@ -25,5 +25,9 @@ export async function acceptInvite(token: string): Promise<AcceptInviteResult> {
 
   trackSpacesEvent("invite_accepted");
   await setActiveWorkspace(workspaceId);
-  redirect("/");
+  // Land on the onboarding checklist - scoped to what this member
+  // actually has to set up. For an organization member/viewer that has
+  // nothing of their own to configure, getOnboardingState() reports the
+  // checklist disabled and /get-started forwards to the dashboard.
+  redirect("/get-started");
 }
