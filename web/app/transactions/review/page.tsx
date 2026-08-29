@@ -44,6 +44,12 @@ export default async function ReviewQueuePage() {
               <h2 className="mb-2 text-sm font-medium text-text-primary">
                 Possible duplicates ({duplicateClusters.length})
               </h2>
+              <p className="mb-2 text-xs text-text-muted">
+                These transactions look like the same payment recorded
+                twice — e.g. once from an SMS and once from a statement
+                import. Merging keeps one and files the rest away; nothing
+                is deleted.
+              </p>
               <DuplicateReviewList clusters={duplicateClusters} />
             </section>
           )}
