@@ -14,6 +14,36 @@ type SendResult = { ok: true; providerMessageId: string | null } | {
   errorCode: string;
 };
 
+/** Recipient domain only - never log a full recipient address. */
+function recipientDomain(to: string): string {
+  const at = to.lastIndexOf("@");
+  return at >= 0 ? to.slice(at + 1).toLowerCase() : "(none)";
+}
+
+/**
+ * One structured line per send attempt, safe to ship to logs: subject,
+ * recipient *domain* (not the address), outcome, and the Resend message
+ * id or a short error tag. A failed invite / confirmation is invisible
+ * without this (every send here is otherwise best-effort and swallowed).
+ */
+function logSend(
+  subject: string,
+  to: string,
+  outcome: "sent" | "skipped" | "failed",
+  detail: { messageId?: string | null; code?: string },
+): void {
+  const parts = [
+    `outcome=${outcome}`,
+    `domain=${recipientDomain(to)}`,
+    `subject=${JSON.stringify(subject)}`,
+  ];
+  if (detail.messageId) parts.push(`messageId=${detail.messageId}`);
+  if (detail.code) parts.push(`code=${detail.code}`);
+  const line = `[email-send] ${parts.join(" ")}`;
+  if (outcome === "sent") console.info(line);
+  else console.error(line);
+}
+
 /**
  * `text` is optional (existing short notification emails don't bother -
  * Resend/mail clients synthesize a reasonable plain-text view from html
@@ -33,6 +63,7 @@ async function send(
     console.error(
       `Skipped sending "${subject}" to ${to}: RESEND_API_KEY is not set.`,
     );
+    logSend(subject, to, "skipped", { code: "missing_api_key" });
     return { ok: false, errorCode: "provider_not_configured" };
   }
 
@@ -45,6 +76,7 @@ async function send(
         "verify a domain in Resend and set RESEND_FROM_EMAIL to an " +
         "address on it.",
     );
+    logSend(subject, to, "skipped", { code: "missing_from" });
     return { ok: false, errorCode: "provider_not_configured" };
   }
 
@@ -57,9 +89,12 @@ async function send(
       text,
     });
     if (error) throw error;
+    logSend(subject, to, "sent", { messageId: data?.id ?? null });
     return { ok: true, providerMessageId: data?.id ?? null };
   } catch (error) {
     console.error(`Failed sending "${subject}" to ${to}:`, error);
+    const code = error instanceof Error && error.name ? error.name : "send_failed";
+    logSend(subject, to, "failed", { code });
     return { ok: false, errorCode: "send_failed" };
   }
 }

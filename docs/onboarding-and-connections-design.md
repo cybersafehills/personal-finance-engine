@@ -235,3 +235,55 @@ workspace-scoped and uniform.
 - `ONBOARDING_CHECKLIST_ENABLED=false` → no nudge; `/get-started` →
   dashboard.
 - `deno test web/lib/onboarding_test.ts`, lint, tsc, build all clean.
+
+---
+
+## PR5 — Email deliverability hardening
+
+**Problem.** Signup confirmation (Supabase Auth SMTP) and invites /
+notices / reports (`lib/emails.ts`) both go through Resend and both fail
+**silently** for real recipients when the sender domain isn't verified or
+`RESEND_FROM_EMAIL` is still a `resend.dev` sandbox address.
+
+**Findings.** `lib/emails.ts` `send()` already returned a typed
+`{ providerMessageId | errorCode }`, and `createInvite` already returns
+`emailSent` which `CreateInviteForm` already renders ("We couldn't send
+this by email — share it yourself."). So the invite-UX item was largely
+done; the gaps were a *health check* and *observable send logging*.
+
+**Decisions.**
+
+1. **`web/lib/email-health-rules.ts`** — pure, import-free, Deno-tested
+   `classifyEmailEnv({ RESEND_API_KEY, RESEND_FROM_EMAIL, SITE_URL,
+   isProduction })` → typed `error` / `warn` issues (missing key/from/url,
+   odd key shape, sandbox sender, relative or localhost-in-prod URL).
+2. **`web/lib/email-health.ts`** — `checkEmailConfig()` layers a live
+   Resend `domains.list()` lookup on top: a real sending domain that
+   isn't in the account, or isn't `verified`, is an error.
+3. **`GET /api/health/email`** — operator-only (`X-Report-Cron-Secret`,
+   the existing cron gate). 200 when clean, **503** when any error-level
+   issue, so a monitor / CI `curl --fail` catches a broken setup against
+   a deployed environment. Body carries no key values.
+4. **Send logging.** `send()` now emits one redacted structured line per
+   attempt — `[email-send] outcome=sent|skipped|failed domain=<recipient
+   domain only> subject=… messageId=…|code=…`. A failed invite /
+   confirmation is no longer invisible.
+5. **`docs/email-deliverability.md`** — the production checklist (verify
+   domain, set the pair in Vercel *and* as Supabase secrets, real
+   `SITE_URL`, the rate limit) and the local inbucket note.
+
+**Not done / deferred.** No `email_send_log` table (structured logs
+answer "was it sent?"; a per-recipient history table needs an admin
+viewer — a separate effort). No new e2e: the suite doesn't currently
+exercise the signup-email flow, and standing that up against inbucket is
+its own task — noted for later.
+
+**Manual verification.**
+
+- `GET /api/health/email` with the cron secret: 200 + `ok:true` on a
+  configured env; drop `RESEND_FROM_EMAIL` → 503 + a `missing_from`
+  error issue.
+- Create an invite with no `RESEND_API_KEY` → the form shows "couldn't
+  send", and a `[email-send] outcome=skipped … code=missing_api_key`
+  line is logged.
+- `deno test web/lib/email-health-rules_test.ts`, lint, tsc, build clean.
