@@ -73,3 +73,54 @@ checklist (PR4).
   state and the app still renders.
 - `deno test web/lib/ingest_test.ts` passes; `npm run lint`,
   `npx tsc --noEmit`, `npm run build` clean.
+
+---
+
+## PR2 — iPhone Shortcut build guide
+
+**Problem.** Every instruction assumed the user already had a MoMo
+forwarding Shortcut. There was no guide to building one, and no repo can
+produce a signed `.shortcut` / iCloud link.
+
+**Decisions.**
+
+1. **One canonical source: `web/lib/shortcut-guide.ts`.** A pure,
+   env-free, Deno-tested module exporting `shortcutGuideSteps({
+   endpointUrl, mtnSender })` (ordered steps, each with plain-text body
+   and optional copyable field values) and `SHORTCUT_TROUBLESHOOTING`
+   (rows whose optional `responseKey` must exist in `INGEST_RESPONSE_HELP`
+   — a test enforces this, tying the guide to PR1's contract module).
+
+2. **In-app guide at `/settings/connections/setup`.** Server component
+   resolves the endpoint URL (same as the Connections page) and passes
+   the built steps to `ShortcutGuide` (presentation only, reuses
+   `CopyField` from `ConnectionDetails`). Linked from the Connections page
+   header, the `ConnectionDetails` panel, and the one-time reveal.
+
+3. **`docs/momo-shortcut-setup.md`** mirrors the steps for offline
+   reading with an explicit "change the module, keep this in step" note.
+   The cURL example is not duplicated — it points at
+   `docs/momo-ingest-contract.md`.
+
+4. **Two optional env vars, guide renders fine without either.**
+   `MOMO_SMS_SENDER` (server) fills the real MoMo SMS sender into Step 2;
+   until set, the guide shows `<MTN sender - confirm on device>` and a
+   caveat box. `NEXT_PUBLIC_MOMO_SHORTCUT_URL` (browser) shows a "Get the
+   ready-made Shortcut" button when a signed link exists.
+
+**Data model / flags.** None. New route is not gated — it is static help
+content with no side effects.
+
+**Open item.** The real MTN Rwanda MoMo SMS sender ID is still
+unconfirmed (placeholder + `MOMO_SMS_SENDER` override in place).
+
+**Manual verification.**
+
+- `/settings/connections/setup` renders 7 steps + troubleshooting table;
+  Step 3 shows the resolved endpoint URL with a copy button.
+- With `MOMO_SMS_SENDER` unset: placeholder + caveat box shown. With it
+  set: real sender in Step 2, no caveat.
+- With `NEXT_PUBLIC_MOMO_SHORTCUT_URL` unset: no button. Set: button links
+  out with `rel="noopener noreferrer"`.
+- `deno test web/lib/shortcut-guide_test.ts` passes; lint / tsc / build
+  clean.

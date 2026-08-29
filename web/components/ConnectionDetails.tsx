@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import {
   INGEST_BODY_EXAMPLE,
   INGEST_REQUEST,
@@ -17,7 +18,7 @@ import {
  * by RevealedSecret at create / rotate time.
  */
 
-function CopyField({ label, value }: { label: string; value: string }) {
+export function CopyField({ label, value }: { label: string; value: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="flex flex-col gap-1">
@@ -137,6 +138,13 @@ export function ConnectionDetails({
             </li>
           </ul>
         </div>
+
+        <Link
+          href="/settings/connections/setup"
+          className="text-xs font-medium text-accent hover:underline"
+        >
+          Full step-by-step Shortcut guide →
+        </Link>
       </div>
     </details>
   );
@@ -180,9 +188,15 @@ export function ShortcutKeyInstructions({
         </li>
       </ul>
       <p className="mt-1">
-        Save. Messages already forwarded are unaffected. Full reference is
-        under <span className="font-medium">Connection details</span> on this
-        screen.
+        Save. Messages already forwarded are unaffected. Never built the
+        automation?{" "}
+        <Link
+          href="/settings/connections/setup"
+          className="font-medium text-accent hover:underline"
+        >
+          Follow the step-by-step guide
+        </Link>
+        .
       </p>
     </>
   );

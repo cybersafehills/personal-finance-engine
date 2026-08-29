@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { getAccounts, getIngestionConnections } from "../../../lib/queries";
 import { buildIngestEndpointUrl } from "../../../lib/ingest";
 import { PageHeader } from "../../../components/PageHeader";
@@ -28,6 +29,17 @@ export default async function ConnectionsPage() {
         title="Connections"
         subtitle="The devices and Shortcuts that send transactions in"
       />
+
+      <p className="mb-3 text-sm text-text-secondary">
+        New here?{" "}
+        <Link
+          href="/settings/connections/setup"
+          className="font-medium text-accent hover:underline"
+        >
+          Set up a device with an iPhone Shortcut
+        </Link>
+        .
+      </p>
 
       <div className="flex flex-col gap-3">
         {connections.length === 0 ? (

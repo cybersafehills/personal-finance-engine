@@ -68,4 +68,41 @@ test("a new connection surfaces the full ingest contract, not just the key", asy
   await expect(row).toContainText("What to expect");
   await expect(row).toContainText("401");
   await expect(row).toContainText("422");
+
+  // PR2: the panel links to the full step-by-step guide.
+  await row.getByRole("link", { name: /step-by-step Shortcut guide/i }).click();
+  await expect(page).toHaveURL(/\/settings\/connections\/setup$/);
+});
+
+test("the Shortcut setup guide renders the steps and the resolved endpoint", async ({
+  page,
+}) => {
+  await page.goto("/settings/connections/setup");
+
+  await expect(
+    page.getByRole("heading", { name: "Set up a device" }),
+  ).toBeVisible();
+
+  // Numbered steps from web/lib/shortcut-guide.ts.
+  await expect(page.getByText("Step 1")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: /Get Contents of URL/ }),
+  ).toBeVisible();
+
+  // Step 3 carries the environment-resolved endpoint URL.
+  await expect(page.getByText(ENDPOINT_PATH).first()).toBeVisible();
+
+  // Troubleshooting table, keyed to real ingest responses.
+  await expect(
+    page.getByRole("heading", { name: "Troubleshooting" }),
+  ).toBeVisible();
+  await expect(page.getByText("unauthorized")).toBeVisible();
+
+  // No ready-made Shortcut link unless NEXT_PUBLIC_MOMO_SHORTCUT_URL is set.
+  await expect(
+    page.getByRole("link", { name: /ready-made Shortcut/i }),
+  ).toHaveCount(0);
+
+  // Sender is the placeholder until MOMO_SMS_SENDER is configured.
+  await expect(page.getByText(/MTN sender - confirm on device/)).toBeVisible();
 });
