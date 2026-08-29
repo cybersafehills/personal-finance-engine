@@ -171,3 +171,67 @@ fallback, and here it is the *right* call, not just the easy one:
 - Leave it 3 min with nothing → it degrades to the "No message yet"
   hint linking the setup guide.
 - lint / tsc / build clean.
+
+---
+
+## PR4 — Guided onboarding checklist
+
+**Problem.** Signup → add account → connect device → build Shortcut →
+verify was spread across four unrelated screens with nothing tying them
+together.
+
+**Decisions.**
+
+1. **`web/lib/onboarding.ts`** — pure, Deno-tested `deriveOnboardingState`
+   over four independent signals (email confirmed, account count, active
+   connection count, live connection count). Four steps, stable order,
+   each carrying its own CTA target. Step completion is **always derived
+   live**, never stored.
+
+2. **`getOnboardingState()` in `queries.ts`** — gathers the signals
+   (`getUser().email_confirmed_at`, `accounts`, `ingestion_connections`)
+   plus the stored dismissal, applies the feature gate, and returns an
+   `OnboardingSnapshot` (`{ ...state, enabled, dismissed, showNudge }`).
+   `showNudge = enabled && !dismissed && !complete`.
+
+3. **Only the dismissal is persisted.** New column
+   `ui_preferences.onboarding_dismissed` (migration
+   `20261006000000_…`) — same shape/purpose as the existing
+   `reports_relocation_notice_dismissed`, per `(workspace_id, user_id)`.
+   The two existing `upsertUiPreferences` read-then-merge helpers
+   (appearance, privacy) were updated to carry the new column through, so
+   saving nav order / a privacy toggle can't reset it.
+
+4. **Two surfaces.** `OnboardingCard` — compact dashboard nudge (progress
+   bar, single next action, "See all steps", "Dismiss"), rendered on
+   `web/app/page.tsx` only while `showNudge`. `/get-started` — the full
+   walkthrough (server route); every step shows done/undone with a CTA;
+   "Hide this checklist" at the bottom.
+
+5. **Post-signup redirect.** `/auth/callback` sends a first-run user (no
+   `next`, or `next === "/"`) to `/get-started`. Links that carry a real
+   `next` (password reset, `/invite/<token>`) are followed verbatim.
+   `/get-started` `redirect("/")`s when the flag is off, so the callback
+   redirect is always safe — no 404 path.
+
+6. **Flag:** `ONBOARDING_CHECKLIST_ENABLED` (on unless `"false"`) +
+   `ONBOARDING_CHECKLIST_WORKSPACE_ALLOWLIST`, same convention as the Pay
+   flags. Off ⇒ no nudge, `/get-started` redirects to the dashboard.
+
+**Invitee note (PR6 will refine).** An invitee joining a Space that
+already has accounts still sees "Add a financial account" as undone. PR6
+decides whether members skip that step; for now the derive is
+workspace-scoped and uniform.
+
+**Manual verification.**
+
+- Fresh user → dashboard shows "Finish setting up 1/4" (email confirmed
+  only); `/get-started` lists 4 steps, step 1 ✓.
+- Add an account → 2/4; create a connection → 3/4; first real forwarded
+  SMS → 4/4, nudge disappears, `/get-started` shows "You're all set".
+- "Dismiss" / "Hide this checklist" → nudge gone on reload, steps still
+  reachable at `/get-started`. Changing nav order afterwards does not
+  bring the nudge back.
+- `ONBOARDING_CHECKLIST_ENABLED=false` → no nudge; `/get-started` →
+  dashboard.
+- `deno test web/lib/onboarding_test.ts`, lint, tsc, build all clean.

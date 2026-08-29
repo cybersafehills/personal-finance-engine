@@ -38,7 +38,7 @@ async function upsertUiPreferences(
   const { data: existing } = await supabase
     .from("ui_preferences")
     .select(
-      "nav_order, hide_balance, privacy_mode, reports_relocation_notice_dismissed",
+      "nav_order, hide_balance, privacy_mode, reports_relocation_notice_dismissed, onboarding_dismissed",
     )
     .eq("workspace_id", workspaceId)
     .eq("user_id", user.id)
@@ -53,6 +53,7 @@ async function upsertUiPreferences(
       privacy_mode: existing?.privacy_mode ?? false,
       reports_relocation_notice_dismissed:
         existing?.reports_relocation_notice_dismissed ?? false,
+      onboarding_dismissed: existing?.onboarding_dismissed ?? false,
       ...patch,
     },
     { onConflict: "workspace_id,user_id" },
