@@ -60,7 +60,7 @@ const en = {
       uploadImage: "Upload a QR image",
       uploadNoCode: "No QR code was found in that image. Try another photo.",
       decoderUnsupported:
-        "This browser can't read QR codes. Try a recent Chrome, or Safari 17 or newer.",
+        "This browser can't read QR codes on this device. Use the other payment options, or open OneLedger in a different browser.",
       permissionHelp: "How to enable camera access",
       permissionHelpBody:
         "Open your browser or device settings, allow camera access for this site, then return here and try again.",
