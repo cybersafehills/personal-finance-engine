@@ -9,7 +9,7 @@ import {
 import {
   detectFromImageFile,
   detectFromVideo,
-  isBarcodeDetectorSupported,
+  isQrDecodeSupported,
 } from "../../lib/pay/scan/decode.client";
 import { formatScanAmount } from "../../lib/pay/scan/money";
 import { parseUserAmount } from "../../lib/pay/scan/handoff";
@@ -28,9 +28,10 @@ const t = messages().pay.scan;
 
 /**
  * Phases R1-R3 - the "Scan to pay" scanner. It opens the rear camera,
- * models every permission / device failure, decodes a QR with the native
- * `BarcodeDetector` (camera frames or an uploaded image), classifies the
- * payload on the server, shows a mandatory review, and - only on an
+ * models every permission / device failure, decodes a QR (native
+ * `BarcodeDetector` where present, else a jsQR canvas fallback - see
+ * decode.client.ts) from camera frames or an uploaded image, classifies
+ * the payload on the server, shows a mandatory review, and - only on an
  * explicit tap - creates a payment_intents draft (source=qr_scan) and
  * opens the USSD instruction on the device. It never dials on detection,
  * and it never claims the payment settled (the terminal state is
@@ -119,12 +120,14 @@ export default function ScanToPay({ onBack }: { onBack: () => void }) {
   const [errorKind, setErrorKind] = useState<ScanErrorKind | null>(null);
   const [torchAvailable, setTorchAvailable] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
-  // `BarcodeDetector` presence is a client fact known at first render -
-  // read it in the initializer, not an effect. This component only ever
-  // mounts client-side (lazy, after a tap), so the initializer runs in
-  // the browser.
+  // QR-decode availability is a client fact known at first render - read
+  // it in the initializer, not an effect. This component only ever mounts
+  // client-side (lazy, after a tap), so the initializer runs in the
+  // browser. In practice this is always true (any browser that can run
+  // the camera can also draw a frame to a canvas for the jsQR fallback);
+  // it flips false only if canvas 2D itself is unavailable.
   const [decoderSupported, setDecoderSupported] = useState(() =>
-    typeof window === "undefined" ? true : isBarcodeDetectorSupported(),
+    typeof window === "undefined" ? true : isQrDecodeSupported(),
   );
   const decoderUnsupportedLoggedRef = useRef(false);
   const [multipleInView, setMultipleInView] = useState(false);
@@ -341,8 +344,9 @@ export default function ScanToPay({ onBack }: { onBack: () => void }) {
   );
 
   // Report an unsupported decoder once - whether it was missing from the
-  // start or a detect pass told us so. `BarcodeDetector` is the only
-  // decoder in R2; where it's missing the scanner is preview-only.
+  // start or a detect pass told us so. With the jsQR fallback this only
+  // happens where canvas 2D itself is unavailable; the scanner is then
+  // preview-only.
   useEffect(() => {
     if (!decoderSupported && !decoderUnsupportedLoggedRef.current) {
       decoderUnsupportedLoggedRef.current = true;
