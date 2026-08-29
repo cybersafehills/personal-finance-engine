@@ -236,6 +236,45 @@ verification (the emulated Playwright checks confirm the shell doesn't
 break and controls stay nameable, not that every color choice is
 genuinely legible under an OS high-contrast theme).
 
+**Mobile form controls - the 16px rule**
+
+Design-system rule: *editable form controls must render at a computed
+font size of at least 16 CSS pixels on iOS-sized mobile viewports.*
+Smaller visual typography (`text-sm` / `text-xs`) is fine at `>= md`,
+where iOS Safari does not focus-zoom.
+
+iOS Safari zooms the whole page in when a focused `<input>` / `<select>`
+/ `<textarea>` computes to under 16px, and does not reliably zoom back
+out on blur - which crops the right edge of the layout, displaces the
+fixed bottom nav, and leaves the page shifted after the keyboard closes.
+The app has no shared form-control component (every control is a raw
+element with Tailwind classes), so this is enforced once in
+`app/globals.css`: an unlayered `@media (max-width: 767px)` block sets
+`font-size: 16px` on those elements (unlayered, so it wins over Tailwind's
+layered `text-sm` utility with no `!important`). The same file also adds
+`body { overflow-x: clip }` plus `max-width: 100%` on media and form
+controls as an outer clamp against a single over-wide descendant (long
+USSD strings, account numbers, portaled menus) reintroducing horizontal
+scroll. The `<meta viewport>` (`app/layout.tsx`) keeps `width=device-width,
+initial-scale=1, viewport-fit=cover` with **no** `user-scalable=no` /
+`maximum-scale` - pinch-to-zoom and browser zoom stay available; only the
+involuntary focus-zoom is removed. New form-heavy surfaces inherit this
+for free; only add an explicit `text-base md:text-sm` on a control when it
+is the specific subject of a bug report (as `components/ussd/
+DirectoryControls.tsx` and `components/directory/field-styles.ts` do).
+
+Automated coverage: `e2e/pay-ussd.spec.ts` ("USSD Directory - mobile form
+focus and viewport stability") asserts the directory's search field and
+both filter selects compute to `>= 16px` on a 390px viewport, that focus
++ typing + filtering + blur never makes the document scroll horizontally,
+and that the viewport meta never gains a zoom restriction.
+`e2e/responsive-matrix.spec.ts` continues to assert no horizontal
+overflow across the full breakpoint list. Playwright cannot read iOS
+Safari's native zoom factor, so **final sign-off still needs a manual
+pass on a physical iPhone** (focus the USSD search, type, open Category /
+Provider, dismiss the keyboard - the page scale and horizontal position
+must be unchanged throughout).
+
 ## Analytics and monitoring
 
 **No product-analytics system exists anywhere in this codebase** (no
