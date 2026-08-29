@@ -2,7 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { supabaseSession } from "../../../../lib/supabase-session-server";
+import { logSpacesError } from "../../../../lib/spaces/monitoring";
 import type { NormalizedStatementRow } from "../../../../lib/statement-import";
+import { trackSpacesEvent } from "../../../../lib/spaces/analytics";
 
 export type ImportStatementResult =
   | {
@@ -69,7 +71,7 @@ export async function importStatement(
   });
 
   if (error) {
-    console.error("importStatement failed:", error.message);
+    logSpacesError("statement_import", error);
     return {
       ok: false,
       error: error.message.includes("own")
@@ -79,14 +81,18 @@ export async function importStatement(
   }
 
   const result = (data ?? {}) as Record<string, unknown>;
+  const created = Number(result.created ?? 0);
+  const flaggedPossibleDuplicate = Number(result.flagged_possible_duplicate ?? 0);
+  const skipped = Number(result.skipped ?? 0);
+  trackSpacesEvent("statement_imported", {
+    created,
+    flagged: flaggedPossibleDuplicate,
+    skipped,
+  });
+
   revalidatePath("/transactions");
   revalidatePath("/transactions/review");
   revalidatePath("/");
 
-  return {
-    ok: true,
-    created: Number(result.created ?? 0),
-    flaggedPossibleDuplicate: Number(result.flagged_possible_duplicate ?? 0),
-    skipped: Number(result.skipped ?? 0),
-  };
+  return { ok: true, created, flaggedPossibleDuplicate, skipped };
 }

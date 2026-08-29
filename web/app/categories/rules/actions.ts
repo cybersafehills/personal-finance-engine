@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { trackSpacesEvent } from "../../../lib/spaces/analytics";
 import { supabaseSession } from "../../../lib/supabase-session-server";
 import { getActiveWorkspaceId } from "../../../lib/queries";
 
@@ -153,6 +154,7 @@ export async function upsertPolicy(
 
     revalidatePath("/categories/rules");
     revalidatePath("/categories");
+    if (scopeType === "source") trackSpacesEvent("rule_scope_set", { scope: "source" });
     return { ok: true, id: policyId };
   }
 
@@ -174,6 +176,7 @@ export async function upsertPolicy(
 
   revalidatePath("/categories/rules");
   revalidatePath("/categories");
+  if (scopeType === "source") trackSpacesEvent("rule_scope_set", { scope: "source" });
   return { ok: true, id: data.id };
 }
 

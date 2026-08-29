@@ -3665,12 +3665,14 @@ as_user "$V_USER" "select public.accept_workspace_invite('v-token-2');" >/dev/nu
 V_MEMB="$(psql -d pfe_rls -t -A -c "select id from public.workspace_memberships where workspace_id = '$V_HH' and user_id = '$V_USER' and status = 'active';" | head -1)"
 as_user "$USER_A" "select public.remove_member('$V_MEMB');" >/dev/null
 
-V_REMOVED_TO_R="$(psql -d pfe_rls -t -A -c "select count(*) from public.notifications where workspace_id = '$V_HH' and user_id = '$USER_R' and event_key = 'member.removed' and channel = 'in_app';")"
-V_REMOVED_TO_SELF="$(psql -d pfe_rls -t -A -c "select count(*) from public.notifications where workspace_id = '$V_HH' and user_id = '$V_USER' and event_key = 'member.removed';")"
-if [ "$V_REMOVED_TO_R" = "1" ] && [ "$V_REMOVED_TO_SELF" = "0" ]; then
-  pass "Phase V PR1: remove_member enqueues member.removed to the remaining members, never to the removed user"
+V_REMOVED_TO_R="$(psql -d pfe_rls -t -A -c "select count(*) from public.notifications where workspace_id = '$V_HH' and user_id = '$USER_R' and event_key = 'member.removed' and channel = 'in_app' and (metadata->>'self') is null;")"
+# Phase W PR2: the removed member now also gets a "You were removed" one,
+# flagged metadata.self = true.
+V_REMOVED_TO_SELF="$(psql -d pfe_rls -t -A -c "select count(*) from public.notifications where workspace_id = '$V_HH' and user_id = '$V_USER' and event_key = 'member.removed' and channel = 'in_app' and (metadata->>'self') = 'true';")"
+if [ "$V_REMOVED_TO_R" = "1" ] && [ "$V_REMOVED_TO_SELF" = "1" ]; then
+  pass "Phase V PR1 / W PR2: remove_member notifies the remaining members and (self-flagged) the removed member"
 else
-  fail "Phase V PR1: removal fan-out wrong (to R=$V_REMOVED_TO_R to removed=$V_REMOVED_TO_SELF)"
+  fail "Phase V PR1 / W PR2: removal fan-out wrong (to R=$V_REMOVED_TO_R self=$V_REMOVED_TO_SELF)"
 fi
 
 # mark_all_notifications_read clears the caller's unread in_app for a Space.
