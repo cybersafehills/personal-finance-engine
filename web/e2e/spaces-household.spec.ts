@@ -163,14 +163,20 @@ test("household: create a Space, share a source into it, attribute a transaction
   await expect(page.getByText("Transactions only", { exact: true }))
     .toBeVisible();
 
-  const { data: link } = await db
-    .from("source_space_links")
-    .select("status, visibility_mode")
-    .eq("financial_source_id", sourceId)
-    .eq("workspace_id", householdId)
-    .single();
-  expect(link?.status).toBe("active");
-  expect(link?.visibility_mode).toBe("share_transactions");
+  await expect.poll(async () => {
+    const { data: link, error } = await db
+      .from("source_space_links")
+      .select("status, visibility_mode")
+      .eq("financial_source_id", sourceId)
+      .eq("workspace_id", householdId)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Could not inspect source share: ${error.message}`);
+    }
+
+    return link ? `${link.status}|${link.visibility_mode}` : null;
+  }).toBe("active|share_transactions");
 
   // --- an unattributed household transaction ------------------------
   const txnId = await seedHouseholdTransaction(db, { workspaceId: householdId, sourceId });

@@ -67,7 +67,11 @@ set search_path = public
 as $$
 declare
   v_connection_id uuid;
+  v_financial_source_id uuid;
   v_source_owner uuid;
+  v_account_name text;
+  v_account_provider text;
+  v_account_currency char(3);
 begin
   if auth.uid() is null then
     raise exception 'Authentication required.';
@@ -77,19 +81,48 @@ begin
     raise exception 'Only a workspace owner can create a connection.';
   end if;
 
-  select fs.owner_user_id into v_source_owner
+  -- Lock the account while resolving/creating its source so concurrent
+  -- enrollments cannot manufacture two canonical sources for one account.
+  select a.financial_source_id, fs.owner_user_id, a.name, a.provider, a.currency
+  into v_financial_source_id, v_source_owner, v_account_name,
+    v_account_provider, v_account_currency
   from public.accounts a
-  join public.financial_sources fs on fs.id = a.financial_source_id
+  left join public.financial_sources fs on fs.id = a.financial_source_id
   where a.id = p_account_id
     and a.workspace_id = p_workspace_id
     and a.is_active
-    and a.archived_at is null;
+    and a.archived_at is null
+  for update of a;
 
-  if v_source_owner is null then
-    raise exception 'The selected account has no active financial source.';
+  if not found then
+    raise exception 'The selected account is unavailable.';
   end if;
 
-  if v_source_owner <> auth.uid() then
+  if v_financial_source_id is null then
+    insert into public.financial_sources (
+      owner_user_id, provider, source_type, display_name, currency, created_by
+    ) values (
+      auth.uid(),
+      v_account_provider,
+      case v_account_provider
+        when 'mtn_momo' then 'mobile_money'
+        when 'airtel_money' then 'mobile_money'
+        when 'bank' then 'bank_account'
+        else 'import'
+      end,
+      v_account_name,
+      v_account_currency,
+      auth.uid()
+    ) returning id into v_financial_source_id;
+
+    update public.accounts
+    set financial_source_id = v_financial_source_id
+    where id = p_account_id;
+
+    v_source_owner := auth.uid();
+  end if;
+
+  if v_source_owner is distinct from auth.uid() then
     raise exception 'You can only connect a financial source you own.';
   end if;
 

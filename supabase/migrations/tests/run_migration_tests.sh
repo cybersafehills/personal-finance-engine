@@ -4169,6 +4169,22 @@ else
   fail "Connector Stage C: atomic enrollment mapping missing"
 fi
 
+CMC_LEGACY_ACCOUNT="00000000-0000-4000-8000-000000000103"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.accounts
+    (id, workspace_id, name, provider, currency)
+  values ('$CMC_LEGACY_ACCOUNT', '$WORKSPACE_A', 'C source-less account', 'bank', 'RWF');
+" >/dev/null
+CMC_LEGACY_CONNECTION="$(as_user "$USER_A" "select public.create_ingestion_connection_dual_write('$WORKSPACE_A', '$CMC_LEGACY_ACCOUNT', 'C legacy bank', 'bank', 'cmc-hash-legacy', 'cmc_old');")"
+CMC_LEGACY_SOURCE="$(psql -d pfe_rls -t -A -c "select a.financial_source_id from public.accounts a where a.id = '$CMC_LEGACY_ACCOUNT';")"
+CMC_LEGACY_COMPAT="$(psql -d pfe_rls -t -A -c "select count(*) from public.financial_sources fs join public.accounts a on a.financial_source_id = fs.id join public.ingestion_connections ic on ic.account_id = a.id join public.connector_installations ci on ci.id = ic.connector_installation_id join public.device_credentials dc on dc.id = ic.device_credential_id where a.id = '$CMC_LEGACY_ACCOUNT' and ic.id = '$CMC_LEGACY_CONNECTION' and fs.id = '$CMC_LEGACY_SOURCE' and fs.owner_user_id = '$USER_A' and fs.provider = 'bank' and fs.source_type = 'bank_account';")"
+if [ "$CMC_LEGACY_COMPAT" = "1" ]; then
+  pass "Connector Stage C: enrollment deterministically canonicalizes an owned account without a source"
+else
+  fail "Connector Stage C: source-less account compatibility enrollment failed"
+fi
+
 if as_user "$USER_A" "insert into public.ingestion_connections (workspace_id, account_id, label, provider, credential_hash, credential_prefix) values ('$WORKSPACE_A', '$CMC_ACCOUNT', 'bypass', 'mtn_momo', 'cmc-bypass-hash', 'cmc_bad');" >/dev/null 2>$ARTIFACT_DIR/pfe_cmc_direct.log; then
   fail "Connector Stage C: owner bypassed atomic enrollment with a direct legacy insert"
 else

@@ -262,15 +262,12 @@ otp_length = 8
 # Number of seconds before the email OTP expires (defaults to 1 hour).
 otp_expiry = 3600
 
-# Production SMTP: Resend's relay, same account/domain as the app's own
-# transactional emails (web/lib/resend.ts, web/lib/emails.ts) - one
-# provider for both Supabase Auth's own emails (confirmation, password
-# reset) and the app's own (invites, sign-in notifications). admin_email
-# must be an address on a domain verified in Resend, same constraint as
-# RESEND_FROM_EMAIL in web/.env.local.example - reusing that same env
-# var here rather than a second one.
+# Keep repository-local Auth on Supabase's bundled Mailpit so local and CI
+# signup flows never depend on production SMTP credentials. Production Auth
+# SMTP is configured in the hosted project's dashboard; this file is not the
+# source of truth for that secret-bearing setting.
 [auth.email.smtp]
-enabled = true
+enabled = false
 host = "smtp.resend.com"
 port = 587
 user = "resend"
