@@ -151,10 +151,11 @@ test("household: create a Space, share a source into it, attribute a transaction
 
   // --- share the source into the household ---------------------------
   await page.goto("/settings/sources");
-  await expect(page.getByText(SOURCE_NAME)).toBeVisible();
-  await expect(page.getByText("Private")).toBeVisible();
+  const sourceCard = page.getByRole("region", { name: `${SOURCE_NAME} source` });
+  await expect(sourceCard.getByText(SOURCE_NAME, { exact: true })).toBeVisible();
+  await expect(sourceCard.getByText("Private", { exact: true })).toBeVisible();
 
-  await page.getByRole("button", { name: "Share with a household" }).click();
+  await sourceCard.getByRole("button", { name: "Share with a household" }).click();
   // "Transactions only" is the default radio; just submit.
   await page.getByRole("button", { name: "Share", exact: true }).click();
 

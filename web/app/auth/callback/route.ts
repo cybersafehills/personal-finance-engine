@@ -1,13 +1,15 @@
+import { createServerClient } from "@supabase/ssr";
+import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-import { supabaseSession } from "../../../lib/supabase-session-server";
 import { internalRedirectPath } from "../../../lib/internal-redirect";
+import { siteUrl } from "../../../lib/site-url";
 
 // Exchanges a Supabase Auth confirmation/recovery code for a real session.
 // Used by both the signup-confirmation email link and the password-reset
 // email link (which additionally carries a `next` param pointing at
 // /auth/reset-password/confirm).
-export async function GET(request: Request) {
-  const { searchParams, origin } = new URL(request.url);
+export async function GET(request: NextRequest) {
+  const { searchParams } = request.nextUrl;
   const code = searchParams.get("code");
   const rawNext = searchParams.get("next");
 
@@ -22,15 +24,36 @@ export async function GET(request: Request) {
     rawNext && rawNext !== "/" ? rawNext : "/get-started",
     "/get-started",
   );
+  const destination = new URL(next, siteUrl());
+  let response = NextResponse.redirect(destination);
 
   if (code) {
-    const supabase = await supabaseSession();
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() {
+            return request.cookies.getAll();
+          },
+          setAll(cookiesToSet) {
+            for (const { name, value } of cookiesToSet) {
+              request.cookies.set(name, value);
+            }
+            response = NextResponse.redirect(destination);
+            for (const { name, value, options } of cookiesToSet) {
+              response.cookies.set(name, value, options);
+            }
+          },
+        },
+      },
+    );
     const { error } = await supabase.auth.exchangeCodeForSession(code);
 
     if (!error) {
-      return NextResponse.redirect(new URL(next, origin));
+      return response;
     }
   }
 
-  return NextResponse.redirect(`${origin}/login`);
+  return NextResponse.redirect(new URL("/login", siteUrl()));
 }
