@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseSession } from "../../../lib/supabase-session-server";
+import { internalRedirectPath } from "../../../lib/internal-redirect";
 
 // Exchanges a Supabase Auth confirmation/recovery code for a real session.
 // Used by both the signup-confirmation email link and the password-reset
@@ -13,17 +14,21 @@ export async function GET(request: Request) {
   // A signup-confirmation link carries no `next` (or just "/"); send
   // those first-run users to the onboarding checklist. Links that DO
   // carry a `next` - password reset (/auth/reset-password/confirm), an
-  // invite (/invite/<token>) - are followed verbatim. /get-started
+  // invite (/invite/<token>) - are followed after same-origin validation.
+  // /get-started
   // itself redirects to "/" when the checklist flag is off, so this is
   // always safe.
-  const next = rawNext && rawNext !== "/" ? rawNext : "/get-started";
+  const next = internalRedirectPath(
+    rawNext && rawNext !== "/" ? rawNext : "/get-started",
+    "/get-started",
+  );
 
   if (code) {
     const supabase = await supabaseSession();
     const { error } = await supabase.auth.exchangeCodeForSession(code);
 
     if (!error) {
-      return NextResponse.redirect(`${origin}${next}`);
+      return NextResponse.redirect(new URL(next, origin));
     }
   }
 

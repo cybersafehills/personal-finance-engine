@@ -15,10 +15,18 @@ import {
   paymentIntentTtlHours,
   smsReconciliationMode,
 } from "../../lib/pay/gate";
-import { normalizeRwandaMsisdn, maskMsisdn, guessProvider } from "../../lib/pay/phone";
+import {
+  guessProvider,
+  maskMsisdn,
+  normalizeRwandaMsisdn,
+} from "../../lib/pay/phone";
 import { isSessionFresh } from "../../lib/pay/intents";
 import { getServiceCodeForPayment } from "../../lib/ussd/queries";
-import { redactUssdForAnalytics, type ParamSpec } from "../../lib/ussd/capability";
+import {
+  type ParamSpec,
+  redactUssdForAnalytics,
+} from "../../lib/ussd/capability";
+import { requireMfaForSensitiveAction } from "../../lib/auth/assurance";
 
 export type PayResult = { ok: true } | { ok: false; error: string };
 export type PayIntentResult =
@@ -50,7 +58,10 @@ async function ctx() {
 
 function mapErr(err: unknown): { ok: false; error: string } {
   if (err instanceof FeatureDisabledError) {
-    return { ok: false, error: "Assisted Quick Pay is turned off for your account." };
+    return {
+      ok: false,
+      error: "Assisted Quick Pay is turned off for your account.",
+    };
   }
   return { ok: false, error: "Something went wrong." };
 }
@@ -88,7 +99,10 @@ export type DraftInput = {
  * (workspace_id, idempotency_key), so a double-submit yields one row.
  * Never charges anything — the result is a `draft`.
  */
-export async function createDraftIntent(input: DraftInput): Promise<PayIntentResult> {
+export async function createDraftIntent(
+  input: DraftInput,
+): Promise<PayIntentResult> {
+  await requireMfaForSensitiveAction("/pay");
   try {
     const { supabase, userId, workspaceId } = await ctx();
     if (!userId) return { ok: false, error: "Sign in to prepare a payment." };
@@ -104,22 +118,26 @@ export async function createDraftIntent(input: DraftInput): Promise<PayIntentRes
       ? normalizeRwandaMsisdn(input.recipientMsisdn)
       : { normalized: null, display: "" };
     if (input.recipientMsisdn && !norm.normalized) {
-      return { ok: false, error: "That doesn't look like a Rwandan mobile number." };
+      return {
+        ok: false,
+        error: "That doesn't look like a Rwandan mobile number.",
+      };
     }
 
-    const providerGuess = input.provider ?? guessProvider(norm.normalized) ?? null;
+    const providerGuess = input.provider ?? guessProvider(norm.normalized) ??
+      null;
 
     // Give the intent a real USSD template to hand off with, resolved
     // from the published directory (never a hard-coded string). Only the
     // redacted template is persisted.
     let serviceCodeId = input.serviceCodeId ?? null;
-    let ussdRedacted: string | null =
-      input.ussdTemplate && input.ussdParamSpecs
-        ? redactUssdForAnalytics(input.ussdTemplate, input.ussdParamSpecs)
-        : (input.ussdTemplate ?? null);
+    let ussdRedacted: string | null = input.ussdTemplate && input.ussdParamSpecs
+      ? redactUssdForAnalytics(input.ussdTemplate, input.ussdParamSpecs)
+      : (input.ussdTemplate ?? null);
     if (
       !serviceCodeId &&
-      (input.paymentType === "pay_person" || input.paymentType === "buy_airtime") &&
+      (input.paymentType === "pay_person" ||
+        input.paymentType === "buy_airtime") &&
       (providerGuess === "mtn" || providerGuess === "airtel")
     ) {
       const code = await getServiceCodeForPayment(providerGuess, "send_money");
@@ -149,7 +167,9 @@ export async function createDraftIntent(input: DraftInput): Promise<PayIntentRes
       recipient_kind: recipientKindFor(input.paymentType),
       recipient_name: input.recipientName ?? null,
       recipient_msisdn_normalized: norm.normalized,
-      recipient_msisdn_masked: norm.normalized ? maskMsisdn(norm.normalized) : null,
+      recipient_msisdn_masked: norm.normalized
+        ? maskMsisdn(norm.normalized)
+        : null,
       merchant_code: input.merchantCode ?? null,
       meter_number: input.meterNumber ?? null,
       billing_reference: input.billingReference ?? null,
@@ -165,7 +185,9 @@ export async function createDraftIntent(input: DraftInput): Promise<PayIntentRes
       session_fresh: await isSessionFresh(),
     };
 
-    const { data, error } = await supabase.rpc("create_payment_intent", { payload });
+    const { data, error } = await supabase.rpc("create_payment_intent", {
+      payload,
+    });
     if (error) {
       if (/not_authorized/i.test(error.message)) {
         return { ok: false, error: "You're not a member of this workspace." };
@@ -206,7 +228,10 @@ export async function updateDraftIntent(
   try {
     const { supabase, workspaceId } = await ctx();
     assertAssistedPayEnabled(workspaceId);
-    const { error } = await supabase.rpc("update_draft_payment_intent", { p_id: id, patch });
+    const { error } = await supabase.rpc("update_draft_payment_intent", {
+      p_id: id,
+      patch,
+    });
     if (error) {
       if (/not_draft/i.test(error.message)) {
         return { ok: false, error: "This payment is no longer a draft." };
@@ -231,7 +256,12 @@ export async function updateDraftIntent(
 export async function recordHandoff(
   id: string,
   method: "dialer" | "copy" | "qr",
-  outcome: "dialer_opened" | "dialer_unsupported" | "copied" | "qr_shown" | "fallback_shown",
+  outcome:
+    | "dialer_opened"
+    | "dialer_unsupported"
+    | "copied"
+    | "qr_shown"
+    | "fallback_shown",
 ): Promise<PayResult> {
   try {
     const { supabase, workspaceId } = await ctx();
@@ -285,7 +315,9 @@ export async function recordHandoff(
 // Phase 2b: reconciliation resolution
 // ---------------------------------------------------------------------------
 
-export async function applyReconciliation(reconciliationId: string): Promise<PayResult> {
+export async function applyReconciliation(
+  reconciliationId: string,
+): Promise<PayResult> {
   try {
     const { supabase, workspaceId } = await ctx();
     assertPaymentIntentSurfaceEnabled(workspaceId);
@@ -297,7 +329,10 @@ export async function applyReconciliation(reconciliationId: string): Promise<Pay
         return { ok: false, error: "You can't apply this match." };
       }
       if (/not_linkable/i.test(error.message)) {
-        return { ok: false, error: "This match can't be applied from its current state." };
+        return {
+          ok: false,
+          error: "This match can't be applied from its current state.",
+        };
       }
       return { ok: false, error: "Could not apply the match." };
     }
@@ -352,10 +387,16 @@ export async function linkPaymentManually(
         return { ok: false, error: "You can't link this payment." };
       }
       if (/transaction_already_linked/i.test(error.message)) {
-        return { ok: false, error: "That transaction is already linked to another payment." };
+        return {
+          ok: false,
+          error: "That transaction is already linked to another payment.",
+        };
       }
       if (/not_linkable|cross_workspace/i.test(error.message)) {
-        return { ok: false, error: "This payment can't be linked to that transaction." };
+        return {
+          ok: false,
+          error: "This payment can't be linked to that transaction.",
+        };
       }
       return { ok: false, error: "Could not link the payment." };
     }
@@ -368,7 +409,10 @@ export async function linkPaymentManually(
   }
 }
 
-export async function manuallyConfirm(id: string, note: string): Promise<PayResult> {
+export async function manuallyConfirm(
+  id: string,
+  note: string,
+): Promise<PayResult> {
   try {
     const { supabase, workspaceId } = await ctx();
     assertPaymentIntentSurfaceEnabled(workspaceId);
@@ -378,7 +422,10 @@ export async function manuallyConfirm(id: string, note: string): Promise<PayResu
     });
     if (error) {
       if (/not_confirmable/i.test(error.message)) {
-        return { ok: false, error: "This payment can't be confirmed from its current state." };
+        return {
+          ok: false,
+          error: "This payment can't be confirmed from its current state.",
+        };
       }
       return { ok: false, error: "Could not record your confirmation." };
     }
@@ -390,7 +437,10 @@ export async function manuallyConfirm(id: string, note: string): Promise<PayResu
   }
 }
 
-export async function markIntentFailed(id: string, reason: string): Promise<PayResult> {
+export async function markIntentFailed(
+  id: string,
+  reason: string,
+): Promise<PayResult> {
   return transitionUser(id, "failed", reason);
 }
 
@@ -414,7 +464,10 @@ async function transitionUser(
     });
     if (error) {
       if (/invalid_transition/i.test(error.message)) {
-        return { ok: false, error: "That isn't allowed from this payment's current state." };
+        return {
+          ok: false,
+          error: "That isn't allowed from this payment's current state.",
+        };
       }
       return { ok: false, error: "Could not update the payment." };
     }
@@ -431,7 +484,10 @@ async function transitionUser(
  * intent. Never repeats the earlier payment; the user must review and
  * hand off again.
  */
-export async function payAgain(sourceIntentId: string): Promise<PayIntentResult> {
+export async function payAgain(
+  sourceIntentId: string,
+): Promise<PayIntentResult> {
+  await requireMfaForSensitiveAction("/pay/activity");
   try {
     const { supabase, userId, workspaceId } = await ctx();
     if (!userId) return { ok: false, error: "Sign in first." };
@@ -444,7 +500,9 @@ export async function payAgain(sourceIntentId: string): Promise<PayIntentResult>
       )
       .eq("id", sourceIntentId)
       .maybeSingle();
-    if (error || !src) return { ok: false, error: "Couldn't find that payment." };
+    if (error || !src) {
+      return { ok: false, error: "Couldn't find that payment." };
+    }
 
     return createDraftIntent({
       paymentType: src.payment_type,
@@ -485,7 +543,9 @@ export type RecipientInput = {
   trustStatus?: "saved" | "trusted_by_user";
 };
 
-export async function createTrustedRecipient(input: RecipientInput): Promise<PayResult> {
+export async function createTrustedRecipient(
+  input: RecipientInput,
+): Promise<PayResult> {
   try {
     const { supabase, userId, workspaceId } = await ctx();
     if (!userId) return { ok: false, error: "Sign in first." };
@@ -495,12 +555,23 @@ export async function createTrustedRecipient(input: RecipientInput): Promise<Pay
     if (!input.displayName.trim()) {
       return { ok: false, error: "Give the recipient a name." };
     }
-    const norm = input.msisdn ? normalizeRwandaMsisdn(input.msisdn) : { normalized: null, display: "" };
+    const norm = input.msisdn
+      ? normalizeRwandaMsisdn(input.msisdn)
+      : { normalized: null, display: "" };
     if (input.msisdn && !norm.normalized) {
-      return { ok: false, error: "That doesn't look like a Rwandan mobile number." };
+      return {
+        ok: false,
+        error: "That doesn't look like a Rwandan mobile number.",
+      };
     }
-    if (!norm.normalized && !input.merchantCode?.trim() && !input.accountReference?.trim()) {
-      return { ok: false, error: "Add a phone number, merchant code, or reference." };
+    if (
+      !norm.normalized && !input.merchantCode?.trim() &&
+      !input.accountReference?.trim()
+    ) {
+      return {
+        ok: false,
+        error: "Add a phone number, merchant code, or reference.",
+      };
     }
 
     const { error } = await supabase.from("trusted_recipients").insert({
@@ -515,7 +586,9 @@ export async function createTrustedRecipient(input: RecipientInput): Promise<Pay
       account_reference: input.accountReference?.trim() || null,
       relationship: input.relationship?.trim() || null,
       default_category: input.defaultCategory?.trim() || null,
-      trust_status: input.trustStatus === "trusted_by_user" ? "trusted_by_user" : "saved",
+      trust_status: input.trustStatus === "trusted_by_user"
+        ? "trusted_by_user"
+        : "saved",
     });
     if (error) {
       if (/duplicate|unique/i.test(error.message)) {
@@ -540,15 +613,22 @@ export async function updateTrustedRecipient(
       throw new FeatureDisabledError("trusted_recipients");
     }
     const update: Record<string, unknown> = {};
-    if (patch.displayName !== undefined) update.display_name = patch.displayName.trim();
-    if (patch.relationship !== undefined) update.relationship = patch.relationship.trim() || null;
+    if (patch.displayName !== undefined) {
+      update.display_name = patch.displayName.trim();
+    }
+    if (patch.relationship !== undefined) {
+      update.relationship = patch.relationship.trim() || null;
+    }
     if (patch.defaultCategory !== undefined) {
       update.default_category = patch.defaultCategory.trim() || null;
     }
     if (patch.trustStatus !== undefined) {
-      update.trust_status = patch.trustStatus === "trusted_by_user" ? "trusted_by_user" : "saved";
+      update.trust_status = patch.trustStatus === "trusted_by_user"
+        ? "trusted_by_user"
+        : "saved";
     }
-    const { error } = await supabase.from("trusted_recipients").update(update).eq("id", id);
+    const { error } = await supabase.from("trusted_recipients").update(update)
+      .eq("id", id);
     if (error) return { ok: false, error: "Could not update the recipient." };
     revalidatePath("/pay/recipients");
     return { ok: true };
@@ -563,7 +643,10 @@ export async function deleteTrustedRecipient(id: string): Promise<PayResult> {
     if (!isTrustedRecipientsEnabled(workspaceId)) {
       throw new FeatureDisabledError("trusted_recipients");
     }
-    const { error } = await supabase.from("trusted_recipients").delete().eq("id", id);
+    const { error } = await supabase.from("trusted_recipients").delete().eq(
+      "id",
+      id,
+    );
     if (error) return { ok: false, error: "Could not remove the recipient." };
     revalidatePath("/pay/recipients");
     return { ok: true };
@@ -601,7 +684,9 @@ export async function createTemplate(input: TemplateInput): Promise<PayResult> {
     if (!isPaymentTemplatesEnabled(workspaceId)) {
       throw new FeatureDisabledError("payment_templates");
     }
-    if (!input.name.trim()) return { ok: false, error: "Give the template a name." };
+    if (!input.name.trim()) {
+      return { ok: false, error: "Give the template a name." };
+    }
     if (!isPaymentType(input.paymentType)) {
       return { ok: false, error: "Unknown payment type." };
     }
@@ -611,10 +696,18 @@ export async function createTemplate(input: TemplateInput): Promise<PayResult> {
 
     // Non-secret snapshot only. The DB trigger also rejects pin/otp/etc.
     const recipient_snapshot: Record<string, unknown> = {};
-    if (input.recipientName) recipient_snapshot.name = input.recipientName.trim();
-    if (norm.normalized) recipient_snapshot.msisdn_masked = maskMsisdn(norm.normalized);
-    if (input.merchantCode) recipient_snapshot.merchant_code = input.merchantCode.trim();
-    if (input.meterNumber) recipient_snapshot.meter_number = input.meterNumber.trim();
+    if (input.recipientName) {
+      recipient_snapshot.name = input.recipientName.trim();
+    }
+    if (norm.normalized) {
+      recipient_snapshot.msisdn_masked = maskMsisdn(norm.normalized);
+    }
+    if (input.merchantCode) {
+      recipient_snapshot.merchant_code = input.merchantCode.trim();
+    }
+    if (input.meterNumber) {
+      recipient_snapshot.meter_number = input.meterNumber.trim();
+    }
     if (input.reference) recipient_snapshot.reference = input.reference.trim();
 
     const { error } = await supabase.from("payment_templates").insert({
@@ -637,7 +730,10 @@ export async function createTemplate(input: TemplateInput): Promise<PayResult> {
     });
     if (error) {
       if (/payment_secret_forbidden/i.test(error.message)) {
-        return { ok: false, error: "A template can't store a PIN or other secret." };
+        return {
+          ok: false,
+          error: "A template can't store a PIN or other secret.",
+        };
       }
       return { ok: false, error: "Could not save the template." };
     }
@@ -654,7 +750,10 @@ export async function deleteTemplate(id: string): Promise<PayResult> {
     if (!isPaymentTemplatesEnabled(workspaceId)) {
       throw new FeatureDisabledError("payment_templates");
     }
-    const { error } = await supabase.from("payment_templates").delete().eq("id", id);
+    const { error } = await supabase.from("payment_templates").delete().eq(
+      "id",
+      id,
+    );
     if (error) return { ok: false, error: "Could not delete the template." };
     revalidatePath("/pay/templates");
     return { ok: true };

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { supabaseSession } from "../../../lib/supabase-session-server";
 import { getActiveWorkspaceId } from "../../../lib/queries";
 import { generateIngestionCredential } from "../../../lib/credentials";
+import { requireMfaForSensitiveAction } from "../../../lib/auth/assurance";
 
 export type CreateConnectionResult =
   | { ok: true; secret: string }
@@ -28,6 +29,7 @@ export async function createConnection(
   provider: string,
   accountId: string,
 ): Promise<CreateConnectionResult> {
+  await requireMfaForSensitiveAction("/settings/connections");
   const trimmedLabel = label.trim();
 
   if (!trimmedLabel) {
@@ -47,14 +49,17 @@ export async function createConnection(
   const credential = await generateIngestionCredential();
 
   const supabase = await supabaseSession();
-  const { error } = await supabase.from("ingestion_connections").insert({
-    workspace_id: workspaceId,
-    account_id: accountId,
-    label: trimmedLabel,
-    provider,
-    credential_hash: credential.hash,
-    credential_prefix: credential.prefix,
-  });
+  const { error } = await supabase.rpc(
+    "create_ingestion_connection_dual_write",
+    {
+      p_workspace_id: workspaceId,
+      p_account_id: accountId,
+      p_label: trimmedLabel,
+      p_provider: provider,
+      p_credential_hash: credential.hash,
+      p_credential_prefix: credential.prefix,
+    },
+  );
 
   if (error) {
     return { ok: false, error: "Could not create the connection." };
@@ -75,6 +80,7 @@ export async function createConnection(
 export async function rotateConnection(
   connectionId: string,
 ): Promise<CreateConnectionResult> {
+  await requireMfaForSensitiveAction("/settings/connections");
   const credential = await generateIngestionCredential();
 
   const supabase = await supabaseSession();
@@ -104,6 +110,7 @@ export async function rotateConnection(
 export async function revokeConnection(
   connectionId: string,
 ): Promise<ConnectionActionResult> {
+  await requireMfaForSensitiveAction("/settings/connections");
   const supabase = await supabaseSession();
   const { error } = await supabase
     .from("ingestion_connections")

@@ -2,6 +2,7 @@
 
 import { supabaseSession } from "../../lib/supabase-session-server";
 import { siteUrl } from "../../lib/site-url";
+import { internalRedirectPath } from "../../lib/internal-redirect";
 
 export type SignUpResult =
   | { ok: true; needsConfirmation: boolean }
@@ -15,7 +16,7 @@ export async function signUp(
   const supabase = await supabaseSession();
 
   const callbackUrl = new URL("/auth/callback", siteUrl());
-  if (next) callbackUrl.searchParams.set("next", next);
+  callbackUrl.searchParams.set("next", internalRedirectPath(next));
 
   const { data, error } = await supabase.auth.signUp({
     email,

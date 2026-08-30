@@ -3,6 +3,7 @@
 import { createHash } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { supabaseSession } from "../../../lib/supabase-session-server";
+import { requireMfaForSensitiveAction } from "../../../lib/auth/assurance";
 import { supabaseServer } from "../../../lib/supabase-server";
 import { getActiveWorkspaceId } from "../../../lib/queries";
 import {
@@ -58,7 +59,9 @@ export type ClassifyScanResult =
   | { status: "feature_disabled" }
   | { status: "error" };
 
-export async function classifyScannedCode(raw: string): Promise<ClassifyScanResult> {
+export async function classifyScannedCode(
+  raw: string,
+): Promise<ClassifyScanResult> {
   const workspaceId = await getActiveWorkspaceId();
   if (!isScanToPayEnabled(workspaceId)) return { status: "feature_disabled" };
   if (typeof raw !== "string" || raw.length === 0 || raw.length > 8192) {
@@ -70,7 +73,10 @@ export async function classifyScannedCode(raw: string): Promise<ClassifyScanResu
     if (result.ok) {
       trackScanEvent("scan_payload_classified", { kind: result.model.class });
     } else {
-      trackScanEvent("scan_payload_rejected", { kind: result.class, reason: result.reason });
+      trackScanEvent("scan_payload_rejected", {
+        kind: result.class,
+        reason: result.reason,
+      });
     }
     return { status: "ok", result };
   } catch (err) {
@@ -83,12 +89,12 @@ export async function classifyScannedCode(raw: string): Promise<ClassifyScanResu
 
 export type PrepareScanHandoffResult =
   | {
-      // A payable scan: a payment_intents draft (source=qr_scan) exists.
-      status: "prepared";
-      intentId: string;
-      telHref: string;
-      existed: boolean;
-    }
+    // A payable scan: a payment_intents draft (source=qr_scan) exists.
+    status: "prepared";
+    intentId: string;
+    telHref: string;
+    existed: boolean;
+  }
   // A menu / balance code - openable, but not a payment: nothing recorded.
   | { status: "info_only"; telHref: string }
   | { status: "feature_disabled" }
@@ -120,9 +126,13 @@ export async function prepareScanHandoff(
   raw: string,
   userAmountMinor?: number,
 ): Promise<PrepareScanHandoffResult> {
+  await requireMfaForSensitiveAction("/pay/scan");
   const workspaceId = await getActiveWorkspaceId();
   if (!isScanToPayEnabled(workspaceId)) return { status: "feature_disabled" };
-  if (!workspaceId || typeof raw !== "string" || raw.length === 0 || raw.length > 8192) {
+  if (
+    !workspaceId || typeof raw !== "string" || raw.length === 0 ||
+    raw.length > 8192
+  ) {
     return { status: "error" };
   }
 
@@ -133,7 +143,13 @@ export async function prepareScanHandoff(
     const supabase = await supabaseSession();
 
     if (model.route.kind === "ussd" && model.route.literal != null) {
-      return prepareUssdHandoff(raw, model.route.literal, model.amount, workspaceId, supabase);
+      return prepareUssdHandoff(
+        raw,
+        model.route.literal,
+        model.amount,
+        workspaceId,
+        supabase,
+      );
     }
     if (model.route.kind === "oneledger") {
       return prepareOneLedgerHandoff(
@@ -170,15 +186,20 @@ async function prepareUssdHandoff(
   if (!parsed.ok) return { status: "unsupported" };
   const match = await matchUssdInDirectory(parsed.value.dial);
   if (!match) return { status: "unsupported" };
-  const captured = matchesTemplate(parsed.value.dial, match.template)?.params ?? {};
+  const captured = matchesTemplate(parsed.value.dial, match.template)?.params ??
+    {};
 
-  const phoneRaw = captured.phone ?? captured.msisdn ?? captured.recipient ?? null;
-  const normalizedMsisdn = phoneRaw ? normalizeRwandaMsisdn(phoneRaw).normalized : null;
+  const phoneRaw = captured.phone ?? captured.msisdn ?? captured.recipient ??
+    null;
+  const normalizedMsisdn = phoneRaw
+    ? normalizeRwandaMsisdn(phoneRaw).normalized
+    : null;
 
   const payload = buildScanIntentPayload({
     workspaceId,
-    idempotencyKey:
-      "qr:" + createHash("sha256").update(`${dial}|${amount.minor}`).digest("hex").slice(0, 40),
+    idempotencyKey: "qr:" +
+      createHash("sha256").update(`${dial}|${amount.minor}`).digest("hex")
+        .slice(0, 40),
     serviceCodeId: match.id,
     paymentType: ussdPaymentType(match.category, match.intent),
     provider: ussdProvider(match.networks, match.providerLabel),
@@ -188,7 +209,9 @@ async function prepareUssdHandoff(
     category: match.category,
     note: null,
     recipientMsisdnNormalized: normalizedMsisdn,
-    recipientMsisdnMasked: normalizedMsisdn ? maskMsisdn(normalizedMsisdn) : null,
+    recipientMsisdnMasked: normalizedMsisdn
+      ? maskMsisdn(normalizedMsisdn)
+      : null,
     merchantCode: null,
     ttlHours: paymentIntentTtlHours(),
     sessionFresh: await isSessionFresh(),
@@ -211,11 +234,13 @@ async function prepareOneLedgerHandoff(
   if (!parsed.ok) return { status: "unsupported" };
   const p = parsed.value;
 
-  const amountMinor =
-    p.amountMinor ??
+  const amountMinor = p.amountMinor ??
     (typeof userAmountMinor === "number" ? Math.trunc(userAmountMinor) : null);
   if (amountMinor == null) return { status: "amount_required" };
-  if (!Number.isInteger(amountMinor) || amountMinor <= 0 || amountMinor >= MAX_AMOUNT_MINOR) {
+  if (
+    !Number.isInteger(amountMinor) || amountMinor <= 0 ||
+    amountMinor >= MAX_AMOUNT_MINOR
+  ) {
     return { status: "unsupported" };
   }
 
@@ -242,18 +267,16 @@ async function prepareOneLedgerHandoff(
   }
   const telHref = buildTelHref(fill.dial);
 
-  const note =
-    [
-      p.reference ? `Ref ${p.reference}` : null,
-      p.invoiceId ? `Invoice ${p.invoiceId}` : null,
-    ]
-      .filter(Boolean)
-      .join(" · ") || null;
+  const note = [
+    p.reference ? `Ref ${p.reference}` : null,
+    p.invoiceId ? `Invoice ${p.invoiceId}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ") || null;
 
   const payload = buildScanIntentPayload({
     workspaceId,
-    idempotencyKey:
-      "qr:" +
+    idempotencyKey: "qr:" +
       createHash("sha256")
         .update(`ol|${net}|${p.payload.merchant_id}|${amountMinor}`)
         .digest("hex")
@@ -282,7 +305,9 @@ async function createPreparedIntent(
   telHref: string,
   kind: "payment" | "oneledger",
 ): Promise<PrepareScanHandoffResult> {
-  const { data, error } = await supabase.rpc("create_payment_intent", { payload });
+  const { data, error } = await supabase.rpc("create_payment_intent", {
+    payload,
+  });
   if (error) {
     logScanError("prepare_handoff", error);
     return { status: "error" };
@@ -290,7 +315,12 @@ async function createPreparedIntent(
   const row = data as { id: string; existed: boolean };
   trackScanEvent("scan_handoff_prepared", { kind });
   revalidatePath("/pay/activity");
-  return { status: "prepared", intentId: row.id, telHref, existed: row.existed };
+  return {
+    status: "prepared",
+    intentId: row.id,
+    telHref,
+    existed: row.existed,
+  };
 }
 
 // --- record hand-off gesture -----------------------------------------

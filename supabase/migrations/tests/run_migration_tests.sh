@@ -597,7 +597,9 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # Onboarding PR7 (20261007000000) adds email_send_log (RLS enabled,
 # service-role-only, no authenticated policy - like raw_financial_events
 # / budget_threshold_state) - 73 tables, 72 with RLS.
-if [ "$TABLE_COUNT" = "73" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Connector model Stage A (20261011000000) adds connector_installations
+# and device_credentials, both RLS enabled - 75 tables, 74 with RLS.
+if [ "$TABLE_COUNT" = "75" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -682,12 +684,14 @@ fi
 # RPCs and revokes authenticated's insert + update grants (keeps select).
 # 117 - 2 = 115.
 # Phase V PR1 (20261001000000) adds notifications with a SELECT-only grant
-# for authenticated. 115 + 1 = 116.
+# for authenticated. 115 + 1 = 116. Connector Stage C routes connection
+# creation through an atomic RPC and revokes direct ingestion_connections
+# INSERT. 116 - 1 = 115.
 AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and grantee = 'authenticated';")"
-if [ "$AUTHENTICATED_GRANT_COUNT" = "116" ]; then
-  pass "authenticated holds exactly the 116 table grants expected, no more"
+if [ "$AUTHENTICATED_GRANT_COUNT" = "115" ]; then
+  pass "authenticated holds exactly the 115 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 116 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 115 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -825,11 +829,14 @@ fi
 # mark_all_notifications_read, unread_notification_count. enqueue_notification
 # is internal (no authenticated grant). = 75.
 # Phase V PR2 (20261002000000) adds sweep_budget_thresholds. = 76.
+# Connector Stage C (20261013000000) adds the authenticated atomic
+# create_ingestion_connection_dual_write RPC. Its sync trigger and canonical
+# shadow resolver are internal/service-role-only. = 77.
 AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname = 'authenticated' where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "76" ]; then
-  pass "authenticated holds EXECUTE on exactly the 76 functions expected, no more"
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "77" ]; then
+  pass "authenticated holds EXECUTE on exactly the 77 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 76 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 77 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -1159,9 +1166,18 @@ USER_C="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('c@ex
 psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
   insert into public.workspace_memberships (workspace_id, user_id, role, status, joined_at)
   values ('$WORKSPACE_A', '$USER_C', 'member', 'active', now());
+  insert into public.financial_sources
+    (id, owner_user_id, provider, source_type, display_name, currency)
+  values
+    ('00000000-0000-4000-8000-0000000000d1', '$USER_A', 'mtn_momo', 'mobile_money', 'A source', 'RWF'),
+    ('00000000-0000-4000-8000-0000000000c1', '$USER_B', 'mtn_momo', 'mobile_money', 'B source', 'RWF');
+  update public.accounts set financial_source_id = '00000000-0000-4000-8000-0000000000d1'
+    where id = '00000000-0000-0000-0000-0000000000d1';
+  update public.accounts set financial_source_id = '00000000-0000-4000-8000-0000000000c1'
+    where id = '00000000-0000-0000-0000-0000000000c1';
 " >/dev/null
 
-CONN_A="$(as_user "$USER_A" "insert into public.ingestion_connections (workspace_id, account_id, label, credential_hash, credential_prefix, created_by) values ('$WORKSPACE_A', '00000000-0000-0000-0000-0000000000d1', 'A''s Phone', 'hash-a-conn-1', 'pfe_aaaa', '$USER_A') returning id;" | tail -1)"
+CONN_A="$(as_user "$USER_A" "select public.create_ingestion_connection_dual_write('$WORKSPACE_A', '00000000-0000-0000-0000-0000000000d1', 'A''s Phone', 'mtn_momo', 'hash-a-conn-1', 'pfe_aaaa');" | tail -1)"
 if [ -n "$CONN_A" ]; then
   pass "Phase C: workspace owner can create an ingestion connection bound to their own account"
 else
@@ -2684,6 +2700,35 @@ echo "=== Phase R: Spaces authz capabilities and audit ==="
 
 # --- capability matrix ---------------------------------------------------
 
+R_MATRIX_MISMATCHES="$(psql -d pfe_rls -t -A -c "
+  with capabilities(capability) as (values
+    ('space.manage_settings'), ('space.delete'),
+    ('space.transfer_ownership'), ('members.manage'), ('budget.manage'),
+    ('goal.manage'), ('rule.manage'), ('report.config'),
+    ('category.manage'), ('transaction.create'),
+    ('transaction.categorize'), ('audit.view')
+  ), roles(role) as (values ('owner'), ('admin'), ('member'), ('viewer')),
+  expected as (
+    select role, capability,
+      case
+        when role = 'owner' then true
+        when role = 'admin' then capability not in ('space.delete', 'space.transfer_ownership')
+        when role = 'member' then capability in ('transaction.create', 'transaction.categorize')
+        else false
+      end as allowed
+    from roles cross join capabilities
+  )
+  select count(*) from expected
+  where public.space_role_has_capability('household', role, capability) is distinct from allowed;")"
+R_UNKNOWN_OWNER="$(psql -d pfe_rls -t -A -c "select public.space_role_has_capability('household', 'owner', 'capability.typo');")"
+R_UNKNOWN_ADMIN="$(psql -d pfe_rls -t -A -c "select public.space_role_has_capability('household', 'admin', 'capability.typo');")"
+R_NULL_OWNER="$(psql -d pfe_rls -t -A -c "select public.space_role_has_capability('household', 'owner', null);")"
+if [ "$R_MATRIX_MISMATCHES" = "0" ] && [ "$R_UNKNOWN_OWNER" = "f" ] && [ "$R_UNKNOWN_ADMIN" = "f" ] && [ "$R_NULL_OWNER" = "f" ]; then
+  pass "Phase R: all 48 household role/capability cells match the closed authorization matrix"
+else
+  fail "Phase R: closed capability matrix mismatch (cells=$R_MATRIX_MISMATCHES owner_unknown=$R_UNKNOWN_OWNER admin_unknown=$R_UNKNOWN_ADMIN owner_null=$R_NULL_OWNER)"
+fi
+
 R_OWNER_DELETE="$(as_user "$USER_A" "select public.has_space_capability('$Q_HH', 'space.delete');")"
 R_MEMBER_BUDGET="$(as_user "$USER_B" "select public.has_space_capability('$Q_HH', 'budget.manage');")"
 R_MEMBER_TXN="$(as_user "$USER_B" "select public.has_space_capability('$Q_HH', 'transaction.create');")"
@@ -2692,6 +2737,46 @@ if [ "$R_OWNER_DELETE" = "t" ] && [ "$R_MEMBER_BUDGET" = "f" ] && [ "$R_MEMBER_T
   pass "Phase R: has_space_capability reflects the role matrix (owner:space.delete, member:transaction.create yes / budget.manage no, non-member:nothing)"
 else
   fail "Phase R: capability matrix wrong (owner.delete=$R_OWNER_DELETE member.budget=$R_MEMBER_BUDGET member.txn=$R_MEMBER_TXN nonmember=$R_NONMEMBER)"
+fi
+
+R_HAS_UNKNOWN="$(as_user "$USER_A" "select public.has_space_capability('$Q_HH', 'capability.typo');")"
+if [ "$R_HAS_UNKNOWN" = "f" ]; then
+  pass "Phase R: has_space_capability fails closed for an unknown capability"
+else
+  fail "Phase R: an owner received an unknown capability (got $R_HAS_UNKNOWN)"
+fi
+
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.space_member_capability_grants (workspace_id, user_id, capability) values ('$Q_HH', '$USER_B', 'capability.typo');" >/dev/null 2>$ARTIFACT_DIR/pfe_r_unknown_capability.log; then
+  fail "Phase R: service_role inserted a capability outside the closed catalog"
+else
+  pass "Phase R: the grants table rejects capability names outside the catalog"
+fi
+rm -f $ARTIFACT_DIR/pfe_r_unknown_capability.log
+
+# Exercise the matrix through real memberships, including Viewer and a
+# suspended membership. Keep this household isolated from later fixtures.
+R_MATRIX_HH="$(as_user "$USER_A" "select public.create_household_workspace('R Matrix Household');")"
+R_ADMIN_USER="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('r-matrix-admin@example.com') returning id;" | head -1)"
+R_MEMBER_USER="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('r-matrix-member@example.com') returning id;" | head -1)"
+R_VIEWER_USER="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('r-matrix-viewer@example.com') returning id;" | head -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.workspace_memberships (workspace_id, user_id, role, status, joined_at) values ('$R_MATRIX_HH', '$R_ADMIN_USER', 'admin', 'active', now()), ('$R_MATRIX_HH', '$R_MEMBER_USER', 'member', 'active', now()), ('$R_MATRIX_HH', '$R_VIEWER_USER', 'viewer', 'active', now());" >/dev/null
+
+R_OWNER_CAPS="$(as_user "$USER_A" "select count(*) from unnest(array['space.manage_settings','space.delete','space.transfer_ownership','members.manage','budget.manage','goal.manage','rule.manage','report.config','category.manage','transaction.create','transaction.categorize','audit.view']) c where public.has_space_capability('$R_MATRIX_HH', c);")"
+R_ADMIN_CAPS="$(as_user "$R_ADMIN_USER" "select count(*) from unnest(array['space.manage_settings','space.delete','space.transfer_ownership','members.manage','budget.manage','goal.manage','rule.manage','report.config','category.manage','transaction.create','transaction.categorize','audit.view']) c where public.has_space_capability('$R_MATRIX_HH', c);")"
+R_MEMBER_CAPS="$(as_user "$R_MEMBER_USER" "select count(*) from unnest(array['space.manage_settings','space.delete','space.transfer_ownership','members.manage','budget.manage','goal.manage','rule.manage','report.config','category.manage','transaction.create','transaction.categorize','audit.view']) c where public.has_space_capability('$R_MATRIX_HH', c);")"
+R_VIEWER_CAPS="$(as_user "$R_VIEWER_USER" "select count(*) from unnest(array['space.manage_settings','space.delete','space.transfer_ownership','members.manage','budget.manage','goal.manage','rule.manage','report.config','category.manage','transaction.create','transaction.categorize','audit.view']) c where public.has_space_capability('$R_MATRIX_HH', c);")"
+if [ "$R_OWNER_CAPS" = "12" ] && [ "$R_ADMIN_CAPS" = "10" ] && [ "$R_MEMBER_CAPS" = "2" ] && [ "$R_VIEWER_CAPS" = "0" ]; then
+  pass "Phase R: active memberships expose 12/10/2/0 capabilities for owner/admin/member/viewer"
+else
+  fail "Phase R: membership capability totals wrong (owner=$R_OWNER_CAPS admin=$R_ADMIN_CAPS member=$R_MEMBER_CAPS viewer=$R_VIEWER_CAPS)"
+fi
+
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; update public.workspace_memberships set status = 'suspended' where workspace_id = '$R_MATRIX_HH' and user_id = '$R_MEMBER_USER';" >/dev/null
+R_SUSPENDED_CAP="$(as_user "$R_MEMBER_USER" "select public.has_space_capability('$R_MATRIX_HH', 'transaction.create');")"
+if [ "$R_SUSPENDED_CAP" = "f" ]; then
+  pass "Phase R: suspending a membership removes its role capabilities immediately"
+else
+  fail "Phase R: a suspended member retained transaction.create"
 fi
 
 # --- per-member capability grant --------------------------------------
@@ -3749,30 +3834,379 @@ fi
 rm -f $ARTIFACT_DIR/pfe_v_pr2.log
 
 # ===========================================================================
-# Phase V PR3: email outbox read/ack RPCs (pending_notification_emails +
-# mark_notification_emails_delivered). The V PR1 member.joined fan-out
-# already left channel='email' rows for members with email defaults on.
+# Phase V PR3 + Phase 0 hardening: atomically claim and ack the outbox.
+# The V PR1 member.joined fan-out already left email rows pending.
 # ===========================================================================
 echo "=== Phase V PR3: email outbox ==="
 
-V3_PENDING="$(psql -d pfe_rls -t -A -c "set role service_role; select count(*) from public.pending_notification_emails(100);" | tail -1)"
-V3_HAS_EMAIL="$(psql -d pfe_rls -t -A -c "set role service_role; select count(*) from public.pending_notification_emails(100) where email is null or email = '';" | tail -1)"
-V3_IDS="$(psql -d pfe_rls -t -A -c "set role service_role; select string_agg(id::text, ',') from (select id from public.pending_notification_emails(100)) s;" | tail -1)"
-V3_MARKED="$(psql -d pfe_rls -t -A -c "set role service_role; select public.mark_notification_emails_delivered(string_to_array('$V3_IDS', ',')::uuid[]);" | tail -1)"
-V3_PENDING_AFTER="$(psql -d pfe_rls -t -A -c "set role service_role; select count(*) from public.pending_notification_emails(100);" | tail -1)"
-if [ "$V3_PENDING" -ge 1 ] && [ "$V3_HAS_EMAIL" = "0" ] && [ "$V3_MARKED" = "$V3_PENDING" ] && [ "$V3_PENDING_AFTER" = "0" ]; then
-  pass "Phase V PR3: pending_notification_emails joins the recipient email; mark_notification_emails_delivered stamps the batch and drains the queue"
+V3_CLAIM_A="00000000-0000-4000-8000-0000000000a1"
+V3_CLAIM_B="00000000-0000-4000-8000-0000000000b2"
+V3_PENDING="$(psql -d pfe_rls -t -A -c "set role service_role; select count(*) from public.claim_notification_emails('$V3_CLAIM_A', 100, 300);" | tail -1)"
+V3_HAS_EMAIL="$(psql -d pfe_rls -t -A -c "set role service_role; select count(*) from public.claim_notification_emails('$V3_CLAIM_A', 100, 300) where email is null or email = '';" | tail -1)"
+V3_SECOND_CLAIM="$(psql -d pfe_rls -t -A -c "set role service_role; select count(*) from public.claim_notification_emails('$V3_CLAIM_B', 100, 300);" | tail -1)"
+V3_IDS="$(psql -d pfe_rls -t -A -c "select string_agg(id::text, ',') from public.notifications where delivery_claim_token = '$V3_CLAIM_A';" | tail -1)"
+V3_WRONG_ACK="$(psql -d pfe_rls -t -A -c "set role service_role; select public.ack_notification_email_claim('$V3_CLAIM_B', string_to_array('$V3_IDS', ',')::uuid[]);" | tail -1)"
+V3_MARKED="$(psql -d pfe_rls -t -A -c "set role service_role; select public.ack_notification_email_claim('$V3_CLAIM_A', string_to_array('$V3_IDS', ',')::uuid[]);" | tail -1)"
+V3_PENDING_AFTER="$(psql -d pfe_rls -t -A -c "set role service_role; select count(*) from public.claim_notification_emails('$V3_CLAIM_B', 100, 300);" | tail -1)"
+if [ "$V3_PENDING" -ge 1 ] && [ "$V3_HAS_EMAIL" = "0" ] && [ "$V3_SECOND_CLAIM" = "0" ] && [ "$V3_WRONG_ACK" = "0" ] && [ "$V3_MARKED" = "$V3_PENDING" ] && [ "$V3_PENDING_AFTER" = "0" ]; then
+  pass "Phase 0: outbox claims are exclusive, token-bound, recipient-complete, and drain after ack"
 else
-  fail "Phase V PR3: outbox drain wrong (pending=$V3_PENDING no_email=$V3_HAS_EMAIL marked=$V3_MARKED after=$V3_PENDING_AFTER)"
+  fail "Phase 0: outbox claim wrong (pending=$V3_PENDING no_email=$V3_HAS_EMAIL second=$V3_SECOND_CLAIM wrong_ack=$V3_WRONG_ACK marked=$V3_MARKED after=$V3_PENDING_AFTER)"
 fi
 
 # Both RPCs are service-role-only.
-if as_user "$USER_A" "select public.pending_notification_emails(10);" >/dev/null 2>$ARTIFACT_DIR/pfe_v_pr3.log; then
-  fail "Phase V PR3: pending_notification_emails was callable by an authenticated user"
+if as_user "$USER_A" "select public.claim_notification_emails('$V3_CLAIM_A', 10, 300);" >/dev/null 2>$ARTIFACT_DIR/pfe_v_pr3.log; then
+  fail "Phase 0: claim_notification_emails was callable by an authenticated user"
 else
-  pass "Phase V PR3: pending_notification_emails / mark_notification_emails_delivered are service-role-only"
+  pass "Phase 0: notification claim / ack / release RPCs are service-role-only"
 fi
 rm -f $ARTIFACT_DIR/pfe_v_pr3.log
+
+# ===========================================================================
+# Phase 0: exact-ingestion dedupe is scoped to its owning tenant/connection.
+# ===========================================================================
+echo "=== Phase 0: tenant-scoped ingestion dedupe ==="
+
+P0_CONN_A="00000000-0000-4000-8000-0000000000c1"
+P0_CONN_B="00000000-0000-4000-8000-0000000000c2"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.ingestion_connections
+    (id, workspace_id, account_id, label, credential_hash, credential_prefix)
+  values
+    ('$P0_CONN_A', '$WORKSPACE_A', '00000000-0000-0000-0000-0000000000d1', 'P0 A', 'p0-hash-a', 'pfe_p0a'),
+    ('$P0_CONN_B', '$WORKSPACE_B', '00000000-0000-0000-0000-0000000000c1', 'P0 B', 'p0-hash-b', 'pfe_p0b');
+
+  insert into public.momo_messages
+    (ingestion_connection_id, raw_message, message_fingerprint, processing_status)
+  values
+    ('$P0_CONN_A', 'identical provider text', 'same-message-hash', 'processed'),
+    ('$P0_CONN_B', 'identical provider text', 'same-message-hash', 'processed');
+
+  insert into public.raw_financial_events
+    (ingestion_connection_id, channel, received_at, payload_hash, raw_payload)
+  values
+    ('$P0_CONN_A', 'sms', now(), 'same-payload-hash', '{}'),
+    ('$P0_CONN_B', 'sms', now(), 'same-payload-hash', '{}');
+
+  insert into public.transactions
+    (workspace_id, account_id, source, external_transaction_id,
+     transaction_type, direction, status, amount_rwf, fee_rwf,
+     occurred_at, parser_version)
+  values
+    ('$WORKSPACE_A', '00000000-0000-0000-0000-0000000000d1', 'manual', 'provider-ref-same',
+     'other', 'neutral', 'success', 1, 0, now(), 'p0-test'),
+    ('$WORKSPACE_B', '00000000-0000-0000-0000-0000000000c1', 'manual', 'provider-ref-same',
+     'other', 'neutral', 'success', 1, 0, now(), 'p0-test');
+" >/dev/null
+
+P0_MESSAGE_ROWS="$(psql -d pfe_rls -t -A -c "select count(*) from public.momo_messages where message_fingerprint = 'same-message-hash';")"
+P0_EVENT_ROWS="$(psql -d pfe_rls -t -A -c "select count(*) from public.raw_financial_events where payload_hash = 'same-payload-hash';")"
+P0_TX_ROWS="$(psql -d pfe_rls -t -A -c "select count(*) from public.transactions where external_transaction_id = 'provider-ref-same';")"
+if [ "$P0_MESSAGE_ROWS" = "2" ] && [ "$P0_EVENT_ROWS" = "2" ] && [ "$P0_TX_ROWS" = "2" ]; then
+  pass "Phase 0: identical SMS, raw payloads, and provider references coexist across two workspaces"
+else
+  fail "Phase 0: cross-tenant evidence was collapsed (messages=$P0_MESSAGE_ROWS events=$P0_EVENT_ROWS transactions=$P0_TX_ROWS)"
+fi
+
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "insert into public.momo_messages (ingestion_connection_id, raw_message, message_fingerprint) values ('$P0_CONN_A', 'retry', 'same-message-hash');" >/dev/null 2>$ARTIFACT_DIR/pfe_p0_dedupe.log; then
+  fail "Phase 0: the same connection accepted a duplicate message fingerprint"
+else
+  pass "Phase 0: the same connection still rejects an exact SMS retry"
+fi
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "insert into public.raw_financial_events (ingestion_connection_id, channel, received_at, payload_hash, raw_payload) values ('$P0_CONN_A', 'sms', now(), 'same-payload-hash', '{}');" >/dev/null 2>>$ARTIFACT_DIR/pfe_p0_dedupe.log; then
+  fail "Phase 0: the same connection accepted a duplicate raw payload hash"
+else
+  pass "Phase 0: the same connection still rejects an exact raw-event retry"
+fi
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "insert into public.transactions (workspace_id, account_id, source, external_transaction_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version) values ('$WORKSPACE_A', '00000000-0000-0000-0000-0000000000d1', 'manual', 'provider-ref-same', 'other', 'neutral', 'success', 1, 0, now(), 'p0-test');" >/dev/null 2>>$ARTIFACT_DIR/pfe_p0_dedupe.log; then
+  fail "Phase 0: the same workspace accepted a duplicate provider reference"
+else
+  pass "Phase 0: the same workspace still rejects a duplicate provider reference"
+fi
+rm -f $ARTIFACT_DIR/pfe_p0_dedupe.log
+
+# Explicit trusted-service RPC boundary. These functions handle unscoped
+# delivery, ingestion, threshold, or report data and must never be callable
+# from a browser JWT.
+P0_SERVICE_RPC_AUTH_GRANTS="$(psql -d pfe_rls -t -A -c "
+  with f(signature) as (values
+    ('public.claim_notification_emails(uuid,integer,integer)'),
+    ('public.ack_notification_email_claim(uuid,uuid[])'),
+    ('public.release_notification_email_claim(uuid,uuid[],text)'),
+    ('public.resolve_ingestion_target(uuid,timestamp with time zone)'),
+    ('public.record_budget_threshold_crossing(uuid,text,numeric)'),
+    ('public.visible_source_ids_for_user(uuid,uuid)')
+  )
+  select count(*) from f
+  where has_function_privilege('authenticated', to_regprocedure(signature), 'EXECUTE')
+     or has_function_privilege('anon', to_regprocedure(signature), 'EXECUTE');")"
+P0_SERVICE_RPC_SERVICE_GRANTS="$(psql -d pfe_rls -t -A -c "
+  with f(signature) as (values
+    ('public.claim_notification_emails(uuid,integer,integer)'),
+    ('public.ack_notification_email_claim(uuid,uuid[])'),
+    ('public.release_notification_email_claim(uuid,uuid[],text)'),
+    ('public.resolve_ingestion_target(uuid,timestamp with time zone)'),
+    ('public.record_budget_threshold_crossing(uuid,text,numeric)'),
+    ('public.visible_source_ids_for_user(uuid,uuid)')
+  )
+  select count(*) from f
+  where has_function_privilege('service_role', to_regprocedure(signature), 'EXECUTE');")"
+if [ "$P0_SERVICE_RPC_AUTH_GRANTS" = "0" ] && [ "$P0_SERVICE_RPC_SERVICE_GRANTS" = "6" ]; then
+  pass "Phase 0: all six trusted-service RPCs deny browser roles and allow service_role"
+else
+  fail "Phase 0: trusted-service RPC ACL drift (browser_grants=$P0_SERVICE_RPC_AUTH_GRANTS service_grants=$P0_SERVICE_RPC_SERVICE_GRANTS)"
+fi
+
+# ===========================================================================
+# Connector model Stage A: additive installation/device credential schema.
+# Existing ingestion_connections remains live and no existing row is backfilled.
+# ===========================================================================
+echo "=== Connector model Stage A ==="
+
+CMA_UNMAPPED_LEGACY="$(psql -d pfe_rls -t -A -c "select count(*) from public.ingestion_connections where id in ('$P0_CONN_A', '$P0_CONN_B') and connector_installation_id is null and device_credential_id is null;")"
+CMA_UNMAPPED_EVENTS="$(psql -d pfe_rls -t -A -c "select count(*) from public.raw_financial_events where ingestion_connection_id in ('$P0_CONN_A', '$P0_CONN_B') and connector_installation_id is null and device_credential_id is null;")"
+if [ "$CMA_UNMAPPED_LEGACY" = "2" ] && [ "$CMA_UNMAPPED_EVENTS" = "2" ]; then
+  pass "Connector Stage A: nullable canonical fields do not implicitly rewrite legacy connections or raw provenance"
+else
+  fail "Connector Stage A: legacy-only writes unexpectedly gained canonical mappings (connections=$CMA_UNMAPPED_LEGACY events=$CMA_UNMAPPED_EVENTS)"
+fi
+
+CMA_INSTALL_A="00000000-0000-4000-8000-0000000000e1"
+CMA_INSTALL_B="00000000-0000-4000-8000-0000000000e2"
+CMA_SOURCE_A="00000000-0000-4000-8000-0000000000e3"
+CMA_SOURCE_B="00000000-0000-4000-8000-0000000000e4"
+CMA_ACCOUNT_A="00000000-0000-4000-8000-0000000000e5"
+CMA_ACCOUNT_B="00000000-0000-4000-8000-0000000000e6"
+CMA_CRED_A="00000000-0000-4000-8000-0000000000e7"
+
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.connector_installations
+    (id, owner_user_id, home_workspace_id, connector_key, display_name, status, auth_mode)
+  values
+    ('$CMA_INSTALL_A', '$USER_A', '$WORKSPACE_A', 'mtn_momo_sms_v1', 'A phone', 'healthy', 'device_secret'),
+    ('$CMA_INSTALL_B', '$USER_B', '$WORKSPACE_B', 'bank_open_api_v1', 'B bank', 'healthy', 'oauth');
+
+  insert into public.financial_sources
+    (id, owner_user_id, connector_installation_id, provider, provider_key,
+     source_type, display_name, currency, external_source_ref_hash)
+  values
+    ('$CMA_SOURCE_A', '$USER_A', '$CMA_INSTALL_A', 'mtn_momo', 'mtn_rw',
+     'mobile_money', 'A canonical source', 'RWF', 'source-ref-a'),
+    ('$CMA_SOURCE_B', '$USER_B', '$CMA_INSTALL_B', 'bank', 'bank_rw',
+     'bank_account', 'B canonical source', 'RWF', 'source-ref-b');
+
+  insert into public.accounts
+    (id, workspace_id, financial_source_id, name, provider, currency)
+  values
+    ('$CMA_ACCOUNT_A', '$WORKSPACE_A', '$CMA_SOURCE_A', 'A canonical account', 'mtn_momo', 'RWF'),
+    ('$CMA_ACCOUNT_B', '$WORKSPACE_B', '$CMA_SOURCE_B', 'B canonical account', 'bank', 'RWF');
+
+  insert into public.device_credentials
+    (id, connector_installation_id, account_id, label, credential_hash, credential_prefix)
+  values
+    ('$CMA_CRED_A', '$CMA_INSTALL_A', '$CMA_ACCOUNT_A', 'A device', 'cma-credential-hash-a', 'cma_a');
+
+  insert into public.raw_financial_events
+    (financial_source_id, connector_installation_id, device_credential_id,
+     channel, received_at, payload_hash, raw_payload)
+  values
+    ('$CMA_SOURCE_A', '$CMA_INSTALL_A', '$CMA_CRED_A',
+     'sms', now(), 'cma-raw-hash-a', '{\"stage\":\"a\"}');
+" >/dev/null
+
+CMA_PROVENANCE="$(psql -d pfe_rls -t -A -c "select count(*) from public.raw_financial_events where financial_source_id = '$CMA_SOURCE_A' and connector_installation_id = '$CMA_INSTALL_A' and device_credential_id = '$CMA_CRED_A';")"
+if [ "$CMA_PROVENANCE" = "1" ]; then
+  pass "Connector Stage A: raw evidence accepts nullable canonical installation and credential provenance"
+else
+  fail "Connector Stage A: canonical raw-event provenance was not retained"
+fi
+
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.raw_financial_events (financial_source_id, connector_installation_id, device_credential_id, channel, received_at, payload_hash, raw_payload) values ('$CMA_SOURCE_B', '$CMA_INSTALL_B', '$CMA_CRED_A', 'sms', now(), 'cma-mixed-provenance', '{}');" >/dev/null 2>$ARTIFACT_DIR/pfe_cma_provenance.log; then
+  fail "Connector Stage A: raw evidence accepted mismatched installation/source/credential provenance"
+else
+  pass "Connector Stage A: composite FKs reject mixed canonical provenance"
+fi
+rm -f $ARTIFACT_DIR/pfe_cma_provenance.log
+
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.device_credentials (connector_installation_id, account_id, label, credential_hash, credential_prefix) values ('$CMA_INSTALL_A', '$CMA_ACCOUNT_B', 'cross tenant', 'cma-cross-hash', 'cma_x');" >/dev/null 2>$ARTIFACT_DIR/pfe_cma_scope.log; then
+  fail "Connector Stage A: a credential was scoped to another installation's account"
+else
+  pass "Connector Stage A: database trigger rejects cross-installation account scope"
+fi
+
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.financial_sources (owner_user_id, connector_installation_id, provider, source_type, display_name, currency) values ('$USER_B', '$CMA_INSTALL_A', 'other', 'import', 'wrong owner', 'RWF');" >/dev/null 2>>$ARTIFACT_DIR/pfe_cma_scope.log; then
+  fail "Connector Stage A: another user's source attached to an installation"
+else
+  pass "Connector Stage A: composite FK enforces installation/source ownership"
+fi
+rm -f $ARTIFACT_DIR/pfe_cma_scope.log
+
+CMA_A_SEES="$(as_user "$USER_A" "select count(*) from public.device_credentials where id = '$CMA_CRED_A' and credential_prefix = 'cma_a';")"
+CMA_B_SEES="$(as_user "$USER_B" "select count(*) from public.device_credentials where id = '$CMA_CRED_A';")"
+if [ "$CMA_A_SEES" = "1" ] && [ "$CMA_B_SEES" = "0" ]; then
+  pass "Connector Stage A: owners see credential metadata and cross-tenant users see no credential rows"
+else
+  fail "Connector Stage A: credential metadata RLS wrong (owner=$CMA_A_SEES other=$CMA_B_SEES)"
+fi
+
+if as_user "$USER_A" "select credential_hash from public.device_credentials where id = '$CMA_CRED_A';" >/dev/null 2>$ARTIFACT_DIR/pfe_cma_secret.log; then
+  fail "Connector Stage A: authenticated owner could read a credential hash"
+else
+  pass "Connector Stage A: credential hashes remain service-role-only"
+fi
+if as_user "$USER_A" "select sync_cursor_encrypted from public.connector_installations where id = '$CMA_INSTALL_A';" >/dev/null 2>>$ARTIFACT_DIR/pfe_cma_secret.log; then
+  fail "Connector Stage A: authenticated owner could read encrypted connector state"
+else
+  pass "Connector Stage A: encrypted connector state remains service-role-only"
+fi
+rm -f $ARTIFACT_DIR/pfe_cma_secret.log
+
+# ===========================================================================
+# Connector model Stage B: deterministic legacy preflight and backfill.
+# ===========================================================================
+echo "=== Connector model Stage B ==="
+
+CMB_SOURCE="00000000-0000-4000-8000-0000000000f1"
+CMB_ACCOUNT="00000000-0000-4000-8000-0000000000f2"
+CMB_LEGACY="00000000-0000-4000-8000-0000000000f3"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.financial_sources
+    (id, owner_user_id, provider, source_type, display_name, currency)
+  values ('$CMB_SOURCE', '$USER_A', 'mtn_momo', 'mobile_money', 'B legacy source', 'RWF');
+  insert into public.accounts
+    (id, workspace_id, financial_source_id, name, provider, currency)
+  values ('$CMB_ACCOUNT', '$WORKSPACE_A', '$CMB_SOURCE', 'B legacy account', 'mtn_momo', 'RWF');
+  insert into public.ingestion_connections
+    (id, workspace_id, account_id, label, provider, credential_hash,
+     credential_prefix, created_by, last_used_at)
+  values ('$CMB_LEGACY', '$WORKSPACE_A', '$CMB_ACCOUNT', 'B legacy phone',
+     'mtn_momo', 'cmb-legacy-hash', 'cmb_pref', '$USER_A', now() - interval '1 hour');
+" >/dev/null
+
+CMB_PREFLIGHT="$(psql -d pfe_rls -t -A -c "set role service_role; select count(*) from public.connector_stage_b_preflight('$CMB_LEGACY');" | tail -1)"
+CMB_MAPPING="$(psql -d pfe_rls -t -A -c "set role service_role; select connector_installation_id || '|' || device_credential_id from public.backfill_legacy_ingestion_connection('$CMB_LEGACY');" | tail -1)"
+CMB_INSTALL="${CMB_MAPPING%%|*}"
+CMB_CREDENTIAL="${CMB_MAPPING##*|}"
+CMB_SHAPE="$(psql -d pfe_rls -t -A -c "select count(*) from public.ingestion_connections ic join public.connector_installations ci on ci.id = ic.connector_installation_id join public.device_credentials dc on dc.id = ic.device_credential_id join public.financial_sources fs on fs.connector_installation_id = ci.id where ic.id = '$CMB_LEGACY' and ci.legacy_ingestion_connection_id = ic.id and dc.legacy_ingestion_connection_id = ic.id and dc.connector_installation_id = ci.id and dc.account_id = ic.account_id and dc.credential_hash = ic.credential_hash and ci.owner_user_id = '$USER_A' and ci.home_workspace_id = '$WORKSPACE_A' and ci.connector_key = 'mtn_momo_sms_v1' and ci.status = 'healthy' and dc.status = 'active' and fs.id = '$CMB_SOURCE';")"
+if [ "$CMB_PREFLIGHT" = "0" ] && [ "$CMB_SHAPE" = "1" ] && [ -n "$CMB_INSTALL" ] && [ -n "$CMB_CREDENTIAL" ]; then
+  pass "Connector Stage B: one valid legacy row maps to one installation, credential, source, account, and reversible legacy IDs"
+else
+  fail "Connector Stage B: deterministic backfill shape wrong (preflight=$CMB_PREFLIGHT shape=$CMB_SHAPE mapping=$CMB_MAPPING)"
+fi
+
+CMB_MAPPING_AGAIN="$(psql -d pfe_rls -t -A -c "set role service_role; select connector_installation_id || '|' || device_credential_id from public.backfill_legacy_ingestion_connection('$CMB_LEGACY');" | tail -1)"
+CMB_COUNTS="$(psql -d pfe_rls -t -A -c "select (select count(*) from public.connector_installations where legacy_ingestion_connection_id = '$CMB_LEGACY') || '|' || (select count(*) from public.device_credentials where legacy_ingestion_connection_id = '$CMB_LEGACY');")"
+if [ "$CMB_MAPPING_AGAIN" = "$CMB_MAPPING" ] && [ "$CMB_COUNTS" = "1|1" ]; then
+  pass "Connector Stage B: targeted backfill is idempotent"
+else
+  fail "Connector Stage B: retry changed or duplicated the mapping (first=$CMB_MAPPING second=$CMB_MAPPING_AGAIN counts=$CMB_COUNTS)"
+fi
+
+CMB_AMBIG_SOURCE="00000000-0000-4000-8000-0000000000f4"
+CMB_AMBIG_ACCOUNT="00000000-0000-4000-8000-0000000000f5"
+CMB_AMBIG_ONE="00000000-0000-4000-8000-0000000000f6"
+CMB_AMBIG_TWO="00000000-0000-4000-8000-0000000000f7"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.financial_sources
+    (id, owner_user_id, provider, source_type, display_name, currency)
+  values ('$CMB_AMBIG_SOURCE', '$USER_A', 'mtn_momo', 'mobile_money', 'B ambiguous source', 'RWF');
+  insert into public.accounts
+    (id, workspace_id, financial_source_id, name, provider, currency)
+  values ('$CMB_AMBIG_ACCOUNT', '$WORKSPACE_A', '$CMB_AMBIG_SOURCE', 'B ambiguous account', 'mtn_momo', 'RWF');
+  insert into public.ingestion_connections
+    (id, workspace_id, account_id, label, provider, credential_hash, credential_prefix)
+  values
+    ('$CMB_AMBIG_ONE', '$WORKSPACE_A', '$CMB_AMBIG_ACCOUNT', 'device one', 'mtn_momo', 'cmb-ambig-hash-1', 'cmb_a1'),
+    ('$CMB_AMBIG_TWO', '$WORKSPACE_A', '$CMB_AMBIG_ACCOUNT', 'device two', 'mtn_momo', 'cmb-ambig-hash-2', 'cmb_a2');
+" >/dev/null
+CMB_AMBIG_ISSUES="$(psql -d pfe_rls -t -A -c "set role service_role; select count(*) from public.connector_stage_b_preflight('$CMB_AMBIG_ONE') where issue_code = 'shared_source_ambiguous';" | tail -1)"
+if [ "$CMB_AMBIG_ISSUES" = "1" ]; then
+  pass "Connector Stage B: preflight flags multiple legacy connections sharing one source instead of guessing"
+else
+  fail "Connector Stage B: shared-source ambiguity was not reported"
+fi
+
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; select public.backfill_legacy_ingestion_connection('$CMB_AMBIG_ONE');" >/dev/null 2>$ARTIFACT_DIR/pfe_cmb_ambiguous.log; then
+  fail "Connector Stage B: ambiguous legacy mapping was backfilled"
+else
+  pass "Connector Stage B: backfill aborts when preflight returns an ambiguity"
+fi
+rm -f $ARTIFACT_DIR/pfe_cmb_ambiguous.log
+
+if as_user "$USER_A" "select public.connector_stage_b_preflight('$CMB_LEGACY');" >/dev/null 2>$ARTIFACT_DIR/pfe_cmb_acl.log; then
+  fail "Connector Stage B: authenticated user called the service-only preflight"
+else
+  pass "Connector Stage B: preflight and backfill helpers are service-role-only"
+fi
+rm -f $ARTIFACT_DIR/pfe_cmb_acl.log
+
+# ===========================================================================
+# Connector model Stage C: atomic enrollment, lifecycle mirroring, and shadow
+# route rejection. Legacy lookup remains live; direct browser inserts retire.
+# ===========================================================================
+echo "=== Connector model Stage C ==="
+
+CMC_SOURCE="00000000-0000-4000-8000-000000000101"
+CMC_ACCOUNT="00000000-0000-4000-8000-000000000102"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.financial_sources
+    (id, owner_user_id, provider, source_type, display_name, currency)
+  values ('$CMC_SOURCE', '$USER_A', 'mtn_momo', 'mobile_money', 'C dual source', 'RWF');
+  insert into public.accounts
+    (id, workspace_id, financial_source_id, name, provider, currency)
+  values ('$CMC_ACCOUNT', '$WORKSPACE_A', '$CMC_SOURCE', 'C dual account', 'mtn_momo', 'RWF');
+" >/dev/null
+
+CMC_CONNECTION="$(as_user "$USER_A" "select public.create_ingestion_connection_dual_write('$WORKSPACE_A', '$CMC_ACCOUNT', 'C phone', 'mtn_momo', 'cmc-hash-1', 'cmc_pref');")"
+CMC_ATOMIC="$(psql -d pfe_rls -t -A -c "select count(*) from public.ingestion_connections ic join public.connector_installations ci on ci.id = ic.connector_installation_id join public.device_credentials dc on dc.id = ic.device_credential_id where ic.id = '$CMC_CONNECTION' and ci.legacy_ingestion_connection_id = ic.id and dc.legacy_ingestion_connection_id = ic.id and dc.credential_hash = ic.credential_hash;")"
+if [ "$CMC_ATOMIC" = "1" ]; then
+  pass "Connector Stage C: authenticated enrollment atomically writes legacy and canonical models"
+else
+  fail "Connector Stage C: atomic enrollment mapping missing"
+fi
+
+if as_user "$USER_A" "insert into public.ingestion_connections (workspace_id, account_id, label, provider, credential_hash, credential_prefix) values ('$WORKSPACE_A', '$CMC_ACCOUNT', 'bypass', 'mtn_momo', 'cmc-bypass-hash', 'cmc_bad');" >/dev/null 2>$ARTIFACT_DIR/pfe_cmc_direct.log; then
+  fail "Connector Stage C: owner bypassed atomic enrollment with a direct legacy insert"
+else
+  pass "Connector Stage C: direct authenticated legacy inserts are revoked"
+fi
+rm -f $ARTIFACT_DIR/pfe_cmc_direct.log
+
+CMC_SHADOW="$(psql -d pfe_rls -t -A -c "set role service_role; select matches_legacy || '|' || coalesce(mismatch_code, 'none') from public.resolve_canonical_ingestion_shadow('$CMC_CONNECTION');" | tail -1)"
+if [ "$CMC_SHADOW" = "true|none" ] || [ "$CMC_SHADOW" = "t|none" ]; then
+  pass "Connector Stage C: canonical shadow resolves to the exact legacy route"
+else
+  fail "Connector Stage C: fresh dual-write shadow mismatch ($CMC_SHADOW)"
+fi
+
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; update public.ingestion_connections set label = 'C phone rotated', credential_hash = 'cmc-hash-2', credential_prefix = 'cmc_new', status = 'paused', paused_at = now() where id = '$CMC_CONNECTION';" >/dev/null
+CMC_SYNC="$(psql -d pfe_rls -t -A -c "select count(*) from public.ingestion_connections ic join public.connector_installations ci on ci.id = ic.connector_installation_id join public.device_credentials dc on dc.id = ic.device_credential_id where ic.id = '$CMC_CONNECTION' and ci.display_name = ic.label and ci.status = 'paused' and dc.label = ic.label and dc.credential_hash = ic.credential_hash and dc.credential_prefix = ic.credential_prefix and dc.status = ic.status and dc.paused_at is not null;")"
+if [ "$CMC_SYNC" = "1" ]; then
+  pass "Connector Stage C: legacy rotation/lifecycle updates mirror to canonical rows in the same transaction"
+else
+  fail "Connector Stage C: compatibility trigger failed to mirror lifecycle/credential state"
+fi
+
+CMC_INSTALL="$(psql -d pfe_rls -t -A -c "select connector_installation_id from public.ingestion_connections where id = '$CMC_CONNECTION';")"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; update public.connector_installations set status = 'error' where id = '$CMC_INSTALL';" >/dev/null
+CMC_MISMATCH="$(psql -d pfe_rls -t -A -c "set role service_role; select matches_legacy || '|' || mismatch_code from public.resolve_canonical_ingestion_shadow('$CMC_CONNECTION');" | tail -1)"
+if [ "$CMC_MISMATCH" = "false|installation_status_mismatch" ] || [ "$CMC_MISMATCH" = "f|installation_status_mismatch" ]; then
+  pass "Connector Stage C: shadow comparison identifies canonical route/lifecycle drift"
+else
+  fail "Connector Stage C: canonical drift was not surfaced ($CMC_MISMATCH)"
+fi
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; update public.connector_installations set status = 'paused' where id = '$CMC_INSTALL';" >/dev/null
+
+if as_user "$USER_A" "select public.resolve_canonical_ingestion_shadow('$CMC_CONNECTION');" >/dev/null 2>$ARTIFACT_DIR/pfe_cmc_acl.log; then
+  fail "Connector Stage C: authenticated user called the service-only shadow resolver"
+else
+  pass "Connector Stage C: canonical shadow resolver is service-role-only"
+fi
+rm -f $ARTIFACT_DIR/pfe_cmc_acl.log
 
 # Phase V PR4b: visible_source_ids_for_user - the auth.uid()-free source
 # visibility the scheduled-report generator uses for household members.

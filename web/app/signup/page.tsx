@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { OneLedgerLogo } from "../../components/brand/OneLedgerLogo";
 import { SignUpForm } from "./SignUpForm";
+import { internalRedirectPath } from "../../lib/internal-redirect";
 
 export const dynamic = "force-dynamic";
 
@@ -8,7 +9,7 @@ export default async function SignUpPage({
   searchParams,
 }: PageProps<"/signup">) {
   const { next } = await searchParams;
-  const nextPath = typeof next === "string" ? next : "/";
+  const nextPath = internalRedirectPath(typeof next === "string" ? next : null);
 
   return (
     <div className="mx-auto flex max-w-sm flex-col gap-6 py-10">

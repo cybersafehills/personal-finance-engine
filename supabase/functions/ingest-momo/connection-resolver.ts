@@ -27,7 +27,60 @@ export type IngestionConnectionRow = {
   // 'revoked' identically, so a paused device silently stops ingesting
   // until it is resumed.
   status: "active" | "paused" | "revoked";
+  connector_installation_id: string | null;
+  device_credential_id: string | null;
 };
+
+export type CanonicalShadowRow = {
+  matches_legacy: boolean;
+  mismatch_code: string | null;
+  connector_installation_id: string | null;
+  device_credential_id: string | null;
+  workspace_id: string | null;
+  account_id: string | null;
+  financial_source_id: string | null;
+};
+
+export type CanonicalShadowRoute = {
+  connectorInstallationId: string;
+  deviceCredentialId: string;
+  financialSourceId: string;
+};
+
+export function acceptCanonicalShadow(
+  connection: IngestionConnectionRow,
+  shadow: CanonicalShadowRow | null,
+): { ok: true; route: CanonicalShadowRoute } | {
+  ok: false;
+  mismatchCode: string;
+} {
+  if (!shadow) return { ok: false, mismatchCode: "canonical_shadow_missing" };
+  if (!shadow.matches_legacy) {
+    return {
+      ok: false,
+      mismatchCode: shadow.mismatch_code ?? "canonical_shadow_mismatch",
+    };
+  }
+  if (
+    !connection.connector_installation_id ||
+    !connection.device_credential_id ||
+    shadow.connector_installation_id !== connection.connector_installation_id ||
+    shadow.device_credential_id !== connection.device_credential_id ||
+    shadow.workspace_id !== connection.workspace_id ||
+    shadow.account_id !== connection.account_id ||
+    !shadow.financial_source_id
+  ) {
+    return { ok: false, mismatchCode: "canonical_shadow_shape_mismatch" };
+  }
+  return {
+    ok: true,
+    route: {
+      connectorInstallationId: shadow.connector_installation_id,
+      deviceCredentialId: shadow.device_credential_id,
+      financialSourceId: shadow.financial_source_id,
+    },
+  };
+}
 
 export type AccountRow = {
   id: string;

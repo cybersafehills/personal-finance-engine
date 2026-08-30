@@ -1,5 +1,12 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { buildResendRequest, deliveryConfig, summarize } from "../lib.ts";
+import {
+  authorizeDrainRequest,
+  buildResendRequest,
+  deliveryConfig,
+  resendIdempotencyKey,
+  secretsEqual,
+  summarize,
+} from "../lib.ts";
 
 function env(map: Record<string, string>) {
   return (k: string) => map[k];
@@ -33,6 +40,52 @@ Deno.test("deliveryConfig: NOTIFICATION_EMAIL_FROM overrides the sender", () => 
     NOTIFICATION_EMAIL_FROM: "Household <hi@example.com>",
   }));
   assertEquals(c.enabled && c.from, "Household <hi@example.com>");
+});
+
+Deno.test("authorizeDrainRequest: requires POST and the configured scheduler secret", () => {
+  const secret = "correct-secret-at-least-32-bytes-long";
+  const configured = env({ NOTIFICATION_CRON_SECRET: secret });
+  assertEquals(
+    authorizeDrainRequest(
+      new Request("https://example.test", { method: "GET" }),
+      configured,
+    ),
+    "method_not_allowed",
+  );
+  assertEquals(
+    authorizeDrainRequest(
+      new Request("https://example.test", { method: "POST" }),
+      env({}),
+    ),
+    "secret_not_configured",
+  );
+  assertEquals(
+    authorizeDrainRequest(
+      new Request("https://example.test", { method: "POST" }),
+      configured,
+    ),
+    "unauthorized",
+  );
+  assertEquals(
+    authorizeDrainRequest(
+      new Request("https://example.test", {
+        method: "POST",
+        headers: { "x-notification-cron-secret": secret },
+      }),
+      configured,
+    ),
+    "ok",
+  );
+});
+
+Deno.test("secret comparison and provider idempotency key are stable", () => {
+  assertEquals(secretsEqual("same", "same"), true);
+  assertEquals(secretsEqual("same", "different"), false);
+  assertEquals(secretsEqual(null, "same"), false);
+  assertEquals(
+    resendIdempotencyKey("abc-123"),
+    "oneledger-notification/abc-123",
+  );
 });
 
 Deno.test("buildResendRequest: subject is the title; body is appended when present", () => {

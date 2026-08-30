@@ -22,6 +22,9 @@ export type RawFinancialEventInsert = {
   payload_hash: string;
   raw_payload: Record<string, unknown>;
   ingestion_connection_id: string;
+  financial_source_id: string;
+  connector_installation_id: string;
+  device_credential_id: string;
   parser_version: string;
   parse_status: "pending";
 };
@@ -29,15 +32,18 @@ export type RawFinancialEventInsert = {
 /**
  * The raw_financial_events row for one inbound MoMo SMS. `payloadHash` is
  * the same normalized-message SHA-256 that momo_messages dedupes on, so the
- * same SMS delivered by two devices collapses to one evidence row here too
- * (payload_hash is UNIQUE - the caller reuses the existing row on
- * conflict).
+ * same SMS redelivered by this connection collapses to one evidence row here
+ * too. The connection is part of the uniqueness scope so identical provider
+ * text belonging to another customer remains independent.
  */
 export function buildRawFinancialEvent(input: {
   rawMessage: string;
   payloadHash: string;
   deviceReceivedAt: string | null;
   ingestionConnectionId: string;
+  financialSourceId: string;
+  connectorInstallationId: string;
+  deviceCredentialId: string;
   momoMessageId: string;
   parserVersion: string;
   now: string;
@@ -53,6 +59,9 @@ export function buildRawFinancialEvent(input: {
       device_received_at: input.deviceReceivedAt,
     },
     ingestion_connection_id: input.ingestionConnectionId,
+    financial_source_id: input.financialSourceId,
+    connector_installation_id: input.connectorInstallationId,
+    device_credential_id: input.deviceCredentialId,
     parser_version: input.parserVersion,
     parse_status: "pending",
   };

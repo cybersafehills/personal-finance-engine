@@ -8,6 +8,33 @@ export type DeliveryConfig =
 
 const DEFAULT_FROM = "OneLedger <notifications@oneledger.app>";
 
+export function secretsEqual(
+  presented: string | null,
+  expected: string,
+): boolean {
+  if (!presented || presented.length !== expected.length) return false;
+  let difference = 0;
+  for (let i = 0; i < expected.length; i++) {
+    difference |= presented.charCodeAt(i) ^ expected.charCodeAt(i);
+  }
+  return difference === 0;
+}
+
+export function authorizeDrainRequest(
+  request: Request,
+  get: (key: string) => string | undefined,
+): "ok" | "method_not_allowed" | "unauthorized" | "secret_not_configured" {
+  if (request.method !== "POST") return "method_not_allowed";
+  const expected = (get("NOTIFICATION_CRON_SECRET") ?? "").trim();
+  if (expected.length < 32) return "secret_not_configured";
+  return secretsEqual(
+      request.headers.get("x-notification-cron-secret"),
+      expected,
+    )
+    ? "ok"
+    : "unauthorized";
+}
+
 /**
  * Email delivery is dark unless BOTH switches are set, matching this
  * repo's other opt-in integrations (SCAN_TO_PAY_ENABLED etc.):
@@ -64,6 +91,10 @@ export function buildResendRequest(
 }
 
 export type SendOutcome = { id: string; ok: boolean; error?: string };
+
+export function resendIdempotencyKey(notificationId: string): string {
+  return `oneledger-notification/${notificationId}`;
+}
 
 export type DrainSummary = {
   configured: boolean;

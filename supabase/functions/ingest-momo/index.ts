@@ -10,7 +10,9 @@ import {
   fingerprintArgs,
 } from "./raw-event.ts";
 import {
+  acceptCanonicalShadow,
   authenticateCredential,
+  type CanonicalShadowRow,
   type IngestionConnectionRow,
   resolveAccountRoute,
 } from "./connection-resolver.ts";
@@ -67,7 +69,9 @@ Deno.serve(async (req: Request) => {
       findConnectionByCredentialHash: async (credentialHash) => {
         const { data, error } = await supabase
           .from("ingestion_connections")
-          .select("id, workspace_id, account_id, status")
+          .select(
+            "id, workspace_id, account_id, status, connector_installation_id, device_credential_id",
+          )
           .eq("credential_hash", credentialHash)
           .maybeSingle();
 
@@ -90,6 +94,42 @@ Deno.serve(async (req: Request) => {
     }
 
     const connection = authResult.connection;
+
+    // ========================================================
+    // CANONICAL SHADOW ROUTE (Stage C)
+    // ========================================================
+    // Legacy credential authentication remains authoritative in this stage,
+    // but canonical installation/source/account provenance must resolve to
+    // exactly the same route. Reject before reading/storing the payload on any
+    // disagreement; never silently choose one model.
+    const { data: shadowData, error: shadowError } = await supabase.rpc(
+      "resolve_canonical_ingestion_shadow",
+      { p_ingestion_connection_id: connection.id },
+    ).maybeSingle();
+    const shadowResult = acceptCanonicalShadow(
+      connection,
+      (shadowData as CanonicalShadowRow | null) ?? null,
+    );
+
+    if (shadowError) {
+      console.error(JSON.stringify({
+        event: "canonical_route_mismatch",
+        mismatch_code: "shadow_resolver_error",
+        connection_suffix: connection.id.slice(-8),
+      }));
+      return jsonResponse({ ok: false, error: "routing_mismatch" }, 409);
+    }
+
+    if (!shadowResult.ok) {
+      console.error(JSON.stringify({
+        event: "canonical_route_mismatch",
+        mismatch_code: shadowResult.mismatchCode,
+        connection_suffix: connection.id.slice(-8),
+      }));
+      return jsonResponse({ ok: false, error: "routing_mismatch" }, 409);
+    }
+
+    const canonicalRoute = shadowResult.route;
 
     // ========================================================
     // BODY VALIDATION
@@ -175,6 +215,7 @@ Deno.serve(async (req: Request) => {
       await supabase
         .from("momo_messages")
         .select("id, processing_status, parse_attempts")
+        .eq("ingestion_connection_id", connection.id)
         .eq("message_fingerprint", fingerprint)
         .maybeSingle();
 
@@ -242,6 +283,7 @@ Deno.serve(async (req: Request) => {
           .from("momo_messages")
           .insert({
             source: "ios_shortcuts",
+            ingestion_connection_id: connection.id,
             raw_message: rawMessage,
             message_fingerprint: fingerprint,
             device_received_at: deviceReceivedAt,
@@ -255,6 +297,22 @@ Deno.serve(async (req: Request) => {
           })
           .select("id")
           .single();
+
+      if (messageInsertError?.code === "23505") {
+        // Two deliveries for the same connection can pass the initial read
+        // concurrently. The database constraint chooses one winner; the
+        // loser is still a successful idempotent duplicate, not a 500.
+        const { data: concurrentMessage } = await supabase
+          .from("momo_messages")
+          .select("id")
+          .eq("ingestion_connection_id", connection.id)
+          .eq("message_fingerprint", fingerprint)
+          .maybeSingle();
+
+        if (concurrentMessage) {
+          return jsonResponse({ ok: true, status: "duplicate" });
+        }
+      }
 
       if (messageInsertError || !insertedMessage) {
         console.error("Raw message insert error:", messageInsertError);
@@ -278,10 +336,10 @@ Deno.serve(async (req: Request) => {
     // Every inbound SMS is recorded as a raw_financial_events row -
     // upstream of, and independent from, whatever canonical transaction it
     // does or doesn't become (design doc §4.5: "evidence, never
-    // discarded"). It is deduped on the SAME normalized-message hash
-    // momo_messages uses, so the same SMS from two devices collapses to
-    // one evidence row (payload_hash is UNIQUE - on conflict we reuse the
-    // existing row). This is best-effort: a failure to write or reuse the
+    // discarded"). It is deduped on the normalized-message hash WITHIN the
+    // authenticated connection. A retry from this connection reuses one row;
+    // identical provider text belonging to another customer remains separate.
+    // This is best-effort: a failure to write or reuse the
     // evidence row must never turn away an ingestion that otherwise
     // succeeds, so we log and carry on with a null id (parse_status is
     // advanced later, only if we have one).
@@ -294,6 +352,9 @@ Deno.serve(async (req: Request) => {
         payloadHash: fingerprint,
         deviceReceivedAt,
         ingestionConnectionId: connection.id,
+        financialSourceId: canonicalRoute.financialSourceId,
+        connectorInstallationId: canonicalRoute.connectorInstallationId,
+        deviceCredentialId: canonicalRoute.deviceCredentialId,
         momoMessageId,
         parserVersion: PARSER_VERSION,
         now: new Date().toISOString(),
@@ -313,6 +374,7 @@ Deno.serve(async (req: Request) => {
           await supabase
             .from("raw_financial_events")
             .select("id")
+            .eq("ingestion_connection_id", connection.id)
             .eq("payload_hash", fingerprint)
             .maybeSingle();
 
@@ -386,6 +448,7 @@ Deno.serve(async (req: Request) => {
             "external_transaction_id",
             parsed.external_transaction_id,
           )
+          .eq("workspace_id", connection.workspace_id)
           .maybeSingle();
 
       if (transactionLookupError) {

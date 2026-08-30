@@ -61,7 +61,8 @@ export const INGEST_RESPONSE_HELP: Record<string, string> = {
   processed: "Recorded. The transaction appears in your ledger.",
   needs_review:
     "Received and kept, but the format wasn't recognised - it goes to your review queue, never a guessed transaction.",
-  duplicate: "This exact SMS was already received. Nothing was added twice.",
+  duplicate:
+    "This exact SMS was already received through this connection. Nothing was added twice.",
   // 4xx / 5xx — {ok:false, error:…}
   unauthorized:
     "The key is missing, wrong, revoked, or paused. Rotate the credential below and update your Shortcut.",

@@ -1,13 +1,13 @@
 import Link from "next/link";
 import { PageHeader } from "../../components/PageHeader";
 import {
-  WalletIcon,
-  PhoneIcon,
-  LockIcon,
-  UsersIcon,
   DocumentIcon,
-  GearIcon,
   EyeIcon,
+  GearIcon,
+  LockIcon,
+  PhoneIcon,
+  UsersIcon,
+  WalletIcon,
 } from "../../components/icons";
 
 export const dynamic = "force-dynamic";
@@ -60,13 +60,14 @@ const SETTINGS_LINKS = [
   {
     href: "/settings/reports",
     title: "Daily reports",
-    description: "Configure when your daily financial report is generated and emailed.",
+    description:
+      "Configure when your daily financial report is generated and emailed.",
     Icon: DocumentIcon,
   },
   {
     href: "/settings/security",
     title: "Security",
-    description: "Sign-in details and active sessions.",
+    description: "Two-step verification, sign-in details, and active sessions.",
     Icon: LockIcon,
   },
   {
