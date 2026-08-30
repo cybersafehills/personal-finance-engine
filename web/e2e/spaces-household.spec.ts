@@ -151,10 +151,11 @@ test("household: create a Space, share a source into it, attribute a transaction
 
   // --- share the source into the household ---------------------------
   await page.goto("/settings/sources");
-  await expect(page.getByText(SOURCE_NAME)).toBeVisible();
-  await expect(page.getByText("Private")).toBeVisible();
+  const sourceCard = page.getByRole("region", { name: `${SOURCE_NAME} source` });
+  await expect(sourceCard.getByText(SOURCE_NAME, { exact: true })).toBeVisible();
+  await expect(sourceCard.getByText("Private", { exact: true })).toBeVisible();
 
-  await page.getByRole("button", { name: "Share with a household" }).click();
+  await sourceCard.getByRole("button", { name: "Share with a household" }).click();
   // "Transactions only" is the default radio; just submit.
   await page.getByRole("button", { name: "Share", exact: true }).click();
 
@@ -163,14 +164,20 @@ test("household: create a Space, share a source into it, attribute a transaction
   await expect(page.getByText("Transactions only", { exact: true }))
     .toBeVisible();
 
-  const { data: link } = await db
-    .from("source_space_links")
-    .select("status, visibility_mode")
-    .eq("financial_source_id", sourceId)
-    .eq("workspace_id", householdId)
-    .single();
-  expect(link?.status).toBe("active");
-  expect(link?.visibility_mode).toBe("share_transactions");
+  await expect.poll(async () => {
+    const { data: link, error } = await db
+      .from("source_space_links")
+      .select("status, visibility_mode")
+      .eq("financial_source_id", sourceId)
+      .eq("workspace_id", householdId)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Could not inspect source share: ${error.message}`);
+    }
+
+    return link ? `${link.status}|${link.visibility_mode}` : null;
+  }).toBe("active|share_transactions");
 
   // --- an unattributed household transaction ------------------------
   const txnId = await seedHouseholdTransaction(db, { workspaceId: householdId, sourceId });
@@ -188,7 +195,7 @@ test("household: create a Space, share a source into it, attribute a transaction
   // Resolve it on the detail page.
   await page.goto(`/transactions/${txnId}`);
   await expect(page.getByText(/needs an attribution/)).toBeVisible();
-  await expect(page.getByText("Whose spending")).toBeVisible();
+  await expect(page.getByText("Whose spending", { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "Change" }).click();
   await page.getByRole("radio", { name: /Shared — belongs to the household/ }).check();

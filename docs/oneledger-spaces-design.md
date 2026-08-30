@@ -1365,8 +1365,16 @@ drain, service-role lockdown). Full suite: **250 passed / 0 failed**.
 `deno fmt` / `deno lint` / `deno check send-notifications` / `deno test
 send-notifications` (4) green.
 
-Activation checklist (ops, one-time): set `RESEND_API_KEY` +
-`NOTIFICATION_EMAIL_ENABLED=true` on the project; schedule
+Phase-0 hardening in migration `20261008000000` replaces the race-prone
+read/ack pair with short, atomic leases: `claim_notification_emails`,
+`ack_notification_email_claim`, and `release_notification_email_claim`.
+The Edge Function accepts POST only, requires `x-notification-cron-secret`,
+and sends a stable Resend `Idempotency-Key` per notification.
+
+Activation checklist (ops, one-time): set `RESEND_API_KEY`,
+`NOTIFICATION_EMAIL_ENABLED=true`, and a separate high-entropy
+`NOTIFICATION_CRON_SECRET` on the project; configure the same value as the
+schedule's `x-notification-cron-secret` header; schedule
 `send-notifications` every ~5 min.
 
 Phase V remaining: **PR4** — Space-scoped scheduled reports.

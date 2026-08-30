@@ -11,6 +11,7 @@ import { isSpacesEnabled } from "../../../lib/spaces/gate";
 import { trackSpacesEvent } from "../../../lib/spaces/analytics";
 import { getActiveWorkspaceId, type WorkspaceRole } from "../../../lib/queries";
 import { logSpacesError } from "../../../lib/spaces/monitoring";
+import { requireMfaForSensitiveAction } from "../../../lib/auth/assurance";
 
 export type WorkspaceActionResult = { ok: true } | { ok: false; error: string };
 export type CreateInviteResult =
@@ -126,6 +127,7 @@ export async function createInvite(
   role: string,
   workspaceName: string,
 ): Promise<CreateInviteResult> {
+  await requireMfaForSensitiveAction("/settings/workspace");
   const trimmedEmail = email.trim();
 
   if (!trimmedEmail) {
@@ -234,6 +236,7 @@ export async function resendInvite(
 export async function revokeInvite(
   inviteId: string,
 ): Promise<WorkspaceActionResult> {
+  await requireMfaForSensitiveAction("/settings/workspace");
   const supabase = await supabaseSession();
   const { error } = await supabase
     .from("workspace_invites")
@@ -253,6 +256,7 @@ export async function changeMemberRole(
   membershipId: string,
   role: string,
 ): Promise<WorkspaceActionResult> {
+  await requireMfaForSensitiveAction("/settings/workspace");
   const supabase = await supabaseSession();
   const { error } = await supabase.rpc("set_member_role", {
     p_membership_id: membershipId,
@@ -272,6 +276,7 @@ export async function changeMemberRole(
 export async function removeMember(
   membershipId: string,
 ): Promise<WorkspaceActionResult> {
+  await requireMfaForSensitiveAction("/settings/workspace");
   const supabase = await supabaseSession();
   const { error } = await supabase.rpc("remove_member", {
     p_membership_id: membershipId,

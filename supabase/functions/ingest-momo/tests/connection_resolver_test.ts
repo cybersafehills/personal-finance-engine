@@ -8,6 +8,7 @@
 
 import { assertEquals } from "jsr:@std/assert@1";
 import {
+  acceptCanonicalShadow,
   type AccountRow,
   authenticateCredential,
   type IngestionConnectionRow,
@@ -23,6 +24,8 @@ const ACTIVE_CONNECTION: IngestionConnectionRow = {
   workspace_id: "ws-a",
   account_id: "acct-a",
   status: "active",
+  connector_installation_id: "install-1",
+  device_credential_id: "credential-1",
 };
 
 const REVOKED_CONNECTION: IngestionConnectionRow = {
@@ -30,6 +33,8 @@ const REVOKED_CONNECTION: IngestionConnectionRow = {
   workspace_id: "ws-a",
   account_id: "acct-a",
   status: "revoked",
+  connector_installation_id: "install-revoked",
+  device_credential_id: "credential-revoked",
 };
 
 const ACTIVE_ACCOUNT: AccountRow = {
@@ -45,6 +50,49 @@ const ARCHIVED_ACCOUNT: AccountRow = {
   is_active: false,
   archived_at: "2026-08-01T00:00:00Z",
 };
+
+const MATCHING_SHADOW = {
+  matches_legacy: true,
+  mismatch_code: null,
+  connector_installation_id: "install-1",
+  device_credential_id: "credential-1",
+  workspace_id: "ws-a",
+  account_id: "acct-a",
+  financial_source_id: "source-a",
+};
+
+Deno.test("acceptCanonicalShadow: accepts only an exact canonical mirror", () => {
+  assertEquals(acceptCanonicalShadow(ACTIVE_CONNECTION, MATCHING_SHADOW), {
+    ok: true,
+    route: {
+      connectorInstallationId: "install-1",
+      deviceCredentialId: "credential-1",
+      financialSourceId: "source-a",
+    },
+  });
+});
+
+Deno.test("acceptCanonicalShadow: rejects resolver and shape mismatches", () => {
+  assertEquals(
+    acceptCanonicalShadow(ACTIVE_CONNECTION, {
+      ...MATCHING_SHADOW,
+      matches_legacy: false,
+      mismatch_code: "account_mismatch",
+    }),
+    { ok: false, mismatchCode: "account_mismatch" },
+  );
+  assertEquals(
+    acceptCanonicalShadow(ACTIVE_CONNECTION, {
+      ...MATCHING_SHADOW,
+      workspace_id: "ws-b",
+    }),
+    { ok: false, mismatchCode: "canonical_shadow_shape_mismatch" },
+  );
+  assertEquals(acceptCanonicalShadow(ACTIVE_CONNECTION, null), {
+    ok: false,
+    mismatchCode: "canonical_shadow_missing",
+  });
+});
 
 function connectionStore(rows: IngestionConnectionRow[]) {
   return (credentialHash: string) => {

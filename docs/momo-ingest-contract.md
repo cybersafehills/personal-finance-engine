@@ -27,12 +27,21 @@ The **only** credential is the per-connection ingestion key:
 |---|---|
 | Header | `x-ingest-key: pfe_…` |
 | Issued by | Settings → Connections → *Connect a device* (shown once), or *Rotate credential* |
-| Stored as | SHA-256 hash + 8-char prefix only (`ingestion_connections`), never plaintext |
+| Stored as | SHA-256 hash + 8-char prefix in the legacy connection and canonical device credential, never plaintext |
 | Resolves | the connection's `workspace_id` + bound `account_id` — never anything the client sends |
 
 A missing, blank, malformed, **revoked**, **paused**, or simply unknown
 key all fail **identically** with `401 unauthorized` — the response is not
 an oracle. No `apikey` / `Authorization` header is required or read.
+
+During the Stage C rollout, the legacy connection remains authoritative for
+authentication and routing. Before accepting a payload, ingestion resolves the
+corresponding connector installation, device credential, financial source, and
+account and compares that route with the legacy route. Missing or divergent
+canonical state fails closed with `409 routing_mismatch`; logs contain a
+redacted mismatch code for operators, not credential material. Accepted raw
+events retain both the legacy connection ID and the canonical source,
+installation, and device-credential IDs.
 
 > **Deployed-state note.** The linked production function already runs
 > with JWT verification off (Shortcuts only ever send `x-ingest-key`).
@@ -65,18 +74,21 @@ errors carry `{ "ok": false, "error": … }`.
 |---|---|---|
 | 200 | `processed` | Parsed into a transaction; visible in the ledger. |
 | 200 | `needs_review` | Stored as evidence; format not recognised, so it goes to the review queue — never a guessed transaction. |
-| 200 | `duplicate` | This exact SMS (normalised hash) was already ingested. Nothing added twice. |
+| 200 | `duplicate` | This exact SMS (normalised hash) was already ingested through this connection. Nothing added twice. |
 | 400 | `invalid_json` | Body was not valid JSON. |
 | 400 | `invalid_request_body` | Body was not a JSON object. |
 | 400 | `missing_message` | `message` missing or empty after trim. |
 | 401 | `unauthorized` | Key missing / wrong / revoked / paused / unknown. |
+| 409 | `routing_mismatch` | Canonical connector routing is missing or differs from the authenticated legacy route; nothing recorded. |
 | 413 | `message_too_large` | Trimmed `message` exceeded 5000 chars. |
 | 422 | `not_rwf_message` | No `RWF` amount found — not treated as a MoMo transaction, nothing recorded. |
 | 405 | `method_not_allowed` | Only `POST` is accepted. |
 | 500 | `database_error` | Transient server-side failure. Safe to retry (idempotent on the message hash). |
 
-Idempotency: retries of the same SMS are safe. A prior `failed` state is
-retried; any other prior state returns `duplicate`.
+Idempotency: retries of the same SMS through the same connection are safe. A
+prior `failed` state is retried; any other prior state returns `duplicate`.
+Identical text received through another customer's connection is independent
+and cannot suppress their transaction.
 
 ## cURL equivalent (testing / Android)
 

@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { supabaseSession } from "../../lib/supabase-session-server";
 import { supabaseServer } from "../../lib/supabase-server";
 import { sendLockoutAlertEmail, sendNewSignInEmail } from "../../lib/emails";
+import { internalRedirectPath } from "../../lib/internal-redirect";
 
 export type AuthActionResult = { ok: true } | { ok: false; error: string };
 
@@ -27,7 +28,10 @@ export async function signIn(
   );
 
   if (!lockoutCheckError && (failedCount ?? 0) >= LOCKOUT_THRESHOLD) {
-    return { ok: false, error: "Too many attempts. Try again in a few minutes." };
+    return {
+      ok: false,
+      error: "Too many attempts. Try again in a few minutes.",
+    };
   }
 
   const supabase = await supabaseSession();
@@ -58,7 +62,14 @@ export async function signIn(
 
   await sendNewSignInEmail(email);
 
-  redirect(next || "/");
+  const safeNext = internalRedirectPath(next);
+  const { data: assurance } = await supabase.auth.mfa
+    .getAuthenticatorAssuranceLevel();
+  if (assurance?.nextLevel === "aal2" && assurance.currentLevel !== "aal2") {
+    redirect(`/auth/mfa?next=${encodeURIComponent(safeNext)}`);
+  }
+
+  redirect(safeNext);
 }
 
 export async function signOut(): Promise<void> {

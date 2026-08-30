@@ -1,8 +1,10 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import {
+  authorizeDrainRequest,
   buildResendRequest,
   deliveryConfig,
   type PendingEmail,
+  resendIdempotencyKey,
   type SendOutcome,
   summarize,
 } from "./lib.ts";
@@ -34,8 +36,20 @@ function json(body: Record<string, unknown>, status = 200): Response {
   });
 }
 
-Deno.serve(async () => {
-  const config = deliveryConfig((k) => Deno.env.get(k) ?? undefined);
+Deno.serve(async (request: Request) => {
+  const getEnv = (key: string) => Deno.env.get(key) ?? undefined;
+  const authorization = authorizeDrainRequest(request, getEnv);
+  if (authorization === "method_not_allowed") {
+    return json({ ok: false, error: authorization }, 405);
+  }
+  if (authorization !== "ok") {
+    if (authorization === "secret_not_configured") {
+      console.error("send-notifications: NOTIFICATION_CRON_SECRET is not set");
+    }
+    return json({ ok: false, error: "unauthorized" }, 401);
+  }
+
+  const config = deliveryConfig(getEnv);
 
   if (!config.enabled) {
     console.log(
@@ -44,13 +58,14 @@ Deno.serve(async () => {
     return json({ ok: true, ...summarize(false, 0, [], config.reason) });
   }
 
+  const claimToken = crypto.randomUUID();
   const { data: rows, error } = await supabase.rpc(
-    "pending_notification_emails",
-    { p_limit: BATCH_LIMIT },
+    "claim_notification_emails",
+    { p_claim_token: claimToken, p_limit: BATCH_LIMIT, p_lease_seconds: 300 },
   );
 
   if (error) {
-    console.error("pending_notification_emails failed:", error);
+    console.error("claim_notification_emails failed:", error);
     return json({ ok: false, error: "outbox_read_failed" }, 500);
   }
 
@@ -67,6 +82,7 @@ Deno.serve(async () => {
         headers: {
           "Authorization": `Bearer ${config.apiKey}`,
           "Content-Type": "application/json",
+          "Idempotency-Key": resendIdempotencyKey(row.id),
         },
         body: JSON.stringify(buildResendRequest(row, config.from)),
       });
@@ -92,13 +108,31 @@ Deno.serve(async () => {
   const deliveredIds = outcomes.filter((o) => o.ok).map((o) => o.id);
   if (deliveredIds.length > 0) {
     const { error: ackError } = await supabase.rpc(
-      "mark_notification_emails_delivered",
-      { p_ids: deliveredIds },
+      "ack_notification_email_claim",
+      { p_claim_token: claimToken, p_ids: deliveredIds },
     );
     if (ackError) {
-      // The rows stay pending and get retried; a duplicate send next run
-      // is the acceptable failure mode here, not a lost notification.
-      console.error("mark_notification_emails_delivered failed:", ackError);
+      // The lease eventually expires. Resend's stable Idempotency-Key makes
+      // a retry safe even if the provider accepted mail before this ack.
+      console.error("ack_notification_email_claim failed:", ackError);
+    }
+  }
+
+  const failed = outcomes.filter((o) => !o.ok);
+  if (failed.length > 0) {
+    const { error: releaseError } = await supabase.rpc(
+      "release_notification_email_claim",
+      {
+        p_claim_token: claimToken,
+        p_ids: failed.map((o) => o.id),
+        p_error: failed.map((o) => o.error ?? "unknown send failure").join(
+          "; ",
+        ),
+      },
+    );
+    if (releaseError) {
+      // A failed release delays retry only until the lease expires.
+      console.error("release_notification_email_claim failed:", releaseError);
     }
   }
 

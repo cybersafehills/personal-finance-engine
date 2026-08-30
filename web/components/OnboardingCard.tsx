@@ -27,6 +27,7 @@ export function OnboardingCard({ snapshot }: { snapshot: OnboardingSnapshot }) {
       <div
         className="h-1.5 overflow-hidden rounded-full bg-background"
         role="progressbar"
+        aria-label="Onboarding progress"
         aria-valuenow={doneCount}
         aria-valuemin={0}
         aria-valuemax={totalCount}

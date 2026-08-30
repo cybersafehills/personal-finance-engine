@@ -67,7 +67,10 @@ export function SourceItem({
   const isPrivate = source.visibilityMode === "personal_only";
 
   return (
-    <div className="flex flex-col gap-3 rounded-card border border-border-subtle bg-surface p-4">
+    <section
+      aria-label={`${source.displayName} source`}
+      className="flex flex-col gap-3 rounded-card border border-border-subtle bg-surface p-4"
+    >
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-sm font-medium text-text-primary">
           {source.displayName}
@@ -211,7 +214,7 @@ export function SourceItem({
           {errorMessage}
         </p>
       )}
-    </div>
+    </section>
   );
 }
 

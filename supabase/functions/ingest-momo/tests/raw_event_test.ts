@@ -34,6 +34,9 @@ Deno.test("buildRawFinancialEvent: sms evidence row, deduped on the normalized-m
     payloadHash: "abc123",
     deviceReceivedAt: "2026-08-27T09:16:00Z",
     ingestionConnectionId: "conn-1",
+    financialSourceId: "source-1",
+    connectorInstallationId: "install-1",
+    deviceCredentialId: "credential-1",
     momoMessageId: "msg-1",
     parserVersion: "momo-parser-v1.1",
     now: "2026-08-27T09:20:00Z",
@@ -42,6 +45,9 @@ Deno.test("buildRawFinancialEvent: sms evidence row, deduped on the normalized-m
   assertEquals(row.channel, "sms");
   assertEquals(row.payload_hash, "abc123");
   assertEquals(row.ingestion_connection_id, "conn-1");
+  assertEquals(row.financial_source_id, "source-1");
+  assertEquals(row.connector_installation_id, "install-1");
+  assertEquals(row.device_credential_id, "credential-1");
   assertEquals(row.parse_status, "pending");
   assertEquals(row.parser_version, "momo-parser-v1.1");
   // device time wins when present
@@ -56,6 +62,9 @@ Deno.test("buildRawFinancialEvent: falls back to the server clock when the devic
     payloadHash: "h",
     deviceReceivedAt: null,
     ingestionConnectionId: "conn-1",
+    financialSourceId: "source-1",
+    connectorInstallationId: "install-1",
+    deviceCredentialId: "credential-1",
     momoMessageId: "msg-1",
     parserVersion: "v",
     now: "2026-08-27T09:20:00Z",

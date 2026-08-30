@@ -109,5 +109,7 @@ test("the Shortcut setup guide renders the steps and the resolved endpoint", asy
   ).toHaveCount(0);
 
   // Sender is the placeholder until MOMO_SMS_SENDER is configured.
-  await expect(page.getByText(/MTN sender - confirm on device/)).toBeVisible();
+  await expect(
+    page.getByText("<MTN sender - confirm on device>", { exact: true }),
+  ).toBeVisible();
 });
