@@ -14,7 +14,10 @@ are encoded in `20261013000000_connector_model_stage_c_dual_write.sql`;
 durable service-only shadow-health counters are encoded in
 `20261014000000_connector_stage_c_shadow_health.sql`; the default-off Stage D
 canonical credential resolver is encoded in
-`20261017000000_connector_stage_d_canonical_auth.sql`.
+`20261017000000_connector_stage_d_canonical_auth.sql`; the additive
+multi-source discovery and deterministic route resolver are encoded in
+`20261018000000_connector_stage_d_multi_source_routing.sql`, with the adapter
+boundary in `supabase/functions/_shared/connector-adapter.ts`.
 Authentication and routing remain authoritative in `ingestion_connections`;
 Stage C verifies the equivalent canonical route and fails closed on drift, but
 does not cut reads over to the canonical model. Stage D remains gated on a
@@ -297,6 +300,29 @@ expiry.
 - Source sharing remains unchanged after connector/device changes.
 - Raw events retain legacy and canonical provenance throughout dual write.
 - Service-role resolvers reject missing or ambiguous scope.
+
+### Discovery and routing contract
+
+Adapters validate their provider response before calling
+`apply_connector_discovery`. Raw provider references are hashed at the adapter
+boundary; only stable `source_ref_hash` and source-scoped `account_ref_hash`
+values reach ordinary database metadata. Unknown fields are rejected so access
+tokens, balances, or raw payloads cannot be accidentally persisted there.
+Discovery is idempotent and may update display labels/masks, but a changed
+provider, type, or currency for an existing discriminator is an identity error,
+not an in-place mutation.
+
+`resolve_connector_event_route` applies the following precedence:
+
+1. An account-scoped credential always resolves to that account; conflicting
+   discriminators fail closed.
+2. An installation-wide credential may omit a source/account discriminator
+   only when exactly one active candidate exists at that step.
+3. Multiple active candidates require their stable hash discriminator. Masked
+   identifiers and display names are never routing keys.
+
+Both RPCs are service-role-only and remain unused by current production
+adapters until a provider integration is explicitly wired and released.
 
 ## Rejected alternatives
 

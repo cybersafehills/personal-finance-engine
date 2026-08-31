@@ -4519,6 +4519,113 @@ else
 fi
 rm -f $ARTIFACT_DIR/pfe_cmd_credential.log
 
+# ===========================================================================
+# Connector model Stage D: multi-source discovery + deterministic routing.
+# ===========================================================================
+echo "=== Connector model Stage D multi-source routing ==="
+
+CMS_PROVIDER_VOCAB="$(psql -d pfe_rls -t -A -c "select pg_get_constraintdef(oid) from pg_constraint where conrelid = 'public.accounts'::regclass and conname = 'accounts_provider_check';")"
+if [[ "$CMS_PROVIDER_VOCAB" == *"airtel_money"* ]] && [[ "$CMS_PROVIDER_VOCAB" == *"statement"* ]]; then
+  pass "Connector Stage D: account projections accept the canonical provider vocabulary"
+else
+  fail "Connector Stage D: account/source provider vocabularies remain inconsistent ($CMS_PROVIDER_VOCAB)"
+fi
+
+CMS_INSTALL="00000000-0000-4000-8000-000000000121"
+CMS_CREDENTIAL="00000000-0000-4000-8000-000000000122"
+CMS_SCOPED_CREDENTIAL="00000000-0000-4000-8000-000000000123"
+CMS_SOURCE_A="$(printf '1%.0s' {1..64})"
+CMS_SOURCE_B="$(printf '2%.0s' {1..64})"
+CMS_ACCOUNT_CURRENT="$(printf '3%.0s' {1..64})"
+CMS_ACCOUNT_SAVINGS="$(printf '4%.0s' {1..64})"
+CMS_ACCOUNT_BUSINESS="$(printf '5%.0s' {1..64})"
+CMS_DISCOVERY="[{\"source_ref_hash\":\"$CMS_SOURCE_A\",\"provider_key\":\"example_bank_rw\",\"provider\":\"bank\",\"source_type\":\"bank_account\",\"display_name\":\"Personal banking\",\"masked_identifier\":\"•••• 1001\",\"currency\":\"RWF\",\"accounts\":[{\"account_ref_hash\":\"$CMS_ACCOUNT_CURRENT\",\"display_name\":\"Current\",\"provider\":\"bank\",\"currency\":\"RWF\"},{\"account_ref_hash\":\"$CMS_ACCOUNT_SAVINGS\",\"display_name\":\"Savings\",\"provider\":\"bank\",\"currency\":\"RWF\"}]},{\"source_ref_hash\":\"$CMS_SOURCE_B\",\"provider_key\":\"example_bank_rw\",\"provider\":\"bank\",\"source_type\":\"bank_account\",\"display_name\":\"Business banking\",\"masked_identifier\":\"•••• 2002\",\"currency\":\"RWF\",\"accounts\":[{\"account_ref_hash\":\"$CMS_ACCOUNT_BUSINESS\",\"display_name\":\"Business current\",\"provider\":\"bank\",\"currency\":\"RWF\"}]}]"
+
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.connector_installations
+    (id, owner_user_id, home_workspace_id, connector_key, display_name,
+     status, auth_mode)
+  values
+    ('$CMS_INSTALL', '$USER_A', '$WORKSPACE_A', 'bank_open_api_v1',
+     'Multi-source bank', 'healthy', 'device_secret');
+  insert into public.device_credentials
+    (id, connector_installation_id, label, credential_hash, credential_prefix)
+  values
+    ('$CMS_CREDENTIAL', '$CMS_INSTALL', 'Bank event agent',
+     'cms-credential-hash', 'cms_cred');
+" >/dev/null
+
+CMS_FIRST="$(psql -d pfe_rls -t -A -c "set role service_role; select count(*) from public.apply_connector_discovery('$CMS_INSTALL', '$CMS_DISCOVERY'::jsonb);" | tail -1)"
+CMS_IDS_BEFORE="$(psql -d pfe_rls -t -A -c "select string_agg(fs.id || ':' || a.id, ',' order by fs.external_source_ref_hash, a.external_account_ref_hash) from public.financial_sources fs join public.accounts a on a.financial_source_id = fs.id where fs.connector_installation_id = '$CMS_INSTALL';")"
+CMS_SECOND="$(psql -d pfe_rls -t -A -c "set role service_role; select count(*) from public.apply_connector_discovery('$CMS_INSTALL', '$CMS_DISCOVERY'::jsonb);" | tail -1)"
+CMS_IDS_AFTER="$(psql -d pfe_rls -t -A -c "select string_agg(fs.id || ':' || a.id, ',' order by fs.external_source_ref_hash, a.external_account_ref_hash) from public.financial_sources fs join public.accounts a on a.financial_source_id = fs.id where fs.connector_installation_id = '$CMS_INSTALL';")"
+CMS_COUNTS="$(psql -d pfe_rls -t -A -c "select count(distinct fs.id) || '|' || count(a.id) from public.financial_sources fs join public.accounts a on a.financial_source_id = fs.id where fs.connector_installation_id = '$CMS_INSTALL';")"
+if [ "$CMS_FIRST" = "3" ] && [ "$CMS_SECOND" = "3" ] && [ "$CMS_COUNTS" = "2|3" ] && [ "$CMS_IDS_BEFORE" = "$CMS_IDS_AFTER" ]; then
+  pass "Connector Stage D: discovery idempotently materializes two sources and three stable accounts"
+else
+  fail "Connector Stage D: discovery identity/idempotence drifted (first=$CMS_FIRST second=$CMS_SECOND counts=$CMS_COUNTS)"
+fi
+
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; select public.resolve_connector_event_route('$CMS_CREDENTIAL');" >/dev/null 2>$ARTIFACT_DIR/pfe_cms_route.log; then
+  fail "Connector Stage D: unscoped credential guessed between multiple sources"
+else
+  pass "Connector Stage D: multiple sources require a stable source discriminator"
+fi
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; select public.resolve_connector_event_route('$CMS_CREDENTIAL', '$CMS_SOURCE_A');" >/dev/null 2>>$ARTIFACT_DIR/pfe_cms_route.log; then
+  fail "Connector Stage D: source discriminator guessed between multiple accounts"
+else
+  pass "Connector Stage D: multiple accounts require a stable account discriminator"
+fi
+
+CMS_BUSINESS_ROUTE="$(psql -d pfe_rls -t -A -c "set role service_role; select financial_source_id || '|' || account_id || '|' || workspace_id from public.resolve_connector_event_route('$CMS_CREDENTIAL', '$CMS_SOURCE_B');" | tail -1)"
+CMS_BUSINESS_EXPECTED="$(psql -d pfe_rls -t -A -c "select fs.id || '|' || a.id || '|' || a.workspace_id from public.financial_sources fs join public.accounts a on a.financial_source_id = fs.id where fs.connector_installation_id = '$CMS_INSTALL' and fs.external_source_ref_hash = '$CMS_SOURCE_B' and a.external_account_ref_hash = '$CMS_ACCOUNT_BUSINESS';")"
+CMS_SAVINGS_ROUTE="$(psql -d pfe_rls -t -A -c "set role service_role; select financial_source_id || '|' || account_id || '|' || workspace_id from public.resolve_connector_event_route('$CMS_CREDENTIAL', '$CMS_SOURCE_A', '$CMS_ACCOUNT_SAVINGS');" | tail -1)"
+CMS_SAVINGS_EXPECTED="$(psql -d pfe_rls -t -A -c "select fs.id || '|' || a.id || '|' || a.workspace_id from public.financial_sources fs join public.accounts a on a.financial_source_id = fs.id where fs.connector_installation_id = '$CMS_INSTALL' and fs.external_source_ref_hash = '$CMS_SOURCE_A' and a.external_account_ref_hash = '$CMS_ACCOUNT_SAVINGS';")"
+if [ "$CMS_BUSINESS_ROUTE" = "$CMS_BUSINESS_EXPECTED" ] && [ "$CMS_SAVINGS_ROUTE" = "$CMS_SAVINGS_EXPECTED" ]; then
+  pass "Connector Stage D: unique and explicitly discriminated routes resolve deterministically"
+else
+  fail "Connector Stage D: deterministic routes drifted (business=$CMS_BUSINESS_ROUTE savings=$CMS_SAVINGS_ROUTE)"
+fi
+
+CMS_CURRENT_ID="$(psql -d pfe_rls -t -A -c "select a.id from public.accounts a join public.financial_sources fs on fs.id = a.financial_source_id where fs.connector_installation_id = '$CMS_INSTALL' and fs.external_source_ref_hash = '$CMS_SOURCE_A' and a.external_account_ref_hash = '$CMS_ACCOUNT_CURRENT';")"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.device_credentials (id, connector_installation_id, account_id, label, credential_hash, credential_prefix) values ('$CMS_SCOPED_CREDENTIAL', '$CMS_INSTALL', '$CMS_CURRENT_ID', 'Current-only agent', 'cms-scoped-hash', 'cms_scope');" >/dev/null
+CMS_SCOPED_ROUTE="$(psql -d pfe_rls -t -A -c "set role service_role; select account_id from public.resolve_connector_event_route('$CMS_SCOPED_CREDENTIAL');" | tail -1)"
+if [ "$CMS_SCOPED_ROUTE" = "$CMS_CURRENT_ID" ]; then
+  pass "Connector Stage D: least-privilege credential scope resolves without client routing input"
+else
+  fail "Connector Stage D: scoped credential did not resolve its bound account"
+fi
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; select public.resolve_connector_event_route('$CMS_SCOPED_CREDENTIAL', '$CMS_SOURCE_B', '$CMS_ACCOUNT_BUSINESS');" >/dev/null 2>>$ARTIFACT_DIR/pfe_cms_route.log; then
+  fail "Connector Stage D: scoped credential accepted a conflicting discriminator"
+else
+  pass "Connector Stage D: scoped credentials reject conflicting source/account discriminators"
+fi
+
+CMS_UNSAFE="[{\"source_ref_hash\":\"$CMS_SOURCE_A\",\"provider_key\":\"example_bank_rw\",\"provider\":\"bank\",\"source_type\":\"bank_account\",\"display_name\":\"Unsafe\",\"currency\":\"RWF\",\"access_token\":\"secret\",\"accounts\":[]}]"
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; select public.apply_connector_discovery('$CMS_INSTALL', '$CMS_UNSAFE'::jsonb);" >/dev/null 2>>$ARTIFACT_DIR/pfe_cms_route.log; then
+  fail "Connector Stage D: discovery accepted an unknown secret-bearing field"
+else
+  pass "Connector Stage D: discovery rejects unknown fields instead of storing provider secrets"
+fi
+
+CMS_CROSS_INSTALL="[{\"source_ref_hash\":\"$CMS_SOURCE_A\",\"provider_key\":\"example_bank_rw\",\"provider\":\"bank\",\"source_type\":\"bank_account\",\"display_name\":\"Tenant B banking\",\"masked_identifier\":\"•••• 1001\",\"currency\":\"RWF\",\"accounts\":[{\"account_ref_hash\":\"$CMS_ACCOUNT_CURRENT\",\"display_name\":\"Tenant B current\",\"provider\":\"bank\",\"currency\":\"RWF\"}]}]"
+CMS_CROSS_APPLIED="$(psql -d pfe_rls -t -A -c "set role service_role; select count(*) from public.apply_connector_discovery('$CMA_INSTALL_B', '$CMS_CROSS_INSTALL'::jsonb);" | tail -1)"
+CMS_CROSS_COUNT="$(psql -d pfe_rls -t -A -c "select count(*) from public.financial_sources where external_source_ref_hash = '$CMS_SOURCE_A' and connector_installation_id in ('$CMS_INSTALL', '$CMA_INSTALL_B');")"
+if [ "$CMS_CROSS_APPLIED" = "1" ] && [ "$CMS_CROSS_COUNT" = "2" ]; then
+  pass "Connector Stage D: identical provider references coexist in separate installations"
+else
+  fail "Connector Stage D: installation-scoped provider identity collapsed across tenants"
+fi
+rm -f $ARTIFACT_DIR/pfe_cms_route.log
+
+CMS_ACL="$(psql -d pfe_rls -t -A -c "select has_function_privilege('service_role', 'public.apply_connector_discovery(uuid,jsonb)', 'execute') || '|' || has_function_privilege('authenticated', 'public.apply_connector_discovery(uuid,jsonb)', 'execute') || '|' || has_function_privilege('anon', 'public.apply_connector_discovery(uuid,jsonb)', 'execute') || '|' || has_function_privilege('service_role', 'public.resolve_connector_event_route(uuid,text,text)', 'execute') || '|' || has_function_privilege('authenticated', 'public.resolve_connector_event_route(uuid,text,text)', 'execute') || '|' || has_function_privilege('anon', 'public.resolve_connector_event_route(uuid,text,text)', 'execute');")"
+if [ "$CMS_ACL" = "true|false|false|true|false|false" ] || [ "$CMS_ACL" = "t|f|f|t|f|f" ]; then
+  pass "Connector Stage D: discovery and routing RPCs are service-role-only"
+else
+  fail "Connector Stage D: discovery/routing RPC grants are incorrect ($CMS_ACL)"
+fi
+
 # Phase V PR4b: visible_source_ids_for_user - the auth.uid()-free source
 # visibility the scheduled-report generator uses for household members.
 # Fresh household V4_HH: USER_A owner, USER_R member; V4_SRC_A (USER_A's,
