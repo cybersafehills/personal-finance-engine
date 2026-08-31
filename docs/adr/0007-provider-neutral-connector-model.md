@@ -329,8 +329,14 @@ not an in-place mutation.
 
 Both RPCs are service-role-only. `mtn_momo_sms_v1` now produces discovery and
 event discriminators through the same domain-separated hash contract. Its live
-event-route RPC remains dormant unless the provider-specific rollout flag is
-explicitly enabled. Existing account-scoped credentials need no client
+event-route RPC remains dormant unless the provider-specific rollout flag and
+the exact installation's service-only canary row are both enabled. Initial
+pairing accepts hashes only, attaches them to the existing legacy-backed
+source/account in one transaction, verifies the deterministic route, and
+requires the installation owner to be a platform admin. It allows only one
+enabled installation per connector key. Five clean post-enable
+matches are required before the redacted status projection declares the canary
+ready for broader rollout. Existing account-scoped credentials need no client
 discriminator; if a future unscoped device supplies raw source and account
 references, the adapter hashes them in memory and the resolver rejects missing,
 unknown, ambiguous, or conflicting routes before evidence is written.

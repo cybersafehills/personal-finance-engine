@@ -50,8 +50,10 @@ contains no SMS payloads or credentials. Telemetry writes are best-effort and
 never change whether ingestion accepts or rejects a request.
 
 The first provider-neutral runtime adapter is also default-off. Setting the
-Edge Function secret `ONELEDGER_MTN_MOMO_ADAPTER=enabled` activates it only for
-installations whose canonical `connector_key` is `mtn_momo_sms_v1`. The server
+Edge Function secret `ONELEDGER_MTN_MOMO_ADAPTER=enabled` opens only the coarse
+provider gate. Routing activates only when the exact canonical installation is
+also enabled in `connector_adapter_canaries` and its `connector_key` is
+`mtn_momo_sms_v1`. The server
 then wraps the existing request in a versioned event envelope and resolves the
 credential/source/account through `resolve_connector_event_route` before any
 SMS evidence is written. The result must exactly match the existing canonical
@@ -66,6 +68,18 @@ Each enabled adapter check also updates the service-only
 `connector_adapter_route_health` aggregate with a match, mismatch, resolver
 error, or envelope error. It stores no SMS payload, raw reference, account ID,
 or credential material and is best-effort, so telemetry cannot change routing.
+
+The installation allowlist begins empty. Settings → Connections offers the
+platform admin who owns the controlled installation an MFA-gated MTN pairing
+form. The MSISDN is normalized and domain-separated
+hashed in the application server; only source/account hashes and a four-digit
+display mask reach the database. The pairing transaction updates the existing
+source/account identity, verifies the resolved route against the legacy-backed
+canonical mapping, and only then enables that installation. It never inserts a
+second source or account. A canary is ready for broader rollout only after five
+post-enable matches and zero mismatch, resolver-error, or envelope-error
+observations. Pause the canary from the same screen for immediate rollback;
+paired identity remains intact.
 
 Before the Stage D read cutover, operators must verify a representative window
 with at least one successful canonical match for every active connection and no

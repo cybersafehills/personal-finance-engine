@@ -832,27 +832,61 @@ export type IngestionConnectionRow = {
   created_at: string;
   account_id: string;
   account_name: string;
+  connector_installation_id: string | null;
+  adapter_canary: ConnectorAdapterCanaryStatus | null;
+};
+
+export type ConnectorAdapterCanaryStatus = {
+  enabled: boolean;
+  paired_at: string;
+  enabled_at: string | null;
+  observation_count: number;
+  match_count: number;
+  mismatch_count: number;
+  resolver_error_count: number;
+  envelope_error_count: number;
+  ready_for_broader_rollout: boolean;
 };
 
 export async function getIngestionConnections(): Promise<
   IngestionConnectionRow[]
 > {
   const supabase = await supabaseSession();
-  const { data, error } = await supabase
-    .from("ingestion_connections")
-    .select(
-      // Two FKs link ingestion_connections to accounts (the plain account_id
-      // one, and the composite ingestion_connections_account_same_workspace
-      // one used only to guarantee same-workspace routing at the database
-      // level) - the embed must name the single-column FK explicitly or
-      // PostgREST cannot pick one automatically.
-      "id, label, provider, status, credential_prefix, last_used_at, paused_at, created_at, account_id, accounts!ingestion_connections_account_id_fkey(name)",
-    )
-    .order("created_at", { ascending: true });
+  const [connectionResult, canaryResult] = await Promise.all([
+    supabase
+      .from("ingestion_connections")
+      .select(
+        // Two FKs link ingestion_connections to accounts (the plain account_id
+        // one, and the composite ingestion_connections_account_same_workspace
+        // one used only to guarantee same-workspace routing at the database
+        // level) - the embed must name the single-column FK explicitly or
+        // PostgREST cannot pick one automatically.
+        "id, label, provider, status, credential_prefix, last_used_at, paused_at, created_at, account_id, connector_installation_id, accounts!ingestion_connections_account_id_fkey(name)",
+      )
+      .order("created_at", { ascending: true }),
+    supabase.rpc("get_connector_adapter_canary_status"),
+  ]);
+
+  const { data, error } = connectionResult;
 
   if (error) {
     console.error("getIngestionConnections failed:", error.message);
     return [];
+  }
+
+  if (canaryResult.error) {
+    console.error(
+      "getConnectorAdapterCanaryStatus failed:",
+      canaryResult.error.message,
+    );
+  }
+
+  const canaries = new Map<string, ConnectorAdapterCanaryStatus>();
+  for (const row of canaryResult.data ?? []) {
+    const status = row as ConnectorAdapterCanaryStatus & {
+      connector_installation_id: string;
+    };
+    canaries.set(status.connector_installation_id, status);
   }
 
   return (data ?? []).map((row) => {
@@ -868,6 +902,10 @@ export async function getIngestionConnections(): Promise<
       created_at: row.created_at,
       account_id: row.account_id,
       account_name: account?.name ?? "Unknown account",
+      connector_installation_id: row.connector_installation_id,
+      adapter_canary: row.connector_installation_id
+        ? canaries.get(row.connector_installation_id) ?? null
+        : null,
     };
   });
 }

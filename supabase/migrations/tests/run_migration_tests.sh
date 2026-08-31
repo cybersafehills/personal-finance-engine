@@ -618,7 +618,9 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # RLS-enabled aggregate table - 76 tables, 75 with RLS.
 # Connector adapter route health (20261019000000) adds one service-only,
 # RLS-enabled aggregate table - 77 tables, 76 with RLS.
-if [ "$TABLE_COUNT" = "77" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Connector adapter canaries (20261020000000) adds one service-only,
+# RLS-enabled installation allowlist - 78 tables, 77 with RLS.
+if [ "$TABLE_COUNT" = "78" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -851,12 +853,13 @@ fi
 # Connector Stage C (20261013000000) adds the authenticated atomic
 # create_ingestion_connection_dual_write RPC. Its sync trigger and canonical
 # shadow resolver are internal/service-role-only. Stage D adds four
-# authenticated canonical lifecycle/credential RPCs. = 81.
+# authenticated canonical lifecycle/credential RPCs. = 81. The installation
+# canary adds pairing, kill-switch, and redacted status RPCs. = 84.
 AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname = 'authenticated' where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "81" ]; then
-  pass "authenticated holds EXECUTE on exactly the 81 functions expected, no more"
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "84" ]; then
+  pass "authenticated holds EXECUTE on exactly the 84 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 81 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 84 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -4649,6 +4652,70 @@ if [ "$CMS_ADAPTER_ACL" = "true|false|false|true|false|false" ] || [ "$CMS_ADAPT
 else
   fail "Connector adapter: rollout health privileges are incorrect ($CMS_ADAPTER_ACL)"
 fi
+
+# Installation-scoped MTN canary: pair hashes onto the existing dual-write
+# route, prove deterministic resolution, then evaluate only post-enable health.
+CANARY_SOURCE="00000000-0000-4000-8000-000000000131"
+CANARY_ACCOUNT="00000000-0000-4000-8000-000000000132"
+CANARY_SOURCE_HASH="$(printf '6%.0s' {1..64})"
+CANARY_ACCOUNT_HASH="$(printf '7%.0s' {1..64})"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.financial_sources
+    (id, owner_user_id, provider, source_type, display_name, currency)
+  values ('$CANARY_SOURCE', '$USER_A', 'mtn_momo', 'mobile_money',
+    'Canary MTN source', 'RWF');
+  insert into public.accounts
+    (id, workspace_id, financial_source_id, name, provider, currency)
+  values ('$CANARY_ACCOUNT', '$WORKSPACE_A', '$CANARY_SOURCE',
+    'Canary MTN account', 'mtn_momo', 'RWF');
+" >/dev/null
+CANARY_CONNECTION="$(as_user "$USER_A" "select public.create_ingestion_connection_dual_write('$WORKSPACE_A', '$CANARY_ACCOUNT', 'Canary phone', 'mtn_momo', 'canary-credential-hash', 'canary_p');")"
+if as_user_aal "$USER_A" "aal2" "select public.pair_mtn_momo_adapter_canary('$CANARY_CONNECTION', '$CANARY_SOURCE_HASH', '$CANARY_ACCOUNT_HASH', 'MTN MoMo •••• 0001');" >/dev/null 2>$ARTIFACT_DIR/pfe_canary_admin.log; then
+  fail "Connector adapter canary: a non-platform-admin owner occupied the controlled canary slot"
+else
+  pass "Connector adapter canary: pairing is restricted to the platform admin who owns the controlled installation"
+fi
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; update public.profiles set is_platform_admin = true where id = '$USER_A';" >/dev/null
+CANARY_INSTALL="$(as_user_aal "$USER_A" "aal2" "select public.pair_mtn_momo_adapter_canary('$CANARY_CONNECTION', '$CANARY_SOURCE_HASH', '$CANARY_ACCOUNT_HASH', 'MTN MoMo •••• 0001');")"
+CANARY_BOUND="$(psql -d pfe_rls -t -A -c "select (fs.external_source_ref_hash = '$CANARY_SOURCE_HASH') || '|' || (a.external_account_ref_hash = '$CANARY_ACCOUNT_HASH') || '|' || canary.enabled from public.financial_sources fs join public.accounts a on a.financial_source_id = fs.id join public.connector_adapter_canaries canary on canary.connector_installation_id = fs.connector_installation_id where fs.id = '$CANARY_SOURCE';")"
+if [ "$CANARY_BOUND" = "true|true|true" ] || [ "$CANARY_BOUND" = "t|t|t" ]; then
+  pass "Connector adapter canary: owner pairing binds hashes onto the existing route and enables only its installation"
+else
+  fail "Connector adapter canary: pairing did not bind the existing route ($CANARY_BOUND)"
+fi
+
+CANARY_CREDENTIAL="$(psql -d pfe_rls -t -A -c "select device_credential_id from public.ingestion_connections where id = '$CANARY_CONNECTION';")"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  select public.record_connector_adapter_route_observation('$CANARY_CREDENTIAL', 'match');
+  select public.record_connector_adapter_route_observation('$CANARY_CREDENTIAL', 'match');
+  select public.record_connector_adapter_route_observation('$CANARY_CREDENTIAL', 'match');
+  select public.record_connector_adapter_route_observation('$CANARY_CREDENTIAL', 'match');
+  select public.record_connector_adapter_route_observation('$CANARY_CREDENTIAL', 'match');
+" >/dev/null
+CANARY_STATUS="$(as_user "$USER_A" "select observation_count || '|' || match_count || '|' || mismatch_count || '|' || ready_for_broader_rollout from public.get_connector_adapter_canary_status() where connector_installation_id = '$CANARY_INSTALL';")"
+if [ "$CANARY_STATUS" = "5|5|0|true" ] || [ "$CANARY_STATUS" = "5|5|0|t" ]; then
+  pass "Connector adapter canary: five clean post-enable matches satisfy the broader-rollout evidence gate"
+else
+  fail "Connector adapter canary: health evaluation drifted ($CANARY_STATUS)"
+fi
+
+as_user_aal "$USER_A" "aal2" "select public.set_connector_adapter_canary_enabled('$CANARY_INSTALL', false);" >/dev/null
+CANARY_DISABLED="$(psql -d pfe_rls -t -A -c "select not enabled and disabled_at is not null from public.connector_adapter_canaries where connector_installation_id = '$CANARY_INSTALL';")"
+if [ "$CANARY_DISABLED" = "true" ] || [ "$CANARY_DISABLED" = "t" ]; then
+  pass "Connector adapter canary: owner kill switch disables routing without removing paired identity"
+else
+  fail "Connector adapter canary: kill switch failed ($CANARY_DISABLED)"
+fi
+
+CANARY_ACL="$(psql -d pfe_rls -t -A -c "select has_table_privilege('service_role', 'public.connector_adapter_canaries', 'select') || '|' || has_table_privilege('authenticated', 'public.connector_adapter_canaries', 'select') || '|' || has_table_privilege('anon', 'public.connector_adapter_canaries', 'select') || '|' || has_function_privilege('authenticated', 'public.pair_mtn_momo_adapter_canary(uuid,text,text,text)', 'execute') || '|' || has_function_privilege('anon', 'public.pair_mtn_momo_adapter_canary(uuid,text,text,text)', 'execute') || '|' || has_function_privilege('authenticated', 'public.get_connector_adapter_canary_status()', 'execute');")"
+if [ "$CANARY_ACL" = "true|false|false|true|false|true" ] || [ "$CANARY_ACL" = "t|f|f|t|f|t" ]; then
+  pass "Connector adapter canary: allowlist is service-only while owner workflows use narrow authenticated RPCs"
+else
+  fail "Connector adapter canary: privileges are incorrect ($CANARY_ACL)"
+fi
+rm -f $ARTIFACT_DIR/pfe_canary_admin.log
 
 # Phase V PR4b: visible_source_ids_for_user - the auth.uid()-free source
 # visibility the scheduled-report generator uses for household members.

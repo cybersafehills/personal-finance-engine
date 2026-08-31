@@ -27,14 +27,26 @@ transactions, and classifies merchants via `merchant_rules`.
 ## Provider-adapter rollout
 
 `ONELEDGER_MTN_MOMO_ADAPTER=enabled` is an exact-match, default-off Edge
-Function flag. When enabled, and only for an installation whose canonical
-connector key is `mtn_momo_sms_v1`, `index.ts` builds a provider event envelope
-and calls `resolve_connector_event_route` before storing evidence. The returned
-installation, credential, source, account, and workspace must all equal the
-existing shadow route. Any resolver error or mismatch fails closed. The
-service-only `connector_adapter_route_health` table records redacted aggregate
-outcomes so an operator can judge the rollout without inspecting SMS payloads or
-credentials; telemetry failures never alter the request result.
+Function emergency switch. It is necessary but not sufficient: the canonical
+installation must also have an enabled row in the service-only
+`connector_adapter_canaries` allowlist. When both gates pass, and only for an
+installation whose connector key is `mtn_momo_sms_v1`, `index.ts` builds a
+provider event envelope and calls `resolve_connector_event_route` before storing
+evidence. The returned installation, credential, source, account, and workspace
+must all equal the existing shadow route. Any resolver error or mismatch fails
+closed. The service-only `connector_adapter_route_health` table records redacted
+aggregate outcomes so an operator can judge the rollout without inspecting SMS
+payloads or credentials; telemetry failures never alter the request result.
+
+The platform admin who owns the controlled installation starts its canary from
+Settings → Connections by entering the MTN MSISDN. The server normalizes and
+hashes it before invoking the owner/MFA-gated pairing RPC; the database receives
+no raw MSISDN. Pairing binds the hashes to the source/account already backing
+that dual-write connection, proves that the deterministic route is unchanged,
+and enables only that installation. The status projection counts observations
+since the latest enable and requires five matches with zero failures before
+reporting broader rollout readiness. The same screen provides an immediate
+installation kill switch.
 
 The adapter's discovery snapshot requires a validated Rwanda MSISDN, safe
 display labels, and a masked identifier containing at most four digits. Raw
