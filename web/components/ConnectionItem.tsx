@@ -14,6 +14,7 @@ import { ConnectionDetails, ShortcutKeyInstructions } from "./ConnectionDetails"
 import { ConnectionReadinessProbe } from "./ConnectionReadinessProbe";
 import { formatDateTime } from "../lib/format";
 import type { IngestionConnectionRow } from "../lib/queries";
+import { MtnMomoCanaryPanel } from "./MtnMomoCanaryPanel";
 
 const PROVIDER_LABELS: Record<string, string> = {
   mtn_momo: "MTN MoMo",
@@ -48,9 +49,11 @@ function connectionStatus(
 export function ConnectionItem({
   connection,
   ingestEndpointUrl,
+  canManageAdapterCanary,
 }: {
   connection: IngestionConnectionRow;
   ingestEndpointUrl: string | null;
+  canManageAdapterCanary: boolean;
 }) {
   const [confirmingRevoke, setConfirmingRevoke] = useState(false);
   const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
@@ -119,6 +122,15 @@ export function ConnectionItem({
 
       {connection.status === "active" && !connection.last_used_at && (
         <ConnectionReadinessProbe connectionId={connection.id} />
+      )}
+
+      {canManageAdapterCanary && connection.provider === "mtn_momo" &&
+        !isRevoked && (
+        <MtnMomoCanaryPanel
+          connectionId={connection.id}
+          connectorInstallationId={connection.connector_installation_id}
+          canary={connection.adapter_canary}
+        />
       )}
 
       {isPaused && !renaming && (

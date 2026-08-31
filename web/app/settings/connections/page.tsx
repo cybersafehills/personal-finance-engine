@@ -11,6 +11,7 @@ import { ConnectionItem } from "../../../components/ConnectionItem";
 import { CreateConnectionForm } from "../../../components/CreateConnectionForm";
 import { ConnectorInstallationItem } from "../../../components/ConnectorInstallationItem";
 import { canonicalConnectionsUiEnabled } from "../../../lib/connector-ui-mode";
+import { isPlatformAdmin } from "../../../lib/pay/admin";
 
 export const dynamic = "force-dynamic";
 
@@ -23,12 +24,20 @@ export default async function ConnectionsPage() {
   const canonicalPreviewEnabled = canonicalConnectionsUiEnabled(
     process.env.ONELEDGER_CANONICAL_CONNECTIONS_UI,
   );
-  const [connections, canonicalInstallations, accounts] = await Promise.all([
-    canonicalPreviewEnabled ? Promise.resolve([]) : getIngestionConnections(),
+  const [
+    connections,
+    canonicalInstallations,
+    accounts,
+    canManageAdapterCanary,
+  ] = await Promise.all([
+    canonicalPreviewEnabled
+      ? Promise.resolve([])
+      : getIngestionConnections(),
     canonicalPreviewEnabled
       ? getCanonicalConnectorInstallations()
       : Promise.resolve([]),
     getAccounts(),
+    isPlatformAdmin(),
   ]);
   const activeAccounts = accounts.filter((account) => account.is_active);
 
@@ -85,6 +94,7 @@ export default async function ConnectionsPage() {
                 key={connection.id}
                 connection={connection}
                 ingestEndpointUrl={ingestEndpointUrl}
+                canManageAdapterCanary={canManageAdapterCanary}
               />
             ))
           )

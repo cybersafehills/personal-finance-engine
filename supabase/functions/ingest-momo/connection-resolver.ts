@@ -123,6 +123,12 @@ export function mtnMomoAdapterEnabled(value: string | undefined): boolean {
   return value === "enabled";
 }
 
+export function installationAdapterCanaryEnabled(
+  row: { enabled: boolean } | null,
+): boolean {
+  return row?.enabled === true;
+}
+
 export function acceptDeterministicEventRoute(
   connection: IngestionConnectionRow,
   canonicalRoute: CanonicalShadowRoute,

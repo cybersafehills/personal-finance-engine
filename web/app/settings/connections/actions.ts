@@ -5,6 +5,7 @@ import { supabaseSession } from "../../../lib/supabase-session-server";
 import { getActiveWorkspaceId } from "../../../lib/queries";
 import { generateIngestionCredential } from "../../../lib/credentials";
 import { requireMfaForSensitiveAction } from "../../../lib/auth/assurance";
+import { buildMtnMomoPairingIdentity } from "../../../lib/mtn-momo-pairing";
 
 export type CreateConnectionResult =
   | { ok: true; secret: string }
@@ -13,6 +14,62 @@ export type CreateConnectionResult =
 export type ConnectionActionResult =
   | { ok: true }
   | { ok: false; error: string };
+
+export async function pairMtnMomoAdapterCanary(
+  connectionId: string,
+  msisdn: string,
+): Promise<ConnectionActionResult> {
+  await requireMfaForSensitiveAction("/settings/connections");
+
+  let identity: Awaited<ReturnType<typeof buildMtnMomoPairingIdentity>>;
+  try {
+    identity = await buildMtnMomoPairingIdentity(msisdn);
+  } catch {
+    return { ok: false, error: "Enter a valid Rwanda MTN mobile number." };
+  }
+
+  const supabase = await supabaseSession();
+  const { error } = await supabase.rpc("pair_mtn_momo_adapter_canary", {
+    p_ingestion_connection_id: connectionId,
+    p_source_ref_hash: identity.sourceRefHash,
+    p_account_ref_hash: identity.accountRefHash,
+    p_masked_identifier: identity.maskedIdentifier,
+  });
+
+  if (error) {
+    return {
+      ok: false,
+      error: error.message.includes("adapter_canary_slot_unavailable")
+        ? "Another MTN installation is already using the canary slot."
+        : "Could not pair this MTN installation for canary routing.",
+    };
+  }
+
+  revalidatePath("/settings/connections");
+  return { ok: true };
+}
+
+export async function setMtnMomoAdapterCanaryEnabled(
+  connectorInstallationId: string,
+  enabled: boolean,
+): Promise<ConnectionActionResult> {
+  await requireMfaForSensitiveAction("/settings/connections");
+  const supabase = await supabaseSession();
+  const { error } = await supabase.rpc(
+    "set_connector_adapter_canary_enabled",
+    {
+      p_connector_installation_id: connectorInstallationId,
+      p_enabled: enabled,
+    },
+  );
+
+  if (error) {
+    return { ok: false, error: "Could not update the MTN canary." };
+  }
+
+  revalidatePath("/settings/connections");
+  return { ok: true };
+}
 
 /**
  * Creates a new ingestion connection, permanently bound to accountId at

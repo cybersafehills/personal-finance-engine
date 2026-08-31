@@ -17,6 +17,7 @@ import {
   type CanonicalShadowRow,
   type DeterministicEventRouteRow,
   type IngestionConnectionRow,
+  installationAdapterCanaryEnabled,
   mtnMomoAdapterEnabled,
   resolveAccountRoute,
 } from "./connection-resolver.ts";
@@ -268,6 +269,32 @@ Deno.serve(async (req: Request) => {
       }
       useMtnMomoAdapter = installation.connector_key ===
         MTN_MOMO_SMS_CONNECTOR_KEY;
+
+      if (useMtnMomoAdapter) {
+        const { data: canary, error: canaryError } = await supabase
+          .from("connector_adapter_canaries")
+          .select("enabled")
+          .eq(
+            "connector_installation_id",
+            canonicalRoute.connectorInstallationId,
+          )
+          .maybeSingle();
+
+        if (canaryError) {
+          await recordAdapterRouteObservation(
+            canonicalRoute.deviceCredentialId,
+            "resolver_error",
+            "adapter_canary_lookup_failed",
+          );
+          console.error(JSON.stringify({
+            event: "provider_adapter_canary_lookup_failed",
+            connection_suffix: connection.id.slice(-8),
+          }));
+          return jsonResponse({ ok: false, error: "routing_mismatch" }, 409);
+        }
+
+        useMtnMomoAdapter = installationAdapterCanaryEnabled(canary);
+      }
     }
 
     // ========================================================

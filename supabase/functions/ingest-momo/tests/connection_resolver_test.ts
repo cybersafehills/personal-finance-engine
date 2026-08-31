@@ -14,6 +14,7 @@ import {
   authenticateCredential,
   canonicalIngestionEnabled,
   type IngestionConnectionRow,
+  installationAdapterCanaryEnabled,
   mtnMomoAdapterEnabled,
   resolveAccountRoute,
 } from "../connection-resolver.ts";
@@ -76,6 +77,12 @@ Deno.test("mtnMomoAdapterEnabled: provider rollout is exact-match and default-of
   assertEquals(mtnMomoAdapterEnabled("ENABLED"), false);
   assertEquals(mtnMomoAdapterEnabled("true"), false);
   assertEquals(mtnMomoAdapterEnabled(undefined), false);
+});
+
+Deno.test("installationAdapterCanaryEnabled: only an explicit enabled row activates an installation", () => {
+  assertEquals(installationAdapterCanaryEnabled(null), false);
+  assertEquals(installationAdapterCanaryEnabled({ enabled: false }), false);
+  assertEquals(installationAdapterCanaryEnabled({ enabled: true }), true);
 });
 
 Deno.test("acceptCanonicalShadow: accepts only an exact canonical mirror", () => {
