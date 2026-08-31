@@ -11,7 +11,7 @@
 --     service-role, cron-secret gated) - there is NO authenticated/anon
 --     access. It is an ops surface, not a user-facing one.
 
-create table public.email_send_log (
+create table if not exists public.email_send_log (
   id uuid primary key default gen_random_uuid(),
   created_at timestamptz not null default now(),
   -- 'sent' = provider accepted it; 'skipped' = provider not configured;
@@ -28,9 +28,9 @@ create table public.email_send_log (
 comment on table public.email_send_log is
   'Ops audit of transactional-email attempts (lib/emails.ts). Recipient DOMAIN only, no address/subject/body. service_role-only: written by lib/email-log.ts, read by GET /api/admin/email-log. Never user-facing.';
 
-create index idx_email_send_log_created
+create index if not exists idx_email_send_log_created
   on public.email_send_log (created_at desc);
-create index idx_email_send_log_outcome_created
+create index if not exists idx_email_send_log_outcome_created
   on public.email_send_log (outcome, created_at desc);
 
 alter table public.email_send_log enable row level security;
