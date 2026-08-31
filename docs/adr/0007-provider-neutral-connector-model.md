@@ -248,6 +248,10 @@ production window and verified pause/rotate/revoke behavior.
 
 - Move settings/health UI to connector installations and their discovered
   sources/accounts.
+- Route reversible installation pause/resume and rename through owner-scoped
+  canonical RPCs that atomically maintain Stage C compatibility rows. An
+  installation pause records which credentials it paused so resume never
+  reactivates a credential paused independently.
 - Permit adapters to discover multiple sources and accounts.
 - Require an explicit selection or deterministic provider discriminator when
   more than one route exists.
