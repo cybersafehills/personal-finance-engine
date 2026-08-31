@@ -14,6 +14,14 @@ import {
 } from "./budget-math";
 import { findTransferCandidates, TransferCandidateTransaction } from "./transfer-detection";
 import { lastNCompleteMonthKeys } from "./budget-math";
+import {
+  buildCanonicalConnectorReadModel,
+  type CanonicalConnectorInstallation,
+  type ConnectorAccountRecord,
+  type ConnectorInstallationRecord,
+  type ConnectorSourceRecord,
+  type DeviceCredentialRecord,
+} from "./connector-read-model";
 
 // Every function here queries through the session-authenticated Supabase
 // client (lib/supabase-session-server.ts), never the service-role one -
@@ -861,6 +869,92 @@ export async function getIngestionConnections(): Promise<
       account_id: row.account_id,
       account_name: account?.name ?? "Unknown account",
     };
+  });
+}
+
+/**
+ * Stage D canonical settings projection. This is intentionally not wired to
+ * the live Connections page yet: Stage C production observations remain the
+ * cutover gate. It proves the canonical model can represent one installation
+ * with multiple sources/accounts and multiple independently scoped device
+ * credentials without reading legacy ingestion_connections.
+ */
+export async function getCanonicalConnectorInstallations(): Promise<
+  CanonicalConnectorInstallation[]
+> {
+  const supabase = await supabaseSession();
+  const { data: installationData, error: installationError } = await supabase
+    .from("connector_installations")
+    .select(
+      "id, connector_key, display_name, status, auth_mode, last_attempt_at, last_success_at, last_error_code, revoked_at, created_at",
+    )
+    .order("created_at", { ascending: true });
+
+  if (installationError) {
+    console.error(
+      "getCanonicalConnectorInstallations failed:",
+      installationError.message,
+    );
+    return [];
+  }
+
+  const installations = (installationData ?? []) as ConnectorInstallationRecord[];
+  if (installations.length === 0) return [];
+  const installationIds = installations.map((installation) => installation.id);
+
+  const [sourceResult, credentialResult] = await Promise.all([
+    supabase
+      .from("financial_sources")
+      .select(
+        "id, connector_installation_id, provider, provider_key, source_type, display_name, masked_identifier, currency, status, created_at",
+      )
+      .in("connector_installation_id", installationIds)
+      .order("created_at", { ascending: true }),
+    supabase
+      .from("device_credentials")
+      .select(
+        "id, connector_installation_id, account_id, label, credential_prefix, status, last_used_at, expires_at, rotated_from_id, created_at, paused_at, revoked_at",
+      )
+      .in("connector_installation_id", installationIds)
+      .order("created_at", { ascending: true }),
+  ]);
+
+  if (sourceResult.error || credentialResult.error) {
+    console.error(
+      "getCanonicalConnectorInstallations relations failed:",
+      sourceResult.error?.message ?? credentialResult.error?.message,
+    );
+    return [];
+  }
+
+  const sources = (sourceResult.data ?? []) as ConnectorSourceRecord[];
+  const sourceIds = sources.map((source) => source.id);
+  let accounts: ConnectorAccountRecord[] = [];
+
+  if (sourceIds.length > 0) {
+    const { data: accountData, error: accountError } = await supabase
+      .from("accounts")
+      .select(
+        "id, financial_source_id, workspace_id, name, provider, currency, is_active, is_primary, archived_at, created_at",
+      )
+      .in("financial_source_id", sourceIds)
+      .order("created_at", { ascending: true });
+
+    if (accountError) {
+      console.error(
+        "getCanonicalConnectorInstallations accounts failed:",
+        accountError.message,
+      );
+      return [];
+    }
+    accounts = (accountData ?? []) as ConnectorAccountRecord[];
+  }
+
+  return buildCanonicalConnectorReadModel({
+    installations,
+    sources,
+    accounts,
+    credentials: (credentialResult.data ?? []) as DeviceCredentialRecord[],
   });
 }
 
