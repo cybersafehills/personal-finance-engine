@@ -236,3 +236,66 @@ export async function renameConnection(
 
   return { ok: true };
 }
+
+/**
+ * Stage D canonical lifecycle actions. These call owner-scoped database RPCs
+ * so the installation, the credentials paused by it, and any Stage C legacy
+ * compatibility row commit or roll back together.
+ */
+export async function pauseConnectorInstallation(
+  connectorInstallationId: string,
+): Promise<ConnectionActionResult> {
+  const supabase = await supabaseSession();
+  const { error } = await supabase.rpc("set_connector_installation_paused", {
+    p_connector_installation_id: connectorInstallationId,
+    p_paused: true,
+  });
+
+  if (error) {
+    return { ok: false, error: "Could not pause the connector." };
+  }
+
+  revalidatePath("/settings/connections");
+  return { ok: true };
+}
+
+export async function resumeConnectorInstallation(
+  connectorInstallationId: string,
+): Promise<ConnectionActionResult> {
+  const supabase = await supabaseSession();
+  const { error } = await supabase.rpc("set_connector_installation_paused", {
+    p_connector_installation_id: connectorInstallationId,
+    p_paused: false,
+  });
+
+  if (error) {
+    return { ok: false, error: "Could not resume the connector." };
+  }
+
+  revalidatePath("/settings/connections");
+  return { ok: true };
+}
+
+export async function renameConnectorInstallation(
+  connectorInstallationId: string,
+  displayName: string,
+): Promise<ConnectionActionResult> {
+  const trimmedDisplayName = displayName.trim();
+
+  if (!trimmedDisplayName) {
+    return { ok: false, error: "Connector name cannot be empty." };
+  }
+
+  const supabase = await supabaseSession();
+  const { error } = await supabase.rpc("rename_connector_installation", {
+    p_connector_installation_id: connectorInstallationId,
+    p_display_name: trimmedDisplayName,
+  });
+
+  if (error) {
+    return { ok: false, error: "Could not rename the connector." };
+  }
+
+  revalidatePath("/settings/connections");
+  return { ok: true };
+}

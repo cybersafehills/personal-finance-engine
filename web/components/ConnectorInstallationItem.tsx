@@ -5,6 +5,7 @@ import type {
   CanonicalCredentialScope,
 } from "../lib/connector-read-model";
 import { safeConnectorErrorCode } from "../lib/connector-ui-mode";
+import { ConnectorInstallationActions } from "./ConnectorInstallationActions";
 
 const CONNECTOR_LABELS: Record<string, string> = {
   mtn_momo_sms_v1: "MTN MoMo SMS",
@@ -206,6 +207,12 @@ export function ConnectorInstallationItem({
           </ul>
         )}
       </section>
+
+      <ConnectorInstallationActions
+        installationId={installation.id}
+        displayName={installation.displayName}
+        status={installation.status}
+      />
     </article>
   );
 }

@@ -833,12 +833,13 @@ fi
 # Phase V PR2 (20261002000000) adds sweep_budget_thresholds. = 76.
 # Connector Stage C (20261013000000) adds the authenticated atomic
 # create_ingestion_connection_dual_write RPC. Its sync trigger and canonical
-# shadow resolver are internal/service-role-only. = 77.
+# shadow resolver are internal/service-role-only. Stage D adds two
+# authenticated canonical lifecycle RPCs. = 79.
 AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname = 'authenticated' where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "77" ]; then
-  pass "authenticated holds EXECUTE on exactly the 77 functions expected, no more"
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "79" ]; then
+  pass "authenticated holds EXECUTE on exactly the 79 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 77 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 79 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -4260,6 +4261,100 @@ else
   pass "Connector Stage C: authenticated users cannot read operational shadow-health aggregates"
 fi
 rm -f $ARTIFACT_DIR/pfe_cmc_health_read_acl.log
+
+# ===========================================================================
+# Connector model Stage D: canonical-authoritative reversible lifecycle and
+# rename, with atomic legacy compatibility and tenant isolation.
+# ===========================================================================
+echo "=== Connector model Stage D lifecycle ==="
+
+# Stage C left this compatibility-backed installation paused. Resume through
+# the canonical boundary, add an independently paused sibling credential, then
+# prove an installation pause/resume does not reactivate that sibling.
+as_user "$USER_A" "select public.set_connector_installation_paused('$CMC_INSTALL', false);" >/dev/null
+CMD_INDEPENDENT_CREDENTIAL="00000000-0000-4000-8000-000000000111"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.device_credentials
+    (id, connector_installation_id, label, credential_hash,
+     credential_prefix, status, paused_at)
+  values
+    ('$CMD_INDEPENDENT_CREDENTIAL', '$CMC_INSTALL', 'independent device',
+     'cmd-independent-hash', 'cmd_ind', 'paused', now());
+" >/dev/null
+
+as_user "$USER_A" "select public.set_connector_installation_paused('$CMC_INSTALL', true);" >/dev/null
+as_user "$USER_A" "select public.set_connector_installation_paused('$CMC_INSTALL', true);" >/dev/null
+CMD_PAUSED="$(psql -d pfe_rls -t -A -c "select ci.status || '|' || ic.status || '|' || dc.status || '|' || dc.paused_by_installation || '|' || sibling.status || '|' || sibling.paused_by_installation from public.connector_installations ci join public.ingestion_connections ic on ic.connector_installation_id = ci.id join public.device_credentials dc on dc.id = ic.device_credential_id join public.device_credentials sibling on sibling.id = '$CMD_INDEPENDENT_CREDENTIAL' where ci.id = '$CMC_INSTALL';")"
+if [ "$CMD_PAUSED" = "paused|paused|paused|true|paused|false" ] || [ "$CMD_PAUSED" = "paused|paused|paused|t|paused|f" ]; then
+  pass "Connector Stage D: canonical pause atomically pauses compatibility state and marks only active credentials"
+else
+  fail "Connector Stage D: canonical pause drifted across installation/legacy/credentials ($CMD_PAUSED)"
+fi
+
+as_user "$USER_A" "select public.set_connector_installation_paused('$CMC_INSTALL', false);" >/dev/null
+CMD_RESUMED="$(psql -d pfe_rls -t -A -c "select ci.status || '|' || coalesce(ci.pre_pause_status, 'none') || '|' || ic.status || '|' || dc.status || '|' || dc.paused_by_installation || '|' || sibling.status || '|' || sibling.paused_by_installation from public.connector_installations ci join public.ingestion_connections ic on ic.connector_installation_id = ci.id join public.device_credentials dc on dc.id = ic.device_credential_id join public.device_credentials sibling on sibling.id = '$CMD_INDEPENDENT_CREDENTIAL' where ci.id = '$CMC_INSTALL';")"
+if [ "$CMD_RESUMED" = "healthy|none|active|active|false|paused|false" ] || [ "$CMD_RESUMED" = "healthy|none|active|active|f|paused|f" ]; then
+  pass "Connector Stage D: canonical resume preserves independently paused credentials and legacy shadow compatibility"
+else
+  fail "Connector Stage D: canonical resume changed independent credential state ($CMD_RESUMED)"
+fi
+
+CMD_SHADOW="$(psql -d pfe_rls -t -A -c "set role service_role; select matches_legacy || '|' || coalesce(mismatch_code, 'none') from public.resolve_canonical_ingestion_shadow('$CMC_CONNECTION');" | tail -1)"
+if [ "$CMD_SHADOW" = "true|none" ] || [ "$CMD_SHADOW" = "t|none" ]; then
+  pass "Connector Stage D: canonical lifecycle leaves the Stage C shadow resolver matched"
+else
+  fail "Connector Stage D: canonical lifecycle created shadow drift ($CMD_SHADOW)"
+fi
+
+as_user "$USER_A" "select public.rename_connector_installation('$CMC_INSTALL', '  Canonical phone  ');" >/dev/null
+CMD_RENAMED="$(psql -d pfe_rls -t -A -c "select ci.display_name || '|' || ic.label || '|' || dc.label from public.connector_installations ci join public.ingestion_connections ic on ic.connector_installation_id = ci.id join public.device_credentials dc on dc.id = ic.device_credential_id where ci.id = '$CMC_INSTALL';")"
+if [ "$CMD_RENAMED" = "Canonical phone|Canonical phone|Canonical phone" ]; then
+  pass "Connector Stage D: canonical rename atomically maintains the mapped legacy display name"
+else
+  fail "Connector Stage D: canonical rename compatibility drifted ($CMD_RENAMED)"
+fi
+
+# A canonical-only installation restores its exact pre-pause health state and
+# does not conflate the installation display name with an independent device
+# label.
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; update public.connector_installations set status = 'error' where id = '$CMA_INSTALL_A';" >/dev/null
+as_user "$USER_A" "select public.set_connector_installation_paused('$CMA_INSTALL_A', true); select public.set_connector_installation_paused('$CMA_INSTALL_A', false); select public.rename_connector_installation('$CMA_INSTALL_A', 'Canonical-only source');" >/dev/null
+CMD_CANONICAL_ONLY="$(psql -d pfe_rls -t -A -c "select ci.status || '|' || coalesce(ci.pre_pause_status, 'none') || '|' || ci.display_name || '|' || dc.status || '|' || dc.label from public.connector_installations ci join public.device_credentials dc on dc.connector_installation_id = ci.id where ci.id = '$CMA_INSTALL_A';")"
+if [ "$CMD_CANONICAL_ONLY" = "error|none|Canonical-only source|active|A device" ]; then
+  pass "Connector Stage D: canonical-only resume restores health and rename keeps device labels independent"
+else
+  fail "Connector Stage D: canonical-only lifecycle/rename semantics drifted ($CMD_CANONICAL_ONLY)"
+fi
+
+if as_user "$USER_B" "select public.set_connector_installation_paused('$CMC_INSTALL', true);" >/dev/null 2>$ARTIFACT_DIR/pfe_cmd_tenant.log; then
+  fail "Connector Stage D: another tenant paused an installation"
+else
+  pass "Connector Stage D: canonical lifecycle is owner-scoped"
+fi
+if as_user "$USER_B" "select public.rename_connector_installation('$CMC_INSTALL', 'tenant takeover');" >/dev/null 2>>$ARTIFACT_DIR/pfe_cmd_tenant.log; then
+  fail "Connector Stage D: another tenant renamed an installation"
+else
+  pass "Connector Stage D: canonical rename is owner-scoped"
+fi
+if as_user "$USER_A" "select public.rename_connector_installation('$CMC_INSTALL', '   ');" >/dev/null 2>>$ARTIFACT_DIR/pfe_cmd_tenant.log; then
+  fail "Connector Stage D: canonical rename accepted an empty display name"
+else
+  pass "Connector Stage D: canonical rename rejects empty display names"
+fi
+if as_user "$USER_A" "select public.set_connector_installation_paused('$CMC_INSTALL', null);" >/dev/null 2>>$ARTIFACT_DIR/pfe_cmd_tenant.log; then
+  fail "Connector Stage D: canonical lifecycle accepted an unspecified pause state"
+else
+  pass "Connector Stage D: canonical lifecycle rejects an unspecified pause state"
+fi
+rm -f $ARTIFACT_DIR/pfe_cmd_tenant.log
+
+CMD_ACL="$(psql -d pfe_rls -t -A -c "select has_function_privilege('authenticated', 'public.set_connector_installation_paused(uuid, boolean)', 'execute') || '|' || has_function_privilege('anon', 'public.set_connector_installation_paused(uuid, boolean)', 'execute') || '|' || has_function_privilege('authenticated', 'public.rename_connector_installation(uuid, text)', 'execute') || '|' || has_function_privilege('anon', 'public.rename_connector_installation(uuid, text)', 'execute');")"
+if [ "$CMD_ACL" = "true|false|true|false" ] || [ "$CMD_ACL" = "t|f|t|f" ]; then
+  pass "Connector Stage D: lifecycle RPC execution is authenticated-only"
+else
+  fail "Connector Stage D: lifecycle RPC grants are incorrect ($CMD_ACL)"
+fi
 
 # Phase V PR4b: visible_source_ids_for_user - the auth.uid()-free source
 # visibility the scheduled-report generator uses for household members.
