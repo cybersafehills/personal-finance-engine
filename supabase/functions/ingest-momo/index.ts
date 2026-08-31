@@ -11,18 +11,32 @@ import {
 } from "./raw-event.ts";
 import {
   acceptCanonicalShadow,
+  acceptDeterministicEventRoute,
   authenticateCredential,
   canonicalIngestionEnabled,
   type CanonicalShadowRow,
+  type DeterministicEventRouteRow,
   type IngestionConnectionRow,
+  mtnMomoAdapterEnabled,
   resolveAccountRoute,
 } from "./connection-resolver.ts";
+import {
+  buildConnectorEventRouteDiscriminators,
+} from "../_shared/connector-adapter.ts";
+import {
+  buildMtnMomoEventEnvelope,
+  MTN_MOMO_SMS_CONNECTOR_KEY,
+  mtnMomoSmsAdapter,
+} from "./adapter.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
   "";
 const CANONICAL_INGESTION_ENABLED = canonicalIngestionEnabled(
   Deno.env.get("ONELEDGER_CANONICAL_INGESTION"),
+);
+const MTN_MOMO_ADAPTER_ENABLED = mtnMomoAdapterEnabled(
+  Deno.env.get("ONELEDGER_MTN_MOMO_ADAPTER"),
 );
 
 const PARSER_VERSION = "momo-parser-v1.1";
@@ -35,6 +49,11 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
 });
 
 type ShadowObservationOutcome = "match" | "mismatch" | "resolver_error";
+type AdapterRouteObservationOutcome =
+  | "match"
+  | "mismatch"
+  | "resolver_error"
+  | "envelope_error";
 
 async function recordShadowObservation(
   connectionId: string,
@@ -65,6 +84,37 @@ async function recordShadowObservation(
       event: "canonical_shadow_observation_failed",
       outcome,
       connection_suffix: connectionId.slice(-8),
+    }));
+  }
+}
+
+async function recordAdapterRouteObservation(
+  deviceCredentialId: string,
+  outcome: AdapterRouteObservationOutcome,
+  failureCode: string | null = null,
+): Promise<void> {
+  try {
+    const { error } = await supabase.rpc(
+      "record_connector_adapter_route_observation",
+      {
+        p_device_credential_id: deviceCredentialId,
+        p_outcome: outcome,
+        p_failure_code: failureCode,
+      },
+    );
+    if (error) {
+      console.error(JSON.stringify({
+        event: "provider_adapter_route_observation_failed",
+        outcome,
+        credential_suffix: deviceCredentialId.slice(-8),
+      }));
+    }
+  } catch {
+    // Rollout telemetry is best-effort and must never decide event routing.
+    console.error(JSON.stringify({
+      event: "provider_adapter_route_observation_failed",
+      outcome,
+      credential_suffix: deviceCredentialId.slice(-8),
     }));
   }
 }
@@ -196,6 +246,30 @@ Deno.serve(async (req: Request) => {
     await recordShadowObservation(connection.id, "match");
     const canonicalRoute = shadowResult.route;
 
+    let useMtnMomoAdapter = false;
+    if (MTN_MOMO_ADAPTER_ENABLED) {
+      const { data: installation, error: installationError } = await supabase
+        .from("connector_installations")
+        .select("connector_key")
+        .eq("id", canonicalRoute.connectorInstallationId)
+        .maybeSingle();
+
+      if (installationError || !installation) {
+        await recordAdapterRouteObservation(
+          canonicalRoute.deviceCredentialId,
+          "resolver_error",
+          "adapter_installation_lookup_failed",
+        );
+        console.error(JSON.stringify({
+          event: "provider_adapter_installation_lookup_failed",
+          connection_suffix: connection.id.slice(-8),
+        }));
+        return jsonResponse({ ok: false, error: "routing_mismatch" }, 409);
+      }
+      useMtnMomoAdapter = installation.connector_key ===
+        MTN_MOMO_SMS_CONNECTOR_KEY;
+    }
+
     // ========================================================
     // BODY VALIDATION
     // ========================================================
@@ -271,6 +345,87 @@ Deno.serve(async (req: Request) => {
     const deviceReceivedAt = typeof payload.received_at === "string"
       ? payload.received_at
       : null;
+
+    let adapterEnvelope: ReturnType<typeof buildMtnMomoEventEnvelope> | null =
+      null;
+
+    if (useMtnMomoAdapter) {
+      try {
+        if (
+          (payload.source_ref != null &&
+            typeof payload.source_ref !== "string") ||
+          (payload.account_ref != null &&
+            typeof payload.account_ref !== "string")
+        ) {
+          throw new Error("route_discriminator_invalid");
+        }
+        adapterEnvelope = buildMtnMomoEventEnvelope({
+          message: rawMessage,
+          receivedAt: deviceReceivedAt,
+          sourceExternalRef: payload.source_ref ?? null,
+          accountExternalRef: payload.account_ref ?? null,
+          providerEventReference: fingerprint,
+        });
+
+        const discriminators = await buildConnectorEventRouteDiscriminators(
+          adapterEnvelope,
+        );
+        const { data: routeData, error: routeError } = await supabase.rpc(
+          "resolve_connector_event_route",
+          {
+            p_device_credential_id: canonicalRoute.deviceCredentialId,
+            p_source_ref_hash: discriminators.source_ref_hash,
+            p_account_ref_hash: discriminators.account_ref_hash,
+          },
+        ).maybeSingle();
+        const acceptedRoute = acceptDeterministicEventRoute(
+          connection,
+          canonicalRoute,
+          (routeData as DeterministicEventRouteRow | null) ?? null,
+        );
+        const mismatchCode = routeError
+          ? "adapter_route_resolver_error"
+          : !acceptedRoute.ok
+          ? acceptedRoute.mismatchCode
+          : null;
+
+        if (mismatchCode) {
+          await recordAdapterRouteObservation(
+            canonicalRoute.deviceCredentialId,
+            routeError ? "resolver_error" : "mismatch",
+            mismatchCode,
+          );
+          console.error(JSON.stringify({
+            event: "provider_adapter_route_mismatch",
+            connector_key: adapterEnvelope.connector_key,
+            mismatch_code: mismatchCode,
+            connection_suffix: connection.id.slice(-8),
+          }));
+          return jsonResponse({ ok: false, error: "routing_mismatch" }, 409);
+        }
+        await recordAdapterRouteObservation(
+          canonicalRoute.deviceCredentialId,
+          "match",
+        );
+      } catch (error) {
+        const failureCode = error instanceof Error ? error.message : "unknown";
+        await recordAdapterRouteObservation(
+          canonicalRoute.deviceCredentialId,
+          "envelope_error",
+          failureCode,
+        );
+        console.error(JSON.stringify({
+          event: "provider_adapter_envelope_rejected",
+          connector_key: "mtn_momo_sms_v1",
+          error_code: failureCode,
+          connection_suffix: connection.id.slice(-8),
+        }));
+        return jsonResponse(
+          { ok: false, error: "invalid_route_envelope" },
+          400,
+        );
+      }
+    }
 
     // ========================================================
     // RAW MESSAGE DUPLICATE CHECK
@@ -463,7 +618,15 @@ Deno.serve(async (req: Request) => {
     // DETERMINISTIC TRANSACTION PARSING
     // ========================================================
 
-    const parsed = parseMomoMessage(rawMessage);
+    const parsed = adapterEnvelope
+      ? (mtnMomoSmsAdapter.normalize({
+        message: adapterEnvelope.payload.message,
+        receivedAt: adapterEnvelope.payload.received_at,
+        sourceExternalRef: adapterEnvelope.source_external_ref,
+        accountExternalRef: adapterEnvelope.account_external_ref,
+        providerEventReference: adapterEnvelope.provider_event_reference,
+      })[0] ?? null)
+      : parseMomoMessage(rawMessage);
 
     if (!parsed) {
       await supabase

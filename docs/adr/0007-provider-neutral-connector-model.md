@@ -17,7 +17,13 @@ canonical credential resolver is encoded in
 `20261017000000_connector_stage_d_canonical_auth.sql`; the additive
 multi-source discovery and deterministic route resolver are encoded in
 `20261018000000_connector_stage_d_multi_source_routing.sql`, with the adapter
-boundary in `supabase/functions/_shared/connector-adapter.ts`.
+boundary in `supabase/functions/_shared/connector-adapter.ts`. The first
+concrete adapter, `mtn_momo_sms_v1`, is implemented in
+`supabase/functions/ingest-momo/adapter.ts`; its deterministic event-envelope
+route is guarded by the exact-match, default-off
+`ONELEDGER_MTN_MOMO_ADAPTER=enabled` Edge Function secret. Redacted rollout
+counters are encoded in
+`20261019000000_connector_adapter_route_health.sql`.
 Authentication and routing remain authoritative in `ingestion_connections`;
 Stage C verifies the equivalent canonical route and fails closed on drift, but
 does not cut reads over to the canonical model. Stage D remains gated on a
@@ -321,8 +327,13 @@ not an in-place mutation.
 3. Multiple active candidates require their stable hash discriminator. Masked
    identifiers and display names are never routing keys.
 
-Both RPCs are service-role-only and remain unused by current production
-adapters until a provider integration is explicitly wired and released.
+Both RPCs are service-role-only. `mtn_momo_sms_v1` now produces discovery and
+event discriminators through the same domain-separated hash contract. Its live
+event-route RPC remains dormant unless the provider-specific rollout flag is
+explicitly enabled. Existing account-scoped credentials need no client
+discriminator; if a future unscoped device supplies raw source and account
+references, the adapter hashes them in memory and the resolver rejects missing,
+unknown, ambiguous, or conflicting routes before evidence is written.
 
 ## Rejected alternatives
 

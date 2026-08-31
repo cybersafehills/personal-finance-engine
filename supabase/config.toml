@@ -429,6 +429,11 @@ deno_version = 2
 # 401. `verify_jwt = false` here is what makes that key-only contract
 # reproducible from this repo; the deployed function is already running
 # this way (see docs/momo-ingest-contract.md).
+#
+# Provider-neutral MTN adapter rollout (Edge Function secret, not a TOML
+# setting): ONELEDGER_MTN_MOMO_ADAPTER=enabled. It is exact-match and off when
+# absent. Enabling it adds the deterministic canonical event-route check only
+# for connector_key=mtn_momo_sms_v1; the Shortcut request remains compatible.
 [functions.ingest-momo]
 enabled = true
 verify_jwt = false
