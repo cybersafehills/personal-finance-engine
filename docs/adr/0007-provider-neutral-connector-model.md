@@ -20,8 +20,10 @@ representative production observation window with every active connection
 seen, zero unexplained mismatches/errors, and exercised lifecycle operations.
 The Stage D UI read projection is prepared in
 `web/lib/connector-read-model.ts` and `getCanonicalConnectorInstallations()`;
-it is deliberately not wired to the live Connections page until that gate
-passes.
+the canonical installation/source/account/credential cards are guarded by the
+server-only, default-off `ONELEDGER_CANONICAL_CONNECTIONS_UI=enabled` preview
+flag. The production Connections page remains on the legacy view until the
+gate passes and canonical lifecycle RPCs are ready.
 
 ## Decision
 
