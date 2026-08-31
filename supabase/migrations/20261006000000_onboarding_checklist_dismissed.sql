@@ -14,7 +14,7 @@
 -- authorization, report, or export path.
 
 alter table public.ui_preferences
-  add column onboarding_dismissed boolean not null default false;
+  add column if not exists onboarding_dismissed boolean not null default false;
 
 comment on column public.ui_preferences.onboarding_dismissed is
   'Whether the user has dismissed the "finish setting up" onboarding checklist reminder in this workspace. One-time UI notice only (see reports_relocation_notice_dismissed); step completion itself is derived live, not stored.';
