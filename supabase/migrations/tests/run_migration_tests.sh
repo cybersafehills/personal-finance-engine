@@ -599,7 +599,9 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # / budget_threshold_state) - 73 tables, 72 with RLS.
 # Connector model Stage A (20261011000000) adds connector_installations
 # and device_credentials, both RLS enabled - 75 tables, 74 with RLS.
-if [ "$TABLE_COUNT" = "75" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Connector Stage C shadow health (20261014000000) adds one service-only,
+# RLS-enabled aggregate table - 76 tables, 75 with RLS.
+if [ "$TABLE_COUNT" = "76" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -4217,12 +4219,47 @@ else
 fi
 psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; update public.connector_installations set status = 'paused' where id = '$CMC_INSTALL';" >/dev/null
 
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  select public.record_connector_shadow_observation('$CMC_CONNECTION', 'match');
+  select public.record_connector_shadow_observation('$CMC_CONNECTION', 'match');
+  select public.record_connector_shadow_observation('$CMC_CONNECTION', 'mismatch', 'installation_status_mismatch');
+  select public.record_connector_shadow_observation('$CMC_CONNECTION', 'resolver_error', 'shadow_resolver_error');
+" >/dev/null
+CMC_HEALTH="$(psql -d pfe_rls -t -A -c "set role service_role; select observation_count || '|' || match_count || '|' || mismatch_count || '|' || resolver_error_count || '|' || last_mismatch_code || '|' || (last_match_at is not null) || '|' || (last_mismatch_at is not null) from public.connector_shadow_health where ingestion_connection_id = '$CMC_CONNECTION';" | tail -1)"
+if [ "$CMC_HEALTH" = "4|2|1|1|shadow_resolver_error|true|true" ] || [ "$CMC_HEALTH" = "4|2|1|1|shadow_resolver_error|t|t" ]; then
+  pass "Connector Stage C: durable shadow health aggregates match, mismatch, and resolver-error outcomes"
+else
+  fail "Connector Stage C: shadow health counters/timestamps drifted ($CMC_HEALTH)"
+fi
+
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; select public.record_connector_shadow_observation('$CMC_CONNECTION', 'mismatch', 'unsafe code');" >/dev/null 2>$ARTIFACT_DIR/pfe_cmc_health_validation.log; then
+  fail "Connector Stage C: shadow health accepted an unsafe mismatch code"
+else
+  pass "Connector Stage C: shadow health only accepts redacted machine-readable mismatch codes"
+fi
+rm -f $ARTIFACT_DIR/pfe_cmc_health_validation.log
+
 if as_user "$USER_A" "select public.resolve_canonical_ingestion_shadow('$CMC_CONNECTION');" >/dev/null 2>$ARTIFACT_DIR/pfe_cmc_acl.log; then
   fail "Connector Stage C: authenticated user called the service-only shadow resolver"
 else
   pass "Connector Stage C: canonical shadow resolver is service-role-only"
 fi
 rm -f $ARTIFACT_DIR/pfe_cmc_acl.log
+
+if as_user "$USER_A" "select public.record_connector_shadow_observation('$CMC_CONNECTION', 'match');" >/dev/null 2>$ARTIFACT_DIR/pfe_cmc_health_acl.log; then
+  fail "Connector Stage C: authenticated user recorded a shadow-health observation"
+else
+  pass "Connector Stage C: shadow-health recording is service-role-only"
+fi
+rm -f $ARTIFACT_DIR/pfe_cmc_health_acl.log
+
+if as_user "$USER_A" "select count(*) from public.connector_shadow_health;" >/dev/null 2>$ARTIFACT_DIR/pfe_cmc_health_read_acl.log; then
+  fail "Connector Stage C: authenticated user read connector shadow health"
+else
+  pass "Connector Stage C: authenticated users cannot read operational shadow-health aggregates"
+fi
+rm -f $ARTIFACT_DIR/pfe_cmc_health_read_acl.log
 
 # Phase V PR4b: visible_source_ids_for_user - the auth.uid()-free source
 # visibility the scheduled-report generator uses for household members.
