@@ -11,6 +11,7 @@ import {
   acceptCanonicalShadow,
   type AccountRow,
   authenticateCredential,
+  canonicalIngestionEnabled,
   type IngestionConnectionRow,
   resolveAccountRoute,
 } from "../connection-resolver.ts";
@@ -60,6 +61,13 @@ const MATCHING_SHADOW = {
   account_id: "acct-a",
   financial_source_id: "source-a",
 };
+
+Deno.test("canonicalIngestionEnabled: only the exact enabled value activates cutover", () => {
+  assertEquals(canonicalIngestionEnabled("enabled"), true);
+  assertEquals(canonicalIngestionEnabled("ENABLED"), false);
+  assertEquals(canonicalIngestionEnabled("true"), false);
+  assertEquals(canonicalIngestionEnabled(undefined), false);
+});
 
 Deno.test("acceptCanonicalShadow: accepts only an exact canonical mirror", () => {
   assertEquals(acceptCanonicalShadow(ACTIVE_CONNECTION, MATCHING_SHADOW), {

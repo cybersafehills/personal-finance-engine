@@ -4380,6 +4380,34 @@ else
   fail "Connector Stage D: lifecycle RPC grants are incorrect ($CMD_ACL)"
 fi
 
+# The canonical authentication resolver is deployed before cutover but is
+# callable only by the Edge Function's service role. It returns the canonical
+# route plus the compatibility ID needed by the rest of the reversible path.
+CMD_CANONICAL_AUTH="$(psql -d pfe_rls -t -A -c "set role service_role; select id || '|' || workspace_id || '|' || account_id || '|' || status || '|' || connector_installation_id || '|' || device_credential_id from public.resolve_canonical_ingestion_credential('cmc-hash-2');" | tail -1)"
+CMD_EXPECTED_AUTH="$CMC_CONNECTION|$WORKSPACE_A|$CMC_ACCOUNT|active|$CMC_INSTALL|$(psql -d pfe_rls -t -A -c "select device_credential_id from public.ingestion_connections where id = '$CMC_CONNECTION';")"
+if [ "$CMD_CANONICAL_AUTH" = "$CMD_EXPECTED_AUTH" ]; then
+  pass "Connector Stage D: canonical credential auth resolves the exact compatibility route"
+else
+  fail "Connector Stage D: canonical credential auth route drifted ($CMD_CANONICAL_AUTH)"
+fi
+
+CMD_AUTH_CREDENTIAL="$(psql -d pfe_rls -t -A -c "select device_credential_id from public.ingestion_connections where id = '$CMC_CONNECTION';")"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; update public.device_credentials set expires_at = now() - interval '1 minute' where id = '$CMD_AUTH_CREDENTIAL';" >/dev/null
+CMD_EXPIRED_AUTH="$(psql -d pfe_rls -t -A -c "set role service_role; select count(*) from public.resolve_canonical_ingestion_credential('cmc-hash-2');" | tail -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; update public.device_credentials set expires_at = null where id = '$CMD_AUTH_CREDENTIAL';" >/dev/null
+if [ "$CMD_EXPIRED_AUTH" = "0" ]; then
+  pass "Connector Stage D: canonical credential auth rejects expired credentials"
+else
+  fail "Connector Stage D: canonical credential auth accepted an expired credential"
+fi
+
+CMD_CANONICAL_AUTH_ACL="$(psql -d pfe_rls -t -A -c "select has_function_privilege('service_role', 'public.resolve_canonical_ingestion_credential(text)', 'execute') || '|' || has_function_privilege('authenticated', 'public.resolve_canonical_ingestion_credential(text)', 'execute') || '|' || has_function_privilege('anon', 'public.resolve_canonical_ingestion_credential(text)', 'execute');")"
+if [ "$CMD_CANONICAL_AUTH_ACL" = "true|false|false" ] || [ "$CMD_CANONICAL_AUTH_ACL" = "t|f|f" ]; then
+  pass "Connector Stage D: canonical credential resolver is service-role-only"
+else
+  fail "Connector Stage D: canonical credential resolver grants are incorrect ($CMD_CANONICAL_AUTH_ACL)"
+fi
+
 # ===========================================================================
 # Connector model Stage D: immutable credential rotation and one-way revoke.
 # ===========================================================================

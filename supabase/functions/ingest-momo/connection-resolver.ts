@@ -107,6 +107,10 @@ export type AuthenticateCredentialResult =
   | { ok: true; connection: IngestionConnectionRow }
   | { ok: false };
 
+export function canonicalIngestionEnabled(value: string | undefined): boolean {
+  return value === "enabled";
+}
+
 export async function authenticateCredential(
   suppliedSecret: string | null,
   deps: AuthenticateCredentialDeps,
