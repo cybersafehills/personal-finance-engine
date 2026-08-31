@@ -12,7 +12,9 @@ legacy backfill are encoded in
 enrollment, lifecycle mirroring, canonical provenance, and shadow comparison
 are encoded in `20261013000000_connector_model_stage_c_dual_write.sql`;
 durable service-only shadow-health counters are encoded in
-`20261014000000_connector_stage_c_shadow_health.sql`.
+`20261014000000_connector_stage_c_shadow_health.sql`; the default-off Stage D
+canonical credential resolver is encoded in
+`20261017000000_connector_stage_d_canonical_auth.sql`.
 Authentication and routing remain authoritative in `ingestion_connections`;
 Stage C verifies the equivalent canonical route and fails closed on drift, but
 does not cut reads over to the canonical model. Stage D remains gated on a

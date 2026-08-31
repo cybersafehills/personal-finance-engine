@@ -12,6 +12,7 @@ import {
 import {
   acceptCanonicalShadow,
   authenticateCredential,
+  canonicalIngestionEnabled,
   type CanonicalShadowRow,
   type IngestionConnectionRow,
   resolveAccountRoute,
@@ -20,6 +21,9 @@ import {
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
   "";
+const CANONICAL_INGESTION_ENABLED = canonicalIngestionEnabled(
+  Deno.env.get("ONELEDGER_CANONICAL_INGESTION"),
+);
 
 const PARSER_VERSION = "momo-parser-v1.1";
 
@@ -85,12 +89,11 @@ Deno.serve(async (req: Request) => {
     // CUSTOM INGESTION AUTHENTICATION (Phase C: per-connection credentials)
     // ========================================================
     //
-    // The presented secret is hashed and looked up in ingestion_connections.
-    // A match resolves that specific connection's workspace_id/account_id
-    // later in this function (see ACCOUNT RESOLUTION below) - never
-    // re-derived from anything else the client submits. Only the hash is
-    // ever compared; the plaintext credential is never stored anywhere,
-    // here or in the database.
+    // The presented secret is hashed and looked up through the selected
+    // server-side resolver: legacy by default, canonical only after the exact
+    // cutover flag is enabled. Either path resolves the compatibility
+    // connection used by the rest of this reversible stage. Only the hash is
+    // ever compared; the plaintext credential is never stored anywhere.
     //
     // A blank, malformed, revoked, or simply unrecognized credential all
     // fail identically (401 unauthorized) - the response never reveals
@@ -102,6 +105,21 @@ Deno.serve(async (req: Request) => {
     const authResult = await authenticateCredential(suppliedSecret, {
       hash: sha256,
       findConnectionByCredentialHash: async (credentialHash) => {
+        if (CANONICAL_INGESTION_ENABLED) {
+          const { data, error } = await supabase.rpc(
+            "resolve_canonical_ingestion_credential",
+            { p_credential_hash: credentialHash },
+          ).maybeSingle();
+
+          if (error) {
+            console.error(JSON.stringify({
+              event: "canonical_credential_lookup_failed",
+            }));
+          }
+
+          return (data as IngestionConnectionRow | null) ?? null;
+        }
+
         const { data, error } = await supabase
           .from("ingestion_connections")
           .select(
@@ -133,10 +151,11 @@ Deno.serve(async (req: Request) => {
     // ========================================================
     // CANONICAL SHADOW ROUTE (Stage C)
     // ========================================================
-    // Legacy credential authentication remains authoritative in this stage,
-    // but canonical installation/source/account provenance must resolve to
-    // exactly the same route. Reject before reading/storing the payload on any
-    // disagreement; never silently choose one model.
+    // Canonical installation/source/account provenance must resolve to exactly
+    // the same route as the compatibility row. In the default-off cutover mode
+    // above, canonical credentials authenticate first; this comparison remains
+    // mandatory so rollback writes cannot drift. Reject before reading/storing
+    // the payload on any disagreement; never silently choose one model.
     const { data: shadowData, error: shadowError } = await supabase.rpc(
       "resolve_canonical_ingestion_shadow",
       { p_ingestion_connection_id: connection.id },

@@ -35,13 +35,14 @@ key all fail **identically** with `401 unauthorized` — the response is not
 an oracle. No `apikey` / `Authorization` header is required or read.
 
 During the Stage C rollout, the legacy connection remains authoritative for
-authentication and routing. Before accepting a payload, ingestion resolves the
-corresponding connector installation, device credential, financial source, and
-account and compares that route with the legacy route. Missing or divergent
-canonical state fails closed with `409 routing_mismatch`; logs contain a
-redacted mismatch code for operators, not credential material. Accepted raw
-events retain both the legacy connection ID and the canonical source,
-installation, and device-credential IDs.
+authentication and routing. Stage D includes a server-side, exact-match
+`ONELEDGER_CANONICAL_INGESTION=enabled` cutover toggle. It is off when absent or
+set to any other value. When enabled, the credential authenticates against the
+canonical device-credential resolver first, but the mapped legacy route is
+still compared and maintained for immediate rollback. Missing or divergent
+state fails closed; logs contain a redacted mismatch code, never credential
+material. Accepted raw events retain both the legacy connection ID and the
+canonical source, installation, and device-credential IDs.
 
 Every comparison also updates `connector_shadow_health` with aggregate match,
 mismatch, and resolver-error counters. This service-role-only operational table
