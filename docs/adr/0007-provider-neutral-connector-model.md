@@ -18,6 +18,10 @@ Stage C verifies the equivalent canonical route and fails closed on drift, but
 does not cut reads over to the canonical model. Stage D remains gated on a
 representative production observation window with every active connection
 seen, zero unexplained mismatches/errors, and exercised lifecycle operations.
+The Stage D UI read projection is prepared in
+`web/lib/connector-read-model.ts` and `getCanonicalConnectorInstallations()`;
+it is deliberately not wired to the live Connections page until that gate
+passes.
 
 ## Decision
 
