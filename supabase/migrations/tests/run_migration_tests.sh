@@ -290,12 +290,27 @@ create table if not exists auth.users (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+create table if not exists auth.mfa_factors (
+  id uuid primary key default extensions.gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  status text not null check (status in ('unverified', 'verified'))
+);
 create or replace function auth.uid()
 returns uuid
 language sql
 stable
 as \$\$
   select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
+\$\$;
+create or replace function auth.jwt()
+returns jsonb
+language sql
+stable
+as \$\$
+  select coalesce(
+    nullif(current_setting('request.jwt.claims', true), '')::jsonb,
+    '{}'::jsonb
+  )
 \$\$;
 
 -- Real Supabase provisions the supabase_realtime publication on every
@@ -833,13 +848,13 @@ fi
 # Phase V PR2 (20261002000000) adds sweep_budget_thresholds. = 76.
 # Connector Stage C (20261013000000) adds the authenticated atomic
 # create_ingestion_connection_dual_write RPC. Its sync trigger and canonical
-# shadow resolver are internal/service-role-only. Stage D adds two
-# authenticated canonical lifecycle RPCs. = 79.
+# shadow resolver are internal/service-role-only. Stage D adds four
+# authenticated canonical lifecycle/credential RPCs. = 81.
 AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname = 'authenticated' where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "79" ]; then
-  pass "authenticated holds EXECUTE on exactly the 79 functions expected, no more"
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "81" ]; then
+  pass "authenticated holds EXECUTE on exactly the 81 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 79 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 81 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -1049,7 +1064,16 @@ as_user() {
   # actual result (a SELECT's row, or a RETURNING clause's row) is wanted,
   # so drop every line that is just a bare command tag and take whatever
   # remains last.
-  psql -d pfe_rls -t -A -c "set role authenticated; select set_config('request.jwt.claim.sub', '$user_id', false); $sql" \
+  psql -d pfe_rls -t -A -c "set role authenticated; select set_config('request.jwt.claim.sub', '$user_id', false); select set_config('request.jwt.claims', '{\"sub\":\"$user_id\",\"aal\":\"aal1\"}', false); $sql" \
+    | grep -Ev '^(SET|INSERT [0-9]+ [0-9]+|UPDATE [0-9]+|DELETE [0-9]+)$' \
+    | tail -1
+}
+
+as_user_aal() {
+  local user_id="$1"
+  local aal="$2"
+  local sql="$3"
+  psql -d pfe_rls -t -A -c "set role authenticated; select set_config('request.jwt.claim.sub', '$user_id', false); select set_config('request.jwt.claims', '{\"sub\":\"$user_id\",\"aal\":\"$aal\"}', false); $sql" \
     | grep -Ev '^(SET|INSERT [0-9]+ [0-9]+|UPDATE [0-9]+|DELETE [0-9]+)$' \
     | tail -1
 }
@@ -4355,6 +4379,117 @@ if [ "$CMD_ACL" = "true|false|true|false" ] || [ "$CMD_ACL" = "t|f|t|f" ]; then
 else
   fail "Connector Stage D: lifecycle RPC grants are incorrect ($CMD_ACL)"
 fi
+
+# ===========================================================================
+# Connector model Stage D: immutable credential rotation and one-way revoke.
+# ===========================================================================
+echo "=== Connector model Stage D credential history ==="
+
+CMD_ROTATE_HASH_A="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+CMD_ROTATE_HASH_B="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+CMD_ROTATE_HASH_C="cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+CMD_OLD_CREDENTIAL="$(psql -d pfe_rls -t -A -c "select device_credential_id from public.ingestion_connections where id = '$CMC_CONNECTION';")"
+
+# Opted-in users must have an aal2 JWT at the database boundary, even if a
+# caller bypasses the server action and invokes PostgREST directly.
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "insert into auth.mfa_factors (user_id, status) values ('$USER_A', 'verified');" >/dev/null
+if as_user_aal "$USER_A" "aal1" "select public.rotate_device_credential('$CMD_OLD_CREDENTIAL', '$CMD_ROTATE_HASH_A', 'pfe_aa11');" >/dev/null 2>$ARTIFACT_DIR/pfe_cmd_credential.log; then
+  fail "Connector Stage D: AAL1 rotated a credential after MFA enrollment"
+else
+  pass "Connector Stage D: database rotation requires AAL2 after MFA enrollment"
+fi
+
+CMD_NEW_CREDENTIAL="$(as_user_aal "$USER_A" "aal2" "select public.rotate_device_credential('$CMD_OLD_CREDENTIAL', '$CMD_ROTATE_HASH_A', 'pfe_aa11');")"
+CMD_ROTATION_SHAPE="$(psql -d pfe_rls -t -A -c "select old.status || '|' || (old.revoked_at is not null) || '|' || coalesce(old.legacy_ingestion_connection_id::text, 'none') || '|' || fresh.status || '|' || (fresh.rotated_from_id = old.id) || '|' || (fresh.legacy_ingestion_connection_id = ic.id) || '|' || (ic.device_credential_id = fresh.id) || '|' || (ic.credential_hash = fresh.credential_hash) from public.device_credentials old join public.device_credentials fresh on fresh.id = '$CMD_NEW_CREDENTIAL' join public.ingestion_connections ic on ic.id = '$CMC_CONNECTION' where old.id = '$CMD_OLD_CREDENTIAL';")"
+if [ "$CMD_ROTATION_SHAPE" = "revoked|true|none|active|true|true|true|true" ] || [ "$CMD_ROTATION_SHAPE" = "revoked|t|none|active|t|t|t|t" ]; then
+  pass "Connector Stage D: rotation retains the revoked predecessor and atomically advances the legacy mapping"
+else
+  fail "Connector Stage D: immutable rotation shape is wrong ($CMD_ROTATION_SHAPE)"
+fi
+
+CMD_ROTATE_SHADOW="$(psql -d pfe_rls -t -A -c "set role service_role; select matches_legacy || '|' || coalesce(mismatch_code, 'none') from public.resolve_canonical_ingestion_shadow('$CMC_CONNECTION');" | tail -1)"
+if [ "$CMD_ROTATE_SHADOW" = "true|none" ] || [ "$CMD_ROTATE_SHADOW" = "t|none" ]; then
+  pass "Connector Stage D: rotated credential preserves Stage C shadow parity"
+else
+  fail "Connector Stage D: rotation created shadow drift ($CMD_ROTATE_SHADOW)"
+fi
+
+if as_user_aal "$USER_A" "aal2" "select public.rotate_device_credential('$CMD_OLD_CREDENTIAL', '$CMD_ROTATE_HASH_B', 'pfe_bb22');" >/dev/null 2>>$ARTIFACT_DIR/pfe_cmd_credential.log; then
+  fail "Connector Stage D: an already-revoked predecessor rotated twice"
+else
+  pass "Connector Stage D: a revoked predecessor cannot be replayed for rotation"
+fi
+if as_user "$USER_B" "select public.rotate_device_credential('$CMD_NEW_CREDENTIAL', '$CMD_ROTATE_HASH_B', 'pfe_bb22');" >/dev/null 2>>$ARTIFACT_DIR/pfe_cmd_credential.log; then
+  fail "Connector Stage D: another tenant rotated an owned credential"
+else
+  pass "Connector Stage D: credential rotation is owner-scoped"
+fi
+if as_user_aal "$USER_A" "aal2" "select public.rotate_device_credential('$CMD_NEW_CREDENTIAL', 'not-a-digest', 'pfe_bad1');" >/dev/null 2>>$ARTIFACT_DIR/pfe_cmd_credential.log; then
+  fail "Connector Stage D: rotation accepted a non-SHA-256 credential digest"
+else
+  pass "Connector Stage D: rotation validates hash-only credential input"
+fi
+
+# With no verified factor, the progressive policy still permits AAL1. This
+# canonical-only credential also supplies a valid collision target to prove a
+# failed rotation rolls back revocation of the current credential.
+CMD_B_CREDENTIAL="00000000-0000-4000-8000-000000000112"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.device_credentials
+    (id, connector_installation_id, account_id, label, credential_hash,
+     credential_prefix)
+  values
+    ('$CMD_B_CREDENTIAL', '$CMA_INSTALL_B', '$CMA_ACCOUNT_B', 'B device',
+     '$CMD_ROTATE_HASH_B', 'pfe_bb22');
+" >/dev/null
+CMD_B_SUCCESSOR="$(as_user_aal "$USER_B" "aal1" "select public.rotate_device_credential('$CMD_B_CREDENTIAL', '$CMD_ROTATE_HASH_C', 'pfe_cc33');")"
+if [ -n "$CMD_B_SUCCESSOR" ]; then
+  pass "Connector Stage D: progressive MFA permits AAL1 when no factor is enrolled"
+else
+  fail "Connector Stage D: progressive MFA blocked a user without an enrolled factor"
+fi
+
+if as_user_aal "$USER_A" "aal2" "select public.rotate_device_credential('$CMD_NEW_CREDENTIAL', '$CMD_ROTATE_HASH_C', 'pfe_cc33');" >/dev/null 2>>$ARTIFACT_DIR/pfe_cmd_credential.log; then
+  fail "Connector Stage D: rotation accepted a credential-hash collision"
+else
+  pass "Connector Stage D: credential-hash collision aborts rotation"
+fi
+CMD_ROLLBACK_SAFE="$(psql -d pfe_rls -t -A -c "select status || '|' || (legacy_ingestion_connection_id = '$CMC_CONNECTION') from public.device_credentials where id = '$CMD_NEW_CREDENTIAL';")"
+if [ "$CMD_ROLLBACK_SAFE" = "active|true" ] || [ "$CMD_ROLLBACK_SAFE" = "active|t" ]; then
+  pass "Connector Stage D: failed rotation rolls predecessor/backlink changes back atomically"
+else
+  fail "Connector Stage D: failed rotation left partial state ($CMD_ROLLBACK_SAFE)"
+fi
+
+if as_user_aal "$USER_A" "aal1" "select public.revoke_connector_installation('$CMC_INSTALL');" >/dev/null 2>>$ARTIFACT_DIR/pfe_cmd_credential.log; then
+  fail "Connector Stage D: AAL1 revoked an installation after MFA enrollment"
+else
+  pass "Connector Stage D: database revocation requires AAL2 after MFA enrollment"
+fi
+as_user_aal "$USER_A" "aal2" "select public.revoke_connector_installation('$CMC_INSTALL');" >/dev/null
+as_user_aal "$USER_A" "aal2" "select public.revoke_connector_installation('$CMC_INSTALL');" >/dev/null
+CMD_REVOKED="$(psql -d pfe_rls -t -A -c "select ci.status || '|' || (ci.revoked_at is not null) || '|' || ic.status || '|' || (ic.revoked_at is not null) || '|' || count(dc.id) || '|' || count(dc.id) filter (where dc.status = 'revoked') from public.connector_installations ci join public.ingestion_connections ic on ic.connector_installation_id = ci.id join public.device_credentials dc on dc.connector_installation_id = ci.id where ci.id = '$CMC_INSTALL' group by ci.status, ci.revoked_at, ic.status, ic.revoked_at;")"
+if [ "$CMD_REVOKED" = "revoked|true|revoked|true|3|3" ] || [ "$CMD_REVOKED" = "revoked|t|revoked|t|3|3" ]; then
+  pass "Connector Stage D: installation revoke is idempotent and disables every credential plus legacy auth"
+else
+  fail "Connector Stage D: installation revoke left active authentication state ($CMD_REVOKED)"
+fi
+
+CMD_REVOKE_SHADOW="$(psql -d pfe_rls -t -A -c "set role service_role; select matches_legacy || '|' || coalesce(mismatch_code, 'none') from public.resolve_canonical_ingestion_shadow('$CMC_CONNECTION');" | tail -1)"
+if [ "$CMD_REVOKE_SHADOW" = "true|none" ] || [ "$CMD_REVOKE_SHADOW" = "t|none" ]; then
+  pass "Connector Stage D: permanent revoke preserves Stage C shadow parity"
+else
+  fail "Connector Stage D: revoke created shadow drift ($CMD_REVOKE_SHADOW)"
+fi
+
+CMD_CREDENTIAL_ACL="$(psql -d pfe_rls -t -A -c "select has_function_privilege('authenticated', 'public.rotate_device_credential(uuid, text, text)', 'execute') || '|' || has_function_privilege('anon', 'public.rotate_device_credential(uuid, text, text)', 'execute') || '|' || has_function_privilege('authenticated', 'public.revoke_connector_installation(uuid)', 'execute') || '|' || has_function_privilege('anon', 'public.revoke_connector_installation(uuid)', 'execute') || '|' || has_function_privilege('authenticated', 'public.require_progressive_mfa()', 'execute');")"
+if [ "$CMD_CREDENTIAL_ACL" = "true|false|true|false|false" ] || [ "$CMD_CREDENTIAL_ACL" = "t|f|t|f|f" ]; then
+  pass "Connector Stage D: credential RPCs are authenticated-only and their MFA helper is internal"
+else
+  fail "Connector Stage D: credential RPC grants are incorrect ($CMD_CREDENTIAL_ACL)"
+fi
+rm -f $ARTIFACT_DIR/pfe_cmd_credential.log
 
 # Phase V PR4b: visible_source_ids_for_user - the auth.uid()-free source
 # visibility the scheduled-report generator uses for household members.

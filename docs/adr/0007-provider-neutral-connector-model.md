@@ -252,6 +252,11 @@ production window and verified pause/rotate/revoke behavior.
   canonical RPCs that atomically maintain Stage C compatibility rows. An
   installation pause records which credentials it paused so resume never
   reactivates a credential paused independently.
+- Rotate device credentials by inserting a successor linked through
+  `rotated_from_id`, revoking but retaining the predecessor, and atomically
+  advancing any Stage C compatibility mapping. Permanent installation revoke
+  disables every credential without deleting historical provenance. Both
+  operations enforce progressive MFA at the database boundary.
 - Permit adapters to discover multiple sources and accounts.
 - Require an explicit selection or deterministic provider discriminator when
   more than one route exists.

@@ -6,6 +6,7 @@ import type {
 } from "../lib/connector-read-model";
 import { safeConnectorErrorCode } from "../lib/connector-ui-mode";
 import { ConnectorInstallationActions } from "./ConnectorInstallationActions";
+import { DeviceCredentialActions } from "./DeviceCredentialActions";
 
 const CONNECTOR_LABELS: Record<string, string> = {
   mtn_momo_sms_v1: "MTN MoMo SMS",
@@ -178,30 +179,40 @@ export function ConnectorInstallationItem({
             {installation.credentials.map((credential) => (
               <li
                 key={credential.id}
-                className="flex flex-wrap items-center justify-between gap-3 p-3"
+                className="p-3"
               >
-                <div>
-                  <p className="text-sm font-medium text-text-primary">
-                    {credential.label}
-                  </p>
-                  <p className="text-xs text-text-muted">
-                    <code>{credential.credentialPrefix}…</code>
-                    {" · "}
-                    {credentialScopeLabel(credential.scope)}
-                  </p>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium text-text-primary">
+                      {credential.label}
+                    </p>
+                    <p className="text-xs text-text-muted">
+                      <code>{credential.credentialPrefix}…</code>
+                      {" · "}
+                      {credentialScopeLabel(credential.scope)}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <Badge
+                      variant={credential.status === "active" ? "positive" : "neutral"}
+                    >
+                      {credential.status}
+                    </Badge>
+                    <p className="mt-1 text-xs text-text-muted">
+                      {credential.lastUsedAt
+                        ? `Last used ${formatDateTime(credential.lastUsedAt)}`
+                        : "Never used"}
+                    </p>
+                  </div>
                 </div>
-                <div className="text-right">
-                  <Badge
-                    variant={credential.status === "active" ? "positive" : "neutral"}
-                  >
-                    {credential.status}
-                  </Badge>
-                  <p className="mt-1 text-xs text-text-muted">
-                    {credential.lastUsedAt
-                      ? `Last used ${formatDateTime(credential.lastUsedAt)}`
-                      : "Never used"}
-                  </p>
-                </div>
+                <DeviceCredentialActions
+                  credentialId={credential.id}
+                  canRotate={
+                    credential.status === "active" &&
+                    installation.status !== "paused" &&
+                    installation.status !== "revoked"
+                  }
+                />
               </li>
             ))}
           </ul>

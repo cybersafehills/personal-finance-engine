@@ -70,13 +70,7 @@ export async function createConnection(
   return { ok: true, secret: credential.secret };
 }
 
-/**
- * Rotates a connection's credential: a fresh secret replaces the old one
- * in place (same connection id, same bound account, same label) - the old
- * credential stops working the instant this update commits, since
- * ingest-momo looks up connections by credential_hash and the old hash no
- * longer matches any row.
- */
+/** Rotates through the canonical history-preserving RPC. */
 export async function rotateConnection(
   connectionId: string,
 ): Promise<CreateConnectionResult> {
@@ -84,13 +78,21 @@ export async function rotateConnection(
   const credential = await generateIngestionCredential();
 
   const supabase = await supabaseSession();
-  const { error } = await supabase
+  const { data: connection, error: mappingError } = await supabase
     .from("ingestion_connections")
-    .update({
-      credential_hash: credential.hash,
-      credential_prefix: credential.prefix,
-    })
-    .eq("id", connectionId);
+    .select("device_credential_id")
+    .eq("id", connectionId)
+    .maybeSingle();
+
+  if (mappingError || !connection?.device_credential_id) {
+    return { ok: false, error: "Could not rotate the connection." };
+  }
+
+  const { error } = await supabase.rpc("rotate_device_credential", {
+    p_device_credential_id: connection.device_credential_id,
+    p_credential_hash: credential.hash,
+    p_credential_prefix: credential.prefix,
+  });
 
   if (error) {
     return { ok: false, error: "Could not rotate the connection." };
@@ -101,21 +103,25 @@ export async function rotateConnection(
   return { ok: true, secret: credential.secret };
 }
 
-/**
- * Revokes a connection. Never deleted (see the migration: no delete
- * policy exists for ingestion_connections at all), so provenance of any
- * transaction already ingested through it is preserved. A revoked
- * connection's credential stops authenticating immediately.
- */
+/** Revokes through the canonical installation boundary without deleting provenance. */
 export async function revokeConnection(
   connectionId: string,
 ): Promise<ConnectionActionResult> {
   await requireMfaForSensitiveAction("/settings/connections");
   const supabase = await supabaseSession();
-  const { error } = await supabase
+  const { data: connection, error: mappingError } = await supabase
     .from("ingestion_connections")
-    .update({ status: "revoked", revoked_at: new Date().toISOString() })
-    .eq("id", connectionId);
+    .select("connector_installation_id")
+    .eq("id", connectionId)
+    .maybeSingle();
+
+  if (mappingError || !connection?.connector_installation_id) {
+    return { ok: false, error: "Could not revoke the connection." };
+  }
+
+  const { error } = await supabase.rpc("revoke_connector_installation", {
+    p_connector_installation_id: connection.connector_installation_id,
+  });
 
   if (error) {
     return { ok: false, error: "Could not revoke the connection." };
@@ -294,6 +300,43 @@ export async function renameConnectorInstallation(
 
   if (error) {
     return { ok: false, error: "Could not rename the connector." };
+  }
+
+  revalidatePath("/settings/connections");
+  return { ok: true };
+}
+
+export async function rotateConnectorCredential(
+  deviceCredentialId: string,
+): Promise<CreateConnectionResult> {
+  await requireMfaForSensitiveAction("/settings/connections");
+  const credential = await generateIngestionCredential();
+  const supabase = await supabaseSession();
+  const { error } = await supabase.rpc("rotate_device_credential", {
+    p_device_credential_id: deviceCredentialId,
+    p_credential_hash: credential.hash,
+    p_credential_prefix: credential.prefix,
+  });
+
+  if (error) {
+    return { ok: false, error: "Could not rotate the credential." };
+  }
+
+  revalidatePath("/settings/connections");
+  return { ok: true, secret: credential.secret };
+}
+
+export async function revokeConnectorInstallation(
+  connectorInstallationId: string,
+): Promise<ConnectionActionResult> {
+  await requireMfaForSensitiveAction("/settings/connections");
+  const supabase = await supabaseSession();
+  const { error } = await supabase.rpc("revoke_connector_installation", {
+    p_connector_installation_id: connectorInstallationId,
+  });
+
+  if (error) {
+    return { ok: false, error: "Could not revoke the connector." };
   }
 
   revalidatePath("/settings/connections");
