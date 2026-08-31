@@ -10,10 +10,14 @@ Implementation status: Stage A is encoded in
 legacy backfill are encoded in
 `20261012000000_connector_model_stage_b_backfill.sql`; Stage C atomic
 enrollment, lifecycle mirroring, canonical provenance, and shadow comparison
-are encoded in `20261013000000_connector_model_stage_c_dual_write.sql`.
+are encoded in `20261013000000_connector_model_stage_c_dual_write.sql`;
+durable service-only shadow-health counters are encoded in
+`20261014000000_connector_stage_c_shadow_health.sql`.
 Authentication and routing remain authoritative in `ingestion_connections`;
 Stage C verifies the equivalent canonical route and fails closed on drift, but
-does not cut reads over to the canonical model.
+does not cut reads over to the canonical model. Stage D remains gated on a
+representative production observation window with every active connection
+seen, zero unexplained mismatches/errors, and exercised lifecycle operations.
 
 ## Decision
 

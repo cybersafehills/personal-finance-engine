@@ -30,6 +30,41 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   },
 });
 
+type ShadowObservationOutcome = "match" | "mismatch" | "resolver_error";
+
+async function recordShadowObservation(
+  connectionId: string,
+  outcome: ShadowObservationOutcome,
+  mismatchCode: string | null = null,
+): Promise<void> {
+  try {
+    const { error } = await supabase.rpc(
+      "record_connector_shadow_observation",
+      {
+        p_ingestion_connection_id: connectionId,
+        p_outcome: outcome,
+        p_mismatch_code: mismatchCode,
+      },
+    );
+
+    if (error) {
+      console.error(JSON.stringify({
+        event: "canonical_shadow_observation_failed",
+        outcome,
+        connection_suffix: connectionId.slice(-8),
+      }));
+    }
+  } catch {
+    // Shadow telemetry is best-effort: it must never alter the routing
+    // decision or expose database/credential details in logs.
+    console.error(JSON.stringify({
+      event: "canonical_shadow_observation_failed",
+      outcome,
+      connection_suffix: connectionId.slice(-8),
+    }));
+  }
+}
+
 Deno.serve(async (req: Request) => {
   try {
     // ========================================================
@@ -112,6 +147,11 @@ Deno.serve(async (req: Request) => {
     );
 
     if (shadowError) {
+      await recordShadowObservation(
+        connection.id,
+        "resolver_error",
+        "shadow_resolver_error",
+      );
       console.error(JSON.stringify({
         event: "canonical_route_mismatch",
         mismatch_code: "shadow_resolver_error",
@@ -121,6 +161,11 @@ Deno.serve(async (req: Request) => {
     }
 
     if (!shadowResult.ok) {
+      await recordShadowObservation(
+        connection.id,
+        "mismatch",
+        shadowResult.mismatchCode,
+      );
       console.error(JSON.stringify({
         event: "canonical_route_mismatch",
         mismatch_code: shadowResult.mismatchCode,
@@ -129,6 +174,7 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ ok: false, error: "routing_mismatch" }, 409);
     }
 
+    await recordShadowObservation(connection.id, "match");
     const canonicalRoute = shadowResult.route;
 
     // ========================================================

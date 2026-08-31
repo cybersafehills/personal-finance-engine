@@ -43,6 +43,37 @@ redacted mismatch code for operators, not credential material. Accepted raw
 events retain both the legacy connection ID and the canonical source,
 installation, and device-credential IDs.
 
+Every comparison also updates `connector_shadow_health` with aggregate match,
+mismatch, and resolver-error counters. This service-role-only operational table
+contains no SMS payloads or credentials. Telemetry writes are best-effort and
+never change whether ingestion accepts or rejects a request.
+
+Before the Stage D read cutover, operators must verify a representative window
+with at least one successful canonical match for every active connection and no
+unexplained mismatches or resolver errors:
+
+```sql
+select
+  right(ic.id::text, 8) as connection_suffix,
+  ic.status,
+  h.observation_count,
+  h.match_count,
+  h.mismatch_count,
+  h.resolver_error_count,
+  h.last_mismatch_code,
+  h.last_observed_at
+from public.ingestion_connections ic
+left join public.connector_shadow_health h
+  on h.ingestion_connection_id = ic.id
+where ic.status = 'active'
+order by h.last_observed_at desc nulls last;
+```
+
+The cutover is blocked if any active connection has no observation, no match,
+or a nonzero unexplained mismatch/error count. Pause/resume, credential
+rotation, and revocation must also be exercised once against canonical shadow
+routing during the observation window.
+
 > **Deployed-state note.** The linked production function already runs
 > with JWT verification off (Shortcuts only ever send `x-ingest-key`).
 > The `config.toml` block added in the onboarding work makes that
