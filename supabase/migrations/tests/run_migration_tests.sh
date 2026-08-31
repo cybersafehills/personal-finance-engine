@@ -616,7 +616,9 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # and device_credentials, both RLS enabled - 75 tables, 74 with RLS.
 # Connector Stage C shadow health (20261014000000) adds one service-only,
 # RLS-enabled aggregate table - 76 tables, 75 with RLS.
-if [ "$TABLE_COUNT" = "76" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Connector adapter route health (20261019000000) adds one service-only,
+# RLS-enabled aggregate table - 77 tables, 76 with RLS.
+if [ "$TABLE_COUNT" = "77" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -4624,6 +4626,28 @@ if [ "$CMS_ACL" = "true|false|false|true|false|false" ] || [ "$CMS_ACL" = "t|f|f
   pass "Connector Stage D: discovery and routing RPCs are service-role-only"
 else
   fail "Connector Stage D: discovery/routing RPC grants are incorrect ($CMS_ACL)"
+fi
+
+# Provider adapter route-health rollout evidence: aggregate and service-only.
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  select public.record_connector_adapter_route_observation('$CMS_CREDENTIAL', 'match');
+  select public.record_connector_adapter_route_observation('$CMS_CREDENTIAL', 'mismatch', 'adapter_account_mismatch');
+  select public.record_connector_adapter_route_observation('$CMS_CREDENTIAL', 'resolver_error', 'adapter_route_resolver_error');
+  select public.record_connector_adapter_route_observation('$CMS_CREDENTIAL', 'envelope_error', 'route_discriminator_invalid');
+" >/dev/null
+CMS_ADAPTER_HEALTH="$(psql -d pfe_rls -t -A -c "select observation_count || '|' || match_count || '|' || mismatch_count || '|' || resolver_error_count || '|' || envelope_error_count || '|' || last_failure_code from public.connector_adapter_route_health where connector_installation_id = '$CMS_INSTALL';")"
+if [ "$CMS_ADAPTER_HEALTH" = "4|1|1|1|1|route_discriminator_invalid" ]; then
+  pass "Connector adapter: rollout health records redacted aggregate outcomes"
+else
+  fail "Connector adapter: rollout health counters drifted ($CMS_ADAPTER_HEALTH)"
+fi
+
+CMS_ADAPTER_ACL="$(psql -d pfe_rls -t -A -c "select has_table_privilege('service_role', 'public.connector_adapter_route_health', 'select') || '|' || has_table_privilege('authenticated', 'public.connector_adapter_route_health', 'select') || '|' || has_table_privilege('anon', 'public.connector_adapter_route_health', 'select') || '|' || has_function_privilege('service_role', 'public.record_connector_adapter_route_observation(uuid,text,text)', 'execute') || '|' || has_function_privilege('authenticated', 'public.record_connector_adapter_route_observation(uuid,text,text)', 'execute') || '|' || has_function_privilege('anon', 'public.record_connector_adapter_route_observation(uuid,text,text)', 'execute');")"
+if [ "$CMS_ADAPTER_ACL" = "true|false|false|true|false|false" ] || [ "$CMS_ADAPTER_ACL" = "t|f|f|t|f|f" ]; then
+  pass "Connector adapter: rollout health table and recorder are service-role-only"
+else
+  fail "Connector adapter: rollout health privileges are incorrect ($CMS_ADAPTER_ACL)"
 fi
 
 # Phase V PR4b: visible_source_ids_for_user - the auth.uid()-free source

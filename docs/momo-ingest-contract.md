@@ -49,6 +49,24 @@ mismatch, and resolver-error counters. This service-role-only operational table
 contains no SMS payloads or credentials. Telemetry writes are best-effort and
 never change whether ingestion accepts or rejects a request.
 
+The first provider-neutral runtime adapter is also default-off. Setting the
+Edge Function secret `ONELEDGER_MTN_MOMO_ADAPTER=enabled` activates it only for
+installations whose canonical `connector_key` is `mtn_momo_sms_v1`. The server
+then wraps the existing request in a versioned event envelope and resolves the
+credential/source/account through `resolve_connector_event_route` before any
+SMS evidence is written. The result must exactly match the existing canonical
+shadow route or the request fails closed with `409 routing_mismatch`.
+
+Account-scoped device credentials, including every current production
+connection, do not need new request fields. A future unscoped MTN forwarding
+agent may send `source_ref` plus `account_ref`; both are hashed in memory using
+the same domain-separated discovery contract and are never persisted in raw
+form. `account_ref` without `source_ref` is rejected as an invalid envelope.
+Each enabled adapter check also updates the service-only
+`connector_adapter_route_health` aggregate with a match, mismatch, resolver
+error, or envelope error. It stores no SMS payload, raw reference, account ID,
+or credential material and is best-effort, so telemetry cannot change routing.
+
 Before the Stage D read cutover, operators must verify a representative window
 with at least one successful canonical match for every active connection and no
 unexplained mismatches or resolver errors:
@@ -88,7 +106,9 @@ routing during the observation window.
 ```json
 {
   "message": "<the full SMS text>",
-  "received_at": "<ISO-8601 timestamp>"
+  "received_at": "<ISO-8601 timestamp>",
+  "source_ref": "<optional provider-stable source reference>",
+  "account_ref": "<optional source-scoped account reference>"
 }
 ```
 
@@ -96,6 +116,8 @@ routing during the observation window.
 |---|---|---|
 | `message` | yes | Raw SMS text. Trimmed. Must be non-empty, ≤ 5000 chars, and contain an `RWF` amount. |
 | `received_at` | no | ISO-8601 string. Stored as `device_received_at`. Anything non-string is ignored. |
+| `source_ref` | no | Used only by the default-off MTN adapter route. Required when `account_ref` is present; hashed before the resolver call and never stored raw. |
+| `account_ref` | no | Used only for an unscoped multi-account credential. Must be paired with `source_ref`; ignored by the legacy path while the adapter flag is off. |
 
 ## Responses
 
@@ -109,6 +131,7 @@ errors carry `{ "ok": false, "error": … }`.
 | 200 | `duplicate` | This exact SMS (normalised hash) was already ingested through this connection. Nothing added twice. |
 | 400 | `invalid_json` | Body was not valid JSON. |
 | 400 | `invalid_request_body` | Body was not a JSON object. |
+| 400 | `invalid_route_envelope` | The enabled provider adapter rejected malformed or incomplete route discriminators. |
 | 400 | `missing_message` | `message` missing or empty after trim. |
 | 401 | `unauthorized` | Key missing / wrong / revoked / paused / unknown. |
 | 409 | `routing_mismatch` | Canonical connector routing is missing or differs from the authenticated legacy route; nothing recorded. |

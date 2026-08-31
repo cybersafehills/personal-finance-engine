@@ -37,7 +37,24 @@ export type ConnectorDiscoveryPayload = Array<{
   }>;
 }>;
 
+export type ConnectorEventEnvelope<Payload> = {
+  connector_key: string;
+  adapter_version: string;
+  event_time: string | null;
+  provider_event_reference: string;
+  source_external_ref: string | null;
+  account_external_ref: string | null;
+  payload: Payload;
+};
+
+export type ConnectorEventRouteDiscriminators = {
+  source_ref_hash: string | null;
+  account_ref_hash: string | null;
+};
+
 type HashReference = (scope: string, reference: string) => Promise<string>;
+
+const CONNECTOR_REFERENCE_HASH_DOMAIN = "oneledger:connector-reference:v1";
 
 const SOURCE_KEYS = new Set([
   "externalRef",
@@ -127,6 +144,48 @@ async function checkedHash(
     throw new Error("reference_hash_invalid");
   }
   return digest;
+}
+
+/**
+ * Domain-separated SHA-256 for provider references. The scope is part of the
+ * digest input so the same raw value cannot correlate a source and account.
+ */
+export async function hashConnectorReference(
+  scope: string,
+  reference: string,
+): Promise<string> {
+  const input = new TextEncoder().encode(
+    `${CONNECTOR_REFERENCE_HASH_DOMAIN}\0${scope}\0${reference}`,
+  );
+  const digest = await crypto.subtle.digest("SHA-256", input);
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+/**
+ * Produces the exact hashes accepted by resolve_connector_event_route. An
+ * account reference is source-scoped, matching discovery identity. Raw
+ * references are deliberately absent from the returned object.
+ */
+export async function buildConnectorEventRouteDiscriminators(
+  envelope: ConnectorEventEnvelope<unknown>,
+  hashReference: HashReference = hashConnectorReference,
+): Promise<ConnectorEventRouteDiscriminators> {
+  if (envelope.account_external_ref && !envelope.source_external_ref) {
+    throw new Error("account_discriminator_requires_source");
+  }
+
+  const sourceRef = envelope.source_external_ref;
+  const accountRef = envelope.account_external_ref;
+  return {
+    source_ref_hash: sourceRef
+      ? await checkedHash(hashReference, "source", sourceRef)
+      : null,
+    account_ref_hash: sourceRef && accountRef
+      ? await checkedHash(hashReference, `account:${sourceRef}`, accountRef)
+      : null,
+  };
 }
 
 /**

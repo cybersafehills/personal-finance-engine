@@ -8,6 +8,9 @@ transactions, and classifies merchants via `merchant_rules`.
 
 - `index.ts` — HTTP orchestration only: auth, request validation, duplicate
   detection, calling the parser/classifier, and database writes.
+- `adapter.ts` — concrete `mtn_momo_sms_v1` adapter: pairing/discovery
+  validation, versioned event envelopes, and normalization through the same
+  production parser.
 - `parser.ts` — pure, deterministic SMS parsing (`parseMomoMessage`). No
   Supabase or database access.
 - `parser-utils.ts` — normalization, hashing, and field-extraction helpers used
@@ -20,6 +23,28 @@ transactions, and classifies merchants via `merchant_rules`.
 - `tests/fixtures.ts` — realistic MTN SMS fixtures with expected parsed output.
 - `tests/parser_test.ts` — Deno test suite for `parser.ts`. Runs against
   fixtures only; never touches Supabase or the production project.
+
+## Provider-adapter rollout
+
+`ONELEDGER_MTN_MOMO_ADAPTER=enabled` is an exact-match, default-off Edge
+Function flag. When enabled, and only for an installation whose canonical
+connector key is `mtn_momo_sms_v1`, `index.ts` builds a provider event envelope
+and calls `resolve_connector_event_route` before storing evidence. The returned
+installation, credential, source, account, and workspace must all equal the
+existing shadow route. Any resolver error or mismatch fails closed. The
+service-only `connector_adapter_route_health` table records redacted aggregate
+outcomes so an operator can judge the rollout without inspecting SMS payloads or
+credentials; telemetry failures never alter the request result.
+
+The adapter's discovery snapshot requires a validated Rwanda MSISDN, safe
+display labels, and a masked identifier containing at most four digits. Raw
+source/account references are domain-separated SHA-256 values at the adapter
+boundary. Discovery and event routing therefore produce identical hashes while
+ordinary metadata never receives the raw MSISDN.
+
+Current account-scoped Shortcut credentials work with the unchanged request
+body. Optional `source_ref` and `account_ref` fields exist for future unscoped
+multi-account forwarding agents; `account_ref` is invalid without its source.
 
 ## Supported MTN transaction formats
 

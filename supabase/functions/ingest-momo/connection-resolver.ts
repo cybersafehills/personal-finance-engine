@@ -47,6 +47,14 @@ export type CanonicalShadowRoute = {
   financialSourceId: string;
 };
 
+export type DeterministicEventRouteRow = {
+  connector_installation_id: string;
+  device_credential_id: string;
+  financial_source_id: string;
+  account_id: string;
+  workspace_id: string;
+};
+
 export function acceptCanonicalShadow(
   connection: IngestionConnectionRow,
   shadow: CanonicalShadowRow | null,
@@ -109,6 +117,39 @@ export type AuthenticateCredentialResult =
 
 export function canonicalIngestionEnabled(value: string | undefined): boolean {
   return value === "enabled";
+}
+
+export function mtnMomoAdapterEnabled(value: string | undefined): boolean {
+  return value === "enabled";
+}
+
+export function acceptDeterministicEventRoute(
+  connection: IngestionConnectionRow,
+  canonicalRoute: CanonicalShadowRoute,
+  route: DeterministicEventRouteRow | null,
+): { ok: true } | { ok: false; mismatchCode: string } {
+  if (!route) {
+    return { ok: false, mismatchCode: "adapter_route_missing" };
+  }
+  if (
+    route.connector_installation_id !==
+      canonicalRoute.connectorInstallationId
+  ) {
+    return { ok: false, mismatchCode: "adapter_installation_mismatch" };
+  }
+  if (route.device_credential_id !== canonicalRoute.deviceCredentialId) {
+    return { ok: false, mismatchCode: "adapter_credential_mismatch" };
+  }
+  if (route.financial_source_id !== canonicalRoute.financialSourceId) {
+    return { ok: false, mismatchCode: "adapter_source_mismatch" };
+  }
+  if (route.account_id !== connection.account_id) {
+    return { ok: false, mismatchCode: "adapter_account_mismatch" };
+  }
+  if (route.workspace_id !== connection.workspace_id) {
+    return { ok: false, mismatchCode: "adapter_workspace_mismatch" };
+  }
+  return { ok: true };
 }
 
 export async function authenticateCredential(

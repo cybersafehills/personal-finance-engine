@@ -9,10 +9,12 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import {
   acceptCanonicalShadow,
+  acceptDeterministicEventRoute,
   type AccountRow,
   authenticateCredential,
   canonicalIngestionEnabled,
   type IngestionConnectionRow,
+  mtnMomoAdapterEnabled,
   resolveAccountRoute,
 } from "../connection-resolver.ts";
 
@@ -69,6 +71,13 @@ Deno.test("canonicalIngestionEnabled: only the exact enabled value activates cut
   assertEquals(canonicalIngestionEnabled(undefined), false);
 });
 
+Deno.test("mtnMomoAdapterEnabled: provider rollout is exact-match and default-off", () => {
+  assertEquals(mtnMomoAdapterEnabled("enabled"), true);
+  assertEquals(mtnMomoAdapterEnabled("ENABLED"), false);
+  assertEquals(mtnMomoAdapterEnabled("true"), false);
+  assertEquals(mtnMomoAdapterEnabled(undefined), false);
+});
+
 Deno.test("acceptCanonicalShadow: accepts only an exact canonical mirror", () => {
   assertEquals(acceptCanonicalShadow(ACTIVE_CONNECTION, MATCHING_SHADOW), {
     ok: true,
@@ -100,6 +109,37 @@ Deno.test("acceptCanonicalShadow: rejects resolver and shape mismatches", () => 
     ok: false,
     mismatchCode: "canonical_shadow_missing",
   });
+});
+
+Deno.test("acceptDeterministicEventRoute: accepts only the existing canonical route", () => {
+  const canonicalRoute = {
+    connectorInstallationId: "install-1",
+    deviceCredentialId: "credential-1",
+    financialSourceId: "source-a",
+  };
+  const route = {
+    connector_installation_id: "install-1",
+    device_credential_id: "credential-1",
+    financial_source_id: "source-a",
+    account_id: "acct-a",
+    workspace_id: "ws-a",
+  };
+
+  assertEquals(
+    acceptDeterministicEventRoute(ACTIVE_CONNECTION, canonicalRoute, route),
+    { ok: true },
+  );
+  assertEquals(
+    acceptDeterministicEventRoute(ACTIVE_CONNECTION, canonicalRoute, {
+      ...route,
+      account_id: "acct-b",
+    }),
+    { ok: false, mismatchCode: "adapter_account_mismatch" },
+  );
+  assertEquals(
+    acceptDeterministicEventRoute(ACTIVE_CONNECTION, canonicalRoute, null),
+    { ok: false, mismatchCode: "adapter_route_missing" },
+  );
 });
 
 function connectionStore(rows: IngestionConnectionRow[]) {

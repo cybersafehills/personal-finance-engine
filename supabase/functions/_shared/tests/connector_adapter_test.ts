@@ -1,5 +1,9 @@
 import { assertEquals, assertRejects } from "jsr:@std/assert@1";
-import { buildConnectorDiscoveryPayload } from "../connector-adapter.ts";
+import {
+  buildConnectorDiscoveryPayload,
+  buildConnectorEventRouteDiscriminators,
+  hashConnectorReference,
+} from "../connector-adapter.ts";
 
 const digests = new Map<string, string>([
   ["source|bank-customer-1", "a".repeat(64)],
@@ -125,5 +129,59 @@ Deno.test("discovery rejects an identifier masquerading as a masked suffix", asy
     () => buildConnectorDiscoveryPayload([unsafe], hashReference),
     Error,
     "masked_identifier_invalid",
+  );
+});
+
+Deno.test("event routing uses the exact domain-separated discovery hashes", async () => {
+  const sourceExternalRef = "wallet:250788000001";
+  const accountExternalRef = "primary_wallet";
+  const discoveryPayload = await buildConnectorDiscoveryPayload([{
+    externalRef: sourceExternalRef,
+    providerKey: "mtn_momo_sms_v1",
+    provider: "mtn_momo",
+    sourceType: "mobile_money",
+    displayName: "MTN MoMo",
+    maskedIdentifier: "•••• 0001",
+    currency: "RWF",
+    accounts: [{
+      externalRef: accountExternalRef,
+      displayName: "Primary wallet",
+      provider: "mtn_momo",
+      currency: "RWF",
+    }],
+  }], hashConnectorReference);
+
+  const route = await buildConnectorEventRouteDiscriminators({
+    connector_key: "mtn_momo_sms_v1",
+    adapter_version: "1",
+    event_time: null,
+    provider_event_reference: "event-1",
+    source_external_ref: sourceExternalRef,
+    account_external_ref: accountExternalRef,
+    payload: {},
+  });
+
+  assertEquals(route.source_ref_hash, discoveryPayload[0].source_ref_hash);
+  assertEquals(
+    route.account_ref_hash,
+    discoveryPayload[0].accounts[0].account_ref_hash,
+  );
+  assertEquals(JSON.stringify(route).includes("250788000001"), false);
+});
+
+Deno.test("an account event discriminator cannot be hashed without its source", async () => {
+  await assertRejects(
+    () =>
+      buildConnectorEventRouteDiscriminators({
+        connector_key: "mtn_momo_sms_v1",
+        adapter_version: "1",
+        event_time: null,
+        provider_event_reference: "event-1",
+        source_external_ref: null,
+        account_external_ref: "primary_wallet",
+        payload: {},
+      }),
+    Error,
+    "account_discriminator_requires_source",
   );
 });
