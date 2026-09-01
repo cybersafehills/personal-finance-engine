@@ -19,7 +19,11 @@ export function AttentionItemsCard({ items }: { items: AttentionItem[] }) {
         <h2 className="text-xs font-semibold uppercase tracking-wide text-text-muted">
           Needs attention
         </h2>
-        <Link href="/inbox" className="text-xs font-medium text-accent hover:underline">
+        <Link
+          href="/inbox"
+          prefetch={false}
+          className="text-xs font-medium text-accent hover:underline"
+        >
           Open inbox
         </Link>
       </div>
