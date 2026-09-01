@@ -218,12 +218,14 @@ export function ConnectorInstallationItem({
                     ? ingestEndpointUrl
                     : undefined}
                   canRotate={
+                    installation.canManage &&
                     credential.status === "active" &&
                     installation.status !== "paused" &&
                     installation.status !== "revoked"
                   }
                 />
                 {credential.status === "active" &&
+                  installation.canManage &&
                   !credential.lastUsedAt &&
                   installation.status !== "paused" &&
                   installation.status !== "revoked" && (
@@ -236,6 +238,7 @@ export function ConnectorInstallationItem({
       </section>
 
       {installation.authMode === "device_secret" &&
+        installation.canManage &&
         installation.status !== "revoked" && (
         <ConnectionDetails
           endpointUrl={ingestEndpointUrl}
@@ -245,7 +248,8 @@ export function ConnectorInstallationItem({
         />
       )}
 
-      {canManageAdapterCanary &&
+      {installation.canManage &&
+        canManageAdapterCanary &&
         installation.connectorKey === "mtn_momo_sms_v1" &&
         installation.status !== "revoked" && (
         <MtnMomoCanaryPanel
@@ -254,11 +258,13 @@ export function ConnectorInstallationItem({
         />
       )}
 
-      <ConnectorInstallationActions
-        installationId={installation.id}
-        displayName={installation.displayName}
-        status={installation.status}
-      />
+      {installation.canManage && (
+        <ConnectorInstallationActions
+          installationId={installation.id}
+          displayName={installation.displayName}
+          status={installation.status}
+        />
+      )}
     </article>
   );
 }

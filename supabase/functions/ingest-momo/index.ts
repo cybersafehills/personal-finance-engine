@@ -18,6 +18,7 @@ import {
   type DeterministicEventRouteRow,
   type IngestionConnectionRow,
   installationAdapterCanaryEnabled,
+  installationIngestionRolloutsEnabled,
   mtnMomoAdapterEnabled,
   resolveAccountRoute,
 } from "./connection-resolver.ts";
@@ -36,6 +37,10 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
 const CANONICAL_INGESTION_ENABLED = canonicalIngestionEnabled(
   Deno.env.get("ONELEDGER_CANONICAL_INGESTION"),
 );
+const INSTALLATION_INGESTION_ROLLOUTS_ENABLED =
+  installationIngestionRolloutsEnabled(
+    Deno.env.get("ONELEDGER_INSTALLATION_INGESTION_ROLLOUTS"),
+  );
 const MTN_MOMO_ADAPTER_ENABLED = mtnMomoAdapterEnabled(
   Deno.env.get("ONELEDGER_MTN_MOMO_ADAPTER"),
 );
@@ -156,6 +161,21 @@ Deno.serve(async (req: Request) => {
     const authResult = await authenticateCredential(suppliedSecret, {
       hash: sha256,
       findConnectionByCredentialHash: async (credentialHash) => {
+        if (INSTALLATION_INGESTION_ROLLOUTS_ENABLED) {
+          const { data, error } = await supabase.rpc(
+            "resolve_ingestion_credential_rollout",
+            { p_credential_hash: credentialHash },
+          ).maybeSingle();
+
+          if (error) {
+            console.error(JSON.stringify({
+              event: "installation_credential_rollout_lookup_failed",
+            }));
+          }
+
+          return (data as IngestionConnectionRow | null) ?? null;
+        }
+
         if (CANONICAL_INGESTION_ENABLED) {
           const { data, error } = await supabase.rpc(
             "resolve_canonical_ingestion_credential",

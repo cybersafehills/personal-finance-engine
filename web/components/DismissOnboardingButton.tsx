@@ -11,9 +11,12 @@ import { dismissOnboardingChecklist } from "../app/get-started/actions";
  */
 export function DismissOnboardingButton({
   label = "Dismiss",
+  hrefAfterDismiss,
   className = "min-h-8 text-xs font-medium text-text-muted hover:text-text-primary",
 }: {
   label?: string;
+  /** Optional destination for explicit "set up later" actions. */
+  hrefAfterDismiss?: string;
   className?: string;
 }) {
   const router = useRouter();
@@ -25,7 +28,11 @@ export function DismissOnboardingButton({
       disabled={isPending}
       onClick={() =>
         startTransition(async () => {
-          await dismissOnboardingChecklist();
+          const result = await dismissOnboardingChecklist();
+          if (result.ok && hrefAfterDismiss) {
+            router.push(hrefAfterDismiss);
+            return;
+          }
           router.refresh();
         })}
       className={`${className} disabled:opacity-50`}

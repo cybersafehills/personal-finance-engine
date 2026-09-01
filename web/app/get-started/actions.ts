@@ -29,6 +29,14 @@ export async function dismissOnboardingChecklist(): Promise<
     return { ok: false, error: "Not signed in." };
   }
 
+  const { error: completionError } = await supabase.rpc(
+    "complete_profile_onboarding",
+  );
+  if (completionError) {
+    console.error("complete_profile_onboarding failed:", completionError.message);
+    return { ok: false, error: "Could not finish setup." };
+  }
+
   const { data: existing } = await supabase
     .from("ui_preferences")
     .select(

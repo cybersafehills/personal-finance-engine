@@ -74,6 +74,15 @@ setup("create and sign in the e2e test user", async ({ page }) => {
     if (error) throw error;
   }
 
+  const { data: seededUsers } = await adminClient.auth.admin.listUsers();
+  const seededUser = seededUsers.users.find((user) => user.email === E2E_USER.email);
+  if (!seededUser) throw new Error("E2E user was not provisioned.");
+  const { error: onboardingError } = await adminClient
+    .from("profiles")
+    .update({ onboarding_step: "completed", onboarding_completed_at: new Date().toISOString() })
+    .eq("id", seededUser.id);
+  if (onboardingError) throw onboardingError;
+
   await page.goto("/login");
   await page.getByLabel("Email").fill(E2E_USER.email);
   await page.getByLabel("Password").fill(E2E_USER.password);

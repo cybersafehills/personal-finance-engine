@@ -12,6 +12,10 @@
 export const REPORT_TIMEZONE_OPTIONS: readonly { value: string; label: string }[] = [
   { value: "Africa/Kigali", label: "Kigali (Rwanda)" },
   { value: "Africa/Nairobi", label: "Nairobi (East Africa)" },
+  { value: "Africa/Kampala", label: "Kampala (Uganda)" },
+  { value: "Africa/Dar_es_Salaam", label: "Dar es Salaam (Tanzania)" },
+  { value: "Africa/Bujumbura", label: "Bujumbura (Burundi)" },
+  { value: "Africa/Lubumbashi", label: "Lubumbashi (DR Congo)" },
   { value: "Africa/Lagos", label: "Lagos (West Africa)" },
   { value: "Africa/Johannesburg", label: "Johannesburg (South Africa)" },
   { value: "Africa/Cairo", label: "Cairo (Egypt)" },

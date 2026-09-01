@@ -434,6 +434,10 @@ deno_version = 2
 # setting): ONELEDGER_MTN_MOMO_ADAPTER=enabled. It is exact-match and off when
 # absent. Enabling it adds the deterministic canonical event-route check only
 # for connector_key=mtn_momo_sms_v1; the Shortcut request remains compatible.
+# Installation-scoped credential auth is independently default-off via
+# ONELEDGER_INSTALLATION_INGESTION_ROLLOUTS=enabled. With that coarse gate on,
+# service-only connector_ingestion_rollouts rows select legacy/canonical per
+# installation; missing rows remain legacy.
 [functions.ingest-momo]
 enabled = true
 verify_jwt = false

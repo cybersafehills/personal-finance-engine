@@ -7,6 +7,7 @@
 
 export type ConnectorInstallationRecord = {
   id: string;
+  owner_user_id: string;
   connector_key: string;
   display_name: string;
   status:
@@ -121,6 +122,7 @@ export type ConnectorAdapterCanaryStatus = {
 
 export type CanonicalConnectorInstallation = {
   id: string;
+  canManage: boolean;
   connectorKey: string;
   displayName: string;
   status: ConnectorInstallationRecord["status"];
@@ -135,6 +137,7 @@ export type CanonicalConnectorInstallation = {
 };
 
 export type CanonicalConnectorRows = {
+  currentUserId: string;
   installations: ConnectorInstallationRecord[];
   sources: ConnectorSourceRecord[];
   accounts: ConnectorAccountRecord[];
@@ -245,6 +248,7 @@ export function buildCanonicalConnectorReadModel(
 
     return {
       id: installation.id,
+      canManage: installation.owner_user_id === rows.currentUserId,
       connectorKey: installation.connector_key,
       displayName: installation.display_name,
       status: installation.status,

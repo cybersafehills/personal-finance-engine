@@ -44,6 +44,15 @@ state fails closed; logs contain a redacted mismatch code, never credential
 material. Accepted raw events retain both the legacy connection ID and the
 canonical source, installation, and device-credential IDs.
 
+For a reversible installation-by-installation cutover, the separate exact-match
+`ONELEDGER_INSTALLATION_INGESTION_ROLLOUTS=enabled` runtime gate switches the
+credential lookup to `resolve_ingestion_credential_rollout`. Its service-only
+`connector_ingestion_rollouts` table defaults every absent installation to
+`legacy` and selects `canonical` only for an explicit row. The global gate is
+off by default, the table begins empty, and the canonical shadow comparison
+still runs after authentication, so deploying this control plane changes no
+live route on its own.
+
 Every comparison also updates `connector_shadow_health` with aggregate match,
 mismatch, and resolver-error counters. This service-role-only operational table
 contains no SMS payloads or credentials. Telemetry writes are best-effort and

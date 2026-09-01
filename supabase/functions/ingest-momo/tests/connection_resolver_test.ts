@@ -15,6 +15,7 @@ import {
   canonicalIngestionEnabled,
   type IngestionConnectionRow,
   installationAdapterCanaryEnabled,
+  installationIngestionRolloutsEnabled,
   mtnMomoAdapterEnabled,
   resolveAccountRoute,
 } from "../connection-resolver.ts";
@@ -70,6 +71,13 @@ Deno.test("canonicalIngestionEnabled: only the exact enabled value activates cut
   assertEquals(canonicalIngestionEnabled("ENABLED"), false);
   assertEquals(canonicalIngestionEnabled("true"), false);
   assertEquals(canonicalIngestionEnabled(undefined), false);
+});
+
+Deno.test("installationIngestionRolloutsEnabled: installation control plane is exact-match and default-off", () => {
+  assertEquals(installationIngestionRolloutsEnabled("enabled"), true);
+  assertEquals(installationIngestionRolloutsEnabled("ENABLED"), false);
+  assertEquals(installationIngestionRolloutsEnabled("true"), false);
+  assertEquals(installationIngestionRolloutsEnabled(undefined), false);
 });
 
 Deno.test("mtnMomoAdapterEnabled: provider rollout is exact-match and default-off", () => {

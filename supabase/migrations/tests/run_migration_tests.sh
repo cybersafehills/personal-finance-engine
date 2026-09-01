@@ -619,8 +619,8 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # Connector adapter route health (20261019000000) adds one service-only,
 # RLS-enabled aggregate table - 77 tables, 76 with RLS.
 # Connector adapter canaries (20261020000000) adds one service-only,
-# RLS-enabled installation allowlist - 78 tables, 77 with RLS.
-if [ "$TABLE_COUNT" = "78" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# RLS-enabled installation allowlist - 79 tables, 78 with RLS.
+if [ "$TABLE_COUNT" = "79" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -856,12 +856,13 @@ fi
 # authenticated canonical lifecycle/credential RPCs. = 81. The installation
 # canary adds pairing, kill-switch, and redacted status RPCs. = 84. The
 # canonical settings cutover adds a readiness RPC and an installation-ID
-# pairing entry point. = 86.
+# pairing entry point. Profile onboarding adds three narrow authenticated
+# RPCs for its transactional stage writes. = 89.
 AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname = 'authenticated' where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "86" ]; then
-  pass "authenticated holds EXECUTE on exactly the 86 functions expected, no more"
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "89" ]; then
+  pass "authenticated holds EXECUTE on exactly the 89 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 86 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 89 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -4415,6 +4416,34 @@ else
   fail "Connector Stage D: canonical credential resolver grants are incorrect ($CMD_CANONICAL_AUTH_ACL)"
 fi
 
+# The installation rollout control plane is deployed empty/default-legacy.
+# An explicit service-only row can select canonical for one installation and
+# roll it back without changing any other installation.
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.connector_ingestion_rollouts (connector_installation_id, credential_auth_mode) values ('$CMC_INSTALL', 'canonical');" >/dev/null
+CMD_SCOPED_CANONICAL="$(psql -d pfe_rls -t -A -c "set role service_role; select credential_auth_mode || '|' || id || '|' || connector_installation_id || '|' || device_credential_id from public.resolve_ingestion_credential_rollout('cmc-hash-2');" | tail -1)"
+CMD_EXPECTED_SCOPED_CANONICAL="canonical|$CMC_CONNECTION|$CMC_INSTALL|$CMD_AUTH_CREDENTIAL"
+if [ "$CMD_SCOPED_CANONICAL" = "$CMD_EXPECTED_SCOPED_CANONICAL" ]; then
+  pass "Connector Stage D: one explicit installation can select canonical credential authentication"
+else
+  fail "Connector Stage D: installation-scoped canonical auth resolved incorrectly ($CMD_SCOPED_CANONICAL)"
+fi
+
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; update public.connector_ingestion_rollouts set credential_auth_mode = 'legacy' where connector_installation_id = '$CMC_INSTALL';" >/dev/null
+CMD_SCOPED_LEGACY="$(psql -d pfe_rls -t -A -c "set role service_role; select credential_auth_mode || '|' || id || '|' || connector_installation_id || '|' || device_credential_id from public.resolve_ingestion_credential_rollout('cmc-hash-2');" | tail -1)"
+CMD_UNCONFIGURED_LEGACY="$(psql -d pfe_rls -t -A -c "set role service_role; select credential_auth_mode || '|' || id || '|' || connector_installation_id || '|' || device_credential_id from public.resolve_ingestion_credential_rollout('cmb-legacy-hash');" | tail -1)"
+if [ "$CMD_SCOPED_LEGACY" = "legacy|$CMC_CONNECTION|$CMC_INSTALL|$CMD_AUTH_CREDENTIAL" ] && [ "$CMD_UNCONFIGURED_LEGACY" = "legacy|$CMB_LEGACY|$CMB_INSTALL|$CMB_CREDENTIAL" ]; then
+  pass "Connector Stage D: rollout rollback and every unconfigured installation deterministically remain legacy"
+else
+  fail "Connector Stage D: installation rollout did not default/roll back to legacy (configured=$CMD_SCOPED_LEGACY unconfigured=$CMD_UNCONFIGURED_LEGACY)"
+fi
+
+CMD_SCOPED_ROLLOUT_ACL="$(psql -d pfe_rls -t -A -c "select has_table_privilege('service_role', 'public.connector_ingestion_rollouts', 'select') || '|' || has_table_privilege('authenticated', 'public.connector_ingestion_rollouts', 'select') || '|' || has_table_privilege('anon', 'public.connector_ingestion_rollouts', 'select') || '|' || has_function_privilege('service_role', 'public.resolve_ingestion_credential_rollout(text)', 'execute') || '|' || has_function_privilege('authenticated', 'public.resolve_ingestion_credential_rollout(text)', 'execute') || '|' || has_function_privilege('anon', 'public.resolve_ingestion_credential_rollout(text)', 'execute');")"
+if [ "$CMD_SCOPED_ROLLOUT_ACL" = "true|false|false|true|false|false" ] || [ "$CMD_SCOPED_ROLLOUT_ACL" = "t|f|f|t|f|f" ]; then
+  pass "Connector Stage D: installation rollout state and resolver are service-role-only"
+else
+  fail "Connector Stage D: installation rollout privileges are incorrect ($CMD_SCOPED_ROLLOUT_ACL)"
+fi
+
 # ===========================================================================
 # Connector model Stage D: immutable credential rotation and one-way revoke.
 # ===========================================================================
@@ -4724,18 +4753,77 @@ else
   fail "Connector adapter canary: privileges are incorrect ($CANARY_ACL)"
 fi
 
-CUTOVER_STATUS="$(as_user "$USER_A" "select (blocking_count > 0) || '|' || (not ready) from public.get_connector_canonical_read_cutover_status();")"
-if [ "$CUTOVER_STATUS" = "true|true" ] || [ "$CUTOVER_STATUS" = "t|t" ]; then
-  pass "Connector Stage D: canonical settings cutover fails closed when shared legacy rows are not owner-readable canonically"
+# Shared-workspace canonical visibility. Use isolated users so readiness is
+# evaluated only against the fixture under test, independent of earlier rows.
+CUTOVER_SHARED_OWNER="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('connector-shared-owner@example.com') returning id;" | head -1)"
+CUTOVER_SHARED_MEMBER="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('connector-shared-member@example.com') returning id;" | head -1)"
+CUTOVER_SHARED_WS="$(as_user "$CUTOVER_SHARED_OWNER" "select public.create_household_workspace('Connector shared household');")"
+CUTOVER_SHARED_SOURCE="$(psql -d pfe_rls -t -A -c "set role service_role; insert into public.financial_sources (owner_user_id, provider, source_type, display_name, currency) values ('$CUTOVER_SHARED_OWNER', 'mtn_momo', 'mobile_money', 'Shared connector source', 'RWF') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+CUTOVER_SHARED_ACCOUNT="$(psql -d pfe_rls -t -A -c "set role service_role; insert into public.accounts (workspace_id, financial_source_id, name, provider, currency) values ('$CUTOVER_SHARED_WS', '$CUTOVER_SHARED_SOURCE', 'Shared connector account', 'mtn_momo', 'RWF') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.workspace_memberships
+    (workspace_id, user_id, role, status, joined_at)
+  values
+    ('$CUTOVER_SHARED_WS', '$CUTOVER_SHARED_MEMBER', 'member', 'active', now());
+  insert into public.source_space_links
+    (financial_source_id, workspace_id, visibility_mode, status, created_by)
+  values
+    ('$CUTOVER_SHARED_SOURCE', '$CUTOVER_SHARED_WS', 'share_transactions', 'active', '$CUTOVER_SHARED_OWNER');
+" >/dev/null
+CUTOVER_SHARED_CONNECTION="$(as_user "$CUTOVER_SHARED_OWNER" "select public.create_ingestion_connection_dual_write('$CUTOVER_SHARED_WS', '$CUTOVER_SHARED_ACCOUNT', 'Shared phone', 'mtn_momo', 'cutover-shared-hash', 'cut_shr');")"
+CUTOVER_SHARED_INSTALL="$(psql -d pfe_rls -t -A -c "select connector_installation_id from public.ingestion_connections where id = '$CUTOVER_SHARED_CONNECTION';")"
+CUTOVER_SHARED_CREDENTIAL="$(psql -d pfe_rls -t -A -c "select device_credential_id from public.ingestion_connections where id = '$CUTOVER_SHARED_CONNECTION';")"
+CUTOVER_SHARED_UNSCOPED="$(psql -d pfe_rls -t -A -c "set role service_role; insert into public.device_credentials (connector_installation_id, label, credential_hash, credential_prefix) values ('$CUTOVER_SHARED_INSTALL', 'Owner-wide agent', 'cutover-shared-unscoped-hash', 'cut_wide') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+CUTOVER_SHARED_READ="$(as_user "$CUTOVER_SHARED_MEMBER" "select (select count(*) from public.connector_installations where id = '$CUTOVER_SHARED_INSTALL') || '|' || (select count(*) from public.device_credentials where id = '$CUTOVER_SHARED_CREDENTIAL') || '|' || (select count(*) from public.device_credentials where id = '$CUTOVER_SHARED_UNSCOPED') || '|' || blocking_count || '|' || ready from public.get_connector_canonical_read_cutover_status();")"
+if [ "$CUTOVER_SHARED_READ" = "1|1|0|0|true" ] || [ "$CUTOVER_SHARED_READ" = "1|1|0|0|t" ]; then
+  pass "Connector Stage D: a member reads shared account-scoped metadata, not owner-wide credentials, and exact mappings open canonical cutover"
 else
-  fail "Connector Stage D: incomplete per-user canonical visibility did not block read cutover ($CUTOVER_STATUS)"
+  fail "Connector Stage D: shared canonical visibility or readiness is wrong ($CUTOVER_SHARED_READ)"
 fi
+if as_user "$CUTOVER_SHARED_MEMBER" "select credential_hash from public.device_credentials where id = '$CUTOVER_SHARED_CREDENTIAL';" >/dev/null 2>$ARTIFACT_DIR/pfe_cutover_shared_secret.log; then
+  fail "Connector Stage D: a shared-workspace member could read a credential hash"
+else
+  pass "Connector Stage D: shared credential metadata never exposes credential hashes"
+fi
+if as_user_aal "$CUTOVER_SHARED_MEMBER" "aal2" "select public.rename_connector_installation('$CUTOVER_SHARED_INSTALL', 'Member rename');" >/dev/null 2>$ARTIFACT_DIR/pfe_cutover_shared_manage.log; then
+  fail "Connector Stage D: a shared-workspace member managed another user's installation"
+else
+  pass "Connector Stage D: shared canonical visibility remains read-only for non-owners"
+fi
+rm -f $ARTIFACT_DIR/pfe_cutover_shared_secret.log $ARTIFACT_DIR/pfe_cutover_shared_manage.log
+
+# An installation itself is safe workspace metadata, but an account-scoped
+# credential and cutover mapping remain hidden while its household source is
+# private. This is the no-implicit-sharing privacy boundary.
+CUTOVER_PRIVATE_OWNER="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('connector-private-owner@example.com') returning id;" | head -1)"
+CUTOVER_PRIVATE_MEMBER="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('connector-private-member@example.com') returning id;" | head -1)"
+CUTOVER_PRIVATE_WS="$(as_user "$CUTOVER_PRIVATE_OWNER" "select public.create_household_workspace('Connector private household');")"
+CUTOVER_PRIVATE_SOURCE="$(psql -d pfe_rls -t -A -c "set role service_role; insert into public.financial_sources (owner_user_id, provider, source_type, display_name, currency) values ('$CUTOVER_PRIVATE_OWNER', 'mtn_momo', 'mobile_money', 'Private connector source', 'RWF') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+CUTOVER_PRIVATE_ACCOUNT="$(psql -d pfe_rls -t -A -c "set role service_role; insert into public.accounts (workspace_id, financial_source_id, name, provider, currency) values ('$CUTOVER_PRIVATE_WS', '$CUTOVER_PRIVATE_SOURCE', 'Private connector account', 'mtn_momo', 'RWF') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.workspace_memberships
+    (workspace_id, user_id, role, status, joined_at)
+  values
+    ('$CUTOVER_PRIVATE_WS', '$CUTOVER_PRIVATE_MEMBER', 'member', 'active', now());
+" >/dev/null
+CUTOVER_PRIVATE_CONNECTION="$(as_user "$CUTOVER_PRIVATE_OWNER" "select public.create_ingestion_connection_dual_write('$CUTOVER_PRIVATE_WS', '$CUTOVER_PRIVATE_ACCOUNT', 'Private phone', 'mtn_momo', 'cutover-private-hash', 'cut_prv');")"
+CUTOVER_PRIVATE_INSTALL="$(psql -d pfe_rls -t -A -c "select connector_installation_id from public.ingestion_connections where id = '$CUTOVER_PRIVATE_CONNECTION';")"
+CUTOVER_PRIVATE_CREDENTIAL="$(psql -d pfe_rls -t -A -c "select device_credential_id from public.ingestion_connections where id = '$CUTOVER_PRIVATE_CONNECTION';")"
+CUTOVER_PRIVATE_READ="$(as_user "$CUTOVER_PRIVATE_MEMBER" "select (select count(*) from public.connector_installations where id = '$CUTOVER_PRIVATE_INSTALL') || '|' || (select count(*) from public.device_credentials where id = '$CUTOVER_PRIVATE_CREDENTIAL') || '|' || (blocking_count > 0) || '|' || (not ready) from public.get_connector_canonical_read_cutover_status();")"
+if [ "$CUTOVER_PRIVATE_READ" = "1|0|true|true" ] || [ "$CUTOVER_PRIVATE_READ" = "1|0|t|t" ]; then
+  pass "Connector Stage D: private household sources hide scoped credentials and keep canonical cutover fail-closed"
+else
+  fail "Connector Stage D: private household source visibility leaked or failed open ($CUTOVER_PRIVATE_READ)"
+fi
+
 CUTOVER_EMPTY_USER="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('connector-cutover-empty@example.com') returning id;" | head -1)"
 CUTOVER_READY="$(as_user "$CUTOVER_EMPTY_USER" "select (blocking_count = 0) || '|' || ready from public.get_connector_canonical_read_cutover_status();")"
 if [ "$CUTOVER_READY" = "true|true" ] || [ "$CUTOVER_READY" = "t|t" ]; then
-  pass "Connector Stage D: exact owner-readable mappings satisfy the canonical settings cutover gate"
+  pass "Connector Stage D: users with no visible legacy rows satisfy the canonical settings cutover gate"
 else
-  fail "Connector Stage D: exact owner-readable mappings did not open read cutover ($CUTOVER_READY)"
+  fail "Connector Stage D: an empty canonical visibility set did not open read cutover ($CUTOVER_READY)"
 fi
 rm -f $ARTIFACT_DIR/pfe_canary_admin.log
 
@@ -4793,6 +4881,52 @@ if [ "$W6_ANON" = "0" ]; then
   pass "Phase W PR6: anon holds no privilege on any table the Spaces program added"
 else
   fail "Phase W PR6: anon holds $W6_ANON grant(s) on a Spaces table - lockdown regression"
+fi
+
+# ===========================================================================
+# Profile/preferences onboarding: a new user starts at profile, each RPC
+# advances exactly one resumable stage, and financial preferences update the
+# personal workspace in the same transaction. anon cannot call the RPCs.
+# ===========================================================================
+echo "=== profile/preferences onboarding ==="
+
+ONBOARDING_USER="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('onboarding@example.com') returning id;" | head -1)"
+ONBOARDING_INITIAL="$(psql -d pfe_rls -t -A -c "select onboarding_step || '|' || (onboarding_completed_at is null) from public.profiles where id = '$ONBOARDING_USER';")"
+if [ "$ONBOARDING_INITIAL" = "profile|true" ] || [ "$ONBOARDING_INITIAL" = "profile|t" ]; then
+  pass "new users start at the profile onboarding stage"
+else
+  fail "new user onboarding state was $ONBOARDING_INITIAL"
+fi
+
+as_user "$ONBOARDING_USER" "select public.save_onboarding_profile('Aline', 'Uwase', 'rw', 'en');" >/dev/null
+ONBOARDING_PROFILE="$(psql -d pfe_rls -t -A -c "select first_name || '|' || last_name || '|' || display_name || '|' || country_code || '|' || onboarding_step from public.profiles where id = '$ONBOARDING_USER';")"
+if [ "$ONBOARDING_PROFILE" = "Aline|Uwase|Aline Uwase|RW|preferences" ]; then
+  pass "profile onboarding persists normalized identity and advances to preferences"
+else
+  fail "profile onboarding persisted unexpected state ($ONBOARDING_PROFILE)"
+fi
+
+as_user "$ONBOARDING_USER" "select public.save_onboarding_preferences('usd', 'Africa/Kigali', 'fr');" >/dev/null
+ONBOARDING_PREFS="$(psql -d pfe_rls -t -A -c "select p.preferred_currency || '|' || p.timezone || '|' || p.locale || '|' || p.onboarding_step || '|' || w.default_currency || '|' || w.timezone from public.profiles p join public.workspaces w on w.created_by = p.id and w.kind = 'personal' where p.id = '$ONBOARDING_USER';")"
+if [ "$ONBOARDING_PREFS" = "USD|Africa/Kigali|fr|setup|USD|Africa/Kigali" ]; then
+  pass "financial preferences and personal workspace advance atomically to setup"
+else
+  fail "financial preference onboarding drifted ($ONBOARDING_PREFS)"
+fi
+
+as_user "$ONBOARDING_USER" "select public.complete_profile_onboarding();" >/dev/null
+ONBOARDING_DONE="$(psql -d pfe_rls -t -A -c "select onboarding_step || '|' || (onboarding_completed_at is not null) from public.profiles where id = '$ONBOARDING_USER';")"
+if [ "$ONBOARDING_DONE" = "completed|true" ] || [ "$ONBOARDING_DONE" = "completed|t" ]; then
+  pass "optional setup can complete onboarding with a durable timestamp"
+else
+  fail "onboarding completion state was $ONBOARDING_DONE"
+fi
+
+ONBOARDING_ACL="$(psql -d pfe_rls -t -A -c "select has_function_privilege('authenticated', 'public.save_onboarding_profile(text,text,text,text)', 'execute') || '|' || has_function_privilege('anon', 'public.save_onboarding_profile(text,text,text,text)', 'execute') || '|' || has_function_privilege('authenticated', 'public.save_onboarding_preferences(text,text,text)', 'execute') || '|' || has_function_privilege('anon', 'public.complete_profile_onboarding()', 'execute');")"
+if [ "$ONBOARDING_ACL" = "true|false|true|false" ] || [ "$ONBOARDING_ACL" = "t|f|t|f" ]; then
+  pass "onboarding RPCs are authenticated-only"
+else
+  fail "onboarding RPC privileges are incorrect ($ONBOARDING_ACL)"
 fi
 
 echo ""

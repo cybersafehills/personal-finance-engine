@@ -14,6 +14,24 @@ test("the /get-started checklist renders and links onward", async ({ page }) => 
   ).toBeVisible();
   await expect(page.getByText(/\d of 4 done/)).toBeVisible();
 
+  const quickStart = page.getByRole("region", {
+    name: "How would you like to begin?",
+  });
+  if (await quickStart.isVisible().catch(() => false)) {
+    await expect(
+      quickStart.getByRole("button", { name: /Link a device/ }),
+    ).toBeVisible();
+    await expect(
+      quickStart.getByRole("button", { name: /Create a connection/ }),
+    ).toBeVisible();
+    await expect(
+      quickStart.getByRole("button", { name: /Start using OneLedger/ }),
+    ).toBeVisible();
+    await expect(
+      quickStart.getByRole("button", { name: "Do it later in Settings" }),
+    ).toBeVisible();
+  }
+
   // Either the step list or the completed state.
   const stepList = page.getByText("Add a financial account");
   const allSet = page.getByText(/You.re all set/);

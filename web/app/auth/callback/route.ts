@@ -14,15 +14,12 @@ export async function GET(request: NextRequest) {
   const rawNext = searchParams.get("next");
 
   // A signup-confirmation link carries no `next` (or just "/"); send
-  // those first-run users to the onboarding checklist. Links that DO
+  // those first-run users to resumable profile setup. Links that DO
   // carry a `next` - password reset (/auth/reset-password/confirm), an
   // invite (/invite/<token>) - are followed after same-origin validation.
-  // /get-started
-  // itself redirects to "/" when the checklist flag is off, so this is
-  // always safe.
   const next = internalRedirectPath(
-    rawNext && rawNext !== "/" ? rawNext : "/get-started",
-    "/get-started",
+    rawNext && rawNext !== "/" ? rawNext : "/onboarding/profile",
+    "/onboarding/profile",
   );
   const destination = new URL(next, siteUrl());
   let response = NextResponse.redirect(destination);

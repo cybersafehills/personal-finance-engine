@@ -1,10 +1,12 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import {
   getAttentionItems,
   getCurrentBalance,
   getDashboardBudgetSummary,
   getHouseholdSpendingBreakdown,
   getOnboardingState,
+  getProfileOnboarding,
   getRecentTransactions,
   getTodayTotals,
 } from "../lib/queries";
@@ -24,6 +26,10 @@ export const dynamic = "force-dynamic";
 const RECENT_TRANSACTIONS_LIMIT = 6;
 
 export default async function HomePage() {
+  const profileOnboarding = await getProfileOnboarding();
+  if (profileOnboarding?.step === "profile") redirect("/onboarding/profile");
+  if (profileOnboarding?.step === "preferences") redirect("/onboarding/preferences");
+
   const [
     balance,
     today,

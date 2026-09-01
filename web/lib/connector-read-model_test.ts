@@ -5,9 +5,11 @@ import {
 } from "./connector-read-model.ts";
 
 const rows: CanonicalConnectorRows = {
+  currentUserId: "user-owner",
   installations: [
     {
       id: "install-bank",
+      owner_user_id: "user-owner",
       connector_key: "bank_open_api_v1",
       display_name: "Household bank",
       status: "healthy",
@@ -20,6 +22,7 @@ const rows: CanonicalConnectorRows = {
     },
     {
       id: "install-sms",
+      owner_user_id: "user-other",
       connector_key: "mtn_momo_sms_v1",
       display_name: "My phone",
       status: "healthy",
@@ -158,6 +161,8 @@ Deno.test("canonical connector projection preserves one installation with multip
 
   assertEquals(model.length, 2);
   assertEquals(model[0].id, "install-bank");
+  assertEquals(model[0].canManage, true);
+  assertEquals(model[1].canManage, false);
   assertEquals(model[0].sources.map((source) => source.id), [
     "source-current",
     "source-savings",

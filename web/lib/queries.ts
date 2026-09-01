@@ -953,17 +953,24 @@ export async function getCanonicalConnectorInstallations(): Promise<
   CanonicalConnectorInstallation[]
 > {
   const supabase = await supabaseSession();
-  const { data: installationData, error: installationError } = await supabase
-    .from("connector_installations")
-    .select(
-      "id, connector_key, display_name, status, auth_mode, last_attempt_at, last_success_at, last_error_code, revoked_at, created_at",
-    )
-    .order("created_at", { ascending: true });
+  const [
+    { data: userData, error: userError },
+    { data: installationData, error: installationError },
+  ] = await Promise.all([
+    supabase.auth.getUser(),
+    supabase
+      .from("connector_installations")
+      .select(
+        "id, owner_user_id, connector_key, display_name, status, auth_mode, last_attempt_at, last_success_at, last_error_code, revoked_at, created_at",
+      )
+      .order("created_at", { ascending: true }),
+  ]);
 
-  if (installationError) {
+  if (userError || !userData.user || installationError) {
     console.error(
       "getCanonicalConnectorInstallations failed:",
-      installationError.message,
+      userError?.message ?? installationError?.message ??
+        "No authenticated user",
     );
     return [];
   }
@@ -1036,6 +1043,7 @@ export async function getCanonicalConnectorInstallations(): Promise<
   }
 
   return buildCanonicalConnectorReadModel({
+    currentUserId: userData.user.id,
     installations,
     sources,
     accounts,
@@ -3024,6 +3032,44 @@ export async function getUiPreferences(): Promise<UiPreferencesRow> {
 // ===========================================================================
 
 import { deriveOnboardingState, type OnboardingState } from "./onboarding";
+import type { ProfileOnboardingStep } from "./profile-onboarding";
+
+export type ProfileOnboarding = {
+  firstName: string;
+  lastName: string;
+  countryCode: string;
+  preferredCurrency: string;
+  timezone: string;
+  locale: string;
+  step: ProfileOnboardingStep;
+};
+
+export async function getProfileOnboarding(): Promise<ProfileOnboarding | null> {
+  const supabase = await supabaseSession();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("first_name, last_name, country_code, preferred_currency, timezone, locale, onboarding_step")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  if (error || !data) {
+    if (error) console.error("getProfileOnboarding failed:", error.message);
+    return null;
+  }
+
+  return {
+    firstName: data.first_name ?? "",
+    lastName: data.last_name ?? "",
+    countryCode: data.country_code ?? "RW",
+    preferredCurrency: data.preferred_currency,
+    timezone: data.timezone,
+    locale: data.locale,
+    step: data.onboarding_step as ProfileOnboardingStep,
+  };
+}
 
 export type OnboardingSnapshot = OnboardingState & {
   /** Feature flag + workspace allowlist both passed. */

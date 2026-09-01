@@ -1,12 +1,16 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { getOnboardingState } from "../../lib/queries";
+import { getOnboardingState, getProfileOnboarding } from "../../lib/queries";
 import { PageHeader } from "../../components/PageHeader";
 import { DismissOnboardingButton } from "../../components/DismissOnboardingButton";
+import { OnboardingChoiceLink } from "../../components/OnboardingChoiceLink";
 
 export const dynamic = "force-dynamic";
 
 export default async function GetStartedPage() {
+  const profile = await getProfileOnboarding();
+  if (profile?.step === "profile") redirect("/onboarding/profile");
+  if (profile?.step === "preferences") redirect("/onboarding/preferences");
   const snapshot = await getOnboardingState();
 
   // Flag off (or workspace not on the allowlist): no checklist here -
@@ -20,8 +24,64 @@ export default async function GetStartedPage() {
     <div>
       <PageHeader
         title="Get started"
-        subtitle="Four steps to get your MoMo transactions flowing in"
+        subtitle="Choose a quick start, or finish setup at your own pace"
       />
+
+      {!complete && (
+        <section
+          aria-labelledby="quick-start-heading"
+          className="mb-6 rounded-card border border-border-subtle bg-surface p-4"
+        >
+          <h2
+            id="quick-start-heading"
+            className="text-base font-semibold text-text-primary"
+          >
+            How would you like to begin?
+          </h2>
+          <p className="mt-1 text-sm text-text-muted">
+            Pick any option now. You can return to the others from Settings.
+          </p>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            <OnboardingChoiceLink
+              href="/settings/connections/setup"
+            >
+              <span className="block text-sm font-medium text-text-primary">
+                Link a device
+              </span>
+              <span className="mt-1 block text-xs text-text-muted">
+                Follow the phone and Shortcut setup guide.
+              </span>
+            </OnboardingChoiceLink>
+            <OnboardingChoiceLink
+              href="/settings/connections"
+            >
+              <span className="block text-sm font-medium text-text-primary">
+                Create a connection
+              </span>
+              <span className="mt-1 block text-xs text-text-muted">
+                Connect a provider or a transaction-forwarding device.
+              </span>
+            </OnboardingChoiceLink>
+            <OnboardingChoiceLink
+              href="/transactions/new"
+            >
+              <span className="block text-sm font-medium text-text-primary">
+                Start using OneLedger
+              </span>
+              <span className="mt-1 block text-xs text-text-muted">
+                Add a transaction manually and explore the platform.
+              </span>
+            </OnboardingChoiceLink>
+          </div>
+
+          <DismissOnboardingButton
+            label="Do it later in Settings"
+            hrefAfterDismiss="/settings"
+            className="mt-4 min-h-11 rounded-control px-2 text-sm font-medium text-text-muted hover:text-text-primary"
+          />
+        </section>
+      )}
 
       <p className="mb-4 text-sm text-text-muted">{doneCount} of {totalCount} done</p>
 
@@ -96,7 +156,7 @@ export default async function GetStartedPage() {
         </p>
         {!complete && (
           <DismissOnboardingButton
-            label="Hide this checklist"
+            label="Dismiss setup reminder"
             className="w-fit min-h-8 text-xs font-medium text-text-muted hover:text-text-primary"
           />
         )}

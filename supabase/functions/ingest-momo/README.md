@@ -26,6 +26,16 @@ transactions, and classifies merchants via `merchant_rules`.
 
 ## Provider-adapter rollout
 
+Credential authentication also has an installation-scoped control plane.
+`ONELEDGER_INSTALLATION_INGESTION_ROLLOUTS=enabled` is its exact-match,
+default-off emergency gate. When absent, ingestion continues to use the existing
+global legacy/canonical selection. When enabled, the service-only
+`connector_ingestion_rollouts` table selects `legacy` or `canonical` per
+installation; an absent row still means `legacy`. The resolver returns the same
+compatibility route and the mandatory canonical shadow comparison still runs, so
+a bad or divergent canonical selection fails closed before payload storage.
+Applying the migration or deploying the code alone activates nothing.
+
 `ONELEDGER_MTN_MOMO_ADAPTER=enabled` is an exact-match, default-off Edge
 Function emergency switch. It is necessary but not sufficient: the canonical
 installation must also have an enabled row in the service-only

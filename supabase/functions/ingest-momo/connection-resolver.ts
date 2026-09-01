@@ -119,6 +119,12 @@ export function canonicalIngestionEnabled(value: string | undefined): boolean {
   return value === "enabled";
 }
 
+export function installationIngestionRolloutsEnabled(
+  value: string | undefined,
+): boolean {
+  return value === "enabled";
+}
+
 export function mtnMomoAdapterEnabled(value: string | undefined): boolean {
   return value === "enabled";
 }
