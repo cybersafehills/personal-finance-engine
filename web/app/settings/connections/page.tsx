@@ -2,6 +2,7 @@ import Link from "next/link";
 import {
   getAccounts,
   getCanonicalConnectorInstallations,
+  getCanonicalConnectionsReadCutoverStatus,
   getIngestionConnections,
 } from "../../../lib/queries";
 import { buildIngestEndpointUrl } from "../../../lib/ingest";
@@ -16,14 +17,17 @@ import { isPlatformAdmin } from "../../../lib/pay/admin";
 export const dynamic = "force-dynamic";
 
 export default async function ConnectionsPage() {
-  // Server-only, default-off Stage D preview. Until the Stage C observation
-  // and lifecycle gates pass, production renders the legacy connection cards
-  // and never executes the canonical query. This is deliberately not a
-  // NEXT_PUBLIC flag, so a browser cannot opt itself into an unfinished read
-  // cutover.
-  const canonicalPreviewEnabled = canonicalConnectionsUiEnabled(
+  // Server-only, default-off Stage D cutover request. The database readiness
+  // check is a second, per-user gate: any missing or unreadable canonical
+  // mapping automatically falls back to the complete legacy projection.
+  const canonicalCutoverRequested = canonicalConnectionsUiEnabled(
     process.env.ONELEDGER_CANONICAL_CONNECTIONS_UI,
   );
+  const cutoverStatus = canonicalCutoverRequested
+    ? await getCanonicalConnectionsReadCutoverStatus()
+    : null;
+  const canonicalPreviewEnabled = canonicalCutoverRequested &&
+    cutoverStatus?.ready === true;
   const [
     connections,
     canonicalInstallations,
@@ -79,6 +83,8 @@ export default async function ConnectionsPage() {
               <ConnectorInstallationItem
                 key={installation.id}
                 installation={installation}
+                canManageAdapterCanary={canManageAdapterCanary}
+                ingestEndpointUrl={ingestEndpointUrl}
               />
             ))
           )

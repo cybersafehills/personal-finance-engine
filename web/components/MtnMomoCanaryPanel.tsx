@@ -3,17 +3,18 @@
 import { useState, useTransition } from "react";
 import {
   pairMtnMomoAdapterCanary,
+  pairMtnMomoAdapterCanaryByInstallation,
   setMtnMomoAdapterCanaryEnabled,
 } from "../app/settings/connections/actions";
 import type { ConnectorAdapterCanaryStatus } from "../lib/queries";
 import { Badge } from "./Badge";
 
 export function MtnMomoCanaryPanel({
-  connectionId,
+  connectionId = null,
   connectorInstallationId,
   canary,
 }: {
-  connectionId: string;
+  connectionId?: string | null;
   connectorInstallationId: string | null;
   canary: ConnectorAdapterCanaryStatus | null;
 }) {
@@ -99,10 +100,14 @@ export function MtnMomoCanaryPanel({
         event.preventDefault();
         setError(null);
         startTransition(async () => {
-          const result = await pairMtnMomoAdapterCanary(
-            connectionId,
-            msisdn,
-          );
+          const result = connectionId
+            ? await pairMtnMomoAdapterCanary(connectionId, msisdn)
+            : connectorInstallationId
+              ? await pairMtnMomoAdapterCanaryByInstallation(
+                connectorInstallationId,
+                msisdn,
+              )
+              : { ok: false as const, error: "Canonical route unavailable." };
           if (result.ok) {
             setMsisdn("");
             setOpen(false);

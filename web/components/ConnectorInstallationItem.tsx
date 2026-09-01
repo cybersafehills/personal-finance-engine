@@ -7,6 +7,9 @@ import type {
 import { safeConnectorErrorCode } from "../lib/connector-ui-mode";
 import { ConnectorInstallationActions } from "./ConnectorInstallationActions";
 import { DeviceCredentialActions } from "./DeviceCredentialActions";
+import { MtnMomoCanaryPanel } from "./MtnMomoCanaryPanel";
+import { ConnectionDetails } from "./ConnectionDetails";
+import { ConnectionReadinessProbe } from "./ConnectionReadinessProbe";
 
 const CONNECTOR_LABELS: Record<string, string> = {
   mtn_momo_sms_v1: "MTN MoMo SMS",
@@ -55,8 +58,12 @@ function sourceDescriptor(
 
 export function ConnectorInstallationItem({
   installation,
+  canManageAdapterCanary,
+  ingestEndpointUrl,
 }: {
   installation: CanonicalConnectorInstallation;
+  canManageAdapterCanary: boolean;
+  ingestEndpointUrl: string | null;
 }) {
   const status = installationStatus(installation.status);
   const errorCode = safeConnectorErrorCode(installation.lastErrorCode);
@@ -207,17 +214,45 @@ export function ConnectorInstallationItem({
                 </div>
                 <DeviceCredentialActions
                   credentialId={credential.id}
+                  ingestEndpointUrl={installation.authMode === "device_secret"
+                    ? ingestEndpointUrl
+                    : undefined}
                   canRotate={
                     credential.status === "active" &&
                     installation.status !== "paused" &&
                     installation.status !== "revoked"
                   }
                 />
+                {credential.status === "active" &&
+                  !credential.lastUsedAt &&
+                  installation.status !== "paused" &&
+                  installation.status !== "revoked" && (
+                  <ConnectionReadinessProbe credentialId={credential.id} />
+                )}
               </li>
             ))}
           </ul>
         )}
       </section>
+
+      {installation.authMode === "device_secret" &&
+        installation.status !== "revoked" && (
+        <ConnectionDetails
+          endpointUrl={ingestEndpointUrl}
+          defaultOpen={installation.credentials.some((credential) =>
+            credential.status === "active" && !credential.lastUsedAt
+          )}
+        />
+      )}
+
+      {canManageAdapterCanary &&
+        installation.connectorKey === "mtn_momo_sms_v1" &&
+        installation.status !== "revoked" && (
+        <MtnMomoCanaryPanel
+          connectorInstallationId={installation.id}
+          canary={installation.adapterCanary}
+        />
+      )}
 
       <ConnectorInstallationActions
         installationId={installation.id}

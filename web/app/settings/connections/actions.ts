@@ -49,6 +49,43 @@ export async function pairMtnMomoAdapterCanary(
   return { ok: true };
 }
 
+export async function pairMtnMomoAdapterCanaryByInstallation(
+  connectorInstallationId: string,
+  msisdn: string,
+): Promise<ConnectionActionResult> {
+  await requireMfaForSensitiveAction("/settings/connections");
+
+  let identity: Awaited<ReturnType<typeof buildMtnMomoPairingIdentity>>;
+  try {
+    identity = await buildMtnMomoPairingIdentity(msisdn);
+  } catch {
+    return { ok: false, error: "Enter a valid Rwanda MTN mobile number." };
+  }
+
+  const supabase = await supabaseSession();
+  const { error } = await supabase.rpc(
+    "pair_mtn_momo_adapter_canary_by_installation",
+    {
+      p_connector_installation_id: connectorInstallationId,
+      p_source_ref_hash: identity.sourceRefHash,
+      p_account_ref_hash: identity.accountRefHash,
+      p_masked_identifier: identity.maskedIdentifier,
+    },
+  );
+
+  if (error) {
+    return {
+      ok: false,
+      error: error.message.includes("adapter_canary_slot_unavailable")
+        ? "Another MTN installation is already using the canary slot."
+        : "Could not pair this MTN installation for canary routing.",
+    };
+  }
+
+  revalidatePath("/settings/connections");
+  return { ok: true };
+}
+
 export async function setMtnMomoAdapterCanaryEnabled(
   connectorInstallationId: string,
   enabled: boolean,
@@ -265,6 +302,27 @@ export async function probeConnectionReadiness(
 
   if (error || !data) {
     return { ok: false, error: "Could not check this connection." };
+  }
+
+  return {
+    ok: true,
+    status: data.status as "active" | "paused" | "revoked",
+    lastUsedAt: (data.last_used_at as string | null) ?? null,
+  };
+}
+
+export async function probeConnectorCredentialReadiness(
+  credentialId: string,
+): Promise<ConnectionReadinessResult> {
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("device_credentials")
+    .select("status, last_used_at")
+    .eq("id", credentialId)
+    .maybeSingle();
+
+  if (error || !data) {
+    return { ok: false, error: "Could not check this credential." };
   }
 
   return {

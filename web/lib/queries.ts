@@ -16,12 +16,14 @@ import { findTransferCandidates, TransferCandidateTransaction } from "./transfer
 import { lastNCompleteMonthKeys } from "./budget-math";
 import {
   buildCanonicalConnectorReadModel,
+  type ConnectorAdapterCanaryStatus,
   type CanonicalConnectorInstallation,
   type ConnectorAccountRecord,
   type ConnectorInstallationRecord,
   type ConnectorSourceRecord,
   type DeviceCredentialRecord,
 } from "./connector-read-model";
+export type { ConnectorAdapterCanaryStatus } from "./connector-read-model";
 
 // Every function here queries through the session-authenticated Supabase
 // client (lib/supabase-session-server.ts), never the service-role one -
@@ -836,17 +838,49 @@ export type IngestionConnectionRow = {
   adapter_canary: ConnectorAdapterCanaryStatus | null;
 };
 
-export type ConnectorAdapterCanaryStatus = {
-  enabled: boolean;
-  paired_at: string;
-  enabled_at: string | null;
-  observation_count: number;
-  match_count: number;
-  mismatch_count: number;
-  resolver_error_count: number;
-  envelope_error_count: number;
-  ready_for_broader_rollout: boolean;
+export type CanonicalConnectionsReadCutoverStatus = {
+  visibleLegacyCount: number;
+  exactCanonicalCount: number;
+  blockingCount: number;
+  ready: boolean;
 };
+
+export async function getCanonicalConnectionsReadCutoverStatus(): Promise<
+  CanonicalConnectionsReadCutoverStatus
+> {
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase.rpc(
+    "get_connector_canonical_read_cutover_status",
+  );
+
+  if (error || !data?.[0]) {
+    if (error) {
+      console.error(
+        "getCanonicalConnectionsReadCutoverStatus failed:",
+        error.message,
+      );
+    }
+    return {
+      visibleLegacyCount: 0,
+      exactCanonicalCount: 0,
+      blockingCount: 1,
+      ready: false,
+    };
+  }
+
+  const row = data[0] as {
+    visible_legacy_count: number;
+    exact_canonical_count: number;
+    blocking_count: number;
+    ready: boolean;
+  };
+  return {
+    visibleLegacyCount: Number(row.visible_legacy_count),
+    exactCanonicalCount: Number(row.exact_canonical_count),
+    blockingCount: Number(row.blocking_count),
+    ready: row.ready,
+  };
+}
 
 export async function getIngestionConnections(): Promise<
   IngestionConnectionRow[]
@@ -911,11 +945,9 @@ export async function getIngestionConnections(): Promise<
 }
 
 /**
- * Stage D canonical settings projection. This is intentionally not wired to
- * the live Connections page yet: Stage C production observations remain the
- * cutover gate. It proves the canonical model can represent one installation
- * with multiple sources/accounts and multiple independently scoped device
- * credentials without reading legacy ingestion_connections.
+ * Stage D canonical settings projection. The Connections page executes this
+ * only when the server flag requests cutover and the per-user database gate
+ * proves every visible legacy row has an exact canonical representation.
  */
 export async function getCanonicalConnectorInstallations(): Promise<
   CanonicalConnectorInstallation[]
@@ -940,7 +972,7 @@ export async function getCanonicalConnectorInstallations(): Promise<
   if (installations.length === 0) return [];
   const installationIds = installations.map((installation) => installation.id);
 
-  const [sourceResult, credentialResult] = await Promise.all([
+  const [sourceResult, credentialResult, canaryResult] = await Promise.all([
     supabase
       .from("financial_sources")
       .select(
@@ -955,6 +987,7 @@ export async function getCanonicalConnectorInstallations(): Promise<
       )
       .in("connector_installation_id", installationIds)
       .order("created_at", { ascending: true }),
+    supabase.rpc("get_connector_adapter_canary_status"),
   ]);
 
   if (sourceResult.error || credentialResult.error) {
@@ -966,6 +999,20 @@ export async function getCanonicalConnectorInstallations(): Promise<
   }
 
   const sources = (sourceResult.data ?? []) as ConnectorSourceRecord[];
+  const adapterCanaries = new Map<string, ConnectorAdapterCanaryStatus>();
+  if (canaryResult.error) {
+    console.error(
+      "getCanonicalConnectorInstallations canaries failed:",
+      canaryResult.error.message,
+    );
+  } else {
+    for (const row of canaryResult.data ?? []) {
+      const status = row as ConnectorAdapterCanaryStatus & {
+        connector_installation_id: string;
+      };
+      adapterCanaries.set(status.connector_installation_id, status);
+    }
+  }
   const sourceIds = sources.map((source) => source.id);
   let accounts: ConnectorAccountRecord[] = [];
 
@@ -993,6 +1040,7 @@ export async function getCanonicalConnectorInstallations(): Promise<
     sources,
     accounts,
     credentials: (credentialResult.data ?? []) as DeviceCredentialRecord[],
+    adapterCanaries,
   });
 }
 
