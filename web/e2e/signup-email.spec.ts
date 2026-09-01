@@ -97,7 +97,9 @@ test("signup confirmation email authenticates and starts profile onboarding", as
     .click();
 
   await expect(page).toHaveURL(/\/verify-email$/);
-  await expect(page.getByText("Check your email")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Check your email" }),
+  ).toBeVisible();
   await expect(page.getByText(NEW_USER.email)).toBeVisible();
   await expect(
     page.getByRole("link", { name: "Change email address" }),
