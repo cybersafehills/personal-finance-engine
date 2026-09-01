@@ -183,6 +183,28 @@ Deno.test("canonical connector projection preserves one installation with multip
 Deno.test("an unscoped credential remains installation-wide", () => {
   const model = buildCanonicalConnectorReadModel(rows);
   assertEquals(model[1].credentials[0].scope, { kind: "installation" });
+  assertEquals(model[1].adapterCanary, null);
+});
+
+Deno.test("adapter canary health is attached by canonical installation id", () => {
+  const canary = {
+    enabled: true,
+    paired_at: "2026-09-01T08:00:00Z",
+    enabled_at: "2026-09-01T08:00:00Z",
+    observation_count: 5,
+    match_count: 5,
+    mismatch_count: 0,
+    resolver_error_count: 0,
+    envelope_error_count: 0,
+    ready_for_broader_rollout: true,
+  };
+  const model = buildCanonicalConnectorReadModel({
+    ...rows,
+    adapterCanaries: new Map([["install-sms", canary]]),
+  });
+
+  assertEquals(model[0].adapterCanary, null);
+  assertEquals(model[1].adapterCanary, canary);
 });
 
 Deno.test("a credential never resolves an account through another installation", () => {

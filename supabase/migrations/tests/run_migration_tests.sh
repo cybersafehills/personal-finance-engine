@@ -854,12 +854,14 @@ fi
 # create_ingestion_connection_dual_write RPC. Its sync trigger and canonical
 # shadow resolver are internal/service-role-only. Stage D adds four
 # authenticated canonical lifecycle/credential RPCs. = 81. The installation
-# canary adds pairing, kill-switch, and redacted status RPCs. = 84.
+# canary adds pairing, kill-switch, and redacted status RPCs. = 84. The
+# canonical settings cutover adds a readiness RPC and an installation-ID
+# pairing entry point. = 86.
 AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname = 'authenticated' where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "84" ]; then
-  pass "authenticated holds EXECUTE on exactly the 84 functions expected, no more"
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "86" ]; then
+  pass "authenticated holds EXECUTE on exactly the 86 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 84 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 86 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -4678,6 +4680,12 @@ else
 fi
 psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; update public.profiles set is_platform_admin = true where id = '$USER_A';" >/dev/null
 CANARY_INSTALL="$(as_user_aal "$USER_A" "aal2" "select public.pair_mtn_momo_adapter_canary('$CANARY_CONNECTION', '$CANARY_SOURCE_HASH', '$CANARY_ACCOUNT_HASH', 'MTN MoMo •••• 0001');")"
+CANARY_INSTALL_CANONICAL="$(as_user_aal "$USER_A" "aal2" "select public.pair_mtn_momo_adapter_canary_by_installation('$CANARY_INSTALL', '$CANARY_SOURCE_HASH', '$CANARY_ACCOUNT_HASH', 'MTN MoMo •••• 0001');")"
+if [ "$CANARY_INSTALL_CANONICAL" = "$CANARY_INSTALL" ]; then
+  pass "Connector Stage D: canonical UI pairs the canary without exposing a legacy connection ID"
+else
+  fail "Connector Stage D: canonical installation pairing resolved the wrong route ($CANARY_INSTALL_CANONICAL)"
+fi
 CANARY_BOUND="$(psql -d pfe_rls -t -A -c "select (fs.external_source_ref_hash = '$CANARY_SOURCE_HASH') || '|' || (a.external_account_ref_hash = '$CANARY_ACCOUNT_HASH') || '|' || canary.enabled from public.financial_sources fs join public.accounts a on a.financial_source_id = fs.id join public.connector_adapter_canaries canary on canary.connector_installation_id = fs.connector_installation_id where fs.id = '$CANARY_SOURCE';")"
 if [ "$CANARY_BOUND" = "true|true|true" ] || [ "$CANARY_BOUND" = "t|t|t" ]; then
   pass "Connector adapter canary: owner pairing binds hashes onto the existing route and enables only its installation"
@@ -4709,11 +4717,25 @@ else
   fail "Connector adapter canary: kill switch failed ($CANARY_DISABLED)"
 fi
 
-CANARY_ACL="$(psql -d pfe_rls -t -A -c "select has_table_privilege('service_role', 'public.connector_adapter_canaries', 'select') || '|' || has_table_privilege('authenticated', 'public.connector_adapter_canaries', 'select') || '|' || has_table_privilege('anon', 'public.connector_adapter_canaries', 'select') || '|' || has_function_privilege('authenticated', 'public.pair_mtn_momo_adapter_canary(uuid,text,text,text)', 'execute') || '|' || has_function_privilege('anon', 'public.pair_mtn_momo_adapter_canary(uuid,text,text,text)', 'execute') || '|' || has_function_privilege('authenticated', 'public.get_connector_adapter_canary_status()', 'execute');")"
-if [ "$CANARY_ACL" = "true|false|false|true|false|true" ] || [ "$CANARY_ACL" = "t|f|f|t|f|t" ]; then
+CANARY_ACL="$(psql -d pfe_rls -t -A -c "select has_table_privilege('service_role', 'public.connector_adapter_canaries', 'select') || '|' || has_table_privilege('authenticated', 'public.connector_adapter_canaries', 'select') || '|' || has_table_privilege('anon', 'public.connector_adapter_canaries', 'select') || '|' || has_function_privilege('authenticated', 'public.pair_mtn_momo_adapter_canary(uuid,text,text,text)', 'execute') || '|' || has_function_privilege('anon', 'public.pair_mtn_momo_adapter_canary(uuid,text,text,text)', 'execute') || '|' || has_function_privilege('authenticated', 'public.get_connector_adapter_canary_status()', 'execute') || '|' || has_function_privilege('authenticated', 'public.pair_mtn_momo_adapter_canary_by_installation(uuid,text,text,text)', 'execute') || '|' || has_function_privilege('anon', 'public.pair_mtn_momo_adapter_canary_by_installation(uuid,text,text,text)', 'execute') || '|' || has_function_privilege('authenticated', 'public.get_connector_canonical_read_cutover_status()', 'execute') || '|' || has_function_privilege('anon', 'public.get_connector_canonical_read_cutover_status()', 'execute');")"
+if [ "$CANARY_ACL" = "true|false|false|true|false|true|true|false|true|false" ] || [ "$CANARY_ACL" = "t|f|f|t|f|t|t|f|t|f" ]; then
   pass "Connector adapter canary: allowlist is service-only while owner workflows use narrow authenticated RPCs"
 else
   fail "Connector adapter canary: privileges are incorrect ($CANARY_ACL)"
+fi
+
+CUTOVER_STATUS="$(as_user "$USER_A" "select (blocking_count > 0) || '|' || (not ready) from public.get_connector_canonical_read_cutover_status();")"
+if [ "$CUTOVER_STATUS" = "true|true" ] || [ "$CUTOVER_STATUS" = "t|t" ]; then
+  pass "Connector Stage D: canonical settings cutover fails closed when shared legacy rows are not owner-readable canonically"
+else
+  fail "Connector Stage D: incomplete per-user canonical visibility did not block read cutover ($CUTOVER_STATUS)"
+fi
+CUTOVER_EMPTY_USER="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('connector-cutover-empty@example.com') returning id;" | head -1)"
+CUTOVER_READY="$(as_user "$CUTOVER_EMPTY_USER" "select (blocking_count = 0) || '|' || ready from public.get_connector_canonical_read_cutover_status();")"
+if [ "$CUTOVER_READY" = "true|true" ] || [ "$CUTOVER_READY" = "t|t" ]; then
+  pass "Connector Stage D: exact owner-readable mappings satisfy the canonical settings cutover gate"
+else
+  fail "Connector Stage D: exact owner-readable mappings did not open read cutover ($CUTOVER_READY)"
 fi
 rm -f $ARTIFACT_DIR/pfe_canary_admin.log
 

@@ -107,6 +107,18 @@ export type CanonicalDeviceCredential = {
   revokedAt: string | null;
 };
 
+export type ConnectorAdapterCanaryStatus = {
+  enabled: boolean;
+  paired_at: string;
+  enabled_at: string | null;
+  observation_count: number;
+  match_count: number;
+  mismatch_count: number;
+  resolver_error_count: number;
+  envelope_error_count: number;
+  ready_for_broader_rollout: boolean;
+};
+
 export type CanonicalConnectorInstallation = {
   id: string;
   connectorKey: string;
@@ -119,6 +131,7 @@ export type CanonicalConnectorInstallation = {
   revokedAt: string | null;
   sources: CanonicalConnectorSource[];
   credentials: CanonicalDeviceCredential[];
+  adapterCanary: ConnectorAdapterCanaryStatus | null;
 };
 
 export type CanonicalConnectorRows = {
@@ -126,6 +139,7 @@ export type CanonicalConnectorRows = {
   sources: ConnectorSourceRecord[];
   accounts: ConnectorAccountRecord[];
   credentials: DeviceCredentialRecord[];
+  adapterCanaries?: ReadonlyMap<string, ConnectorAdapterCanaryStatus>;
 };
 
 function byCreatedAt<T extends { created_at: string }>(a: T, b: T): number {
@@ -241,6 +255,7 @@ export function buildCanonicalConnectorReadModel(
       revokedAt: installation.revoked_at,
       sources,
       credentials,
+      adapterCanary: rows.adapterCanaries?.get(installation.id) ?? null,
     };
   });
 }

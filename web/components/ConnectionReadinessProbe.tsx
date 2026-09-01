@@ -3,7 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { probeConnectionReadiness } from "../app/settings/connections/actions";
+import {
+  probeConnectionReadiness,
+  probeConnectorCredentialReadiness,
+} from "../app/settings/connections/actions";
 
 const POLL_MS = 5_000;
 const GIVE_UP_MS = 3 * 60 * 1_000;
@@ -19,8 +22,13 @@ const GIVE_UP_MS = 3 * 60 * 1_000;
  */
 export function ConnectionReadinessProbe({
   connectionId,
+  credentialId,
 }: {
   connectionId: string;
+  credentialId?: never;
+} | {
+  connectionId?: never;
+  credentialId: string;
 }) {
   const router = useRouter();
   const [phase, setPhase] = useState<"waiting" | "ready" | "gave-up">("waiting");
@@ -33,7 +41,11 @@ export function ConnectionReadinessProbe({
     let timer: ReturnType<typeof setTimeout>;
 
     const tick = async () => {
-      const res = await probeConnectionReadiness(connectionId);
+      const res = credentialId
+        ? await probeConnectorCredentialReadiness(credentialId)
+        : connectionId
+          ? await probeConnectionReadiness(connectionId)
+          : { ok: false as const, error: "Connection route unavailable." };
       if (cancelled) return;
 
       if (res.ok && res.lastUsedAt) {
@@ -57,7 +69,7 @@ export function ConnectionReadinessProbe({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [connectionId, phase, router]);
+  }, [connectionId, credentialId, phase, router]);
 
   if (phase === "ready") {
     return (

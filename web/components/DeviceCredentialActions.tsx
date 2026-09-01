@@ -3,13 +3,16 @@
 import { useState, useTransition } from "react";
 import { rotateConnectorCredential } from "../app/settings/connections/actions";
 import { RevealedSecret } from "./RevealedSecret";
+import { ShortcutKeyInstructions } from "./ConnectionDetails";
 
 export function DeviceCredentialActions({
   credentialId,
   canRotate,
+  ingestEndpointUrl,
 }: {
   credentialId: string;
   canRotate: boolean;
+  ingestEndpointUrl?: string | null;
 }) {
   const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -21,6 +24,9 @@ export function DeviceCredentialActions({
         <RevealedSecret
           secret={revealedSecret}
           onDismiss={() => setRevealedSecret(null)}
+          instructions={ingestEndpointUrl !== undefined
+            ? <ShortcutKeyInstructions endpointUrl={ingestEndpointUrl} />
+            : undefined}
         />
       </div>
     );
