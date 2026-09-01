@@ -2,6 +2,12 @@ import { createServerClient } from "@supabase/ssr";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { internalRedirectPath } from "../../../lib/internal-redirect";
+import { verificationFailureStatus } from "../../../lib/auth-callback";
+import {
+  PENDING_VERIFICATION_EMAIL_COOKIE,
+  PENDING_VERIFICATION_NEXT_COOKIE,
+  VERIFICATION_RESEND_AT_COOKIE,
+} from "../../../lib/pending-verification";
 import { siteUrl } from "../../../lib/site-url";
 
 // Exchanges a Supabase Auth confirmation/recovery code for a real session.
@@ -22,6 +28,7 @@ export async function GET(request: NextRequest) {
     "/onboarding/profile",
   );
   const destination = new URL(next, siteUrl());
+  const isPasswordRecovery = next.startsWith("/auth/reset-password");
   let response = NextResponse.redirect(destination);
 
   if (code) {
@@ -48,9 +55,21 @@ export async function GET(request: NextRequest) {
     const { error } = await supabase.auth.exchangeCodeForSession(code);
 
     if (!error) {
+      response.cookies.delete(PENDING_VERIFICATION_EMAIL_COOKIE);
+      response.cookies.delete(PENDING_VERIFICATION_NEXT_COOKIE);
+      response.cookies.delete(VERIFICATION_RESEND_AT_COOKIE);
       return response;
     }
+
+    const status = verificationFailureStatus(error);
+    const failurePath = isPasswordRecovery
+      ? `/auth/reset-password?status=${status}`
+      : `/verify-email?status=${status}`;
+    return NextResponse.redirect(new URL(failurePath, siteUrl()));
   }
 
-  return NextResponse.redirect(new URL("/login", siteUrl()));
+  const failurePath = isPasswordRecovery
+    ? "/auth/reset-password?status=missing"
+    : "/verify-email?status=missing";
+  return NextResponse.redirect(new URL(failurePath, siteUrl()));
 }

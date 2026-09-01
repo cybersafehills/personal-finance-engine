@@ -1,4 +1,4 @@
-import { test, expect } from "./fixtures";
+import { expect, test } from "./fixtures";
 import AxeBuilder from "@axe-core/playwright";
 
 // Runs with no session at all (see playwright.config.ts's "unauthenticated"
@@ -29,6 +29,36 @@ test("the signup page renders with no application shell chrome", async ({ page }
   await expect(page.getByLabel("Account menu")).toHaveCount(0);
 });
 
+test("the email verification page is public and provides recovery paths", async ({ page }) => {
+  await page.goto("/verify-email?status=expired");
+
+  await expect(page.getByRole("heading", { name: "Check your email" }))
+    .toBeVisible();
+  await expect(page.getByText(/verification link has expired/i)).toBeVisible();
+  await expect(page.getByRole("link", { name: "Return to sign up" }))
+    .toBeVisible();
+  await expect(page.getByRole("link", { name: /sign in/i })).toBeVisible();
+  await expect(page.getByRole("banner")).toHaveCount(0);
+});
+
+test("an incomplete confirmation callback returns to verification recovery", async ({ page }) => {
+  await page.goto("/auth/callback");
+
+  await expect(page).toHaveURL(/\/verify-email\?status=missing$/);
+  await expect(page.getByText(/verification link is incomplete/i))
+    .toBeVisible();
+});
+
+test("email verification page has no serious/critical automated accessibility violations", async ({ page }) => {
+  await page.goto("/verify-email?status=expired");
+  const results = await new AxeBuilder({ page }).analyze();
+  const seriousOrWorse = results.violations.filter(
+    (v) => v.impact === "serious" || v.impact === "critical",
+  );
+
+  expect(seriousOrWorse, JSON.stringify(seriousOrWorse, null, 2)).toEqual([]);
+});
+
 test("login page has no serious/critical automated accessibility violations", async ({ page }) => {
   await page.goto("/login");
 
@@ -40,21 +70,33 @@ test("login page has no serious/critical automated accessibility violations", as
   expect(seriousOrWorse, JSON.stringify(seriousOrWorse, null, 2)).toEqual([]);
 });
 
-test("login page - visual regression (desktop)", { tag: "@visual" }, async ({ page }) => {
-  await page.goto("/login");
-  await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
-  await expect(page).toHaveScreenshot("login-desktop.png", { fullPage: true });
-});
+test(
+  "login page - visual regression (desktop)",
+  { tag: "@visual" },
+  async ({ page }) => {
+    await page.goto("/login");
+    await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
+    await expect(page).toHaveScreenshot("login-desktop.png", {
+      fullPage: true,
+    });
+  },
+);
 
-test("login page - visual regression (mobile viewport)", { tag: "@visual" }, async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/login");
-  await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
-  await expect(page).toHaveScreenshot("login-mobile.png", { fullPage: true });
-});
+test(
+  "login page - visual regression (mobile viewport)",
+  { tag: "@visual" },
+  async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/login");
+    await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
+    await expect(page).toHaveScreenshot("login-mobile.png", { fullPage: true });
+  },
+);
 
 async function hasNoHorizontalOverflow(page: import("@playwright/test").Page) {
-  return page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
+  return page.evaluate(() =>
+    document.documentElement.scrollWidth <= window.innerWidth + 1
+  );
 }
 
 // Master prompt §19's responsive test matrix, automated, for the pre-auth
@@ -78,7 +120,10 @@ for (const bp of BREAKPOINTS) {
     await page.setViewportSize({ width: bp.width, height: bp.height });
     await page.goto("/login");
     await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
-    expect(await hasNoHorizontalOverflow(page), `horizontal overflow at ${bp.width}px`).toBe(true);
+    expect(
+      await hasNoHorizontalOverflow(page),
+      `horizontal overflow at ${bp.width}px`,
+    ).toBe(true);
   });
 }
 

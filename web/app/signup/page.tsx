@@ -16,10 +16,11 @@ export default async function SignUpPage({
       <div className="text-center">
         <OneLedgerLogo height={40} className="mx-auto mb-4" />
         <h1 className="text-xl font-semibold text-text-primary">
-          Create your account
+          Create your OneLedger account
         </h1>
         <p className="mt-1 text-sm text-text-muted">
-          Sets up your own personal finance workspace.
+          One secure place to connect accounts, organize your finances, and plan
+          what comes next.
         </p>
       </div>
       <SignUpForm next={nextPath} />
