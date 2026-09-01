@@ -91,7 +91,7 @@ test.afterEach(async () => {
 test("signup confirmation email authenticates and starts profile onboarding", async ({ page }) => {
   await page.goto("/signup");
   await page.getByLabel("Email").fill(NEW_USER.email);
-  await page.getByLabel("Password").fill(NEW_USER.password);
+  await page.getByLabel("Password", { exact: true }).fill(NEW_USER.password);
   await page
     .getByRole("button", { name: /sign up|create account/i })
     .click();

@@ -56,7 +56,9 @@ test("does not replay on internal navigation", async ({ page }) => {
   // Give it well past MIN_VISIBLE_MS to (not) reappear.
   await page.waitForTimeout(1200);
   await expect(page.locator(SPLASH)).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "Create your account" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Create your OneLedger account" }),
+  ).toBeVisible();
 });
 
 test("does not intercept input once it has gone", async ({ page }) => {
