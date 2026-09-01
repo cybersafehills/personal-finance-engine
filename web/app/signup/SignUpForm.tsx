@@ -45,10 +45,13 @@ export function SignUpForm({ next }: { next: string }) {
         />
       </label>
 
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="font-medium text-text-secondary">Password</span>
+      <div className="flex flex-col gap-1 text-sm">
+        <label htmlFor="signup-password" className="font-medium text-text-secondary">
+          Password
+        </label>
         <span className="relative">
           <input
+            id="signup-password"
             type={showPassword ? "text" : "password"}
             autoComplete="new-password"
             value={password}
@@ -72,7 +75,7 @@ export function SignUpForm({ next }: { next: string }) {
           At least {MIN_PASSWORD_LENGTH}{" "}
           characters. You can paste from a password manager.
         </span>
-      </label>
+      </div>
 
       <button
         type="submit"
