@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { DocumentIcon, GearIcon, ListIcon, PayIcon, PieIcon, StarIcon, UsersIcon } from "./icons";
+import { DocumentIcon, GearIcon, InboxIcon, ListIcon, PayIcon, PieIcon, StarIcon, UsersIcon } from "./icons";
 
 // The phone-only "More" destination. Holds the primary destinations that
 // don't fit the fixed five-slot bottom bar (Categories / Reports /
@@ -100,6 +100,7 @@ function MorePanel({
   }
 
   const appItems: Item[] = [
+    { href: "/inbox", label: "Financial Inbox", Icon: InboxIcon },
     { href: "/categories", label: "Categories", Icon: PieIcon },
     { href: "/reports", label: "Reports", Icon: DocumentIcon },
     { href: "/settings", label: "Settings", Icon: GearIcon },

@@ -15,9 +15,14 @@ export function AttentionItemsCard({ items }: { items: AttentionItem[] }) {
 
   return (
     <section className="rounded-card border border-border-subtle bg-surface p-1.5">
-      <h2 className="px-3 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-text-muted">
-        Needs attention
-      </h2>
+      <div className="flex items-center justify-between gap-2 px-3 pb-1 pt-2">
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+          Needs attention
+        </h2>
+        <Link href="/inbox" className="text-xs font-medium text-accent hover:underline">
+          Open inbox
+        </Link>
+      </div>
       <div className="flex flex-col divide-y divide-border-subtle">
         {items.map((item) => (
           <Link
