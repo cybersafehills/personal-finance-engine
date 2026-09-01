@@ -1,8 +1,21 @@
 "use server";
 
+import { cookies } from "next/headers";
 import { supabaseSession } from "../../lib/supabase-session-server";
 import { siteUrl } from "../../lib/site-url";
 import { internalRedirectPath } from "../../lib/internal-redirect";
+import {
+  encodePendingValue,
+  PENDING_VERIFICATION_EMAIL_COOKIE,
+  PENDING_VERIFICATION_NEXT_COOKIE,
+  pendingVerificationCookieOptions,
+  VERIFICATION_RESEND_AT_COOKIE,
+  VERIFICATION_RESEND_COOLDOWN_SECONDS,
+} from "../../lib/pending-verification";
+import {
+  registrationErrorMessage,
+  validateRegistration,
+} from "../../lib/registration";
 
 export type SignUpResult =
   | { ok: true; needsConfirmation: boolean }
@@ -13,13 +26,19 @@ export async function signUp(
   password: string,
   next: string,
 ): Promise<SignUpResult> {
+  const validation = validateRegistration(email, password);
+  if (validation.error) {
+    return { ok: false, error: validation.error };
+  }
+
+  const nextPath = internalRedirectPath(next);
   const supabase = await supabaseSession();
 
   const callbackUrl = new URL("/auth/callback", siteUrl());
-  callbackUrl.searchParams.set("next", internalRedirectPath(next));
+  callbackUrl.searchParams.set("next", nextPath);
 
   const { data, error } = await supabase.auth.signUp({
-    email,
+    email: validation.email,
     password,
     options: {
       emailRedirectTo: callbackUrl.toString(),
@@ -27,7 +46,27 @@ export async function signUp(
   });
 
   if (error) {
-    return { ok: false, error: error.message };
+    return { ok: false, error: registrationErrorMessage(error.message) };
+  }
+
+  if (!data.session) {
+    const cookieStore = await cookies();
+    const options = pendingVerificationCookieOptions();
+    cookieStore.set(
+      PENDING_VERIFICATION_EMAIL_COOKIE,
+      encodePendingValue(validation.email),
+      options,
+    );
+    cookieStore.set(
+      PENDING_VERIFICATION_NEXT_COOKIE,
+      encodePendingValue(nextPath),
+      options,
+    );
+    cookieStore.set(
+      VERIFICATION_RESEND_AT_COOKIE,
+      String(Date.now() + VERIFICATION_RESEND_COOLDOWN_SECONDS * 1000),
+      options,
+    );
   }
 
   // handle_new_user() (20260821000000_phase_b_identity_and_tenancy.sql)

@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { test, expect } from "./fixtures";
+import { expect, test } from "./fixtures";
 import { assertNotProductionSupabaseUrl } from "./production-guard";
 
 // End-to-end proof of the ONE flow nothing else covers: real signup form
@@ -88,17 +88,20 @@ test.afterEach(async () => {
   if (user) await db.auth.admin.deleteUser(user.id);
 });
 
-test("signup confirmation email authenticates and starts profile onboarding", async ({
-  page,
-}) => {
+test("signup confirmation email authenticates and starts profile onboarding", async ({ page }) => {
   await page.goto("/signup");
   await page.getByLabel("Email").fill(NEW_USER.email);
-  await page.getByLabel("Password").fill(NEW_USER.password);
+  await page.getByLabel("Password", { exact: true }).fill(NEW_USER.password);
   await page
     .getByRole("button", { name: /sign up|create account/i })
     .click();
 
+  await expect(page).toHaveURL(/\/verify-email$/);
   await expect(page.getByText("Check your email")).toBeVisible();
+  await expect(page.getByText(NEW_USER.email)).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Change email address" }),
+  ).toBeVisible();
 
   const confirmationUrl = await findConfirmationUrl(NEW_USER.email);
   await page.goto(confirmationUrl);

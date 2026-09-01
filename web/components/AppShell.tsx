@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { OneLedgerLogo } from "./brand/OneLedgerLogo";
 import { GearIcon, HomeIcon, ListIcon, MoreIcon, PieIcon, TargetIcon } from "./icons";
 import { LiveDataSync } from "./LiveDataSync";
+import { InboxButton } from "./InboxButton";
 import { MoreSheet } from "./MoreSheet";
 import { NotificationBell } from "./NotificationBell";
 import { ProfileMenu } from "./ProfileMenu";
@@ -161,6 +162,7 @@ export function AppShell({
 
             <div className="flex shrink-0 items-center gap-1.5">
               {payEnabled && <PayTrigger variant="desktop" />}
+              <InboxButton />
               <NotificationBell count={unreadNotificationCount} />
               <ReportsButton />
               <ProfileMenu

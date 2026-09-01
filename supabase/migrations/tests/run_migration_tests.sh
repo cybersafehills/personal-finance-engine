@@ -4884,6 +4884,33 @@ else
 fi
 
 # ===========================================================================
+# Operational health: aggregate-only service snapshot across ingestion,
+# duplicate review, scheduled reports, email, and reconciliation.
+# ===========================================================================
+echo "=== operational health snapshot ==="
+
+OPS_HEALTH_SHAPE="$(psql -d pfe_rls -t -A -c "set role service_role; with snapshot as (select public.get_operational_health_snapshot(60) as s) select (s ? 'captured_at') || '|' || (s ? 'window_minutes') || '|' || (s ? 'ingestion') || '|' || (s ? 'duplicates') || '|' || (s ? 'jobs') || '|' || (s ? 'email') || '|' || (s ? 'reconciliation') || '|' || (jsonb_typeof(s->'ingestion'->'received') = 'number') from snapshot;" | tail -1)"
+if [ "$OPS_HEALTH_SHAPE" = "true|true|true|true|true|true|true|true" ] || [ "$OPS_HEALTH_SHAPE" = "t|t|t|t|t|t|t|t" ]; then
+  pass "operational health returns aggregate metrics for all five monitored domains"
+else
+  fail "operational health snapshot shape drifted ($OPS_HEALTH_SHAPE)"
+fi
+
+OPS_HEALTH_CLAMP="$(psql -d pfe_rls -t -A -c "set role service_role; select (public.get_operational_health_snapshot(1)->>'window_minutes') || '|' || (public.get_operational_health_snapshot(999999)->>'window_minutes');" | tail -1)"
+if [ "$OPS_HEALTH_CLAMP" = "5|10080" ]; then
+  pass "operational health clamps observation windows to 5 minutes through 7 days"
+else
+  fail "operational health window bounds drifted ($OPS_HEALTH_CLAMP)"
+fi
+
+OPS_HEALTH_ACL="$(psql -d pfe_rls -t -A -c "select has_function_privilege('service_role', 'public.get_operational_health_snapshot(integer)', 'execute') || '|' || has_function_privilege('authenticated', 'public.get_operational_health_snapshot(integer)', 'execute') || '|' || has_function_privilege('anon', 'public.get_operational_health_snapshot(integer)', 'execute');")"
+if [ "$OPS_HEALTH_ACL" = "true|false|false" ] || [ "$OPS_HEALTH_ACL" = "t|f|f" ]; then
+  pass "operational health snapshot is service-role-only"
+else
+  fail "operational health snapshot privileges are incorrect ($OPS_HEALTH_ACL)"
+fi
+
+# ===========================================================================
 # Profile/preferences onboarding: a new user starts at profile, each RPC
 # advances exactly one resumable stage, and financial preferences update the
 # personal workspace in the same transaction. anon cannot call the RPCs.

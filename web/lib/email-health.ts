@@ -44,31 +44,41 @@ export async function checkEmailConfig(): Promise<EmailConfigReport> {
   if (client && fromDomain && !sandbox) {
     try {
       const res = (await client.domains.list()) as {
+        error?: { message?: string; name?: string } | null;
         data?:
           | { data?: Array<{ name?: string; status?: string }> }
           | Array<{ name?: string; status?: string }>;
       };
-      const list = Array.isArray(res.data) ? res.data : res.data?.data ?? [];
-      const match = list.find((d) => d.name?.toLowerCase() === fromDomain);
-
-      if (!match) {
+      if (res.error) {
         issues.push({
           level: "error",
-          code: "domain_not_in_account",
+          code: "api_key_rejected",
           message:
-            `The sending domain ${fromDomain} is not in this Resend account. Add and verify it, or delivery to real recipients fails.`,
+            "Resend rejected RESEND_API_KEY. Replace the production key with an active key from the Resend workspace that owns the sending domain.",
         });
       } else {
-        domainVerified = match.status === "verified";
-        if (!domainVerified) {
+        const list = Array.isArray(res.data) ? res.data : res.data?.data ?? [];
+        const match = list.find((d) => d.name?.toLowerCase() === fromDomain);
+
+        if (!match) {
           issues.push({
             level: "error",
-            code: "domain_unverified",
+            code: "domain_not_in_account",
             message:
-              `The sending domain ${fromDomain} is in Resend but its status is "${
-                match.status ?? "unknown"
-              }", not "verified".`,
+              `The sending domain ${fromDomain} is not in the Resend workspace selected by RESEND_API_KEY. Use a key from the workspace that owns this domain.`,
           });
+        } else {
+          domainVerified = match.status === "verified";
+          if (!domainVerified) {
+            issues.push({
+              level: "error",
+              code: "domain_unverified",
+              message:
+                `The sending domain ${fromDomain} is in Resend but its status is "${
+                  match.status ?? "unknown"
+                }", not "verified".`,
+            });
+          }
         }
       }
     } catch {

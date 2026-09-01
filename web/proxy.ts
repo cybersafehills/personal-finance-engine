@@ -22,6 +22,7 @@ import { type NextRequest, NextResponse } from "next/server";
 const PUBLIC_PATHS = [
   "/login",
   "/signup",
+  "/verify-email",
   "/auth/callback",
   "/auth/reset-password",
   // Must be reachable pre-auth: an invite recipient may not have an
@@ -95,6 +96,10 @@ export const config = {
   // cron call was redirected to /login before the route handler's own
   // secret check ever ran (discovered via a manual curl smoke test
   // returning a 307 to /login instead of reaching the route).
+  // /api/health/email and /api/admin/operational-health follow the same
+  // operator-secret model. Keeping either behind the browser-session gate
+  // makes the documented production checks return a login redirect before
+  // their own authorization can run.
   //
   // /brand/* is excluded: it is nothing but static public brand artwork
   // (logo, mark, favicons, and the iOS PWA launch images). Gating it did
@@ -103,5 +108,5 @@ export const config = {
   // visitor, so an installed iOS PWA never got its apple-touch-startup-
   // image and fell back to a black launch screen.
   matcher:
-    "/((?!_next/static|_next/image|favicon.ico|icon.png|apple-icon.png|api/cron|brand/).*)",
+    "/((?!_next/static|_next/image|favicon.ico|icon.png|apple-icon.png|api/cron|api/health/email|api/admin/operational-health|brand/).*)",
 };

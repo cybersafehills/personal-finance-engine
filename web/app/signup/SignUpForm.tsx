@@ -2,29 +2,16 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import { MIN_PASSWORD_LENGTH } from "../../lib/registration";
 import { signUp } from "./actions";
 
 export function SignUpForm({ next }: { next: string }) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [confirmationSent, setConfirmationSent] = useState(false);
   const [isPending, startTransition] = useTransition();
-
-  if (confirmationSent) {
-    return (
-      <div className="rounded-card border border-border-subtle bg-surface p-5 text-center">
-        <p className="text-sm font-medium text-text-primary">
-          Check your email
-        </p>
-        <p className="mt-1 text-sm text-text-muted">
-          We sent a confirmation link to {email}. Sign in once you&apos;ve
-          confirmed your address.
-        </p>
-      </div>
-    );
-  }
 
   return (
     <form
@@ -39,7 +26,7 @@ export function SignUpForm({ next }: { next: string }) {
             return;
           }
           if (result.needsConfirmation) {
-            setConfirmationSent(true);
+            router.push("/verify-email");
           } else {
             router.push(next || "/");
           }
@@ -58,19 +45,37 @@ export function SignUpForm({ next }: { next: string }) {
         />
       </label>
 
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="font-medium text-text-secondary">Password</span>
-        <input
-          type="password"
-          autoComplete="new-password"
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          required
-          minLength={8}
-          className="min-h-11 rounded-control border border-border-strong bg-surface px-3 py-2 text-sm text-text-primary"
-        />
-        <span className="text-xs text-text-muted">At least 8 characters.</span>
-      </label>
+      <div className="flex flex-col gap-1 text-sm">
+        <label htmlFor="signup-password" className="font-medium text-text-secondary">
+          Password
+        </label>
+        <span className="relative">
+          <input
+            id="signup-password"
+            type={showPassword ? "text" : "password"}
+            autoComplete="new-password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            required
+            minLength={MIN_PASSWORD_LENGTH}
+            maxLength={256}
+            aria-describedby="password-requirement"
+            className="min-h-11 w-full rounded-control border border-border-strong bg-surface px-3 py-2 pr-16 text-sm text-text-primary"
+          />
+          <button
+            type="button"
+            onClick={() => setShowPassword((visible) => !visible)}
+            className="absolute inset-y-0 right-0 px-3 text-xs font-medium text-accent"
+            aria-label={showPassword ? "Hide password" : "Show password"}
+          >
+            {showPassword ? "Hide" : "Show"}
+          </button>
+        </span>
+        <span id="password-requirement" className="text-xs text-text-muted">
+          At least {MIN_PASSWORD_LENGTH}{" "}
+          characters. You can paste from a password manager.
+        </span>
+      </div>
 
       <button
         type="submit"
