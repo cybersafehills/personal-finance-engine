@@ -88,7 +88,7 @@ test.afterEach(async () => {
   if (user) await db.auth.admin.deleteUser(user.id);
 });
 
-test("signup confirmation email authenticates and lands on /get-started", async ({
+test("signup confirmation email authenticates and starts profile onboarding", async ({
   page,
 }) => {
   await page.goto("/signup");
@@ -103,9 +103,9 @@ test("signup confirmation email authenticates and lands on /get-started", async 
   const confirmationUrl = await findConfirmationUrl(NEW_USER.email);
   await page.goto(confirmationUrl);
 
-  // First-run user (no `next`) -> PR4 redirect.
-  await expect(page).toHaveURL(/\/get-started$/);
+  // A newly verified user resumes at the first persisted onboarding stage.
+  await expect(page).toHaveURL(/\/onboarding\/profile$/);
   await expect(
-    page.getByRole("heading", { name: "Get started" }),
+    page.getByRole("heading", { name: "What should we call you?" }),
   ).toBeVisible();
 });
