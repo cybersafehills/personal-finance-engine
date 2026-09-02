@@ -216,6 +216,32 @@ types + status vocabularies).
   is the durable product-event store for the Integrations area, the same
   role `service_recent_usage` plays for the directory.
 
+# Phase 2 — Spreadsheet & Destination Connections
+
+The Phase 1 ingestion connector model is **inbound-only**. Phase 2 adds a
+parallel **outbound / bidirectional** layer, same conventions (RLS SELECT on
+`integration.view`, service-role / capability-gated writes, `integration_events`
+activity, the cron claim/lease pattern). Real OAuth providers (Google Sheets /
+Excel-365 / Drive / OneDrive / Dropbox) are **capability-stubbed and dark**
+until their `*_CLIENT_ID/SECRET` env is set; the **webhook** destination and a
+**`manual_file`** workbook mode are built for real.
+
+## Data model (P2-PR1, migration 20261101000000)
+
+| Table | Purpose |
+| --- | --- |
+| `integration_destinations` | An outbound delivery target: `download` / `webhook` / `cloud_storage` / `connected_workbook`. `config` redacted. |
+| `integration_destination_secrets` | **Service-role only, zero authenticated/anon grants** — hashed webhook secret + (later) encrypted OAuth tokens. |
+| `connected_workbooks` | Persistent link to an external spreadsheet; `direction` `export`/`import`/`two_way`, `source_of_truth` default `oneledger`. |
+| `integration_sync_runs` | One traceable delivery / sync execution; counts, cursor movement, retry state (`attempt`, `next_attempt_at`, claim/lease). |
+| `integration_conflicts` | Field-level OneLedger↔external disagreement awaiting a human decision; never auto-resolved. |
+
+`export_jobs` + `export_schedules` gain `destination_id` (null = download). The
+closed capability catalog + grant CHECK gain `integration.destination_manage`,
+`integration.workbook_manage`, `integration.conflict_resolve` (owner/admin only).
+Pure types + vocabularies: `web/lib/integrations/destinations/model.ts`;
+RLS-scoped reads in `web/lib/integrations/queries.ts`.
+
 ## Feature flags
 
 `web/lib/integrations/gate.ts`, env-var convention shared with
@@ -230,6 +256,10 @@ gate server-side.
 | `INTEGRATIONS_IMPORT_STUDIO_ENABLED` | on | Import Studio |
 | `INTEGRATIONS_EXPORT_CENTER_ENABLED` | on | Export Center + cron |
 | `INTEGRATIONS_SYNC_ENABLED` | **off** | Sync & Automation |
+| `INTEGRATIONS_DESTINATIONS_ENABLED` | on | Destinations (download + webhook), downstream of sync |
+| `INTEGRATIONS_WORKBOOKS_ENABLED` | **off** | Connected Workbooks + conflict review |
+| `INTEGRATIONS_CLOUD_STORAGE_ENABLED` | **off** | Cloud-storage destination type |
+| `GOOGLE_DRIVE_*` / `MICROSOFT_*` / `DROPBOX_*` | absent = provider dark | enables one OAuth provider |
 
 ## Authorization
 

@@ -627,7 +627,11 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # 85 tables, 84 with RLS.
 # Integrations Phase 1 PR6 (20261031000000) adds export_schedules
 # (RLS enabled, SELECT gated on integration.view) - 86 tables, 85 with RLS.
-if [ "$TABLE_COUNT" = "86" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Integrations Phase 2 P2-PR1 (20261101000000) adds integration_destinations,
+# integration_destination_secrets, connected_workbooks, integration_sync_runs
+# and integration_conflicts - all RLS enabled; the secrets table has zero
+# authenticated/anon grants - 91 tables, 90 with RLS.
+if [ "$TABLE_COUNT" = "91" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -722,11 +726,15 @@ fi
 # 115 + 6 = 121.
 # Integrations Phase 1 PR6 (20261031000000) adds export_schedules with a
 # SELECT-only grant for authenticated. 121 + 1 = 122.
+# Integrations Phase 2 P2-PR1 (20261101000000) adds integration_destinations,
+# connected_workbooks, integration_sync_runs and integration_conflicts with a
+# SELECT-only grant each; integration_destination_secrets gets NO authenticated
+# grant (service-role only). 122 + 4 = 126.
 AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and grantee = 'authenticated';")"
-if [ "$AUTHENTICATED_GRANT_COUNT" = "122" ]; then
-  pass "authenticated holds exactly the 122 table grants expected, no more"
+if [ "$AUTHENTICATED_GRANT_COUNT" = "126" ]; then
+  pass "authenticated holds exactly the 126 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 122 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 126 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -5169,6 +5177,59 @@ if [ "$INT_SCHED_MEMBER" = "1" ] && [ "$INT_SCHED_VIEWER" = "0" ] && [ "$INT_SCH
   pass "Integrations: export_schedules is readable by a member with integration.view, hidden from a Space viewer and another tenant"
 else
   fail "Integrations: export_schedules RLS wrong (member=$INT_SCHED_MEMBER viewer=$INT_SCHED_VIEWER outsider=$INT_SCHED_OUTSIDER)"
+fi
+
+# ===========================================================================
+# Integrations Phase 2 (20261101000000): destinations / workbooks / sync
+# runs / conflicts + the 3 new capabilities.
+# ===========================================================================
+echo "=== Integrations P2: destinations model + capabilities ==="
+
+P2_MATRIX_MISMATCHES="$(psql -d pfe_rls -t -A -c "
+  with capabilities(capability) as (values
+    ('integration.destination_manage'), ('integration.workbook_manage'),
+    ('integration.conflict_resolve')
+  ),
+  cells(kind, role) as (values
+    ('household','owner'), ('household','admin'),
+    ('household','member'), ('household','viewer'),
+    ('personal','owner'), ('personal','member')
+  ),
+  expected as (
+    select c.kind, c.role, cap.capability,
+      case
+        when c.kind = 'personal' then c.role = 'owner'
+        when c.role in ('owner', 'admin') then true
+        else false
+      end as allowed
+    from cells c cross join capabilities cap
+  )
+  select count(*) from expected
+  where public.space_role_has_capability(kind, role, capability) is distinct from allowed;")"
+P2_UNKNOWN="$(psql -d pfe_rls -t -A -c "select public.space_role_has_capability('household', 'owner', 'integration.bogus2');")"
+if [ "$P2_MATRIX_MISMATCHES" = "0" ] && [ "$P2_UNKNOWN" = "f" ]; then
+  pass "Integrations P2: the 3 new integration.* capabilities are owner/admin-only (member/viewer none), unknown still fails closed"
+else
+  fail "Integrations P2: capability matrix wrong (cells=$P2_MATRIX_MISMATCHES unknown=$P2_UNKNOWN)"
+fi
+
+P2_SECRET_GRANTS="$(psql -d pfe_rls -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and table_name='integration_destination_secrets' and grantee in ('anon','authenticated');")"
+if [ "$P2_SECRET_GRANTS" = "0" ]; then
+  pass "Integrations P2: integration_destination_secrets has zero anon/authenticated grants (service-role only)"
+else
+  fail "Integrations P2: integration_destination_secrets exposes $P2_SECRET_GRANTS anon/authenticated grant(s)"
+fi
+
+P2_DEST="$(psql -d pfe_rls -t -A -c "insert into public.integration_destinations (workspace_id, created_by, name, kind) values ('$INT_HH', '$USER_A', 'Accountant webhook', 'webhook') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "insert into public.integration_sync_runs (workspace_id, destination_id, trigger) values ('$INT_HH', '$P2_DEST', 'manual');" >/dev/null
+P2_DEST_MEMBER="$(as_user "$INT_MEMBER_USER" "select count(*) from public.integration_destinations where id = '$P2_DEST';")"
+P2_RUN_MEMBER="$(as_user "$INT_MEMBER_USER" "select count(*) from public.integration_sync_runs where destination_id = '$P2_DEST';")"
+P2_DEST_VIEWER="$(as_user "$INT_VIEWER_USER" "select count(*) from public.integration_destinations where id = '$P2_DEST';")"
+P2_DEST_OUTSIDER="$(as_user "$USER_B" "select count(*) from public.integration_destinations where id = '$P2_DEST';")"
+if [ "$P2_DEST_MEMBER" = "1" ] && [ "$P2_RUN_MEMBER" = "1" ] && [ "$P2_DEST_VIEWER" = "0" ] && [ "$P2_DEST_OUTSIDER" = "0" ]; then
+  pass "Integrations P2: destinations + sync_runs readable by a member with integration.view, hidden from a Space viewer and another tenant"
+else
+  fail "Integrations P2: destinations RLS wrong (member d/r=$P2_DEST_MEMBER/$P2_RUN_MEMBER viewer=$P2_DEST_VIEWER outsider=$P2_DEST_OUTSIDER)"
 fi
 
 echo ""

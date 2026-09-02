@@ -74,3 +74,38 @@ export function isExportCenterEnabled(workspaceId: string | null): boolean {
 export function isSyncEnabled(workspaceId: string | null): boolean {
   return isIntegrationsEnabled(workspaceId) && envOptIn("INTEGRATIONS_SYNC_ENABLED");
 }
+
+// --- Phase 2 -----------------------------------------------------------------
+//
+//   INTEGRATIONS_DESTINATIONS_ENABLED - export/sync delivery targets
+//                                       (download + signed webhook). On
+//                                       unless exactly "false".
+//   INTEGRATIONS_WORKBOOKS_ENABLED     - connected workbooks + conflict
+//                                       review. OFF unless exactly "true".
+//   INTEGRATIONS_CLOUD_STORAGE_ENABLED - the cloud-storage destination
+//                                       type. OFF unless exactly "true";
+//                                       a provider is additionally dark
+//                                       until its *_CLIENT_ID/SECRET is set.
+
+/** Destinations - download + webhook delivery. Requires the Sync surface. */
+export function isDestinationsEnabled(workspaceId: string | null): boolean {
+  return (
+    isSyncEnabled(workspaceId) &&
+    envEnabled("INTEGRATIONS_DESTINATIONS_ENABLED")
+  );
+}
+
+/** Connected Workbooks + conflict review - opt-in with exactly "true". */
+export function isWorkbooksEnabled(workspaceId: string | null): boolean {
+  return (
+    isSyncEnabled(workspaceId) && envOptIn("INTEGRATIONS_WORKBOOKS_ENABLED")
+  );
+}
+
+/** Cloud-storage destination type - opt-in with exactly "true". */
+export function isCloudStorageEnabled(workspaceId: string | null): boolean {
+  return (
+    isDestinationsEnabled(workspaceId) &&
+    envOptIn("INTEGRATIONS_CLOUD_STORAGE_ENABLED")
+  );
+}

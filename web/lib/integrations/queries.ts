@@ -4,6 +4,12 @@ import { supabaseSession } from "../supabase-session-server.ts";
 import { getActiveWorkspaceId } from "../queries.ts";
 import { headerSignature, signatureSimilarity } from "./mapping.ts";
 import type {
+  ConnectedWorkbook,
+  IntegrationConflict,
+  IntegrationDestination,
+  IntegrationSyncRun,
+} from "./destinations/model.ts";
+import type {
   ExportJob,
   ExportTemplate,
   ImportBatch,
@@ -446,4 +452,174 @@ export async function listIntegrationEvents(
     return [];
   }
   return (data ?? []).map(toEvent);
+}
+
+// --- Phase 2: destinations / workbooks / sync runs / conflicts --------------
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+function toDestination(row: any): IntegrationDestination {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    name: row.name,
+    kind: row.kind,
+    provider: row.provider ?? null,
+    config: row.config ?? {},
+    status: row.status,
+    lastDeliveryAt: row.last_delivery_at ?? null,
+    lastErrorCode: row.last_error_code ?? null,
+    createdBy: row.created_by ?? null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function toWorkbook(row: any): ConnectedWorkbook {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    destinationId: row.destination_id,
+    externalRef: row.external_ref ?? null,
+    sheetMap: row.sheet_map ?? {},
+    direction: row.direction,
+    sourceOfTruth: row.source_of_truth,
+    lastSyncRunId: row.last_sync_run_id ?? null,
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function toSyncRun(row: any): IntegrationSyncRun {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    destinationId: row.destination_id ?? null,
+    connectedWorkbookId: row.connected_workbook_id ?? null,
+    exportJobId: row.export_job_id ?? null,
+    trigger: row.trigger,
+    direction: row.direction,
+    status: row.status,
+    cursorBefore: row.cursor_before ?? null,
+    cursorAfter: row.cursor_after ?? null,
+    counts: row.counts ?? {},
+    error: row.error ?? null,
+    attempt: row.attempt ?? 0,
+    startedAt: row.started_at ?? null,
+    finishedAt: row.finished_at ?? null,
+    createdAt: row.created_at,
+  };
+}
+
+function toConflict(row: any): IntegrationConflict {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    syncRunId: row.sync_run_id ?? null,
+    connectedWorkbookId: row.connected_workbook_id ?? null,
+    refType: row.ref_type,
+    refId: row.ref_id ?? null,
+    field: row.field ?? null,
+    oneledgerValue: row.oneledger_value ?? null,
+    externalValue: row.external_value ?? null,
+    status: row.status,
+    resolvedBy: row.resolved_by ?? null,
+    resolvedAt: row.resolved_at ?? null,
+    createdAt: row.created_at,
+  };
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
+const DESTINATION_COLUMNS =
+  "id, workspace_id, name, kind, provider, config, status, last_delivery_at, last_error_code, created_by, created_at, updated_at";
+const SYNC_RUN_COLUMNS =
+  "id, workspace_id, destination_id, connected_workbook_id, export_job_id, trigger, direction, status, cursor_before, cursor_after, counts, error, attempt, started_at, finished_at, created_at";
+
+export async function listIntegrationDestinations(): Promise<
+  IntegrationDestination[]
+> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!workspaceId) return [];
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("integration_destinations")
+    .select(DESTINATION_COLUMNS)
+    .eq("workspace_id", workspaceId)
+    .order("name", { ascending: true });
+  if (error) {
+    console.error("listIntegrationDestinations failed:", error.message);
+    return [];
+  }
+  return (data ?? []).map(toDestination);
+}
+
+export async function listConnectedWorkbooks(): Promise<ConnectedWorkbook[]> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!workspaceId) return [];
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("connected_workbooks")
+    .select(
+      "id, workspace_id, destination_id, external_ref, sheet_map, direction, source_of_truth, last_sync_run_id, status, created_at, updated_at",
+    )
+    .eq("workspace_id", workspaceId)
+    .order("created_at", { ascending: false });
+  if (error) {
+    console.error("listConnectedWorkbooks failed:", error.message);
+    return [];
+  }
+  return (data ?? []).map(toWorkbook);
+}
+
+export async function listSyncRuns(limit = 50): Promise<IntegrationSyncRun[]> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!workspaceId) return [];
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("integration_sync_runs")
+    .select(SYNC_RUN_COLUMNS)
+    .eq("workspace_id", workspaceId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) {
+    console.error("listSyncRuns failed:", error.message);
+    return [];
+  }
+  return (data ?? []).map(toSyncRun);
+}
+
+export async function getSyncRun(id: string): Promise<IntegrationSyncRun | null> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!workspaceId) return null;
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("integration_sync_runs")
+    .select(SYNC_RUN_COLUMNS)
+    .eq("workspace_id", workspaceId)
+    .eq("id", id)
+    .maybeSingle();
+  if (error || !data) {
+    if (error) console.error("getSyncRun failed:", error.message);
+    return null;
+  }
+  return toSyncRun(data);
+}
+
+export async function listOpenConflicts(): Promise<IntegrationConflict[]> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!workspaceId) return [];
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("integration_conflicts")
+    .select(
+      "id, workspace_id, sync_run_id, connected_workbook_id, ref_type, ref_id, field, oneledger_value, external_value, status, resolved_by, resolved_at, created_at",
+    )
+    .eq("workspace_id", workspaceId)
+    .eq("status", "open")
+    .order("created_at", { ascending: true });
+  if (error) {
+    console.error("listOpenConflicts failed:", error.message);
+    return [];
+  }
+  return (data ?? []).map(toConflict);
 }
