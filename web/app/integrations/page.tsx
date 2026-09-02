@@ -8,7 +8,10 @@ import {
   getCanonicalConnectorInstallations,
   getIngestionConnections,
 } from "../../lib/queries";
-import { isIntegrationsEnabled } from "../../lib/integrations/gate";
+import {
+  isImportStudioEnabled,
+  isIntegrationsEnabled,
+} from "../../lib/integrations/gate";
 import { getIntegrationActivity } from "../../lib/integrations/activity";
 import { formatDateTime } from "../../lib/format";
 
@@ -106,6 +109,7 @@ export default async function IntegrationsPage() {
     getConnectedSummary(),
     getIntegrationActivity(5),
   ]);
+  const importEnabled = isImportStudioEnabled(workspaceId);
 
   return (
     <div>
@@ -242,30 +246,17 @@ export default async function IntegrationsPage() {
           Move data
         </h2>
         <div className="grid gap-2 sm:grid-cols-2">
-          <div className="rounded-card border border-border-subtle bg-surface p-4">
-            <div className="mb-1 flex items-center gap-2">
-              <span className="text-sm font-medium text-text-primary">
-                Import Studio
-              </span>
-              <Badge>Coming soon</Badge>
-            </div>
-            <p className="text-sm text-text-muted">
-              Upload a CSV or Excel file, map its columns, review duplicates, and
-              import into your ledger.
-            </p>
-          </div>
-          <div className="rounded-card border border-border-subtle bg-surface p-4">
-            <div className="mb-1 flex items-center gap-2">
-              <span className="text-sm font-medium text-text-primary">
-                Export Center
-              </span>
-              <Badge>Coming soon</Badge>
-            </div>
-            <p className="text-sm text-text-muted">
-              Export transactions, income, and expenses as a structured Excel
-              workbook or CSV.
-            </p>
-          </div>
+          <DataCard
+            href={importEnabled ? "/integrations/imports" : null}
+            title="Import Studio"
+            body="Upload a CSV or Excel file, map its columns, review duplicates, and import into your ledger."
+          />
+          <DataCard
+            href={null}
+            title="Export Center"
+            body="Export transactions, income, and expenses as a structured Excel workbook or CSV."
+            comingSoon
+          />
         </div>
       </section>
 
@@ -293,6 +284,50 @@ export default async function IntegrationsPage() {
           ))}
         </ul>
       </section>
+    </div>
+  );
+}
+
+function DataCard({
+  href,
+  title,
+  body,
+  comingSoon = false,
+}: {
+  href: string | null;
+  title: string;
+  body: string;
+  comingSoon?: boolean;
+}) {
+  const inner = (
+    <>
+      <div className="mb-1 flex items-center gap-2">
+        <span className="text-sm font-medium text-text-primary">{title}</span>
+        {href ? (
+          <span aria-hidden="true" className="text-text-muted">
+            →
+          </span>
+        ) : (
+          comingSoon && <Badge>Coming soon</Badge>
+        )}
+      </div>
+      <p className="text-sm text-text-muted">{body}</p>
+    </>
+  );
+
+  if (href) {
+    return (
+      <Link
+        href={href}
+        className="rounded-card border border-border-subtle bg-surface p-4 transition-colors hover:bg-background"
+      >
+        {inner}
+      </Link>
+    );
+  }
+  return (
+    <div className="rounded-card border border-border-subtle bg-surface p-4">
+      {inner}
     </div>
   );
 }

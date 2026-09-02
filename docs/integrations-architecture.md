@@ -35,7 +35,7 @@ account menu (desktop), and a link in Settings.
 | --- | --- | --- |
 | `/integrations` | Dashboard: connected summary, "move data" entry points, available-later categories | **live (PR 0)** |
 | `/integrations/connections` | Connected devices / Shortcuts / providers (canonical connector model) — moved here from `/settings/connections`, which now redirects | **live (PR 0)** |
-| `/integrations/imports` | Import Studio (upload -> detect -> map -> validate -> preview -> resolve -> import -> reconcile) | PR 2-4 |
+| `/integrations/imports` | Import Studio. **PR 2 live**: upload -> detect -> profile (list, `/new` upload, `[id]` detected structure + preview). Map / validate / duplicate review / commit / rollback: PR 3-4. |
 | `/integrations/exports` | Export Center (filters, Excel/CSV, history, templates) | PR 5 |
 | `/integrations/activity` | Consolidated activity / health feed | **live (PR 1)**, enriched PR 6 |
 | `/integrations/sync` | Sync & Automation (scheduled deliveries) — opt-in flag, default off | PR 6 |
@@ -66,6 +66,32 @@ Read models: `web/lib/integrations/queries.ts` (RLS-scoped list/get),
 `web/lib/integrations/activity.ts` + `activity-model.ts` (the
 `/integrations/activity` feed), `web/lib/integrations/model.ts` (pure
 types + status vocabularies).
+
+## Import Studio — upload / detect / profile (PR 2, migration 20261028000000)
+
+- Private storage bucket `integration-imports` (public = false, no
+  `storage.objects` policies — same model as the Phase K report-artifacts
+  bucket). Objects keyed `{workspace_id}/{import_batch_id}/{sanitized_name}`.
+- `web/lib/xlsx-read.ts` — reads `.xlsx` into the `{ headers, rows }` shape
+  of `web/lib/csv.ts` via **exceljs** (server-only; added to
+  `web/package.json`). `.xls` is rejected with a clear message. (exceljs
+  pulls a transitive `uuid` advisory GHSA-w5hq-g745-h8pq — only relevant to
+  a code path we never hit, read-only; not downgrading to the breaking 3.x.)
+- `web/lib/integrations/profile.ts` — **pure, unit-tested** data profiling:
+  row count, date range, currency guess, likely column roles, and
+  invalid / repeated-header / blank / ready-row counts. Reuses the
+  `statement-import` heuristics.
+- `web/app/integrations/imports/actions.ts` — `uploadImportFile` server
+  action: gate + `has_space_capability('integration.import')` check, then
+  MIME/extension/size/parse validation (nothing is written until the file
+  parses), filename sanitize, service-role writes of the `import_batches`
+  row + `import_records` staging rows (capped at 5000 in this phase) + the
+  file + an `integration_events` `import.uploaded` row.
+- Pages: `/integrations/imports` (list), `/integrations/imports/new`
+  (`ImportUploadForm` — drag/drop, 16px controls, retryable), and
+  `/integrations/imports/[id]` (detected structure, suggested column
+  mapping, first-20-row preview; "map & import" is a labelled placeholder
+  until PR 3).
 
 ## Feature flags
 

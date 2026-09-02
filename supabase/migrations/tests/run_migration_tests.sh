@@ -5087,6 +5087,14 @@ else
 fi
 rm -f $ARTIFACT_DIR/pfe_int_txn2.log
 
+# 20261028000000: the private import-source bucket exists and is not public.
+INT_BUCKET="$(psql -d pfe_rls -t -A -c "select count(*) from storage.buckets where id = 'integration-imports' and public = false;")"
+if [ "$INT_BUCKET" = "1" ]; then
+  pass "Integrations: the private integration-imports storage bucket is registered (public = false)"
+else
+  fail "Integrations: integration-imports bucket missing or public (got $INT_BUCKET)"
+fi
+
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="
 if [ "$FAIL_COUNT" -ne 0 ]; then
