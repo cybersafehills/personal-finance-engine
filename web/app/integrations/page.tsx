@@ -12,6 +12,7 @@ import {
   isExportCenterEnabled,
   isImportStudioEnabled,
   isIntegrationsEnabled,
+  isSyncEnabled,
 } from "../../lib/integrations/gate";
 import { getIntegrationActivity } from "../../lib/integrations/activity";
 import { formatDateTime } from "../../lib/format";
@@ -112,6 +113,7 @@ export default async function IntegrationsPage() {
   ]);
   const importEnabled = isImportStudioEnabled(workspaceId);
   const exportEnabled = isExportCenterEnabled(workspaceId);
+  const syncEnabled = isSyncEnabled(workspaceId);
 
   return (
     <div>
@@ -259,6 +261,13 @@ export default async function IntegrationsPage() {
             body="Export transactions, income, and expenses as a structured Excel workbook or CSV."
             comingSoon={!exportEnabled}
           />
+          {syncEnabled && (
+            <DataCard
+              href="/integrations/sync"
+              title="Sync & Automation"
+              body="Connector sync health and recurring scheduled exports."
+            />
+          )}
         </div>
       </section>
 

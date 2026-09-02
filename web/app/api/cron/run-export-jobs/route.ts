@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { isAuthorizedCronRequest } from "../../../../lib/cron-auth";
 import { supabaseServer } from "../../../../lib/supabase-server";
 import { runExportJob } from "../../../../lib/integrations/export/run";
+import { computeNextRun } from "../../../../lib/integrations/schedule";
 
 // Runs export jobs that were left queued (row estimate above the inline
 // limit) and re-claims jobs stuck in `processing` past the lease. Also
@@ -58,6 +59,69 @@ export async function POST(request: NextRequest) {
     else failed += 1;
   }
 
+  // Materialise due scheduled exports into export_jobs and advance them.
+  let scheduled = 0;
+  const nowIso = new Date().toISOString();
+  const { data: dueSchedules } = await admin
+    .from("export_schedules")
+    .select(
+      "id, workspace_id, created_by, name, config, cadence, hour, day_of_week, day_of_month",
+    )
+    .eq("enabled", true)
+    .lte("next_run_at", nowIso)
+    .limit(20);
+  for (const s of dueSchedules ?? []) {
+    const { data: job } = await admin
+      .from("export_jobs")
+      .insert({
+        workspace_id: s.workspace_id,
+        created_by: s.created_by,
+        config: s.config,
+        format: (s.config as { format?: string })?.format === "csv"
+          ? "csv"
+          : "xlsx",
+        status: "queued",
+      })
+      .select("id")
+      .single();
+
+    let ok = false;
+    if (job) {
+      const result = await runExportJob(job.id);
+      ok = result.ok;
+      if (ok) scheduled += 1;
+      else failed += 1;
+    }
+
+    const nextRunAt = computeNextRun(
+      {
+        cadence: s.cadence,
+        hour: s.hour,
+        dayOfWeek: s.day_of_week,
+        dayOfMonth: s.day_of_month,
+        offsetMinutes: 0,
+      },
+      new Date(),
+    );
+    await admin
+      .from("export_schedules")
+      .update({ last_run_at: nowIso, next_run_at: nextRunAt })
+      .eq("id", s.id);
+
+    if (!ok && s.created_by) {
+      await admin.from("notifications").insert({
+        workspace_id: s.workspace_id,
+        user_id: s.created_by,
+        event_key: "integration.scheduled_export_failed",
+        channel: "in_app",
+        title: "A scheduled export failed",
+        body: `"${s.name}" did not generate. It will try again on its next run.`,
+        resource_type: "export_schedule",
+        resource_id: s.id,
+      });
+    }
+  }
+
   // Retention: drop the stored file of old completed exports.
   const retentionCutoff = new Date(
     Date.now() - RETENTION_DAYS * 24 * 60 * 60_000,
@@ -82,5 +146,5 @@ export async function POST(request: NextRequest) {
     purged += 1;
   }
 
-  return NextResponse.json({ ran, failed, purged });
+  return NextResponse.json({ ran, scheduled, failed, purged });
 }

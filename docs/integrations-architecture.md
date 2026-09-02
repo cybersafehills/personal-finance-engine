@@ -37,8 +37,8 @@ account menu (desktop), and a link in Settings.
 | `/integrations/connections` | Connected devices / Shortcuts / providers (canonical connector model) — moved here from `/settings/connections`, which now redirects | **live (PR 0)** |
 | `/integrations/imports` | Import Studio. **PR 2-4 live**: upload -> detect -> profile -> map -> validate -> review -> commit -> undo (interactive mapping, saved templates, per-row validation, duplicate signals, staging review with bulk actions, `commit_import_batch` / `rollback_import_batch`). |
 | `/integrations/exports` | Export Center. **PR 5 live**: config (format / relative or custom period / account + direction filters / XLSX sheet picker), inline generation for small exports + a cron for large ones, saved templates, history with signed-URL download. |
-| `/integrations/activity` | Consolidated activity / health feed | **live (PR 1)**, enriched PR 6 |
-| `/integrations/sync` | Sync & Automation (scheduled deliveries) — opt-in flag, default off | PR 6 |
+| `/integrations/activity` | Consolidated activity / health feed | **live (PR 1)** |
+| `/integrations/sync` | Sync & Automation — connector sync health + recurring scheduled exports | **live (PR 6)**, opt-in flag, default off |
 
 ## Data model (PR 1, migration 20261027000000)
 
@@ -190,6 +190,31 @@ types + status vocabularies).
 - `space_audit_events` integration is deferred here as elsewhere in the
   Export/Import non-RPC paths — `integration_events` is the audit surface
   until a write moves behind a `SECURITY DEFINER` RPC.
+
+## Sync & Automation, health (PR 6, migration 20261031000000)
+
+- `export_schedules` table (workspace-scoped, RLS SELECT on
+  `integration.view`; writes via `integration.sync_manage` actions). A
+  schedule stores a **coarse cadence** (`daily` / `weekly` / `monthly` +
+  local hour + day) and an explicit `next_run_at` — no cron expression.
+- `web/lib/integrations/schedule.ts` (**pure, tested**) — `computeNextRun`
+  for the three cadences with a numeric UTC offset (DST not modelled in
+  Phase 1; `timezone` is stored but always `UTC` for now).
+- `run-export-jobs` cron additionally materialises every due schedule
+  into an `export_jobs` row, runs it, advances `next_run_at`, and (on
+  failure) writes an in-app `notifications` row for the schedule owner.
+- `get_operational_health_snapshot` gains an `integrations` block
+  (import batches created / failed / review backlog + age, export jobs
+  created / failed / stuck, schedules enabled / overdue) — still
+  identifier-free and service-role only. The prior body is split into
+  `get_operational_health_snapshot_core` so the wrapper can append.
+- `/integrations/sync` (gated `isSyncEnabled`, default off) — connector
+  sync health + a schedule list (`ExportScheduleList`) and create form
+  (`ExportScheduleForm`). Dashboard shows a Sync & Automation card when
+  the flag is on.
+- Analytics: this codebase wires no analytics provider — `integration_events`
+  is the durable product-event store for the Integrations area, the same
+  role `service_recent_usage` plays for the directory.
 
 ## Feature flags
 

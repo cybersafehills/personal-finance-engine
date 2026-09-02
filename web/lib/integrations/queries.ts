@@ -383,6 +383,52 @@ export async function getMatchCandidateTransactions(
   /* eslint-enable @typescript-eslint/no-explicit-any */
 }
 
+export type ExportScheduleRow = {
+  id: string;
+  name: string;
+  cadence: "daily" | "weekly" | "monthly";
+  hour: number;
+  dayOfWeek: number | null;
+  dayOfMonth: number | null;
+  timezone: string;
+  enabled: boolean;
+  lastRunAt: string | null;
+  nextRunAt: string;
+  format: "csv" | "xlsx";
+};
+
+export async function listExportSchedules(): Promise<ExportScheduleRow[]> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!workspaceId) return [];
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("export_schedules")
+    .select(
+      "id, name, cadence, hour, day_of_week, day_of_month, timezone, enabled, last_run_at, next_run_at, config",
+    )
+    .eq("workspace_id", workspaceId)
+    .order("name", { ascending: true });
+  if (error) {
+    console.error("listExportSchedules failed:", error.message);
+    return [];
+  }
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  return (data ?? []).map((s: any) => ({
+    id: s.id,
+    name: s.name,
+    cadence: s.cadence,
+    hour: s.hour,
+    dayOfWeek: s.day_of_week ?? null,
+    dayOfMonth: s.day_of_month ?? null,
+    timezone: s.timezone,
+    enabled: s.enabled,
+    lastRunAt: s.last_run_at ?? null,
+    nextRunAt: s.next_run_at,
+    format: (s.config?.format === "csv" ? "csv" : "xlsx") as "csv" | "xlsx",
+  }));
+  /* eslint-enable @typescript-eslint/no-explicit-any */
+}
+
 export async function listIntegrationEvents(
   limit = 50,
 ): Promise<IntegrationEvent[]> {

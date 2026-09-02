@@ -625,7 +625,9 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # integration_events - all RLS enabled, SELECT gated on the
 # integration.view capability, writes via service-role / PR2-5 RPCs -
 # 85 tables, 84 with RLS.
-if [ "$TABLE_COUNT" = "85" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Integrations Phase 1 PR6 (20261031000000) adds export_schedules
+# (RLS enabled, SELECT gated on integration.view) - 86 tables, 85 with RLS.
+if [ "$TABLE_COUNT" = "86" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -718,11 +720,13 @@ fi
 # integration_events - each with a SELECT-only grant for authenticated
 # (all writes go through service-role / PR2-5 SECURITY DEFINER RPCs).
 # 115 + 6 = 121.
+# Integrations Phase 1 PR6 (20261031000000) adds export_schedules with a
+# SELECT-only grant for authenticated. 121 + 1 = 122.
 AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and grantee = 'authenticated';")"
-if [ "$AUTHENTICATED_GRANT_COUNT" = "121" ]; then
-  pass "authenticated holds exactly the 121 table grants expected, no more"
+if [ "$AUTHENTICATED_GRANT_COUNT" = "122" ]; then
+  pass "authenticated holds exactly the 122 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 121 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 122 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -4902,9 +4906,9 @@ fi
 # ===========================================================================
 echo "=== operational health snapshot ==="
 
-OPS_HEALTH_SHAPE="$(psql -d pfe_rls -t -A -c "set role service_role; with snapshot as (select public.get_operational_health_snapshot(60) as s) select (s ? 'captured_at') || '|' || (s ? 'window_minutes') || '|' || (s ? 'ingestion') || '|' || (s ? 'duplicates') || '|' || (s ? 'jobs') || '|' || (s ? 'email') || '|' || (s ? 'reconciliation') || '|' || (jsonb_typeof(s->'ingestion'->'received') = 'number') from snapshot;" | tail -1)"
-if [ "$OPS_HEALTH_SHAPE" = "true|true|true|true|true|true|true|true" ] || [ "$OPS_HEALTH_SHAPE" = "t|t|t|t|t|t|t|t" ]; then
-  pass "operational health returns aggregate metrics for all five monitored domains"
+OPS_HEALTH_SHAPE="$(psql -d pfe_rls -t -A -c "set role service_role; with snapshot as (select public.get_operational_health_snapshot(60) as s) select (s ? 'captured_at') || '|' || (s ? 'window_minutes') || '|' || (s ? 'ingestion') || '|' || (s ? 'duplicates') || '|' || (s ? 'jobs') || '|' || (s ? 'email') || '|' || (s ? 'reconciliation') || '|' || (s ? 'integrations') || '|' || (jsonb_typeof(s->'ingestion'->'received') = 'number') || '|' || (jsonb_typeof(s->'integrations'->'export_jobs_stuck') = 'number') from snapshot;" | tail -1)"
+if [ "$OPS_HEALTH_SHAPE" = "true|true|true|true|true|true|true|true|true|true" ] || [ "$OPS_HEALTH_SHAPE" = "t|t|t|t|t|t|t|t|t|t" ]; then
+  pass "operational health returns aggregate metrics for all six monitored domains (incl. integrations)"
 else
   fail "operational health snapshot shape drifted ($OPS_HEALTH_SHAPE)"
 fi
@@ -5154,6 +5158,17 @@ if [ "$INT_EXP_BUCKET" = "1" ]; then
   pass "Integrations: the private integration-exports storage bucket is registered (public = false)"
 else
   fail "Integrations: integration-exports bucket missing or public (got $INT_EXP_BUCKET)"
+fi
+
+# 20261031000000: export_schedules RLS mirrors the rest of the model.
+INT_SCHED="$(psql -d pfe_rls -t -A -c "insert into public.export_schedules (workspace_id, created_by, name, cadence, hour, next_run_at) values ('$INT_HH', '$USER_A', 'Monthly', 'monthly', 6, now() + interval '1 day') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+INT_SCHED_MEMBER="$(as_user "$INT_MEMBER_USER" "select count(*) from public.export_schedules where id = '$INT_SCHED';")"
+INT_SCHED_VIEWER="$(as_user "$INT_VIEWER_USER" "select count(*) from public.export_schedules where id = '$INT_SCHED';")"
+INT_SCHED_OUTSIDER="$(as_user "$USER_B" "select count(*) from public.export_schedules where id = '$INT_SCHED';")"
+if [ "$INT_SCHED_MEMBER" = "1" ] && [ "$INT_SCHED_VIEWER" = "0" ] && [ "$INT_SCHED_OUTSIDER" = "0" ]; then
+  pass "Integrations: export_schedules is readable by a member with integration.view, hidden from a Space viewer and another tenant"
+else
+  fail "Integrations: export_schedules RLS wrong (member=$INT_SCHED_MEMBER viewer=$INT_SCHED_VIEWER outsider=$INT_SCHED_OUTSIDER)"
 fi
 
 echo ""
