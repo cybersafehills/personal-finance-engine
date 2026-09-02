@@ -4,8 +4,8 @@
 // a duplicate. This is advisory: commit_import_batch independently sets
 // dedupe_state from the Space fingerprint. Never used to auto-merge.
 
-import type { NormalizedImportRow } from "./mapping";
-import type { MatchConfidence } from "./model";
+import type { NormalizedImportRow } from "./mapping.ts";
+import type { MatchConfidence } from "./model.ts";
 
 export type CandidateTransaction = {
   id: string;

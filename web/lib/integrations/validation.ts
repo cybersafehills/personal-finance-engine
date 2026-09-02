@@ -3,8 +3,8 @@
 // client-side preview count. Classifies every issue as blocking (row
 // cannot be imported), warning (import but flag for review), or info.
 
-import type { NormalizedImportRow } from "./mapping";
-import type { ImportRecordStatus } from "./model";
+import type { NormalizedImportRow } from "./mapping.ts";
+import type { ImportRecordStatus } from "./model.ts";
 
 export type IssueSeverity = "blocking" | "warning" | "info";
 

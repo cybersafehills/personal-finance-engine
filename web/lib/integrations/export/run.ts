@@ -1,16 +1,16 @@
 import "server-only";
 
-import { supabaseServer } from "../../supabase-server";
+import { supabaseServer } from "../../supabase-server.ts";
 import {
   type ExportPeriod,
   resolvePeriod,
-} from "./period";
+} from "./period.ts";
 import {
   buildExportDataset,
   type ExportDirection,
   type ExportFilters,
-} from "./query";
-import { buildCsv, buildXlsx, EXPORT_SHEETS } from "./workbook";
+} from "./query.ts";
+import { buildCsv, buildXlsx, EXPORT_SHEETS } from "./workbook.ts";
 
 const EXPORT_BUCKET = "integration-exports";
 

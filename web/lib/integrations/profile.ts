@@ -8,7 +8,7 @@ import {
   guessMapping,
   parseAmount,
   parseStatementDate,
-} from "../statement-import";
+} from "../statement-import.ts";
 
 export type ProfileColumnGuess = {
   date: number | null;

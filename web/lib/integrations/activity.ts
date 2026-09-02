@@ -1,10 +1,10 @@
 import "server-only";
 
-import { listIntegrationEvents } from "./queries";
+import { listIntegrationEvents } from "./queries.ts";
 import {
   buildIntegrationActivity,
   type IntegrationActivityView,
-} from "./activity-model";
+} from "./activity-model.ts";
 
 /**
  * Authenticated, RLS-scoped read model for /integrations/activity: the

@@ -1,8 +1,8 @@
 import "server-only";
 
 import ExcelJS from "exceljs";
-import { csvDocument, neutralizeFormula } from "./csv-safe";
-import type { ExportDataset, ExportTransactionRow } from "./query";
+import { csvDocument, neutralizeFormula } from "./csv-safe.ts";
+import type { ExportDataset, ExportTransactionRow } from "./query.ts";
 
 // CSV and multi-sheet XLSX builders for an export dataset. Server-only
 // (exceljs must not reach the browser bundle). Every string cell is run

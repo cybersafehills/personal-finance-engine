@@ -9,8 +9,8 @@ import {
   parseAmount,
   parseStatementDate,
   type DateOrder,
-} from "../statement-import";
-import type { CanonicalImportField } from "./model";
+} from "../statement-import.ts";
+import type { CanonicalImportField } from "./model.ts";
 
 export type AmountMode =
   | "signed" // one column; negative = money out

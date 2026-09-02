@@ -1,8 +1,8 @@
 import "server-only";
 
-import { supabaseSession } from "../supabase-session-server";
-import { getActiveWorkspaceId } from "../queries";
-import { headerSignature, signatureSimilarity } from "./mapping";
+import { supabaseSession } from "../supabase-session-server.ts";
+import { getActiveWorkspaceId } from "../queries.ts";
+import { headerSignature, signatureSimilarity } from "./mapping.ts";
 import type {
   ExportJob,
   ExportTemplate,
@@ -10,7 +10,7 @@ import type {
   ImportRecord,
   ImportTemplate,
   IntegrationEvent,
-} from "./model";
+} from "./model.ts";
 
 // RLS-scoped reads for the Integrations area. The database policies
 // (migration 20261027000000) already restrict every row to workspaces

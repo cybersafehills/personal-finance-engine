@@ -1,7 +1,7 @@
 // Pure shaping of raw integration_events rows into the feed rendered at
 // /integrations/activity. No server-only import - unit-tested directly.
 
-import type { IntegrationEvent, IntegrationEventSeverity } from "./model";
+import type { IntegrationEvent, IntegrationEventSeverity } from "./model.ts";
 
 export type IntegrationActivityItem = {
   id: string;
