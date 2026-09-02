@@ -80,6 +80,63 @@ body {
   border-radius: 4px;
 }
 
+/*
+ * DESIGN-SYSTEM RULE - mobile form-control font size.
+ *
+ * Editable form controls MUST render at a computed font size of at least
+ * 16 CSS pixels on iOS-sized mobile viewports. Smaller visual typography
+ * (text-sm / text-xs utilities) is fine at >= md, where iOS Safari does
+ * not focus-zoom.
+ *
+ * Why: iOS Safari zooms the whole page in when a text-entry control whose
+ * *computed* font size is under 16px receives focus, and does not reliably
+ * zoom back out on blur - which crops the right edge of the layout,
+ * displaces the fixed bottom nav, and leaves the page shifted after the
+ * keyboard closes. Every editable control in this app is a raw <input> /
+ * <select> / <textarea> carrying Tailwind text-sm/text-xs classes, so this
+ * enforces the 16px floor in ONE place instead of at ~250 call sites,
+ * scoped to the viewport range where the zoom actually happens. These
+ * rules are unlayered, so they win over Tailwind's layered utilities
+ * without !important or specificity hacks (same mechanism the body /
+ * :focus-visible rules above already rely on).
+ *
+ * This does NOT disable user zoom: the <meta viewport> (app/layout.tsx)
+ * has no user-scalable=no / maximum-scale, so pinch-to-zoom and the
+ * browser zoom control stay fully available. Only the involuntary
+ * focus-zoom is removed.
+ */
+@media (max-width: 767px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+/*
+ * Defensive layout bounds. Individual over-wide descendants (a long
+ * unbroken USSD string / account number, an image, a portaled menu) are
+ * still fixed at their source; this is only the outer clamp so one of
+ * them can never widen the document and reintroduce horizontal scroll.
+ * `overflow-x: clip` (not `hidden`) creates no scroll container and
+ * leaves `position: sticky` on the header working.
+ */
+body {
+  overflow-x: clip;
+}
+
+img,
+video,
+canvas {
+  max-width: 100%;
+}
+
+input,
+select,
+textarea {
+  max-width: 100%;
+}
+
 /* Respect prefers-reduced-motion (master prompt §14) globally rather
    than hunting down every individual `transition-*`/`animate-*` utility
    class across the app - this covers all of them, present and future,

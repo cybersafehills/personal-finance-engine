@@ -176,3 +176,71 @@ test("the open launcher has no serious/critical accessibility violations", async
   );
   expect(seriousOrWorse, JSON.stringify(seriousOrWorse, null, 2)).toEqual([]);
 });
+
+// Mobile form-focus behaviour - the USSD Directory is the reported
+// regression case (focusing "Search by name or code" zoomed the page in
+// on iPhone Safari and cropped the right edge). Playwright cannot read
+// iOS Safari's native zoom factor, so these assert the *mechanism*: the
+// search field and both filter selects compute to >= 16px on a phone
+// viewport (below which iOS auto-zooms on focus), and the document never
+// develops horizontal overflow through focus + typing + filtering + blur.
+test.describe("USSD Directory - mobile form focus and viewport stability", () => {
+  const PHONE = { width: 390, height: 844 };
+
+  async function docScrollWidthOverflow(page: import("@playwright/test").Page) {
+    return page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+  }
+
+  test("search + filter controls compute to at least 16px on a phone viewport", async ({
+    page,
+  }) => {
+    await page.setViewportSize(PHONE);
+    await page.goto("/pay/ussd");
+
+    for (const control of [
+      page.getByLabel("Search services"),
+      page.getByLabel("Category"),
+      page.getByLabel("Provider"),
+    ]) {
+      const px = await control.evaluate(
+        (el) => parseFloat(getComputedStyle(el).fontSize),
+      );
+      expect(px, "iOS Safari focus-zooms controls under 16px").toBeGreaterThanOrEqual(16);
+    }
+  });
+
+  test("focusing and typing in search never makes the document scroll horizontally", async ({
+    page,
+  }) => {
+    await page.setViewportSize(PHONE);
+    await page.goto("/pay/ussd");
+    expect(await docScrollWidthOverflow(page), "overflow before focus").toBeLessThanOrEqual(1);
+
+    const search = page.getByLabel("Search services");
+    await search.focus();
+    await search.fill("MTN MoMo send money to a registered recipient 0781234567");
+    await expect(page).toHaveURL(/[?&]q=/);
+    expect(await docScrollWidthOverflow(page), "overflow while typing").toBeLessThanOrEqual(1);
+
+    await page.getByLabel("Category").selectOption({ index: 1 });
+    expect(await docScrollWidthOverflow(page), "overflow after category filter").toBeLessThanOrEqual(1);
+
+    await search.fill("");
+    await search.blur();
+    expect(await docScrollWidthOverflow(page), "overflow after clear + blur").toBeLessThanOrEqual(1);
+  });
+
+  test("viewport metadata keeps user zoom available (no user-scalable=no / maximum-scale)", async ({
+    page,
+  }) => {
+    await page.goto("/pay/ussd");
+    const content = await page
+      .locator('meta[name="viewport"]')
+      .getAttribute("content");
+    expect(content).toContain("width=device-width");
+    expect(content).not.toMatch(/user-scalable\s*=\s*no/i);
+    expect(content).not.toMatch(/maximum-scale/i);
+  });
+});

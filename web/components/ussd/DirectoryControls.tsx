@@ -69,16 +69,20 @@ export function DirectoryControls({
           onChange={(e) => setTerm(e.target.value)}
           placeholder={t.searchPlaceholder}
           aria-label={t.searchLabel}
-          className="w-full rounded-control border border-border-subtle bg-surface px-3 py-2.5 text-sm text-text-primary outline-none focus:border-accent"
+          // text-base on mobile keeps the computed size at 16px so iOS
+          // Safari does not focus-zoom (globals.css enforces this app-wide
+          // too; kept explicit here as this is the control in the bug
+          // report); text-sm from md: up where zoom can't happen.
+          className="w-full min-w-0 rounded-control border border-border-subtle bg-surface px-3 py-2.5 text-base text-text-primary outline-none focus:border-accent md:text-sm"
         />
       </label>
       <div className="flex flex-wrap gap-2">
-        <label className="flex items-center gap-1.5 text-sm">
-          <span className="text-text-muted">{t.categoryLabel}</span>
+        <label className="flex min-w-0 items-center gap-1.5 text-sm">
+          <span className="shrink-0 text-text-muted">{t.categoryLabel}</span>
           <select
             value={category}
             onChange={(e) => apply({ category: e.target.value })}
-            className="rounded-control border border-border-subtle bg-surface px-2 py-1.5 text-sm text-text-primary outline-none focus:border-accent"
+            className="min-w-0 max-w-full rounded-control border border-border-subtle bg-surface px-2 py-1.5 text-base text-text-primary outline-none focus:border-accent md:text-sm"
           >
             <option value="">{t.allCategories}</option>
             {DIRECTORY_CATEGORIES.map((c: DirectoryCategory) => (
@@ -88,12 +92,12 @@ export function DirectoryControls({
             ))}
           </select>
         </label>
-        <label className="flex items-center gap-1.5 text-sm">
-          <span className="text-text-muted">{t.providerLabel}</span>
+        <label className="flex min-w-0 items-center gap-1.5 text-sm">
+          <span className="shrink-0 text-text-muted">{t.providerLabel}</span>
           <select
             value={provider}
             onChange={(e) => apply({ provider: e.target.value })}
-            className="rounded-control border border-border-subtle bg-surface px-2 py-1.5 text-sm text-text-primary outline-none focus:border-accent"
+            className="min-w-0 max-w-full rounded-control border border-border-subtle bg-surface px-2 py-1.5 text-base text-text-primary outline-none focus:border-accent md:text-sm"
           >
             <option value="">{t.allProviders}</option>
             {providers.map((p) => (
