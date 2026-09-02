@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { rotateConnectorCredential } from "../app/settings/connections/actions";
+import { rotateConnectorCredential } from "../app/integrations/connections/actions";
 import { RevealedSecret } from "./RevealedSecret";
 import { ShortcutKeyInstructions } from "./ConnectionDetails";
 

@@ -1,5 +1,25 @@
 // Minimal hand-drawn icon set - no icon library dependency for three glyphs.
 
+export function PlugIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M9 2v6" />
+      <path d="M15 2v6" />
+      <path d="M6 8h12v3a6 6 0 0 1-12 0z" />
+      <path d="M12 17v5" />
+    </svg>
+  );
+}
+
 export function HomeIcon({ className }: { className?: string }) {
   return (
     <svg

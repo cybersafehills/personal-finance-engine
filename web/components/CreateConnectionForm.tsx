@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { createConnection } from "../app/settings/connections/actions";
+import { createConnection } from "../app/integrations/connections/actions";
 import { RevealedSecret } from "./RevealedSecret";
 import { ShortcutKeyInstructions } from "./ConnectionDetails";
 import type { AccountRow } from "../lib/queries";

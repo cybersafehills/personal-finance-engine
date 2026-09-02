@@ -6,7 +6,7 @@ import Link from "next/link";
 import {
   probeConnectionReadiness,
   probeConnectorCredentialReadiness,
-} from "../app/settings/connections/actions";
+} from "../app/integrations/connections/actions";
 
 const POLL_MS = 5_000;
 const GIVE_UP_MS = 3 * 60 * 1_000;
@@ -84,7 +84,7 @@ export function ConnectionReadinessProbe({
       <p className="text-xs text-text-muted">
         No message yet. Trigger a MoMo SMS from your phone, or check the{" "}
         <Link
-          href="/settings/connections/setup"
+          href="/integrations/connections/setup"
           className="font-medium text-accent hover:underline"
         >
           setup guide

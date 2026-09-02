@@ -158,7 +158,7 @@ export async function getFinancialInbox(): Promise<FinancialInbox> {
         : waitingForFirstSuccess
           ? "No successful data delivery was observed after setup."
           : "The connector has stopped delivering fresh data.",
-      href: "/settings/connections",
+      href: "/integrations/connections",
       actionableSince: installation.lastAttemptAt ?? installation.lastSuccessAt,
       affectedCount: 1,
     });

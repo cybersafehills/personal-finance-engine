@@ -1,5 +1,5 @@
 // The canonical, machine-readable "wire up an iPhone Shortcut" guide.
-// Rendered in-app at /settings/connections/setup and mirrored for offline
+// Rendered in-app at /integrations/connections/setup and mirrored for offline
 // reading in docs/momo-shortcut-setup.md. Keeping the steps here (not as
 // prose in a component) means the in-app guide and the doc describe the
 // same procedure and the same field values.

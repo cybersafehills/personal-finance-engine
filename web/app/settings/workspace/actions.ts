@@ -119,7 +119,7 @@ export async function createHousehold(name: string): Promise<void> {
  * Issues an invite for the active workspace. The link is returned to the
  * caller exactly once here - only token_hash/token_prefix are persisted,
  * same reveal-once contract as createConnection() in
- * app/settings/connections/actions.ts.
+ * app/integrations/connections/actions.ts.
  */
 export async function createInvite(
   workspaceId: string,

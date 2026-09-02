@@ -32,7 +32,7 @@ const SETTINGS_LINKS = [
     Icon: WalletIcon,
   },
   {
-    href: "/settings/connections",
+    href: "/integrations/connections",
     title: "Connections",
     description: "Manage the devices and Shortcuts that send transactions in.",
     Icon: PhoneIcon,

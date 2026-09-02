@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { DocumentIcon, GearIcon, InboxIcon, ListIcon, PayIcon, PieIcon, StarIcon, UsersIcon } from "./icons";
+import { DocumentIcon, GearIcon, InboxIcon, ListIcon, PayIcon, PieIcon, PlugIcon, StarIcon, UsersIcon } from "./icons";
 
 // The phone-only "More" destination. Holds the primary destinations that
 // don't fit the fixed five-slot bottom bar (Categories / Reports /
@@ -26,11 +26,13 @@ export function MoreSheet({
   onClose,
   payEnabled,
   assistedPayEnabled,
+  integrationsEnabled,
 }: {
   open: boolean;
   onClose: () => void;
   payEnabled: boolean;
   assistedPayEnabled: boolean;
+  integrationsEnabled: boolean;
 }) {
   if (!open) return null;
   return (
@@ -38,6 +40,7 @@ export function MoreSheet({
       onClose={onClose}
       payEnabled={payEnabled}
       assistedPayEnabled={assistedPayEnabled}
+      integrationsEnabled={integrationsEnabled}
     />
   );
 }
@@ -46,10 +49,12 @@ function MorePanel({
   onClose,
   payEnabled,
   assistedPayEnabled,
+  integrationsEnabled,
 }: {
   onClose: () => void;
   payEnabled: boolean;
   assistedPayEnabled: boolean;
+  integrationsEnabled: boolean;
 }) {
   const router = useRouter();
   const panelRef = useRef<HTMLDivElement>(null);
@@ -101,6 +106,9 @@ function MorePanel({
 
   const appItems: Item[] = [
     { href: "/inbox", label: "Financial Inbox", Icon: InboxIcon },
+    ...(integrationsEnabled
+      ? [{ href: "/integrations", label: "Integrations", Icon: PlugIcon }]
+      : []),
     { href: "/categories", label: "Categories", Icon: PieIcon },
     { href: "/reports", label: "Reports", Icon: DocumentIcon },
     { href: "/settings", label: "Settings", Icon: GearIcon },

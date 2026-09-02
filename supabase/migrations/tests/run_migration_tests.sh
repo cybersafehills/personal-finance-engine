@@ -4956,6 +4956,69 @@ else
   fail "onboarding RPC privileges are incorrect ($ONBOARDING_ACL)"
 fi
 
+# ===========================================================================
+# Integrations Phase 1 (20261026000000): the closed Spaces capability
+# catalog is extended with 8 integration.* capabilities. This verifies the
+# closed matrix for the new names (owner/admin all, member integration.view
+# only, viewer none, unknown integration.* fails closed) and that the
+# space_member_capability_grants CHECK moves in lockstep with the function.
+# Self-contained: its own household + member so it never depends on the
+# late state of earlier fixtures.
+# ===========================================================================
+echo "=== Integrations: integration.* capability catalog ==="
+
+INT_HH="$(as_user "$USER_A" "select public.create_household_workspace('Integrations Catalog HH');")"
+INT_MEMBER_USER="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('int-catalog-member@example.com') returning id;" | head -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.workspace_memberships (workspace_id, user_id, role, status, joined_at) values ('$INT_HH', '$INT_MEMBER_USER', 'member', 'active', now());" >/dev/null
+
+INT_MATRIX_MISMATCHES="$(psql -d pfe_rls -t -A -c "
+  with capabilities(capability) as (values
+    ('integration.view'), ('integration.import'),
+    ('integration.import_approve'), ('integration.export'),
+    ('integration.configure'), ('integration.connection_manage'),
+    ('integration.sync_manage'), ('integration.logs_view')
+  ),
+  cells(kind, role) as (values
+    ('household','owner'), ('household','admin'),
+    ('household','member'), ('household','viewer'),
+    ('personal','owner'), ('personal','member')
+  ),
+  expected as (
+    select c.kind, c.role, cap.capability,
+      case
+        when c.kind = 'personal' then c.role = 'owner'
+        when c.role in ('owner', 'admin') then true
+        when c.role = 'member' then cap.capability = 'integration.view'
+        else false
+      end as allowed
+    from cells c cross join capabilities cap
+  )
+  select count(*) from expected
+  where public.space_role_has_capability(kind, role, capability) is distinct from allowed;")"
+INT_UNKNOWN_OWNER="$(psql -d pfe_rls -t -A -c "select public.space_role_has_capability('household', 'owner', 'integration.bogus');")"
+INT_MEMBER_VIEW="$(as_user "$INT_MEMBER_USER" "select public.has_space_capability('$INT_HH', 'integration.view');")"
+INT_MEMBER_IMPORT="$(as_user "$INT_MEMBER_USER" "select public.has_space_capability('$INT_HH', 'integration.import');")"
+if [ "$INT_MATRIX_MISMATCHES" = "0" ] && [ "$INT_UNKNOWN_OWNER" = "f" ] && [ "$INT_MEMBER_VIEW" = "t" ] && [ "$INT_MEMBER_IMPORT" = "f" ]; then
+  pass "Integrations: 48 integration.* role/capability cells match (owner/admin all, member view-only, viewer none, unknown fails closed)"
+else
+  fail "Integrations: integration.* matrix mismatch (cells=$INT_MATRIX_MISMATCHES unknown_owner=$INT_UNKNOWN_OWNER member_view=$INT_MEMBER_VIEW member_import=$INT_MEMBER_IMPORT)"
+fi
+
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.space_member_capability_grants (workspace_id, user_id, capability) values ('$INT_HH', '$INT_MEMBER_USER', 'integration.export');" >/dev/null 2>$ARTIFACT_DIR/pfe_int_grant.log; then
+  psql -d pfe_rls -c "set role service_role; delete from public.space_member_capability_grants where workspace_id = '$INT_HH' and user_id = '$INT_MEMBER_USER' and capability = 'integration.export';" >/dev/null
+  pass "Integrations: the grants CHECK accepts a known integration.* capability"
+else
+  fail "Integrations: the grants CHECK rejected integration.export"
+fi
+rm -f $ARTIFACT_DIR/pfe_int_grant.log
+
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.space_member_capability_grants (workspace_id, user_id, capability) values ('$INT_HH', '$INT_MEMBER_USER', 'integration.bogus');" >/dev/null 2>$ARTIFACT_DIR/pfe_int_bogus.log; then
+  fail "Integrations: the grants CHECK accepted an unknown integration.* capability"
+else
+  pass "Integrations: the grants CHECK rejects a capability outside the extended catalog"
+fi
+rm -f $ARTIFACT_DIR/pfe_int_bogus.log
+
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="
 if [ "$FAIL_COUNT" -ne 0 ]; then

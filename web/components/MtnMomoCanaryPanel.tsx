@@ -5,7 +5,7 @@ import {
   pairMtnMomoAdapterCanary,
   pairMtnMomoAdapterCanaryByInstallation,
   setMtnMomoAdapterCanaryEnabled,
-} from "../app/settings/connections/actions";
+} from "../app/integrations/connections/actions";
 import type { ConnectorAdapterCanaryStatus } from "../lib/queries";
 import { Badge } from "./Badge";
 
