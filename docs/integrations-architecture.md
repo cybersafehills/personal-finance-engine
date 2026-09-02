@@ -265,6 +265,37 @@ RLS-scoped reads in `web/lib/integrations/queries.ts`.
 - UI: `/integrations/sync` "Destinations" section (`DestinationManager`);
   `ExportConfigForm` + `ExportScheduleForm` gain a "Deliver to" `<select>`.
 
+## Cloud-storage destination — dark adapter (P2-PR3)
+
+- `destinations/cloud-storage/contract.ts` (**pure, tested**) — provider keys
+  (`google_drive` / `onedrive` / `dropbox`), `CLOUD_STORAGE_PROVIDER_META`
+  (auth/token URLs, scopes, PKCE, the two env-var names), a
+  `CloudStorageClient` interface, `normalizeFolderPath`, and
+  `ProviderNotConfiguredError`.
+- `destinations/cloud-storage/registry.ts` (server-only) —
+  `isCloudProviderConfigured` (both `*_CLIENT_ID` + `*_SECRET` present),
+  `configuredCloudProviders`, `getCloudStorageClient`. An **unconfigured**
+  provider's client throws `ProviderNotConfiguredError` from every method; a
+  **configured** one gets a real OAuth `authUrl` / `exchangeCode` / `refresh`,
+  but `listFolders` / `uploadFile` still throw `provider_upload_not_implemented`
+  — a delivery is never faked.
+- `web/app/api/integrations/oauth/[provider]/{start,callback}/route.ts` —
+  session-authed + `integration.destination_manage`; **501** with a clear
+  message while the provider is dark; otherwise a state-cookie + PKCE consent
+  flow. Tokens land in `integration_destination_secrets`
+  (`secret_kind='oauth_token'`; encryption at rest is a follow-up — the table
+  is service-role-only).
+- `createCloudStorageDestination` action (`integration.destination_manage`,
+  `INTEGRATIONS_CLOUD_STORAGE_ENABLED`) creates a `needs_auth` destination and
+  returns the OAuth start URL only when the provider is configured.
+- `deliver.ts` cloud-storage branch resolves the token, fetches the export
+  file via a signed URL, and calls `uploadFile` — `provider_not_configured` /
+  `provider_upload_not_implemented` are recorded as **partial** runs (honest
+  dark state), real errors as **failed**.
+- `DestinationManager` shows cloud providers only when
+  `INTEGRATIONS_CLOUD_STORAGE_ENABLED` is on, labels unconfigured ones
+  "(not configured yet)", and never shows a dark provider as connected.
+
 ## Feature flags
 
 `web/lib/integrations/gate.ts`, env-var convention shared with

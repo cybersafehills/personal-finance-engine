@@ -5,11 +5,19 @@ import { getActiveWorkspaceId } from "../../../lib/queries";
 import { supabaseSession } from "../../../lib/supabase-session-server";
 import { supabaseServer } from "../../../lib/supabase-server";
 import { hashToken } from "../../../lib/credentials";
-import { isDestinationsEnabled } from "../../../lib/integrations/gate";
+import {
+  isCloudStorageEnabled,
+  isDestinationsEnabled,
+} from "../../../lib/integrations/gate";
 import {
   buildWebhookHeaders,
   isSafeWebhookUrl,
 } from "../../../lib/integrations/destinations/webhook";
+import {
+  isCloudStorageProviderKey,
+  normalizeFolderPath,
+} from "../../../lib/integrations/destinations/cloud-storage/contract";
+import { isCloudProviderConfigured } from "../../../lib/integrations/destinations/cloud-storage/registry";
 
 type AccessOk = { ok: true; workspaceId: string; userId: string };
 type AccessErr = { ok: false; error: string };
@@ -322,4 +330,74 @@ export async function testDestination(destinationId: string): Promise<TestResult
   return succeeded
     ? { ok: true, httpStatus }
     : { ok: false, error: deliveryError ?? `Endpoint returned HTTP ${httpStatus}.` };
+}
+
+// --- cloud-storage destinations (dark until a provider is configured) ------
+
+export type CreateCloudDestinationResult =
+  | { ok: true; destinationId: string; connectUrl: string | null }
+  | { ok: false; error: string };
+
+/** Create a cloud-storage destination. It starts `needs_auth`; the caller
+ *  then sends the user to connectUrl (the OAuth start route) - which
+ *  itself returns 501 while the provider is dark. */
+export async function createCloudStorageDestination(input: {
+  name: string;
+  provider: string;
+  folderPath: string;
+}): Promise<CreateCloudDestinationResult> {
+  const access = await requireDestinationAccess();
+  if (!access.ok) return access;
+  const { workspaceId, userId } = access;
+
+  if (!isCloudStorageEnabled(workspaceId)) {
+    return { ok: false, error: "Cloud-storage destinations aren’t enabled." };
+  }
+  const name = (input.name ?? "").trim();
+  if (!name || name.length > 80) {
+    return { ok: false, error: "Give the destination a short name." };
+  }
+  if (!isCloudStorageProviderKey(input.provider)) {
+    return { ok: false, error: "Unknown cloud provider." };
+  }
+  const folder = normalizeFolderPath(input.folderPath);
+  if (folder === null) return { ok: false, error: "That folder path isn’t valid." };
+
+  const admin = supabaseServer();
+  const { data: destination, error } = await admin
+    .from("integration_destinations")
+    .insert({
+      workspace_id: workspaceId,
+      created_by: userId,
+      name,
+      kind: "cloud_storage",
+      provider: input.provider,
+      config: { folder_path: folder },
+      status: "needs_auth",
+    })
+    .select("id")
+    .single();
+  if (error || !destination) {
+    console.error("createCloudStorageDestination failed", error?.message);
+    return { ok: false, error: "Could not create the destination." };
+  }
+
+  await admin.from("integration_events").insert({
+    workspace_id: workspaceId,
+    kind: "destination.created",
+    severity: "info",
+    ref_type: "integration_destination",
+    ref_id: destination.id,
+    summary: `Destination "${name}" (${input.provider}) added — needs authorisation`,
+    context: { actorUserId: userId, kind: "cloud_storage", provider: input.provider },
+  });
+
+  revalidatePath("/integrations/sync");
+  return {
+    ok: true,
+    destinationId: destination.id,
+    connectUrl: isCloudProviderConfigured(input.provider)
+      ? `/api/integrations/oauth/${input.provider}/start?destination_id=${destination.id}`
+      : null,
+  };
 }

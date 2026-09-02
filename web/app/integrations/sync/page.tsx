@@ -11,9 +11,12 @@ import {
   getCanonicalConnectorInstallations,
 } from "../../../lib/queries";
 import {
+  isCloudStorageEnabled,
   isDestinationsEnabled,
   isSyncEnabled,
 } from "../../../lib/integrations/gate";
+import { CLOUD_STORAGE_PROVIDER_META } from "../../../lib/integrations/destinations/cloud-storage/contract";
+import { configuredCloudProviders } from "../../../lib/integrations/destinations/cloud-storage/registry";
 import {
   listExportSchedules,
   listIntegrationDestinations,
@@ -41,6 +44,16 @@ export default async function SyncPage() {
   }
 
   const destinationsEnabled = isDestinationsEnabled(workspaceId);
+  const configured = isCloudStorageEnabled(workspaceId)
+    ? new Set(configuredCloudProviders())
+    : new Set<string>();
+  const cloudProviders = isCloudStorageEnabled(workspaceId)
+    ? Object.values(CLOUD_STORAGE_PROVIDER_META).map((m) => ({
+      key: m.key,
+      label: m.label,
+      configured: configured.has(m.key),
+    }))
+    : [];
   const [schedules, installations, destinations] = await Promise.all([
     listExportSchedules(),
     getCanonicalConnectorInstallations(),
@@ -108,7 +121,10 @@ export default async function SyncPage() {
             signed JSON envelope with a short-lived download link; “download
             only” keeps the file in the export history.
           </p>
-          <DestinationManager destinations={destinations} />
+          <DestinationManager
+            destinations={destinations}
+            cloudProviders={cloudProviders}
+          />
         </section>
       )}
 

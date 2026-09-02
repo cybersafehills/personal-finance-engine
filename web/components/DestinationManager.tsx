@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Badge } from "./Badge";
 import { RevealedSecret } from "./RevealedSecret";
 import {
+  createCloudStorageDestination,
   createDestination,
   deleteDestination,
   rotateWebhookSecret,
@@ -19,16 +20,26 @@ const KIND_LABEL: Record<string, string> = {
   connected_workbook: "Connected workbook",
 };
 
+type CloudProvider = { key: string; label: string; configured: boolean };
+
 export function DestinationManager({
   destinations,
+  cloudProviders = [],
 }: {
   destinations: IntegrationDestination[];
+  cloudProviders?: CloudProvider[];
 }) {
   const router = useRouter();
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
-  const [kind, setKind] = useState<"download" | "webhook">("webhook");
+  const [kind, setKind] = useState<"download" | "webhook" | "cloud_storage">(
+    "webhook",
+  );
   const [url, setUrl] = useState("");
+  const [cloudProvider, setCloudProvider] = useState(
+    cloudProviders[0]?.key ?? "google_drive",
+  );
+  const [folderPath, setFolderPath] = useState("/OneLedger");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [secret, setSecret] = useState<string | null>(null);
@@ -42,6 +53,28 @@ export function DestinationManager({
     setError(null);
     setNotice(null);
     start(async () => {
+      if (kind === "cloud_storage") {
+        const result = await createCloudStorageDestination({
+          name,
+          provider: cloudProvider,
+          folderPath,
+        });
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
+        setName("");
+        setAdding(false);
+        if (result.connectUrl) {
+          window.location.href = result.connectUrl;
+        } else {
+          setNotice(
+            "Destination created. This provider isn’t configured on this deployment yet — set its OAuth env vars to finish connecting.",
+          );
+          refresh();
+        }
+        return;
+      }
       const result = await createDestination({
         name,
         kind,
@@ -156,8 +189,8 @@ export function DestinationManager({
             maxLength={80}
             className="min-h-11 rounded-control border border-border-subtle bg-surface px-3 text-base text-text-primary"
           />
-          <div className="flex gap-4 text-sm">
-            {(["webhook", "download"] as const).map((k) => (
+          <div className="flex flex-wrap gap-4 text-sm">
+            {(["webhook", "download", ...(cloudProviders.length > 0 ? ["cloud_storage"] as const : [])] as const).map((k) => (
               <label key={k} className="flex items-center gap-2">
                 <input type="radio" name="destKind" checked={kind === k} onChange={() => setKind(k)} />
                 {KIND_LABEL[k]}
@@ -171,6 +204,32 @@ export function DestinationManager({
               placeholder="https://hooks.example.com/oneledger"
               className="min-h-11 rounded-control border border-border-subtle bg-surface px-3 text-base text-text-primary"
             />
+          )}
+          {kind === "cloud_storage" && (
+            <>
+              <select
+                value={cloudProvider}
+                onChange={(e) => setCloudProvider(e.target.value)}
+                className="min-h-11 rounded-control border border-border-subtle bg-surface px-3 text-base text-text-primary"
+              >
+                {cloudProviders.map((p) => (
+                  <option key={p.key} value={p.key}>
+                    {p.label}
+                    {p.configured ? "" : " (not configured yet)"}
+                  </option>
+                ))}
+              </select>
+              <input
+                value={folderPath}
+                onChange={(e) => setFolderPath(e.target.value)}
+                placeholder="/OneLedger/Accounting"
+                className="min-h-11 rounded-control border border-border-subtle bg-surface px-3 text-base text-text-primary"
+              />
+              <p className="text-xs text-text-muted">
+                You’ll be asked to authorise the provider. Providers marked “not
+                configured” are coming soon on this deployment.
+              </p>
+            </>
           )}
           <div className="flex gap-2">
             <button type="button" disabled={!name.trim() || isPending} onClick={add} className="min-h-11 rounded-control bg-accent px-4 text-base font-medium text-accent-foreground disabled:opacity-50">

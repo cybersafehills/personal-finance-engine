@@ -2,6 +2,11 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { buildWebhookHeaders, isSafeWebhookUrl } from "./webhook.ts";
+import {
+  isCloudStorageProviderKey,
+  type OAuthTokenSet,
+} from "./cloud-storage/contract.ts";
+import { getCloudStorageClient } from "./cloud-storage/registry.ts";
 
 const EXPORT_BUCKET = "integration-exports";
 const SIGNED_URL_TTL = 3600;
@@ -84,9 +89,12 @@ export async function deliverExportToDestination(
       .eq("id", input.destinationId);
   };
 
+  if (destination.kind === "cloud_storage") {
+    return deliverToCloudStorage(admin, destination, input, finish);
+  }
   if (destination.kind !== "webhook") {
-    await finish("partial", { code: "provider_not_configured" }, 0);
-    return { ok: false, error: "provider not configured" };
+    await finish("partial", { code: "not_wired" }, 0);
+    return { ok: false, error: "that destination type is not wired yet" };
   }
 
   const safe = isSafeWebhookUrl((destination.config as { url?: string })?.url ?? "");
@@ -141,3 +149,77 @@ export async function deliverExportToDestination(
     return { ok: false, error: message };
   }
 }
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+async function deliverToCloudStorage(
+  admin: SupabaseClient,
+  destination: any,
+  input: DeliverExportInput,
+  finish: (
+    status: "succeeded" | "partial" | "failed",
+    error: Record<string, unknown> | null,
+    delivered: number,
+  ) => Promise<void>,
+): Promise<{ ok: boolean; error?: string }> {
+  const providerKey = destination.provider as string;
+  if (!isCloudStorageProviderKey(providerKey)) {
+    await finish("failed", { code: "unknown_provider" }, 0);
+    return { ok: false, error: "unknown provider" };
+  }
+
+  const { data: secretRow } = await admin
+    .from("integration_destination_secrets")
+    .select("secret_material, secret_kind")
+    .eq("destination_id", input.destinationId)
+    .maybeSingle();
+  if (!secretRow || secretRow.secret_kind !== "oauth_token") {
+    await finish("partial", { code: "needs_auth" }, 0);
+    return { ok: false, error: "destination needs authorisation" };
+  }
+
+  let token: OAuthTokenSet;
+  try {
+    token = JSON.parse(secretRow.secret_material) as OAuthTokenSet;
+  } catch {
+    await finish("failed", { code: "bad_token" }, 0);
+    return { ok: false, error: "stored token is unreadable" };
+  }
+
+  const folderPath =
+    (destination.config as { folder_path?: string })?.folder_path ?? "/";
+
+  try {
+    const client = getCloudStorageClient(providerKey);
+    const { data: signed } = await admin.storage
+      .from(EXPORT_BUCKET)
+      .createSignedUrl(input.storagePath, SIGNED_URL_TTL);
+    const fileRes = signed?.signedUrl
+      ? await fetch(signed.signedUrl, { signal: AbortSignal.timeout(15_000) })
+      : null;
+    const bytes = fileRes && fileRes.ok
+      ? new Uint8Array(await fileRes.arrayBuffer())
+      : new Uint8Array();
+    await client.uploadFile(token, {
+      folderPath,
+      filename: input.filename,
+      contentType: "application/octet-stream",
+      body: bytes,
+    });
+    await finish("succeeded", null, 1);
+    return { ok: true };
+  } catch (err) {
+    const errCode = (err as { code?: string })?.code;
+    const errMsg = err instanceof Error ? err.message : "";
+    const code = errCode === "provider_not_configured"
+      ? "provider_not_configured"
+      : errMsg === "provider_upload_not_implemented"
+      ? "provider_upload_not_implemented"
+      : "cloud_delivery_failed";
+    // "not configured" / "not implemented" are the honest dark-mode states:
+    // a partial run, not a hard failure.
+    const status = code === "cloud_delivery_failed" ? "failed" : "partial";
+    await finish(status, { code }, 0);
+    return { ok: false, error: code };
+  }
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
