@@ -242,6 +242,29 @@ closed capability catalog + grant CHECK gain `integration.destination_manage`,
 Pure types + vocabularies: `web/lib/integrations/destinations/model.ts`;
 RLS-scoped reads in `web/lib/integrations/queries.ts`.
 
+## Destinations: download + signed webhook (P2-PR2)
+
+- `web/lib/integrations/destinations/webhook.ts` (**pure, tested**) —
+  `signWebhookPayload` (HMAC-SHA256 of `{timestamp}.{body}`),
+  `buildWebhookHeaders` (`X-OneLedger-Signature` / `X-OneLedger-Timestamp`),
+  and `isSafeWebhookUrl` — an **SSRF guard** rejecting non-https, embedded
+  credentials, and literal loopback / private / link-local / metadata hosts.
+- `web/lib/integrations/destinations/deliver.ts` (server-only) —
+  `deliverExportToDestination`: `download` is a no-op; `webhook` POSTs a signed
+  JSON envelope (`oneledger.export.ready` + a 1-hour signed download URL,
+  `redirect: "error"`, 15s timeout); `cloud_storage` / `connected_workbook`
+  record a `partial` run (`provider_not_configured`) until P2-PR3/PR4. Every
+  attempt writes an `integration_sync_run` and updates the destination's
+  `status` / `last_delivery_at` / `last_error_code`.
+- `run-export-jobs` calls it after a job completes; the schedule cron copies
+  `destination_id` onto the job it materialises.
+- Actions (`web/app/integrations/sync/actions.ts`, `integration.destination_manage`):
+  `createDestination` (webhook secret is reveal-once, SHA-256 stored in
+  `integration_destination_secrets`), `updateDestination`, `deleteDestination`,
+  `rotateWebhookSecret`, `testDestination` (sends a signed `oneledger.test`).
+- UI: `/integrations/sync` "Destinations" section (`DestinationManager`);
+  `ExportConfigForm` + `ExportScheduleForm` gain a "Deliver to" `<select>`.
+
 ## Feature flags
 
 `web/lib/integrations/gate.ts`, env-var convention shared with

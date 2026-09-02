@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
   const { data: dueSchedules } = await admin
     .from("export_schedules")
     .select(
-      "id, workspace_id, created_by, name, config, cadence, hour, day_of_week, day_of_month",
+      "id, workspace_id, created_by, name, config, destination_id, cadence, hour, day_of_week, day_of_month",
     )
     .eq("enabled", true)
     .lte("next_run_at", nowIso)
@@ -77,6 +77,7 @@ export async function POST(request: NextRequest) {
         workspace_id: s.workspace_id,
         created_by: s.created_by,
         config: s.config,
+        destination_id: s.destination_id ?? null,
         format: (s.config as { format?: string })?.format === "csv"
           ? "csv"
           : "xlsx",

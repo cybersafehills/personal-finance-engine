@@ -9,6 +9,7 @@ import {
 
 type Account = { id: string; name: string; currency: string };
 type Template = { id: string; name: string; config: Record<string, unknown> };
+type Destination = { id: string; name: string };
 
 const PRESETS: { value: string; label: string }[] = [
   { value: "previous_month", label: "Last month" },
@@ -32,12 +33,15 @@ const SHEETS = [
 export function ExportConfigForm({
   accounts,
   templates,
+  destinations = [],
 }: {
   accounts: Account[];
   templates: Template[];
+  destinations?: Destination[];
 }) {
   const router = useRouter();
   const [format, setFormat] = useState<"csv" | "xlsx">("xlsx");
+  const [destinationId, setDestinationId] = useState("");
   const [preset, setPreset] = useState("previous_month");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -97,7 +101,11 @@ export function ExportConfigForm({
       return;
     }
     startRun(async () => {
-      const result = await createExportJob(buildConfig());
+      const result = await createExportJob(
+        buildConfig(),
+        null,
+        destinationId || null,
+      );
       if (result.ok) {
         setNotice(
           result.ran
@@ -168,6 +176,22 @@ export function ExportConfigForm({
           </label>
         ))}
       </fieldset>
+
+      {destinations.length > 0 && (
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-text-primary">Deliver to</span>
+          <select
+            value={destinationId}
+            onChange={(e) => setDestinationId(e.target.value)}
+            className="min-h-11 rounded-control border border-border-subtle bg-surface px-3 text-base text-text-primary"
+          >
+            <option value="">Download only</option>
+            {destinations.map((d) => (
+              <option key={d.id} value={d.id}>{d.name}</option>
+            ))}
+          </select>
+        </label>
+      )}
 
       <label className="flex flex-col gap-1 text-sm">
         <span className="font-medium text-text-primary">Period</span>

@@ -4,10 +4,14 @@ import { Badge } from "../../../components/Badge";
 import { ExportConfigForm } from "../../../components/ExportConfigForm";
 import { formatDateTime } from "../../../lib/format";
 import { getAccounts, getActiveWorkspaceId } from "../../../lib/queries";
-import { isExportCenterEnabled } from "../../../lib/integrations/gate";
+import {
+  isDestinationsEnabled,
+  isExportCenterEnabled,
+} from "../../../lib/integrations/gate";
 import {
   listExportJobs,
   listExportTemplates,
+  listIntegrationDestinations,
 } from "../../../lib/integrations/queries";
 import type { ExportJobStatus } from "../../../lib/integrations/model";
 
@@ -38,10 +42,13 @@ export default async function ExportsPage() {
     );
   }
 
-  const [jobs, templates, accounts] = await Promise.all([
+  const [jobs, templates, accounts, destinations] = await Promise.all([
     listExportJobs(),
     listExportTemplates(),
     getAccounts(),
+    isDestinationsEnabled(workspaceId)
+      ? listIntegrationDestinations()
+      : Promise.resolve([]),
   ]);
   const activeAccounts = accounts.filter((a) => a.is_active);
 
@@ -65,6 +72,7 @@ export default async function ExportsPage() {
           name: t.name,
           config: t.config,
         }))}
+        destinations={destinations.map((d) => ({ id: d.id, name: d.name }))}
       />
 
       <h2 className="mb-2 mt-8 text-sm font-semibold text-text-primary">History</h2>

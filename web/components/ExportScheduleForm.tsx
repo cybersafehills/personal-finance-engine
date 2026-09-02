@@ -6,9 +6,14 @@ import { createExportSchedule } from "../app/integrations/exports/actions";
 
 const DOW = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
-export function ExportScheduleForm() {
+export function ExportScheduleForm({
+  destinations = [],
+}: {
+  destinations?: { id: string; name: string }[];
+}) {
   const router = useRouter();
   const [name, setName] = useState("");
+  const [destinationId, setDestinationId] = useState("");
   const [format, setFormat] = useState<"xlsx" | "csv">("xlsx");
   const [preset, setPreset] = useState("previous_month");
   const [cadence, setCadence] = useState<"daily" | "weekly" | "monthly">("monthly");
@@ -31,6 +36,7 @@ export function ExportScheduleForm() {
         dayOfWeek: cadence === "weekly" ? dayOfWeek : null,
         dayOfMonth: cadence === "monthly" ? dayOfMonth : null,
         offsetMinutes: 0,
+        destinationId: destinationId || null,
       });
       if (result.ok) {
         setNotice(`Scheduled "${name.trim()}".`);
@@ -65,6 +71,22 @@ export function ExportScheduleForm() {
         maxLength={80}
         className={field}
       />
+
+      {destinations.length > 0 && (
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-text-primary">Deliver to</span>
+          <select
+            value={destinationId}
+            onChange={(e) => setDestinationId(e.target.value)}
+            className={field}
+          >
+            <option value="">Download only (export history)</option>
+            {destinations.map((d) => (
+              <option key={d.id} value={d.id}>{d.name}</option>
+            ))}
+          </select>
+        </label>
+      )}
 
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="flex flex-col gap-1 text-sm">

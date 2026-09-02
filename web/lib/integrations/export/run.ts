@@ -11,6 +11,7 @@ import {
   type ExportFilters,
 } from "./query.ts";
 import { buildCsv, buildXlsx, EXPORT_SHEETS } from "./workbook.ts";
+import { deliverExportToDestination } from "../destinations/deliver.ts";
 
 const EXPORT_BUCKET = "integration-exports";
 
@@ -40,7 +41,7 @@ export async function runExportJob(
 
   const { data: job, error: loadError } = await admin
     .from("export_jobs")
-    .select("id, workspace_id, config, format")
+    .select("id, workspace_id, config, format, destination_id")
     .eq("id", jobId)
     .maybeSingle();
   if (loadError || !job) {
@@ -121,6 +122,19 @@ export async function runExportJob(
       summary: `Export ready — ${dataset.transactions.length} transactions (${period.label})`,
       context: { format, rowCount: dataset.transactions.length },
     });
+
+    if (job.destination_id) {
+      await deliverExportToDestination(admin, {
+        workspaceId: job.workspace_id,
+        exportJobId: jobId,
+        destinationId: job.destination_id as string,
+        storagePath,
+        filename,
+        rowCount: dataset.transactions.length,
+        periodLabel: period.label,
+        trigger: "scheduled",
+      });
+    }
 
     return { ok: true };
   } catch (err) {

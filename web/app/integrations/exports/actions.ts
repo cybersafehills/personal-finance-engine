@@ -73,9 +73,26 @@ export type CreateExportResult =
   | { ok: false; error: string };
 
 /** Queue an export; run it inline when the row estimate is small. */
+/** Verify a destination id (if given) belongs to this workspace. */
+async function resolveDestinationId(
+  admin: ReturnType<typeof supabaseServer>,
+  workspaceId: string,
+  destinationId: string | null | undefined,
+): Promise<string | null> {
+  if (!destinationId) return null;
+  const { data } = await admin
+    .from("integration_destinations")
+    .select("id")
+    .eq("id", destinationId)
+    .eq("workspace_id", workspaceId)
+    .maybeSingle();
+  return data?.id ?? null;
+}
+
 export async function createExportJob(
   rawConfig: unknown,
   templateId?: string | null,
+  destinationId?: string | null,
 ): Promise<CreateExportResult> {
   const access = await requireExportAccess();
   if (!access.ok) return access;
@@ -85,11 +102,17 @@ export async function createExportJob(
   if (!config) return { ok: false, error: "That export configuration is invalid." };
 
   const admin = supabaseServer();
+  const resolvedDestination = await resolveDestinationId(
+    admin,
+    workspaceId,
+    destinationId,
+  );
   const { data: job, error } = await admin
     .from("export_jobs")
     .insert({
       workspace_id: workspaceId,
       template_id: templateId ?? null,
+      destination_id: resolvedDestination,
       created_by: userId,
       config,
       format: config.format,
@@ -211,6 +234,7 @@ export type ScheduleInput = {
   dayOfWeek?: number | null;
   dayOfMonth?: number | null;
   offsetMinutes?: number;
+  destinationId?: string | null;
 };
 
 export type CreateScheduleResult =
@@ -249,6 +273,11 @@ export async function createExportSchedule(
   );
 
   const admin = supabaseServer();
+  const resolvedDestination = await resolveDestinationId(
+    admin,
+    workspaceId,
+    input.destinationId,
+  );
   const { data, error } = await admin
     .from("export_schedules")
     .insert({
@@ -256,6 +285,7 @@ export async function createExportSchedule(
       created_by: userId,
       name,
       config,
+      destination_id: resolvedDestination,
       cadence: input.cadence,
       hour,
       day_of_week: input.cadence === "weekly" ? input.dayOfWeek ?? 1 : null,

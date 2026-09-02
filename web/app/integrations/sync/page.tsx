@@ -4,13 +4,20 @@ import { EmptyState } from "../../../components/EmptyState";
 import { Badge } from "../../../components/Badge";
 import { ExportScheduleForm } from "../../../components/ExportScheduleForm";
 import { ExportScheduleList } from "../../../components/ExportScheduleList";
+import { DestinationManager } from "../../../components/DestinationManager";
 import { formatDateTime } from "../../../lib/format";
 import {
   getActiveWorkspaceId,
   getCanonicalConnectorInstallations,
 } from "../../../lib/queries";
-import { isSyncEnabled } from "../../../lib/integrations/gate";
-import { listExportSchedules } from "../../../lib/integrations/queries";
+import {
+  isDestinationsEnabled,
+  isSyncEnabled,
+} from "../../../lib/integrations/gate";
+import {
+  listExportSchedules,
+  listIntegrationDestinations,
+} from "../../../lib/integrations/queries";
 
 export const dynamic = "force-dynamic";
 
@@ -33,9 +40,13 @@ export default async function SyncPage() {
     );
   }
 
-  const [schedules, installations] = await Promise.all([
+  const destinationsEnabled = isDestinationsEnabled(workspaceId);
+  const [schedules, installations, destinations] = await Promise.all([
     listExportSchedules(),
     getCanonicalConnectorInstallations(),
+    destinationsEnabled
+      ? listIntegrationDestinations()
+      : Promise.resolve([]),
   ]);
 
   return (
@@ -87,6 +98,20 @@ export default async function SyncPage() {
         )}
       </section>
 
+      {destinationsEnabled && (
+        <section aria-labelledby="destinations" className="mb-8">
+          <h2 id="destinations" className="mb-2 text-sm font-semibold text-text-primary">
+            Destinations
+          </h2>
+          <p className="mb-3 text-sm text-text-muted">
+            Where an export or scheduled delivery is sent. A webhook receives a
+            signed JSON envelope with a short-lived download link; “download
+            only” keeps the file in the export history.
+          </p>
+          <DestinationManager destinations={destinations} />
+        </section>
+      )}
+
       <section aria-labelledby="schedules">
         <h2 id="schedules" className="mb-2 text-sm font-semibold text-text-primary">
           Scheduled exports
@@ -99,7 +124,9 @@ export default async function SyncPage() {
         <div className="mb-4">
           <ExportScheduleList schedules={schedules} />
         </div>
-        <ExportScheduleForm />
+        <ExportScheduleForm
+          destinations={destinations.map((d) => ({ id: d.id, name: d.name }))}
+        />
       </section>
     </div>
   );
