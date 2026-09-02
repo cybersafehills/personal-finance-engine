@@ -8,14 +8,61 @@ import { isImportStudioEnabled } from "../../../lib/integrations/gate";
 import { parseCsv } from "../../../lib/csv";
 import { parseXlsx } from "../../../lib/xlsx-read";
 import { profileTabularData } from "../../../lib/integrations/profile";
+import {
+  headerSignature,
+  type ImportColumnMapping,
+  normalizeImportRow,
+} from "../../../lib/integrations/mapping";
+import {
+  defaultValidationContext,
+  tallyValidation,
+  validateNormalizedRow,
+  type RowValidation,
+} from "../../../lib/integrations/validation";
 
 const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
 const MAX_RECORDS = 5000; // staging rows persisted per batch in this phase
 const IMPORT_BUCKET = "integration-imports";
+const RECORD_CHUNK = 500;
 
 export type UploadImportResult =
   | { ok: true; batchId: string }
   | { ok: false; error: string };
+
+type IntegrationCapability =
+  | "integration.import"
+  | "integration.import_approve"
+  | "integration.configure";
+
+type AccessOk = { ok: true; workspaceId: string; userId: string };
+type AccessErr = { ok: false; error: string };
+
+/** Gate + auth + capability preamble shared by every import action. */
+async function requireImportAccess(
+  capability: IntegrationCapability,
+): Promise<AccessOk | AccessErr> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!workspaceId || !isImportStudioEnabled(workspaceId)) {
+    return { ok: false, error: "Importing isn’t available for this Space." };
+  }
+  const supabase = await supabaseSession();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "You need to be signed in." };
+
+  const { data: allowed, error } = await supabase.rpc("has_space_capability", {
+    p_workspace_id: workspaceId,
+    p_capability: capability,
+  });
+  if (error || allowed !== true) {
+    return {
+      ok: false,
+      error: "You don’t have permission to do that in this Space.",
+    };
+  }
+  return { ok: true, workspaceId, userId: user.id };
+}
 
 /** Keep only safe filename characters; never trust the client's string. */
 function sanitizeFilename(name: string): string {
@@ -37,27 +84,9 @@ function fileKind(name: string): "csv" | "xlsx" | null {
 export async function uploadImportFile(
   formData: FormData,
 ): Promise<UploadImportResult> {
-  const workspaceId = await getActiveWorkspaceId();
-  if (!workspaceId || !isImportStudioEnabled(workspaceId)) {
-    return { ok: false, error: "Importing isn’t available for this Space." };
-  }
-
-  const supabase = await supabaseSession();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "You need to be signed in." };
-
-  const { data: allowed, error: capError } = await supabase.rpc(
-    "has_space_capability",
-    { p_workspace_id: workspaceId, p_capability: "integration.import" },
-  );
-  if (capError || allowed !== true) {
-    return {
-      ok: false,
-      error: "You don’t have permission to import data into this Space.",
-    };
-  }
+  const access = await requireImportAccess("integration.import");
+  if (!access.ok) return access;
+  const { workspaceId, userId } = access;
 
   const file = formData.get("file");
   if (!(file instanceof File) || file.size === 0) {
@@ -124,7 +153,7 @@ export async function uploadImportFile(
     .from("import_batches")
     .insert({
       workspace_id: workspaceId,
-      created_by: user.id,
+      created_by: userId,
       source_kind: kind,
       original_filename: file.name.slice(0, 255),
       status: "uploaded",
@@ -206,4 +235,232 @@ export async function uploadImportFile(
   revalidatePath("/integrations/imports");
   revalidatePath("/integrations");
   return { ok: true, batchId: batch.id };
+}
+
+export type ApplyMappingResult =
+  | {
+    ok: true;
+    counts: { ready: number; needsReview: number; invalid: number; total: number };
+  }
+  | { ok: false; error: string };
+
+/**
+ * Re-normalize and re-validate every staged row of a batch against
+ * `mapping`, persisting per-row status + issues and the batch-level
+ * counts. This is the authoritative pass - the client's live preview is
+ * advisory only.
+ */
+export async function applyImportMapping(
+  batchId: string,
+  mapping: ImportColumnMapping,
+): Promise<ApplyMappingResult> {
+  const access = await requireImportAccess("integration.import");
+  if (!access.ok) return access;
+  const { workspaceId } = access;
+
+  const admin = supabaseServer();
+  const { data: batch, error: batchError } = await admin
+    .from("import_batches")
+    .select("id, status")
+    .eq("id", batchId)
+    .eq("workspace_id", workspaceId)
+    .maybeSingle();
+  if (batchError || !batch) {
+    return { ok: false, error: "That import could not be found." };
+  }
+  if (["imported", "committing", "rolled_back"].includes(batch.status)) {
+    return { ok: false, error: "This import can no longer be re-mapped." };
+  }
+
+  const { data: records, error: recordsError } = await admin
+    .from("import_records")
+    .select("id, row_index, raw_cells")
+    .eq("import_batch_id", batchId)
+    .order("row_index", { ascending: true });
+  if (recordsError || !records) {
+    return { ok: false, error: "Could not load the staged rows." };
+  }
+
+  const ctx = defaultValidationContext();
+  const statuses: RowValidation["status"][] = [];
+  const updates = records.map((record) => {
+    const cells =
+      ((record.raw_cells as { cells?: string[] })?.cells as string[]) ?? [];
+    const normalized = normalizeImportRow(cells, mapping);
+    if (!normalized.ok) {
+      statuses.push("invalid");
+      return {
+        id: record.id,
+        import_batch_id: batchId,
+        workspace_id: workspaceId,
+        row_index: record.row_index,
+        raw_cells: record.raw_cells,
+        normalized: {},
+        status: "invalid" as const,
+        validation: {
+          issues: [
+            {
+              severity: "blocking",
+              code: normalized.reason,
+              message: "This row could not be read with the current mapping.",
+            },
+          ],
+        },
+      };
+    }
+    const result = validateNormalizedRow(normalized.row, ctx);
+    statuses.push(result.status);
+    return {
+      id: record.id,
+      import_batch_id: batchId,
+      workspace_id: workspaceId,
+      row_index: record.row_index,
+      raw_cells: record.raw_cells,
+      normalized: normalized.row,
+      status: result.status,
+      validation: { issues: result.issues },
+    };
+  });
+
+  for (let i = 0; i < updates.length; i += RECORD_CHUNK) {
+    const { error } = await admin
+      .from("import_records")
+      .upsert(updates.slice(i, i + RECORD_CHUNK), { onConflict: "id" });
+    if (error) {
+      console.error("applyImportMapping: upsert failed", error.message);
+      return { ok: false, error: "Could not save the mapping results." };
+    }
+  }
+
+  const counts = tallyValidation(statuses);
+  await admin
+    .from("import_batches")
+    .update({
+      status: "validated",
+      mapping,
+      row_counts: {
+        total: updates.length,
+        ready: counts.ready,
+        needs_review: counts.needsReview,
+        invalid: counts.invalid,
+        possible_duplicate: 0,
+        imported: 0,
+        failed: 0,
+        skipped: 0,
+      },
+    })
+    .eq("id", batchId);
+
+  await admin.from("integration_events").insert({
+    workspace_id: workspaceId,
+    kind: "import.mapped",
+    severity: counts.invalid > 0 ? "warning" : "info",
+    ref_type: "import_batch",
+    ref_id: batchId,
+    summary:
+      `Mapping applied — ${counts.ready} ready, ${counts.needsReview} to review, ${counts.invalid} invalid`,
+    context: { counts },
+  });
+
+  revalidatePath(`/integrations/imports/${batchId}`);
+  return {
+    ok: true,
+    counts: { ...counts, total: updates.length },
+  };
+}
+
+export type SaveTemplateResult =
+  | { ok: true; templateId: string }
+  | { ok: false; error: string };
+
+/** Persist the batch's current mapping as a reusable, versioned template. */
+export async function saveImportTemplate(
+  batchId: string,
+  rawName: string,
+): Promise<SaveTemplateResult> {
+  const access = await requireImportAccess("integration.configure");
+  if (!access.ok) return access;
+  const { workspaceId, userId } = access;
+
+  const name = rawName.trim();
+  if (!name) return { ok: false, error: "Give the template a name." };
+  if (name.length > 80) {
+    return { ok: false, error: "That name is too long." };
+  }
+
+  const admin = supabaseServer();
+  const { data: batch, error: batchError } = await admin
+    .from("import_batches")
+    .select("detected, mapping")
+    .eq("id", batchId)
+    .eq("workspace_id", workspaceId)
+    .maybeSingle();
+  if (batchError || !batch) {
+    return { ok: false, error: "That import could not be found." };
+  }
+
+  const headers =
+    ((batch.detected as { headers?: string[] })?.headers as string[]) ?? [];
+  const mapping = (batch.mapping ?? {}) as
+    & Partial<ImportColumnMapping>
+    & { suggested?: unknown };
+  if (!mapping.columns) {
+    return { ok: false, error: "Map the columns before saving a template." };
+  }
+
+  const fields = {
+    workspace_id: workspaceId,
+    name,
+    source_type: "generic",
+    header_signature: headerSignature(headers),
+    mapping,
+    date_format: mapping.dateOrder ?? null,
+    direction_convention: mapping.directionMode ?? null,
+    currency: mapping.defaultCurrency ?? null,
+    created_by: userId,
+  };
+
+  const { data: existing } = await admin
+    .from("import_templates")
+    .select("id, version")
+    .eq("workspace_id", workspaceId)
+    .eq("name", name)
+    .maybeSingle();
+
+  let templateId: string;
+  if (existing) {
+    const { error } = await admin
+      .from("import_templates")
+      .update({ ...fields, version: existing.version + 1 })
+      .eq("id", existing.id);
+    if (error) {
+      console.error("saveImportTemplate: update failed", error.message);
+      return { ok: false, error: "Could not update the template." };
+    }
+    templateId = existing.id;
+  } else {
+    const { data: inserted, error } = await admin
+      .from("import_templates")
+      .insert(fields)
+      .select("id")
+      .single();
+    if (error || !inserted) {
+      console.error("saveImportTemplate: insert failed", error?.message);
+      return { ok: false, error: "Could not save the template." };
+    }
+    templateId = inserted.id;
+  }
+
+  await admin.from("integration_events").insert({
+    workspace_id: workspaceId,
+    kind: "template.saved",
+    severity: "info",
+    ref_type: "import_template",
+    ref_id: templateId,
+    summary: `Import template "${name}" ${existing ? "updated" : "saved"}`,
+    context: { actorUserId: userId, version: (existing?.version ?? 0) + 1 },
+  });
+
+  revalidatePath(`/integrations/imports/${batchId}`);
+  return { ok: true, templateId };
 }

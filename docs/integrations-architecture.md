@@ -35,7 +35,7 @@ account menu (desktop), and a link in Settings.
 | --- | --- | --- |
 | `/integrations` | Dashboard: connected summary, "move data" entry points, available-later categories | **live (PR 0)** |
 | `/integrations/connections` | Connected devices / Shortcuts / providers (canonical connector model) — moved here from `/settings/connections`, which now redirects | **live (PR 0)** |
-| `/integrations/imports` | Import Studio. **PR 2 live**: upload -> detect -> profile (list, `/new` upload, `[id]` detected structure + preview). Map / validate / duplicate review / commit / rollback: PR 3-4. |
+| `/integrations/imports` | Import Studio. **PR 2-3 live**: upload -> detect -> profile -> map -> validate (interactive mapping + saved templates + per-row validation + preview). Duplicate review / commit / rollback: PR 4. |
 | `/integrations/exports` | Export Center (filters, Excel/CSV, history, templates) | PR 5 |
 | `/integrations/activity` | Consolidated activity / health feed | **live (PR 1)**, enriched PR 6 |
 | `/integrations/sync` | Sync & Automation (scheduled deliveries) — opt-in flag, default off | PR 6 |
@@ -89,9 +89,38 @@ types + status vocabularies).
   file + an `integration_events` `import.uploaded` row.
 - Pages: `/integrations/imports` (list), `/integrations/imports/new`
   (`ImportUploadForm` — drag/drop, 16px controls, retryable), and
-  `/integrations/imports/[id]` (detected structure, suggested column
-  mapping, first-20-row preview; "map & import" is a labelled placeholder
-  until PR 3).
+  `/integrations/imports/[id]` (detected structure, mapping, preview).
+
+## Import Studio — map / validate / templates (PR 3)
+
+- `web/lib/integrations/mapping.ts` — **pure** column-mapping engine
+  (runs in the client for the live preview *and* on the server for the
+  authoritative apply). Canonical target fields, `suggestMapping` from
+  header names, `missingRequiredFields`, `normalizeImportRow` (signed /
+  split / all-out / all-in amount modes, direction from amount or a
+  column), and `headerSignature` / `signatureSimilarity` for template
+  matching (`TEMPLATE_AUTO_APPLY_THRESHOLD = 0.85`).
+- `web/lib/integrations/validation.ts` — **pure** per-row validation
+  classifying each issue `blocking | warning | info` and mapping to a
+  row status (`invalid` / `needs_review` / `ready`): date, amount, zero
+  amount, direction, unsupported/missing currency, in-batch duplicate
+  external id, missing description.
+- Server actions (`app/integrations/imports/actions.ts`):
+  `applyImportMapping` (re-normalize + re-validate every staged row,
+  persist per-row status + issues and batch counts, status ->
+  `validated`) and `saveImportTemplate` (`integration.configure`-gated,
+  versioned upsert into `import_templates`). Both write an
+  `integration_events` row; `space_audit_events` integration waits for
+  the PR 4 `SECURITY DEFINER` commit RPC (`record_space_audit_event` is
+  not service-role-callable).
+- `web/components/ImportMappingForm.tsx` — interactive mapping: per-field
+  column selects, amount-mode + direction-mode radios, date-format,
+  default currency, a live "N of M sample rows parse" count, and inline
+  "save as template". Desktop two-column, mobile stacked, 16px controls.
+- `/integrations/imports/[id]` pre-fills the mapping from a matched saved
+  template (when similarity ≥ threshold) else from `suggestMapping`, and
+  after `validated` shows ready/review/invalid counts + a per-row status
+  and issue list in the preview.
 
 ## Feature flags
 

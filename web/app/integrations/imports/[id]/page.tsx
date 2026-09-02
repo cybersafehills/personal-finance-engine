@@ -1,21 +1,33 @@
 import { notFound } from "next/navigation";
 import { PageHeader } from "../../../../components/PageHeader";
 import { Badge } from "../../../../components/Badge";
+import { ImportMappingForm } from "../../../../components/ImportMappingForm";
 import { formatDateTime } from "../../../../lib/format";
 import { getActiveWorkspaceId } from "../../../../lib/queries";
 import { isImportStudioEnabled } from "../../../../lib/integrations/gate";
-import { getImportBatch } from "../../../../lib/integrations/queries";
+import {
+  findMatchingImportTemplate,
+  getImportBatch,
+} from "../../../../lib/integrations/queries";
 import type { DataProfile } from "../../../../lib/integrations/profile";
+import {
+  type ImportColumnMapping,
+  suggestMapping,
+  TEMPLATE_AUTO_APPLY_THRESHOLD,
+} from "../../../../lib/integrations/mapping";
+import type {
+  ImportRecord,
+  ImportRecordStatus,
+} from "../../../../lib/integrations/model";
 
 export const dynamic = "force-dynamic";
 
-const FIELD_LABELS: Record<string, string> = {
-  date: "Date",
-  description: "Description",
-  amount: "Amount",
-  direction: "Direction",
-  balance: "Balance",
-  reference: "Reference",
+const RECORD_BADGE: Partial<
+  Record<ImportRecordStatus, "neutral" | "attention" | "positive">
+> = {
+  ready: "positive",
+  needs_review: "neutral",
+  invalid: "attention",
 };
 
 function fmtDate(iso: string | undefined): string {
@@ -25,6 +37,13 @@ function fmtDate(iso: string | undefined): string {
     month: "short",
     year: "numeric",
   });
+}
+
+function issues(record: ImportRecord): { severity: string; message: string }[] {
+  const raw = (record.validation as { issues?: unknown }).issues;
+  return Array.isArray(raw)
+    ? (raw as { severity: string; message: string }[])
+    : [];
 }
 
 export default async function ImportBatchPage({
@@ -43,10 +62,34 @@ export default async function ImportBatchPage({
   const profile = batch.detected as Partial<
     DataProfile & { truncated: boolean; stagedRowCount: number }
   >;
-  const suggested =
-    (batch.mapping.suggested as Record<string, number | null> | undefined) ?? {};
   const headers = profile.headers ?? [];
-  const preview = records.slice(0, 20);
+  const preview = records.slice(0, 25);
+
+  // Resolve the mapping to start from.
+  const persisted = batch.mapping as Partial<ImportColumnMapping>;
+  let initialMapping: ImportColumnMapping;
+  let matchedTemplateName: string | null = null;
+  if (persisted && persisted.columns) {
+    initialMapping = persisted as ImportColumnMapping;
+  } else {
+    const match = await findMatchingImportTemplate(headers);
+    if (
+      match &&
+      match.score >= TEMPLATE_AUTO_APPLY_THRESHOLD &&
+      (match.template.mapping as Partial<ImportColumnMapping>).columns
+    ) {
+      initialMapping = match.template.mapping as ImportColumnMapping;
+      matchedTemplateName = match.template.name;
+    } else {
+      initialMapping = suggestMapping(headers, profile.currencyGuess ?? null);
+    }
+  }
+
+  const showForm = batch.status === "profiled" ||
+    batch.status === "mapped" ||
+    batch.status === "validated";
+  const validated = batch.status === "validated";
+  const counts = batch.rowCounts;
 
   return (
     <div>
@@ -82,23 +125,33 @@ export default async function ImportBatchPage({
             }
           />
           <Stat label="Likely currency" value={profile.currencyGuess ?? "—"} />
-          <Stat
-            label="Probable type"
-            value={
-              profile.probableType === "bank_transactions"
-                ? "Bank transactions"
-                : "Unrecognised"
-            }
-          />
-          <Stat label="Ready to map" value={String(profile.readyRows ?? 0)} />
-          <Stat
-            label="Need attention"
-            value={String(
-              (profile.invalidRows ?? 0) +
-                (profile.repeatedHeaderRows ?? 0) +
-                (profile.blankRows ?? 0),
-            )}
-          />
+          {validated ? (
+            <>
+              <Stat label="Ready" value={String(counts.ready ?? 0)} />
+              <Stat label="To review" value={String(counts.needs_review ?? 0)} />
+              <Stat label="Invalid" value={String(counts.invalid ?? 0)} />
+            </>
+          ) : (
+            <>
+              <Stat
+                label="Probable type"
+                value={
+                  profile.probableType === "bank_transactions"
+                    ? "Bank transactions"
+                    : "Unrecognised"
+                }
+              />
+              <Stat label="Ready to map" value={String(profile.readyRows ?? 0)} />
+              <Stat
+                label="Need attention"
+                value={String(
+                  (profile.invalidRows ?? 0) +
+                    (profile.repeatedHeaderRows ?? 0) +
+                    (profile.blankRows ?? 0),
+                )}
+              />
+            </>
+          )}
         </dl>
         {profile.truncated && (
           <p className="mt-2 text-xs text-text-muted">
@@ -108,43 +161,33 @@ export default async function ImportBatchPage({
         )}
       </section>
 
-      {headers.length > 0 && (
-        <section aria-labelledby="columns" className="mb-6">
-          <h2 id="columns" className="mb-2 text-sm font-semibold text-text-primary">
-            Suggested column mapping
+      {showForm && (
+        <section aria-labelledby="mapping" className="mb-8">
+          <h2 id="mapping" className="mb-3 text-sm font-semibold text-text-primary">
+            {validated ? "Adjust the column mapping" : "Map the columns"}
           </h2>
-          <ul className="flex flex-col gap-1.5">
-            {headers.map((header, index) => {
-              const role = Object.entries(suggested).find(
-                ([, colIndex]) => colIndex === index,
-              )?.[0];
-              return (
-                <li
-                  key={`${header}-${index}`}
-                  className="flex items-center justify-between gap-3 rounded-control border border-border-subtle bg-surface px-3 py-2 text-sm"
-                >
-                  <span className="truncate text-text-primary">
-                    {header || `Column ${index + 1}`}
-                  </span>
-                  <span className="text-text-muted">
-                    {role ? (FIELD_LABELS[role] ?? role) : "Not mapped"}
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
+          <ImportMappingForm
+            batchId={batch.id}
+            headers={headers}
+            sampleRows={records
+              .slice(0, 30)
+              .map((r) => (r.rawCells.cells as string[] | undefined) ?? [])}
+            initialMapping={initialMapping}
+            matchedTemplateName={matchedTemplateName}
+          />
         </section>
       )}
 
       {preview.length > 0 && (
         <section aria-labelledby="preview" className="mb-6">
           <h2 id="preview" className="mb-2 text-sm font-semibold text-text-primary">
-            Preview
+            Preview {validated ? "(after mapping)" : ""}
           </h2>
           <div className="overflow-x-auto rounded-card border border-border-subtle">
             <table className="min-w-full text-left text-xs">
               <thead className="bg-background text-text-muted">
                 <tr>
+                  {validated && <th className="px-3 py-2 font-medium">Status</th>}
                   {headers.map((h, i) => (
                     <th key={i} className="whitespace-nowrap px-3 py-2 font-medium">
                       {h || `Col ${i + 1}`}
@@ -156,8 +199,23 @@ export default async function ImportBatchPage({
                 {preview.map((record) => {
                   const cells =
                     (record.rawCells.cells as string[] | undefined) ?? [];
+                  const rowIssues = issues(record);
                   return (
-                    <tr key={record.id} className="border-t border-border-subtle">
+                    <tr key={record.id} className="border-t border-border-subtle align-top">
+                      {validated && (
+                        <td className="px-3 py-1.5">
+                          <Badge variant={RECORD_BADGE[record.status] ?? "neutral"}>
+                            {record.status.replace("_", " ")}
+                          </Badge>
+                          {rowIssues.length > 0 && (
+                            <ul className="mt-1 text-[11px] text-text-muted">
+                              {rowIssues.map((issue, i) => (
+                                <li key={i}>{issue.message}</li>
+                              ))}
+                            </ul>
+                          )}
+                        </td>
+                      )}
                       {headers.map((_, i) => (
                         <td key={i} className="whitespace-nowrap px-3 py-1.5 text-text-secondary">
                           {cells[i] ?? ""}
@@ -175,13 +233,14 @@ export default async function ImportBatchPage({
       <div className="rounded-card border border-border-subtle bg-surface p-4">
         <div className="mb-1 flex items-center gap-2">
           <span className="text-sm font-medium text-text-primary">
-            Map columns and import
+            Review duplicates and import
           </span>
           <Badge>Coming soon</Badge>
         </div>
         <p className="text-sm text-text-muted">
-          Column mapping, validation, duplicate review, and commit arrive in the
-          next release. Your uploaded file and detected structure are saved.
+          {validated
+            ? "Duplicate detection, the staging inbox, and commit / rollback arrive in the next release. Your mapping and validation results are saved."
+            : "Map the columns above first. Nothing enters your ledger until you review it."}
         </p>
       </div>
     </div>

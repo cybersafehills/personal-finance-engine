@@ -2,6 +2,7 @@ import "server-only";
 
 import { supabaseSession } from "../supabase-session-server";
 import { getActiveWorkspaceId } from "../queries";
+import { headerSignature, signatureSimilarity } from "./mapping";
 import type {
   ExportJob,
   ExportTemplate,
@@ -185,6 +186,26 @@ export async function getImportBatch(
     batch: toBatch(batchRow),
     records: (recordRows ?? []).map(toRecord),
   };
+}
+
+/**
+ * The saved template whose header signature best matches `headers`, with
+ * its similarity score (0..1). Callers decide whether the score clears
+ * TEMPLATE_AUTO_APPLY_THRESHOLD before pre-filling a mapping.
+ */
+export async function findMatchingImportTemplate(
+  headers: string[],
+): Promise<{ template: ImportTemplate; score: number } | null> {
+  const templates = await listImportTemplates();
+  if (templates.length === 0) return null;
+
+  const target = headerSignature(headers);
+  let best: { template: ImportTemplate; score: number } | null = null;
+  for (const template of templates) {
+    const score = signatureSimilarity(target, template.headerSignature);
+    if (!best || score > best.score) best = { template, score };
+  }
+  return best && best.score > 0 ? best : null;
 }
 
 export async function listImportTemplates(): Promise<ImportTemplate[]> {
