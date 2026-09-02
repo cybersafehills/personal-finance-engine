@@ -8,17 +8,24 @@ import { isImportStudioEnabled } from "../../../lib/integrations/gate";
 import { parseCsv } from "../../../lib/csv";
 import { parseXlsx } from "../../../lib/xlsx-read";
 import { profileTabularData } from "../../../lib/integrations/profile";
+import { getMatchCandidateTransactions } from "../../../lib/integrations/queries";
 import {
   headerSignature,
   type ImportColumnMapping,
+  type NormalizedImportRow,
   normalizeImportRow,
 } from "../../../lib/integrations/mapping";
+import {
+  isReviewWorthy,
+  matchNormalizedRow,
+} from "../../../lib/integrations/matching";
 import {
   defaultValidationContext,
   tallyValidation,
   validateNormalizedRow,
   type RowValidation,
 } from "../../../lib/integrations/validation";
+import type { ImportRecordStatus } from "../../../lib/integrations/model";
 
 const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
 const MAX_RECORDS = 5000; // staging rows persisted per batch in this phase
@@ -283,12 +290,27 @@ export async function applyImportMapping(
 
   const ctx = defaultValidationContext();
   const statuses: RowValidation["status"][] = [];
-  const updates = records.map((record) => {
+  type RowUpdate = {
+    id: string;
+    import_batch_id: string;
+    workspace_id: string;
+    row_index: number;
+    raw_cells: unknown;
+    normalized: NormalizedImportRow | Record<string, never>;
+    status: RowValidation["status"];
+    validation: { issues: unknown[] };
+    match: Record<string, unknown>;
+  };
+  // Parallel to `updates`, index-aligned: the parsed row or null if it
+  // failed to normalize.
+  const normalizedByIndex: (NormalizedImportRow | null)[] = [];
+  const updates: RowUpdate[] = records.map((record) => {
     const cells =
       ((record.raw_cells as { cells?: string[] })?.cells as string[]) ?? [];
     const normalized = normalizeImportRow(cells, mapping);
     if (!normalized.ok) {
       statuses.push("invalid");
+      normalizedByIndex.push(null);
       return {
         id: record.id,
         import_batch_id: batchId,
@@ -306,10 +328,12 @@ export async function applyImportMapping(
             },
           ],
         },
+        match: {},
       };
     }
     const result = validateNormalizedRow(normalized.row, ctx);
     statuses.push(result.status);
+    normalizedByIndex.push(normalized.row);
     return {
       id: record.id,
       import_batch_id: batchId,
@@ -319,8 +343,44 @@ export async function applyImportMapping(
       normalized: normalized.row,
       status: result.status,
       validation: { issues: result.issues },
+      match: {},
     };
   });
+
+  // Enrich with duplicate signals against existing ledger transactions in
+  // the file's date window. A likely/exact match on an otherwise-ready row
+  // pushes it to needs_review so the user sees it before commit.
+  const parsedRows = normalizedByIndex.filter(
+    (n): n is NormalizedImportRow => n !== null,
+  );
+  if (parsedRows.length > 0) {
+    const times = parsedRows.map((n) => Date.parse(n.occurred_at)).sort();
+    const DAY = 24 * 60 * 60 * 1000;
+    const fromIso = new Date(times[0] - DAY).toISOString();
+    const toIso = new Date(times[times.length - 1] + DAY).toISOString();
+    const candidates = await getMatchCandidateTransactions(fromIso, toIso);
+    if (candidates.length > 0) {
+      for (let i = 0; i < updates.length; i += 1) {
+        const u = updates[i];
+        const parsed = normalizedByIndex[i];
+        if (!parsed) continue;
+        const match = matchNormalizedRow(parsed, candidates);
+        u.match = { ...match };
+        if (isReviewWorthy(match.confidence) && u.status === "ready") {
+          u.status = "needs_review";
+          statuses[i] = "needs_review";
+          u.validation.issues = [
+            ...u.validation.issues,
+            {
+              severity: "warning",
+              code: "possible_duplicate",
+              message: "This looks like a transaction already in your ledger.",
+            },
+          ];
+        }
+      }
+    }
+  }
 
   for (let i = 0; i < updates.length; i += RECORD_CHUNK) {
     const { error } = await admin
@@ -463,4 +523,154 @@ export async function saveImportTemplate(
 
   revalidatePath(`/integrations/imports/${batchId}`);
   return { ok: true, templateId };
+}
+
+export type SimpleResult = { ok: true } | { ok: false; error: string };
+
+/** Set which financial source (account) a batch's rows will be imported into. */
+export async function setImportBatchTarget(
+  batchId: string,
+  financialSourceId: string,
+): Promise<SimpleResult> {
+  const access = await requireImportAccess("integration.import");
+  if (!access.ok) return access;
+  const { workspaceId } = access;
+
+  const supabase = await supabaseSession();
+  // The caller must own the source and it must resolve to an account.
+  const { data: owns } = await supabase.rpc("owns_financial_source", {
+    p_source_id: financialSourceId,
+  });
+  if (owns !== true) {
+    return { ok: false, error: "That isn’t one of your accounts." };
+  }
+
+  const admin = supabaseServer();
+  const { data: account } = await admin
+    .from("accounts")
+    .select("id")
+    .eq("financial_source_id", financialSourceId)
+    .eq("workspace_id", workspaceId)
+    .limit(1)
+    .maybeSingle();
+  if (!account) {
+    return { ok: false, error: "That account isn’t linked in this Space." };
+  }
+
+  const { error } = await admin
+    .from("import_batches")
+    .update({ financial_source_id: financialSourceId })
+    .eq("id", batchId)
+    .eq("workspace_id", workspaceId)
+    .not("status", "in", "(imported,rolled_back)");
+  if (error) {
+    console.error("setImportBatchTarget failed", error.message);
+    return { ok: false, error: "Could not set the target account." };
+  }
+  revalidatePath(`/integrations/imports/${batchId}`);
+  return { ok: true };
+}
+
+const BULK_STATUSES: ImportRecordStatus[] = ["approved", "ignored", "ready"];
+
+/** Bulk approve / ignore / re-open staged rows before commit. */
+export async function setImportRecordsStatus(
+  batchId: string,
+  recordIds: string[],
+  status: ImportRecordStatus,
+): Promise<SimpleResult> {
+  const access = await requireImportAccess("integration.import");
+  if (!access.ok) return access;
+  const { workspaceId } = access;
+  if (!BULK_STATUSES.includes(status)) {
+    return { ok: false, error: "That status can’t be set here." };
+  }
+  if (recordIds.length === 0) return { ok: true };
+
+  const admin = supabaseServer();
+  const { error } = await admin
+    .from("import_records")
+    .update({ status })
+    .eq("import_batch_id", batchId)
+    .eq("workspace_id", workspaceId)
+    .in("id", recordIds.slice(0, 5000))
+    .not("status", "in", "(imported)");
+  if (error) {
+    console.error("setImportRecordsStatus failed", error.message);
+    return { ok: false, error: "Could not update those rows." };
+  }
+  revalidatePath(`/integrations/imports/${batchId}`);
+  return { ok: true };
+}
+
+export type CommitResult =
+  | {
+    ok: true;
+    created: number;
+    flaggedPossibleDuplicate: number;
+    skipped: number;
+  }
+  | { ok: false; error: string };
+
+/** Commit the ready/approved rows via the SECURITY DEFINER RPC. */
+export async function commitImportBatch(batchId: string): Promise<CommitResult> {
+  const access = await requireImportAccess("integration.import");
+  if (!access.ok) return access;
+
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase.rpc("commit_import_batch", {
+    p_batch_id: batchId,
+  });
+  if (error) {
+    console.error("commitImportBatch failed", error.message);
+    return {
+      ok: false,
+      error: error.message.includes("permission")
+        ? "You don’t have permission to approve imports in this Space."
+        : error.message.includes("account")
+        ? "Choose which account this import belongs to first."
+        : "The import could not be committed.",
+    };
+  }
+  const result = (data ?? {}) as Record<string, number>;
+  revalidatePath(`/integrations/imports/${batchId}`);
+  revalidatePath("/integrations/imports");
+  revalidatePath("/transactions");
+  return {
+    ok: true,
+    created: result.created ?? 0,
+    flaggedPossibleDuplicate: result.flagged_possible_duplicate ?? 0,
+    skipped: result.skipped ?? 0,
+  };
+}
+
+export type RollbackResult =
+  | { ok: true; removed: number; retained: number; complete: boolean }
+  | { ok: false; error: string };
+
+/** Undo a committed import via the SECURITY DEFINER RPC. */
+export async function rollbackImportBatch(
+  batchId: string,
+): Promise<RollbackResult> {
+  const access = await requireImportAccess("integration.import");
+  if (!access.ok) return access;
+
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase.rpc("rollback_import_batch", {
+    p_batch_id: batchId,
+  });
+  if (error) {
+    console.error("rollbackImportBatch failed", error.message);
+    return { ok: false, error: "The import could not be undone." };
+  }
+  const result = (data ?? {}) as Record<string, unknown>;
+  revalidatePath(`/integrations/imports/${batchId}`);
+  revalidatePath("/integrations/imports");
+  revalidatePath("/transactions");
+  return {
+    ok: true,
+    removed: Number(result.removed ?? 0),
+    retained: Number(result.retained ?? 0),
+    complete: result.complete === true,
+  };
 }

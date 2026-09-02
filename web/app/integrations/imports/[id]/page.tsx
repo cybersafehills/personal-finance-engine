@@ -2,12 +2,17 @@ import { notFound } from "next/navigation";
 import { PageHeader } from "../../../../components/PageHeader";
 import { Badge } from "../../../../components/Badge";
 import { ImportMappingForm } from "../../../../components/ImportMappingForm";
+import {
+  ImportStagingReview,
+  type StagingRecord,
+} from "../../../../components/ImportStagingReview";
 import { formatDateTime } from "../../../../lib/format";
 import { getActiveWorkspaceId } from "../../../../lib/queries";
 import { isImportStudioEnabled } from "../../../../lib/integrations/gate";
 import {
   findMatchingImportTemplate,
   getImportBatch,
+  listImportTargetSources,
 } from "../../../../lib/integrations/queries";
 import type { DataProfile } from "../../../../lib/integrations/profile";
 import {
@@ -15,20 +20,9 @@ import {
   suggestMapping,
   TEMPLATE_AUTO_APPLY_THRESHOLD,
 } from "../../../../lib/integrations/mapping";
-import type {
-  ImportRecord,
-  ImportRecordStatus,
-} from "../../../../lib/integrations/model";
+import type { ImportRecord } from "../../../../lib/integrations/model";
 
 export const dynamic = "force-dynamic";
-
-const RECORD_BADGE: Partial<
-  Record<ImportRecordStatus, "neutral" | "attention" | "positive">
-> = {
-  ready: "positive",
-  needs_review: "neutral",
-  invalid: "attention",
-};
 
 function fmtDate(iso: string | undefined): string {
   if (!iso) return "—";
@@ -39,11 +33,19 @@ function fmtDate(iso: string | undefined): string {
   });
 }
 
-function issues(record: ImportRecord): { severity: string; message: string }[] {
-  const raw = (record.validation as { issues?: unknown }).issues;
-  return Array.isArray(raw)
-    ? (raw as { severity: string; message: string }[])
-    : [];
+function toStaging(record: ImportRecord): StagingRecord {
+  const rawIssues = (record.validation as { issues?: unknown }).issues;
+  return {
+    id: record.id,
+    rowIndex: record.rowIndex,
+    status: record.status,
+    cells: (record.rawCells.cells as string[] | undefined) ?? [],
+    issues: Array.isArray(rawIssues)
+      ? (rawIssues as { severity: string; message: string }[])
+      : [],
+    matchConfidence:
+      (record.match as { confidence?: string } | undefined)?.confidence ?? null,
+  };
 }
 
 export default async function ImportBatchPage({
@@ -63,9 +65,15 @@ export default async function ImportBatchPage({
     DataProfile & { truncated: boolean; stagedRowCount: number }
   >;
   const headers = profile.headers ?? [];
-  const preview = records.slice(0, 25);
+  const counts = batch.rowCounts;
 
-  // Resolve the mapping to start from.
+  const validated = batch.status === "validated";
+  const committed = batch.status === "imported" || batch.status === "rolled_back";
+  const showMappingForm = batch.status === "profiled" ||
+    batch.status === "mapped" ||
+    validated;
+
+  // Starting mapping: persisted -> matched template -> header guess.
   const persisted = batch.mapping as Partial<ImportColumnMapping>;
   let initialMapping: ImportColumnMapping;
   let matchedTemplateName: string | null = null;
@@ -85,11 +93,9 @@ export default async function ImportBatchPage({
     }
   }
 
-  const showForm = batch.status === "profiled" ||
-    batch.status === "mapped" ||
-    batch.status === "validated";
-  const validated = batch.status === "validated";
-  const counts = batch.rowCounts;
+  const targetSources = validated || committed
+    ? await listImportTargetSources()
+    : [];
 
   return (
     <div>
@@ -98,7 +104,7 @@ export default async function ImportBatchPage({
         subtitle={`${batch.sourceKind.toUpperCase()} · uploaded ${formatDateTime(batch.createdAt)}`}
         backHref="/integrations/imports"
         backLabel="Imports"
-        action={<Badge>{batch.status}</Badge>}
+        action={<Badge>{batch.status.replace("_", " ")}</Badge>}
       />
 
       {batch.status === "failed" && (
@@ -112,7 +118,7 @@ export default async function ImportBatchPage({
 
       <section aria-labelledby="detection" className="mb-6">
         <h2 id="detection" className="mb-2 text-sm font-semibold text-text-primary">
-          What we detected
+          {committed ? "Summary" : "What we detected"}
         </h2>
         <dl className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           <Stat label="Rows" value={String(profile.rowCount ?? records.length)} />
@@ -125,11 +131,14 @@ export default async function ImportBatchPage({
             }
           />
           <Stat label="Likely currency" value={profile.currencyGuess ?? "—"} />
-          {validated ? (
+          {validated || committed ? (
             <>
-              <Stat label="Ready" value={String(counts.ready ?? 0)} />
+              <Stat label="Imported" value={String(counts.imported ?? 0)} />
+              <Stat
+                label="Possible duplicates"
+                value={String(counts.possible_duplicate ?? 0)}
+              />
               <Stat label="To review" value={String(counts.needs_review ?? 0)} />
-              <Stat label="Invalid" value={String(counts.invalid ?? 0)} />
             </>
           ) : (
             <>
@@ -161,88 +170,49 @@ export default async function ImportBatchPage({
         )}
       </section>
 
-      {showForm && (
+      {showMappingForm && (
         <section aria-labelledby="mapping" className="mb-8">
-          <h2 id="mapping" className="mb-3 text-sm font-semibold text-text-primary">
-            {validated ? "Adjust the column mapping" : "Map the columns"}
+          <details open={!validated}>
+            <summary className="mb-3 cursor-pointer text-sm font-semibold text-text-primary">
+              {validated ? "Adjust the column mapping" : "Map the columns"}
+            </summary>
+            <ImportMappingForm
+              batchId={batch.id}
+              headers={headers}
+              sampleRows={records
+                .slice(0, 30)
+                .map((r) => (r.rawCells.cells as string[] | undefined) ?? [])}
+              initialMapping={initialMapping}
+              matchedTemplateName={matchedTemplateName}
+            />
+          </details>
+        </section>
+      )}
+
+      {(validated || committed) && (
+        <section aria-labelledby="staging" className="mb-6">
+          <h2 id="staging" className="mb-3 text-sm font-semibold text-text-primary">
+            {committed ? "Imported rows" : "Review and import"}
           </h2>
-          <ImportMappingForm
+          <ImportStagingReview
             batchId={batch.id}
+            batchStatus={batch.status}
             headers={headers}
-            sampleRows={records
-              .slice(0, 30)
-              .map((r) => (r.rawCells.cells as string[] | undefined) ?? [])}
-            initialMapping={initialMapping}
-            matchedTemplateName={matchedTemplateName}
+            records={records.map(toStaging)}
+            targetSources={targetSources}
+            currentSourceId={batch.financialSourceId}
           />
         </section>
       )}
 
-      {preview.length > 0 && (
-        <section aria-labelledby="preview" className="mb-6">
-          <h2 id="preview" className="mb-2 text-sm font-semibold text-text-primary">
-            Preview {validated ? "(after mapping)" : ""}
-          </h2>
-          <div className="overflow-x-auto rounded-card border border-border-subtle">
-            <table className="min-w-full text-left text-xs">
-              <thead className="bg-background text-text-muted">
-                <tr>
-                  {validated && <th className="px-3 py-2 font-medium">Status</th>}
-                  {headers.map((h, i) => (
-                    <th key={i} className="whitespace-nowrap px-3 py-2 font-medium">
-                      {h || `Col ${i + 1}`}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {preview.map((record) => {
-                  const cells =
-                    (record.rawCells.cells as string[] | undefined) ?? [];
-                  const rowIssues = issues(record);
-                  return (
-                    <tr key={record.id} className="border-t border-border-subtle align-top">
-                      {validated && (
-                        <td className="px-3 py-1.5">
-                          <Badge variant={RECORD_BADGE[record.status] ?? "neutral"}>
-                            {record.status.replace("_", " ")}
-                          </Badge>
-                          {rowIssues.length > 0 && (
-                            <ul className="mt-1 text-[11px] text-text-muted">
-                              {rowIssues.map((issue, i) => (
-                                <li key={i}>{issue.message}</li>
-                              ))}
-                            </ul>
-                          )}
-                        </td>
-                      )}
-                      {headers.map((_, i) => (
-                        <td key={i} className="whitespace-nowrap px-3 py-1.5 text-text-secondary">
-                          {cells[i] ?? ""}
-                        </td>
-                      ))}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      )}
-
-      <div className="rounded-card border border-border-subtle bg-surface p-4">
-        <div className="mb-1 flex items-center gap-2">
-          <span className="text-sm font-medium text-text-primary">
-            Review duplicates and import
-          </span>
-          <Badge>Coming soon</Badge>
+      {!validated && !committed && (
+        <div className="rounded-card border border-border-subtle bg-surface p-4">
+          <p className="text-sm text-text-muted">
+            Map the columns above, then apply the mapping to review and import.
+            Nothing enters your ledger until you do.
+          </p>
         </div>
-        <p className="text-sm text-text-muted">
-          {validated
-            ? "Duplicate detection, the staging inbox, and commit / rollback arrive in the next release. Your mapping and validation results are saved."
-            : "Map the columns above first. Nothing enters your ledger until you review it."}
-        </p>
-      </div>
+      )}
     </div>
   );
 }

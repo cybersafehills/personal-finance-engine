@@ -17,6 +17,7 @@ const KIND_LABELS: Record<FinancialInboxKind, string> = {
   duplicate_candidate: "Duplicate",
   needs_attribution: "Attribution",
   category_review: "Category",
+  import_review: "Import",
   rule_suggestion: "Rule suggestion",
   budget_alert: "Budget",
 };

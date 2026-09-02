@@ -868,11 +868,14 @@ fi
 # canonical settings cutover adds a readiness RPC and an installation-ID
 # pairing entry point. Profile onboarding adds three narrow authenticated
 # RPCs for its transactional stage writes. = 89.
+# Integrations Phase 1 PR4 (20261029000000) adds commit_import_batch and
+# rollback_import_batch (both integration.import_approve-gated SECURITY
+# DEFINER RPCs). = 91.
 AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname = 'authenticated' where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "89" ]; then
-  pass "authenticated holds EXECUTE on exactly the 89 functions expected, no more"
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "91" ]; then
+  pass "authenticated holds EXECUTE on exactly the 91 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 89 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 91 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -5093,6 +5096,56 @@ if [ "$INT_BUCKET" = "1" ]; then
   pass "Integrations: the private integration-imports storage bucket is registered (public = false)"
 else
   fail "Integrations: integration-imports bucket missing or public (got $INT_BUCKET)"
+fi
+
+# ===========================================================================
+# Integrations Phase 1 (20261029000000): commit_import_batch /
+# rollback_import_batch. Uses WORKSPACE_A (USER_A personal owner) and
+# USER_A's U_SRC -> U_ACCT from the Phase U PR7 fixture.
+# ===========================================================================
+echo "=== Integrations: commit / rollback import batch ==="
+
+INT_CB="$(psql -d pfe_rls -t -A -c "insert into public.import_batches (workspace_id, financial_source_id, created_by, source_kind, original_filename, status) values ('$WORKSPACE_A', '$U_SRC', '$USER_A', 'csv', 'commit.csv', 'validated') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "insert into public.import_records (import_batch_id, workspace_id, row_index, status, normalized) values ('$INT_CB', '$WORKSPACE_A', 0, 'ready', '{\"occurred_at\":\"2026-08-09T09:00:00Z\",\"amount_minor\":1500,\"direction\":\"out\",\"merchant\":\"UNIQUE MERCHANT\"}'::jsonb), ('$INT_CB', '$WORKSPACE_A', 1, 'ready', '{\"occurred_at\":\"2026-08-10T09:00:00Z\",\"amount_minor\":4200,\"direction\":\"out\",\"merchant\":\"DUP MERCHANT\"}'::jsonb), ('$INT_CB', '$WORKSPACE_A', 2, 'invalid', '{}'::jsonb);" >/dev/null
+
+INT_DUP_FP="$(psql -d pfe_rls -t -A -c "set role service_role; select public.compute_transaction_fingerprint('mtn_momo','',4200,'RWF','out','DUP MERCHANT','2026-08-10T09:00:00Z'::timestamptz);" | tail -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "insert into public.transactions (source, financial_source_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version, counterparty_name, dedupe_fingerprint) values ('manual', '$U_SRC', '$U_ACCT', '$WORKSPACE_A', 'other', 'out', 'success', 4200, 0, '2026-08-10T09:00:00Z', 'test', 'DUP MERCHANT', '$INT_DUP_FP');" >/dev/null
+
+INT_COMMIT="$(as_user "$USER_A" "select (j->>'created')||','||(j->>'flagged_possible_duplicate')||','||(j->>'skipped') from (select public.commit_import_batch('$INT_CB') as j) s;")"
+INT_TXN_COUNT="$(psql -d pfe_rls -t -A -c "select count(*) from public.transactions where import_batch_id = '$INT_CB' and source = 'import';")"
+INT_DUP_STATE="$(psql -d pfe_rls -t -A -c "select count(*) from public.transactions where import_batch_id = '$INT_CB' and dedupe_state = 'possible_duplicate';")"
+INT_BATCH_STATUS="$(psql -d pfe_rls -t -A -c "select status from public.import_batches where id = '$INT_CB';")"
+INT_COMMIT_AUDIT="$(psql -d pfe_rls -t -A -c "select count(*) from public.space_audit_events where workspace_id = '$WORKSPACE_A' and event_type = 'import.committed' and resource_id = '$INT_CB';")"
+if [ "$INT_COMMIT" = "2,1,0" ] && [ "$INT_TXN_COUNT" = "2" ] && [ "$INT_DUP_STATE" = "1" ] && [ "$INT_BATCH_STATUS" = "imported" ] && [ "$INT_COMMIT_AUDIT" = "1" ]; then
+  pass "Integrations: commit_import_batch creates one transaction per ready row, flags the Space fingerprint match, sets the batch imported, audits import.committed"
+else
+  fail "Integrations: commit wrong (result=$INT_COMMIT txns=$INT_TXN_COUNT dup=$INT_DUP_STATE status=$INT_BATCH_STATUS audit=$INT_COMMIT_AUDIT)"
+fi
+
+INT_RECOMMIT="$(as_user "$USER_A" "select (j->>'created') from (select public.commit_import_batch('$INT_CB') as j) s;")"
+INT_TXN_COUNT2="$(psql -d pfe_rls -t -A -c "select count(*) from public.transactions where import_batch_id = '$INT_CB';")"
+if [ "$INT_RECOMMIT" = "0" ] && [ "$INT_TXN_COUNT2" = "2" ]; then
+  pass "Integrations: re-committing the same batch is a no-op (payload_hash idempotency)"
+else
+  fail "Integrations: re-commit not idempotent (created=$INT_RECOMMIT txns=$INT_TXN_COUNT2)"
+fi
+
+if as_user "$USER_B" "select public.commit_import_batch('$INT_CB');" >/dev/null 2>$ARTIFACT_DIR/pfe_int_commit.log; then
+  fail "Integrations: a non-member committed an import batch"
+else
+  pass "Integrations: commit_import_batch refuses a caller without integration.import_approve"
+fi
+rm -f $ARTIFACT_DIR/pfe_int_commit.log
+
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "update public.transactions set category = 'Coffee', category_source = 'manual' where import_batch_id = '$INT_CB' and dedupe_state = 'unique';" >/dev/null
+INT_ROLLBACK="$(as_user "$USER_A" "select (j->>'removed')||','||(j->>'retained')||','||(j->>'complete') from (select public.rollback_import_batch('$INT_CB') as j) s;")"
+INT_LEFT="$(psql -d pfe_rls -t -A -c "select count(*) from public.transactions where import_batch_id = '$INT_CB';")"
+INT_RB_STATUS="$(psql -d pfe_rls -t -A -c "select status from public.import_batches where id = '$INT_CB';")"
+INT_RB_AUDIT="$(psql -d pfe_rls -t -A -c "select count(*) from public.space_audit_events where workspace_id = '$WORKSPACE_A' and event_type = 'import.rolled_back' and resource_id = '$INT_CB';")"
+if [ "$INT_ROLLBACK" = "1,1,false" ] && [ "$INT_LEFT" = "1" ] && [ "$INT_RB_STATUS" = "imported" ] && [ "$INT_RB_AUDIT" = "1" ]; then
+  pass "Integrations: rollback_import_batch removes untouched rows, retains the hand-edited one, keeps the batch imported, audits import.rolled_back"
+else
+  fail "Integrations: rollback wrong (result=$INT_ROLLBACK left=$INT_LEFT status=$INT_RB_STATUS audit=$INT_RB_AUDIT)"
 fi
 
 echo ""

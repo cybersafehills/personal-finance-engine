@@ -4,6 +4,7 @@ export const FINANCIAL_INBOX_KINDS = [
   "duplicate_candidate",
   "needs_attribution",
   "category_review",
+  "import_review",
   "rule_suggestion",
   "budget_alert",
 ] as const;

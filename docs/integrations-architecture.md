@@ -35,7 +35,7 @@ account menu (desktop), and a link in Settings.
 | --- | --- | --- |
 | `/integrations` | Dashboard: connected summary, "move data" entry points, available-later categories | **live (PR 0)** |
 | `/integrations/connections` | Connected devices / Shortcuts / providers (canonical connector model) — moved here from `/settings/connections`, which now redirects | **live (PR 0)** |
-| `/integrations/imports` | Import Studio. **PR 2-3 live**: upload -> detect -> profile -> map -> validate (interactive mapping + saved templates + per-row validation + preview). Duplicate review / commit / rollback: PR 4. |
+| `/integrations/imports` | Import Studio. **PR 2-4 live**: upload -> detect -> profile -> map -> validate -> review -> commit -> undo (interactive mapping, saved templates, per-row validation, duplicate signals, staging review with bulk actions, `commit_import_batch` / `rollback_import_batch`). |
 | `/integrations/exports` | Export Center (filters, Excel/CSV, history, templates) | PR 5 |
 | `/integrations/activity` | Consolidated activity / health feed | **live (PR 1)**, enriched PR 6 |
 | `/integrations/sync` | Sync & Automation (scheduled deliveries) — opt-in flag, default off | PR 6 |
@@ -121,6 +121,35 @@ types + status vocabularies).
   template (when similarity ≥ threshold) else from `suggestMapping`, and
   after `validated` shows ready/review/invalid counts + a per-row status
   and issue list in the preview.
+
+## Import Studio — staging review, commit, rollback (PR 4, migration 20261029000000)
+
+- `commit_import_batch(p_batch_id)` / `rollback_import_batch(p_batch_id)` —
+  `SECURITY DEFINER`, `integration.import_approve`-gated, caller must own
+  the batch's financial source. Commit mirrors
+  `import_statement_transactions`: deterministic `import|batch|row`
+  `payload_hash` makes a repeat run a no-op, a Space fingerprint match
+  lands `dedupe_state='possible_duplicate'` for `/transactions/review`
+  (never auto-merged). Rollback removes only the batch's transactions
+  that have not been merged / hand-edited / referenced elsewhere (FK
+  violation caught per row); retained rows are reported and the batch
+  stays `imported`. Both call `record_space_audit_event`
+  (`import.committed` / `import.rolled_back`) — now reachable because
+  these are SECURITY DEFINER RPCs.
+- `web/lib/integrations/matching.ts` — **pure, unit-tested** explainable
+  confidence model (`exact | likely | possible | distinct`) over external
+  id, reference, amount+currency+direction+time window, and counterparty
+  overlap. `applyImportMapping` enriches each staged row's `match` and
+  bumps a `ready` row with a likely/exact match to `needs_review`.
+- Actions: `setImportBatchTarget`, `setImportRecordsStatus` (bulk
+  approve / ignore / re-open), `commitImportBatch`, `rollbackImportBatch`.
+- `web/components/ImportStagingReview.tsx` — status-filter chips,
+  per-row checkboxes + bulk bar, target-account selector, Commit / Undo /
+  Re-import, and a "download invalid rows" CSV
+  (`/api/integrations/imports/[id]/errors`, CSV-injection guarded).
+- Financial Inbox: an `import_review` item for a batch sitting in
+  `validated` with rows still to decide (`web/lib/financial-inbox.ts`,
+  gated on `isIntegrationsEnabled`).
 
 ## Feature flags
 

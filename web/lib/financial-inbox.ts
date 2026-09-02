@@ -11,6 +11,8 @@ import {
 } from "./queries";
 import { isPaymentIntentSurfaceEnabled } from "./pay/gate";
 import { getReconciliationQueue } from "./pay/intents";
+import { isIntegrationsEnabled } from "./integrations/gate";
+import { listImportBatchesNeedingReview } from "./integrations/queries";
 import {
   buildFinancialInbox,
   type FinancialInbox,
@@ -31,6 +33,7 @@ function amountLabel(amountMinor: number, currency = "RWF"): string {
 export async function getFinancialInbox(): Promise<FinancialInbox> {
   const workspaceId = await getActiveWorkspaceId();
   const paymentEnabled = isPaymentIntentSurfaceEnabled(workspaceId);
+  const integrationsEnabled = isIntegrationsEnabled(workspaceId);
 
   const [
     categoryReview,
@@ -40,6 +43,7 @@ export async function getFinancialInbox(): Promise<FinancialInbox> {
     learnedSuggestions,
     budgetSummary,
     reconciliation,
+    importReviewBatches,
   ] = await Promise.all([
     getReviewQueueTransactions(),
     getNeedsAttributionTransactions(),
@@ -50,6 +54,9 @@ export async function getFinancialInbox(): Promise<FinancialInbox> {
     paymentEnabled
       ? getReconciliationQueue()
       : Promise.resolve({ candidates: [], requiresReconciliation: [] }),
+    integrationsEnabled
+      ? listImportBatchesNeedingReview()
+      : Promise.resolve([]),
   ]);
 
   const items: FinancialInboxItem[] = [];
@@ -174,6 +181,23 @@ export async function getFinancialInbox(): Promise<FinancialInbox> {
       href: "/categories/rules/suggestions",
       actionableSince: suggestion.lastOccurredAt,
       affectedCount: suggestion.occurrenceCount,
+    });
+  }
+
+  for (const batch of importReviewBatches) {
+    const needsReview = Number(batch.rowCounts.needs_review ?? 0);
+    const ready = Number(batch.rowCounts.ready ?? 0);
+    items.push({
+      id: `import:${batch.id}`,
+      kind: "import_review",
+      priority: needsReview > 0 ? "high" : "normal",
+      title: `Finish importing ${batch.originalFilename}`,
+      description: needsReview > 0
+        ? `${needsReview} rows need review and ${ready} are ready to import.`
+        : `${ready} rows are mapped and ready to import.`,
+      href: `/integrations/imports/${batch.id}`,
+      actionableSince: batch.createdAt,
+      affectedCount: needsReview + ready,
     });
   }
 
