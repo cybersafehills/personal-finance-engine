@@ -9,6 +9,8 @@ import {
   getIngestionConnections,
 } from "../../lib/queries";
 import { isIntegrationsEnabled } from "../../lib/integrations/gate";
+import { getIntegrationActivity } from "../../lib/integrations/activity";
+import { formatDateTime } from "../../lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -100,7 +102,10 @@ export default async function IntegrationsPage() {
     );
   }
 
-  const connected = await getConnectedSummary();
+  const [connected, activity] = await Promise.all([
+    getConnectedSummary(),
+    getIntegrationActivity(5),
+  ]);
 
   return (
     <div>
@@ -169,6 +174,65 @@ export default async function IntegrationsPage() {
           </ul>
         )}
       </section>
+
+      {activity.total > 0 && (
+        <section aria-labelledby="integrations-activity" className="mb-8">
+          <div className="mb-2 flex items-center justify-between">
+            <h2
+              id="integrations-activity"
+              className="text-sm font-semibold text-text-primary"
+            >
+              Recent activity
+            </h2>
+            <Link
+              href="/integrations/activity"
+              className="text-sm font-medium text-accent hover:underline"
+            >
+              View all
+            </Link>
+          </div>
+          <ul className="flex flex-col gap-2">
+            {activity.items.map((item) => {
+              const row = (
+                <>
+                  <span className="min-w-0">
+                    <span className="block text-sm text-text-primary">
+                      {item.summary}
+                    </span>
+                    <span className="block text-xs text-text-muted">
+                      {formatDateTime(item.at)}
+                    </span>
+                  </span>
+                  {item.severity !== "info" && (
+                    <Badge
+                      variant={item.severity === "error" ? "attention" : "neutral"}
+                    >
+                      {item.severity === "error" ? "Error" : "Warning"}
+                    </Badge>
+                  )}
+                </>
+              );
+              return (
+                <li
+                  key={item.id}
+                  className="flex items-center justify-between gap-3 rounded-card border border-border-subtle bg-surface p-4"
+                >
+                  {item.href ? (
+                    <Link
+                      href={item.href}
+                      className="flex flex-1 items-center justify-between gap-3"
+                    >
+                      {row}
+                    </Link>
+                  ) : (
+                    row
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
 
       <section aria-labelledby="integrations-data" className="mb-8">
         <h2

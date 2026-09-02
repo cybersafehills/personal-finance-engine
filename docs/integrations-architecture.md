@@ -37,8 +37,35 @@ account menu (desktop), and a link in Settings.
 | `/integrations/connections` | Connected devices / Shortcuts / providers (canonical connector model) — moved here from `/settings/connections`, which now redirects | **live (PR 0)** |
 | `/integrations/imports` | Import Studio (upload -> detect -> map -> validate -> preview -> resolve -> import -> reconcile) | PR 2-4 |
 | `/integrations/exports` | Export Center (filters, Excel/CSV, history, templates) | PR 5 |
-| `/integrations/activity` | Consolidated activity / health feed | PR 6 |
+| `/integrations/activity` | Consolidated activity / health feed | **live (PR 1)**, enriched PR 6 |
 | `/integrations/sync` | Sync & Automation (scheduled deliveries) — opt-in flag, default off | PR 6 |
+
+## Data model (PR 1, migration 20261027000000)
+
+Six workspace-scoped tables, all RLS-enabled with a SELECT policy gated on
+the `integration.view` capability (Space viewers see nothing). Every write
+goes through a service-role client or a `SECURITY DEFINER` RPC (PR 2-5)
+that checks the specific `integration.*` capability — there are no
+`authenticated` INSERT/UPDATE policies.
+
+| Table | Purpose |
+| --- | --- |
+| `import_templates` | Reusable column mapping + parsing profile, matched to a file by `header_signature`. |
+| `import_batches` | One uploaded CSV/XLSX file and its 9-state lifecycle (`uploaded`…`imported`/`rolled_back`). |
+| `import_records` | Per-row staging (the Integration Inbox); 10-state `status`, `validation` + `match` JSON. |
+| `export_templates` | Reusable export config (filters, relative period, format). |
+| `export_jobs` | One export request; `queued`/`processing`/`completed`/`failed` + `claim_token` for the PR5 cron. |
+| `integration_events` | Append-only, redacted activity/health feed (no secrets, no raw financial text, no stack traces). |
+
+`transactions` gains `import_batch_id uuid` (FK, `on delete set null`,
+partial index); the `source` CHECK now allows `'import'`; a new
+`transactions_import_batch_only_for_import` CHECK keeps the batch id off
+non-import rows.
+
+Read models: `web/lib/integrations/queries.ts` (RLS-scoped list/get),
+`web/lib/integrations/activity.ts` + `activity-model.ts` (the
+`/integrations/activity` feed), `web/lib/integrations/model.ts` (pure
+types + status vocabularies).
 
 ## Feature flags
 

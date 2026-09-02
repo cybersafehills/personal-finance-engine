@@ -620,7 +620,12 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # RLS-enabled aggregate table - 77 tables, 76 with RLS.
 # Connector adapter canaries (20261020000000) adds one service-only,
 # RLS-enabled installation allowlist - 79 tables, 78 with RLS.
-if [ "$TABLE_COUNT" = "79" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Integrations Phase 1 PR1 (20261027000000) adds import_templates,
+# import_batches, import_records, export_templates, export_jobs and
+# integration_events - all RLS enabled, SELECT gated on the
+# integration.view capability, writes via service-role / PR2-5 RPCs -
+# 85 tables, 84 with RLS.
+if [ "$TABLE_COUNT" = "85" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -708,11 +713,16 @@ fi
 # for authenticated. 115 + 1 = 116. Connector Stage C routes connection
 # creation through an atomic RPC and revokes direct ingestion_connections
 # INSERT. 116 - 1 = 115.
+# Integrations Phase 1 PR1 (20261027000000) adds import_templates,
+# import_batches, import_records, export_templates, export_jobs and
+# integration_events - each with a SELECT-only grant for authenticated
+# (all writes go through service-role / PR2-5 SECURITY DEFINER RPCs).
+# 115 + 6 = 121.
 AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and grantee = 'authenticated';")"
-if [ "$AUTHENTICATED_GRANT_COUNT" = "115" ]; then
-  pass "authenticated holds exactly the 115 table grants expected, no more"
+if [ "$AUTHENTICATED_GRANT_COUNT" = "121" ]; then
+  pass "authenticated holds exactly the 121 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 115 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 121 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -5018,6 +5028,64 @@ else
   pass "Integrations: the grants CHECK rejects a capability outside the extended catalog"
 fi
 rm -f $ARTIFACT_DIR/pfe_int_bogus.log
+
+# ===========================================================================
+# Integrations Phase 1 (20261027000000): the import/export data model.
+# RLS is SELECT-only for authenticated and gated on integration.view, so a
+# Space viewer sees nothing and another tenant sees nothing. Also proves
+# transactions accepts source='import' with import_batch_id lineage and
+# rejects import_batch_id on a non-import row. Reuses INT_HH (USER_A owner,
+# INT_MEMBER_USER member) plus USER_A's personal WORKSPACE_A / U_SRC / U_ACCT.
+# ===========================================================================
+echo "=== Integrations: import/export model + RLS ==="
+
+INT_VIEWER_USER="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('int-catalog-viewer@example.com') returning id;" | head -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.workspace_memberships (workspace_id, user_id, role, status, joined_at) values ('$INT_HH', '$INT_VIEWER_USER', 'viewer', 'active', now());" >/dev/null
+
+INT_BATCH="$(psql -d pfe_rls -t -A -c "insert into public.import_batches (workspace_id, created_by, source_kind, original_filename, status) values ('$INT_HH', '$USER_A', 'csv', 'august.csv', 'uploaded') returning id;" | head -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.import_records (import_batch_id, workspace_id, row_index, status) values ('$INT_BATCH', '$INT_HH', 0, 'needs_mapping');" >/dev/null
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.integration_events (workspace_id, kind, summary) values ('$INT_HH', 'import.uploaded', 'august.csv uploaded');" >/dev/null
+
+INT_MEMBER_SEES_BATCH="$(as_user "$INT_MEMBER_USER" "select count(*) from public.import_batches where id = '$INT_BATCH';")"
+INT_MEMBER_SEES_RECORD="$(as_user "$INT_MEMBER_USER" "select count(*) from public.import_records where import_batch_id = '$INT_BATCH';")"
+INT_MEMBER_SEES_EVENT="$(as_user "$INT_MEMBER_USER" "select count(*) from public.integration_events where workspace_id = '$INT_HH';")"
+INT_VIEWER_SEES="$(as_user "$INT_VIEWER_USER" "select count(*) from public.import_batches where id = '$INT_BATCH';")"
+INT_OUTSIDER_SEES="$(as_user "$USER_B" "select count(*) from public.import_batches where id = '$INT_BATCH';")"
+if [ "$INT_MEMBER_SEES_BATCH" = "1" ] && [ "$INT_MEMBER_SEES_RECORD" = "1" ] && [ "$INT_MEMBER_SEES_EVENT" = "1" ] && [ "$INT_VIEWER_SEES" = "0" ] && [ "$INT_OUTSIDER_SEES" = "0" ]; then
+  pass "Integrations: import_batches/records/events are readable by a member with integration.view, hidden from a Space viewer and from another tenant"
+else
+  fail "Integrations: import model RLS wrong (member b/r/e=$INT_MEMBER_SEES_BATCH/$INT_MEMBER_SEES_RECORD/$INT_MEMBER_SEES_EVENT viewer=$INT_VIEWER_SEES outsider=$INT_OUTSIDER_SEES)"
+fi
+
+# a member cannot write directly - every write is a service-role / RPC path.
+if as_user "$INT_MEMBER_USER" "insert into public.import_batches (workspace_id, created_by, source_kind, original_filename) values ('$INT_HH', '$INT_MEMBER_USER', 'csv', 'sneaky.csv');" >/dev/null 2>$ARTIFACT_DIR/pfe_int_write.log; then
+  fail "Integrations: a member inserted directly into import_batches (should be RPC/service-role only)"
+else
+  pass "Integrations: import_batches has no authenticated INSERT path"
+fi
+rm -f $ARTIFACT_DIR/pfe_int_write.log
+
+# transactions carries import lineage.
+INT_LEDGER_BATCH="$(psql -d pfe_rls -t -A -c "insert into public.import_batches (workspace_id, created_by, source_kind, original_filename, status) values ('$WORKSPACE_A', '$USER_A', 'csv', 'ledger.csv', 'imported') returning id;" | head -1)"
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.transactions (source, import_batch_id, financial_source_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version)
+  values ('import', '$INT_LEDGER_BATCH', '$U_SRC', '$U_ACCT', '$WORKSPACE_A', 'merchant_payment', 'out', 'success', 4200, 0, '2026-08-23T10:00:00Z', 'import-v1');" >/dev/null 2>$ARTIFACT_DIR/pfe_int_txn.log; then
+  pass "Integrations: transactions accepts source='import' with import_batch_id and no momo_message_id"
+else
+  fail "Integrations: a valid source='import' transaction was rejected ($(cat $ARTIFACT_DIR/pfe_int_txn.log))"
+fi
+rm -f $ARTIFACT_DIR/pfe_int_txn.log
+
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.transactions (source, import_batch_id, financial_source_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version)
+  values ('manual', '$INT_LEDGER_BATCH', '$U_SRC', '$U_ACCT', '$WORKSPACE_A', 'merchant_payment', 'out', 'success', 100, 0, '2026-08-23T11:00:00Z', 'import-v1');" >/dev/null 2>$ARTIFACT_DIR/pfe_int_txn2.log; then
+  fail "Integrations: import_batch_id was accepted on a source='manual' row (transactions_import_batch_only_for_import missing)"
+else
+  pass "Integrations: import_batch_id is rejected on a non-import transaction"
+fi
+rm -f $ARTIFACT_DIR/pfe_int_txn2.log
 
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="
