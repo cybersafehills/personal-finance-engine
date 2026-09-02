@@ -36,7 +36,7 @@ account menu (desktop), and a link in Settings.
 | `/integrations` | Dashboard: connected summary, "move data" entry points, available-later categories | **live (PR 0)** |
 | `/integrations/connections` | Connected devices / Shortcuts / providers (canonical connector model) — moved here from `/settings/connections`, which now redirects | **live (PR 0)** |
 | `/integrations/imports` | Import Studio. **PR 2-4 live**: upload -> detect -> profile -> map -> validate -> review -> commit -> undo (interactive mapping, saved templates, per-row validation, duplicate signals, staging review with bulk actions, `commit_import_batch` / `rollback_import_batch`). |
-| `/integrations/exports` | Export Center (filters, Excel/CSV, history, templates) | PR 5 |
+| `/integrations/exports` | Export Center. **PR 5 live**: config (format / relative or custom period / account + direction filters / XLSX sheet picker), inline generation for small exports + a cron for large ones, saved templates, history with signed-URL download. |
 | `/integrations/activity` | Consolidated activity / health feed | **live (PR 1)**, enriched PR 6 |
 | `/integrations/sync` | Sync & Automation (scheduled deliveries) — opt-in flag, default off | PR 6 |
 
@@ -150,6 +150,46 @@ types + status vocabularies).
 - Financial Inbox: an `import_review` item for a batch sitting in
   `validated` with rows still to decide (`web/lib/financial-inbox.ts`,
   gated on `isIntegrationsEnabled`).
+
+## Export Center (PR 5, migration 20261030000000)
+
+- Private bucket `integration-exports` (public = false, service-role
+  only, keyed `{workspace_id}/{export_job_id}/{filename}`). Downloads go
+  out only as a 5-minute signed URL from
+  `GET /api/integrations/exports/[id]` (session-authed, RLS-scoped,
+  `integration.export` required) which 302-redirects to it.
+- `web/lib/integrations/export/`:
+  - `csv-safe.ts` (**pure, tested**) — formula-injection neutralisation
+    (`= + - @ TAB CR` -> `'`-prefixed) for CSV fields and exceljs string
+    cells; `csvDocument` assembles CRLF output.
+  - `period.ts` (**pure, tested**) — resolves relative presets
+    (`previous_month`, `current_month`, `previous_week`, `last_30_days`,
+    `fiscal_year`, `all`) and absolute ranges to UTC `{from,to,label}`.
+  - `query.ts` (server-only) — service-role, workspace-pinned paged fetch
+    of transactions + accounts into an `ExportDataset`; `countExportRows`
+    for the inline/queued decision.
+  - `workbook.ts` (server-only, exceljs) — `buildCsv` (Transactions) and
+    `buildXlsx` with Summary / Transactions / Income / Expenses /
+    Categories / Accounts sheets (only the picked, non-empty ones),
+    frozen bold header, `#,##0` number formats, column widths, workbook
+    metadata; no internal ids or secrets.
+  - `run.ts` (server-only) — `runExportJob(jobId)`: resolve period, build
+    dataset, render bytes, upload, mark `completed` / `failed`, write an
+    `integration_events` `export.completed` / `export.failed` row.
+- `createExportJob` action (`integration.export`-gated): insert a
+  `queued` `export_jobs` row, then run inline when the estimate is
+  ≤ 20 000 rows, else leave it for the cron. `saveExportTemplate` upserts
+  a versioned `export_templates` row.
+- `web/app/api/cron/run-export-jobs/route.ts` — cron-secret auth,
+  claim/lease via `claim_token` / `claimed_at` (15-min lease), runs
+  queued + stuck jobs, and purges the stored file (not the history row)
+  of completed exports older than 7 days. Not yet wired to a scheduler.
+- `web/app/integrations/exports/page.tsx` + `ExportConfigForm` —
+  format / period / account + direction filters / XLSX sheet picker /
+  template load + save, and a download history list.
+- `space_audit_events` integration is deferred here as elsewhere in the
+  Export/Import non-RPC paths — `integration_events` is the audit surface
+  until a write moves behind a `SECURITY DEFINER` RPC.
 
 ## Feature flags
 

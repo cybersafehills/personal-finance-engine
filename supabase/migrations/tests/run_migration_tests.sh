@@ -5148,6 +5148,14 @@ else
   fail "Integrations: rollback wrong (result=$INT_ROLLBACK left=$INT_LEFT status=$INT_RB_STATUS audit=$INT_RB_AUDIT)"
 fi
 
+# 20261030000000: the private export bucket exists and is not public.
+INT_EXP_BUCKET="$(psql -d pfe_rls -t -A -c "select count(*) from storage.buckets where id = 'integration-exports' and public = false;")"
+if [ "$INT_EXP_BUCKET" = "1" ]; then
+  pass "Integrations: the private integration-exports storage bucket is registered (public = false)"
+else
+  fail "Integrations: integration-exports bucket missing or public (got $INT_EXP_BUCKET)"
+fi
+
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="
 if [ "$FAIL_COUNT" -ne 0 ]; then

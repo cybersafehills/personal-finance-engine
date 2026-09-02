@@ -9,6 +9,7 @@ import {
   getIngestionConnections,
 } from "../../lib/queries";
 import {
+  isExportCenterEnabled,
   isImportStudioEnabled,
   isIntegrationsEnabled,
 } from "../../lib/integrations/gate";
@@ -110,6 +111,7 @@ export default async function IntegrationsPage() {
     getIntegrationActivity(5),
   ]);
   const importEnabled = isImportStudioEnabled(workspaceId);
+  const exportEnabled = isExportCenterEnabled(workspaceId);
 
   return (
     <div>
@@ -252,10 +254,10 @@ export default async function IntegrationsPage() {
             body="Upload a CSV or Excel file, map its columns, review duplicates, and import into your ledger."
           />
           <DataCard
-            href={null}
+            href={exportEnabled ? "/integrations/exports" : null}
             title="Export Center"
             body="Export transactions, income, and expenses as a structured Excel workbook or CSV."
-            comingSoon
+            comingSoon={!exportEnabled}
           />
         </div>
       </section>
