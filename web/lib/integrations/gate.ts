@@ -125,3 +125,17 @@ export function isReconciliationCenterEnabled(
     envEnabled("INTEGRATIONS_RECONCILIATION_CENTER_ENABLED")
   );
 }
+
+//   INTEGRATIONS_ACCOUNTANT_PACKAGE_ENABLED - the "Ready for Accountant"
+//     package (/integrations/accountant + its build cron). On unless
+//     exactly "false".
+
+/** "Ready for Accountant" package - period-scoped downloadable ZIP. */
+export function isAccountantPackageEnabled(
+  workspaceId: string | null,
+): boolean {
+  return (
+    isIntegrationsEnabled(workspaceId) &&
+    envEnabled("INTEGRATIONS_ACCOUNTANT_PACKAGE_ENABLED")
+  );
+}

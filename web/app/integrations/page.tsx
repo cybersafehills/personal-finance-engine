@@ -9,6 +9,7 @@ import {
   getIngestionConnections,
 } from "../../lib/queries";
 import {
+  isAccountantPackageEnabled,
   isExportCenterEnabled,
   isImportStudioEnabled,
   isIntegrationsEnabled,
@@ -116,6 +117,7 @@ export default async function IntegrationsPage() {
   const exportEnabled = isExportCenterEnabled(workspaceId);
   const syncEnabled = isSyncEnabled(workspaceId);
   const reconciliationEnabled = isReconciliationCenterEnabled(workspaceId);
+  const accountantEnabled = isAccountantPackageEnabled(workspaceId);
 
   return (
     <div>
@@ -268,6 +270,13 @@ export default async function IntegrationsPage() {
               href="/integrations/reconciliation"
               title="Reconciliation"
               body="Balance drift, unmatched payments, possible duplicates, and sync conflicts in one hub."
+            />
+          )}
+          {accountantEnabled && (
+            <DataCard
+              href="/integrations/accountant"
+              title="Accountant package"
+              body="A period-scoped ZIP — transactions, reconciliation summary, and a PDF cover — ready to hand off."
             />
           )}
           {syncEnabled && (
