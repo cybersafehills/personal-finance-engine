@@ -542,3 +542,40 @@ real-message path; setup-funnel analytics.
 pass; `npm run lint` 0 errors; `npx tsc --noEmit` + `npx next build --webpack`
 clean (`/pair` builds). `curl /pair?c=<valid>` → code + run button + the
 `no-referrer` meta; `curl /pair` (no code) → "no longer valid".
+
+---
+
+## PR14 — op:"capture" ingestion + provider detection
+
+**Problem.** A paired device (PR8) could `pair`/`test` but not send a real
+transaction message over `/capture`. The parse→transaction pipeline lives
+inline in the 1285-line `ingest-momo/index.ts` — the repo's most
+safety-critical function.
+
+**Decisions.** Full rationale in `docs/adr/0009-async-capture-ingestion.md`.
+
+1. **`op:"capture"` is a thin, evidence-first writer.** Authenticate device
+   credential → validate the universal envelope → `detectProvider(message)` →
+   write **one** `raw_financial_events` row (`parse_status='pending'`,
+   `ingestion_origin='iphone_capture_v2'`, `provider_key`, canonical
+   provenance) → `202 { status:"queued" }`. Never creates a `transactions`
+   row. Unknown provider → `422 UNKNOWN_PROVIDER`, no evidence. Redelivery
+   (same `(ingestion_connection_id, payload_hash)`) → `200 duplicate`.
+2. **Provider detection is a registry** — `supabase/functions/_shared/providers.ts`,
+   `detectProvider` over `PROVIDER_MATCHERS`. Adding Airtel / a bank = append a
+   matcher. MTN MoMo is the only registered one (RWF + an MTN token or a MoMo
+   verb).
+3. **Migration `20261105000000_capture_ingestion.sql`** — two nullable
+   `raw_financial_events` columns (`ingestion_origin`, `provider_key`), a
+   `capture_accepted` audit event value, a partial index for the future
+   processor sweep. Additive; `ingest-momo` untouched.
+
+**Not in this PR — the next one:** `process-raw-events` Edge Function + cron;
+extract `ingest-momo` steps 9–22 into `_shared/ingestion-pipeline.ts`; migrate
+`ingest-momo` onto it; normalization / accounting / categorization / budget
+sweep for capture rows.
+
+**Verification.** `deno test supabase/functions/_shared/tests
+supabase/functions/capture/tests` (provider + capture cases) pass;
+`ingest-momo/tests` untouched and green; `run_migration_tests.sh` 382 pass
+(4 new capture assertions); `deno fmt`/`lint`/`check` clean.

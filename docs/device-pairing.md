@@ -6,8 +6,10 @@ Function. ADR 0008 has the rationale; the migration
 `supabase/functions/capture/`, and the shared module
 `supabase/functions/_shared/pairing.ts` are the source of truth for behaviour.
 
-Status: **PR1 backend + PR2 wizard.** Dark unless `DEVICE_PAIRING_V2=enabled`.
-`ingest-momo` and the legacy `x-ingest-key` path are unchanged.
+Status: **backend + wizard + QR handoff + `op:"capture"` writer.** Dark unless
+`DEVICE_PAIRING_V2=enabled`. `ingest-momo` and the legacy `x-ingest-key` path
+are unchanged. The processor that normalizes captured evidence into
+`transactions` is a follow-up PR (ADR 0009).
 
 ## Roles
 
@@ -123,6 +125,29 @@ optional. Proves the credential authenticates and the endpoint is reachable.
 Bumps `device_credentials.last_used_at`, records `device_test_succeeded`.
 **Never** creates a transaction or `raw_financial_events` row. `200 { "ok": true, "test": true }`.
 
+### `op:"capture"`  (ADR 0009)
+
+A real inbound transaction message. Header `x-device-key: pfe_…`. Body: the
+universal envelope, `message` **required**.
+
+1. Authenticate the device credential (`resolve_canonical_ingestion_credential`)
+   → uniform `401 INVALID_DEVICE_CREDENTIAL` on any failure.
+2. Validate the envelope → `400 INVALID_CAPTURE_PAYLOAD` + `capture_rejected`.
+3. `detectProvider(message)` (`_shared/providers.ts`) → null → `422
+   UNKNOWN_PROVIDER` + `capture_rejected`, **no evidence written**.
+4. Write **one** `raw_financial_events` row: `channel:'sms'`,
+   `parse_status:'pending'`, `ingestion_origin:'iphone_capture_v2'`,
+   `provider_key`, canonical provenance (`ingestion_connection_id` =
+   `legacy_ingestion_connection_id`, `connector_installation_id`,
+   `device_credential_id`, `financial_source_id`). `payload_hash` = the same
+   normalized-message SHA-256 `ingest-momo` uses.
+   - insert OK → `202 { "ok": true, "status": "queued", "event_id": "…" }` +
+     `capture_accepted`.
+   - `(ingestion_connection_id, payload_hash)` conflict → `200 { "ok": true,
+     "status": "duplicate" }`.
+5. **Never** creates a `transactions` row. A separate `process-raw-events`
+   processor (follow-up PR) normalizes pending capture rows.
+
 ## Universal capture envelope
 
 Validated by `validateCaptureEnvelope` in `_shared/pairing.ts`. Unknown
@@ -144,9 +169,12 @@ top-level keys are rejected.
 | `PAIRING_NO_ROUTE` | 400 | new installation with no `intended_account_id` |
 | `PAIRING_ALREADY_USED` | 409 | token already consumed |
 | `PAIRING_EXPIRED` | 410 | token past its 10-minute TTL (or already swept) |
-| `INVALID_DEVICE_CREDENTIAL` | 401 | `op:"test"` — unknown / inactive / revoked credential (uniform, no oracle) |
+| `INVALID_DEVICE_CREDENTIAL` | 401 | `op:"test"` / `op:"capture"` — unknown / inactive / revoked credential (uniform, no oracle) |
 | `INVALID_CAPTURE_PAYLOAD` | 400 | envelope failed validation |
+| `UNKNOWN_PROVIDER` | 422 | `op:"capture"` — `detectProvider` didn't recognise the message; no evidence stored |
 | `RATE_LIMITED` | 429 | per-isolate limiter (`Retry-After` header set) |
+
+Success statuses for `op:"capture"`: `202 queued` (new evidence row) · `200 duplicate`.
 
 ## Rate limits (per Edge isolate, coarse)
 
@@ -154,6 +182,7 @@ top-level keys are rejected.
 |---|---|---|
 | `pair` (keyed by client IP) | 60 s | 10 |
 | `test` (keyed by device-secret prefix) | 60 s | 30 |
+| `capture` (keyed by device-secret prefix) | 60 s | 60 |
 
 ## Audit — `connector_pairing_events`
 
@@ -161,7 +190,7 @@ Service-role-only, RLS on, no authenticated policy. Rows carry only IDs and a
 machine `reason_code` — never tokens, secrets, message bodies, amounts, phone
 numbers or workspace payloads. Events: `device_pairing_started`,
 `device_paired`, `device_pairing_failed`, `device_test_succeeded`,
-`device_test_failed`, `capture_rejected`.
+`device_test_failed`, `capture_accepted`, `capture_rejected`.
 
 ## Flags / config
 

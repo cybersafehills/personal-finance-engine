@@ -5385,6 +5385,74 @@ else
 fi
 rm -f $ARTIFACT_DIR/pfe_p2_conf2.log
 
+# ===========================================================================
+# Capture ingestion (20261105000000): op:"capture" writes canonical evidence.
+# ===========================================================================
+echo "=== Capture ingestion: raw_financial_events origin/provider + dedup ==="
+
+CAP_OWNER="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('capture-owner@example.com') returning id;" | head -1)"
+CAP_WS="$(psql -d pfe_rls -t -A -c "select w.id from public.workspaces w join public.workspace_memberships m on m.workspace_id = w.id where m.user_id = '$CAP_OWNER' and w.kind = 'personal';" | head -1)"
+CAP_SRC="$(psql -d pfe_rls -t -A -c "set role service_role; insert into public.financial_sources (owner_user_id, provider, source_type, display_name, currency) values ('$CAP_OWNER', 'mtn_momo', 'mobile_money', 'Capture source', 'RWF') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+CAP_ACC="$(psql -d pfe_rls -t -A -c "set role service_role; insert into public.accounts (workspace_id, financial_source_id, name, provider, currency) values ('$CAP_WS', '$CAP_SRC', 'Capture account', 'mtn_momo', 'RWF') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+CAP_CONN="$(as_user "$CAP_OWNER" "select public.create_ingestion_connection_dual_write('$CAP_WS', '$CAP_ACC', 'Capture phone', 'mtn_momo', 'capture-hash', 'cap_pfx');")"
+
+CAP_HASH="$(printf 'd%.0s' $(seq 1 64))"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.raw_financial_events
+    (channel, received_at, payload_hash, raw_payload, ingestion_connection_id,
+     financial_source_id, provider_key, ingestion_origin, parse_status)
+  values
+    ('sms', now(), '$CAP_HASH', '{\"ingestion_source\":\"iphone_capture_v2\"}'::jsonb,
+     '$CAP_CONN', '$CAP_SRC', 'mtn_momo', 'iphone_capture_v2', 'pending');
+" >/dev/null
+CAP_ROW="$(psql -d pfe_rls -t -A -c "select ingestion_origin || '|' || provider_key || '|' || parse_status from public.raw_financial_events where payload_hash = '$CAP_HASH';")"
+if [ "$CAP_ROW" = "iphone_capture_v2|mtn_momo|pending" ]; then
+  pass "Capture ingestion: ingestion_origin + provider_key round-trip on a pending evidence row"
+else
+  fail "Capture ingestion: evidence row columns are wrong ($CAP_ROW)"
+fi
+
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.raw_financial_events
+    (channel, received_at, payload_hash, raw_payload, ingestion_connection_id,
+     financial_source_id, provider_key, ingestion_origin, parse_status)
+  values
+    ('sms', now(), '$CAP_HASH', '{}'::jsonb, '$CAP_CONN', '$CAP_SRC',
+     'mtn_momo', 'iphone_capture_v2', 'pending');
+" >/dev/null 2>$ARTIFACT_DIR/pfe_cap_dup.log; then
+  fail "Capture ingestion: a redelivery to the same connection was not de-duplicated"
+else
+  grep -q "23505\|duplicate key" $ARTIFACT_DIR/pfe_cap_dup.log \
+    && pass "Capture ingestion: same (ingestion_connection_id, payload_hash) is refused (23505)" \
+    || fail "Capture ingestion: redelivery failed with an unexpected error"
+fi
+rm -f $ARTIFACT_DIR/pfe_cap_dup.log
+
+CAP_BAD_HASH="$(printf 'e%.0s' $(seq 1 64))"
+if psql -d pfe_rls -c "set role service_role; insert into public.raw_financial_events (channel, received_at, payload_hash, ingestion_connection_id, ingestion_origin, parse_status) values ('sms', now(), '$CAP_BAD_HASH', '$CAP_CONN', 'Not Valid Origin', 'pending');" >/dev/null 2>$ARTIFACT_DIR/pfe_cap_origin.log; then
+  fail "Capture ingestion: ingestion_origin accepted a non-slug value"
+else
+  grep -q "violates check constraint" $ARTIFACT_DIR/pfe_cap_origin.log \
+    && pass "Capture ingestion: ingestion_origin is CHECK-constrained to a slug" \
+    || fail "Capture ingestion: ingestion_origin insert failed for an unexpected reason"
+fi
+rm -f $ARTIFACT_DIR/pfe_cap_origin.log
+
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.connector_pairing_events (event) values ('capture_accepted');" >/dev/null
+CAP_EVT_OK="$(psql -d pfe_rls -t -A -c "select count(*) from public.connector_pairing_events where event = 'capture_accepted';")"
+if psql -d pfe_rls -c "set role service_role; insert into public.connector_pairing_events (event) values ('capture_bogus');" >/dev/null 2>$ARTIFACT_DIR/pfe_cap_evt.log; then
+  fail "Capture ingestion: connector_pairing_events accepted an unknown event value"
+else
+  if [ "$CAP_EVT_OK" -ge 1 ] && grep -q "violates check constraint" $ARTIFACT_DIR/pfe_cap_evt.log; then
+    pass "Capture ingestion: connector_pairing_events accepts 'capture_accepted', rejects an unknown event"
+  else
+    fail "Capture ingestion: connector_pairing_events event CHECK is wrong (ok=$CAP_EVT_OK)"
+  fi
+fi
+rm -f $ARTIFACT_DIR/pfe_cap_evt.log
+
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="
 if [ "$FAIL_COUNT" -ne 0 ]; then

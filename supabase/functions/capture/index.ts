@@ -10,7 +10,13 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { createRateLimiter } from "../_shared/pairing.ts";
-import { handlePair, handleTest, type PairingEvent } from "./handler.ts";
+import {
+  type CaptureRoute,
+  handleCapture,
+  handlePair,
+  handleTest,
+  type PairingEvent,
+} from "./handler.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
@@ -41,6 +47,7 @@ function jsonResponse(
 // Coarse per-isolate limiters in front of the DB. Not a distributed quota.
 const pairLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
 const testLimiter = createRateLimiter({ windowMs: 60_000, max: 30 });
+const captureLimiter = createRateLimiter({ windowMs: 60_000, max: 60 });
 
 function clientIp(req: Request): string {
   return (req.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() ||
@@ -161,6 +168,107 @@ Deno.serve(async (req: Request) => {
           if (error) {
             console.error(JSON.stringify({ event: "device_touch_failed" }));
           }
+        },
+      }, new Date());
+      return jsonResponse(result.body, result.status, result.headers);
+    }
+
+    if (op === "capture") {
+      const headerKey = req.headers.get("x-device-key");
+      const rate = captureLimiter.check(
+        `capture:${(headerKey ?? "").slice(0, 8) || clientIp(req)}`,
+      );
+      if (!rate.ok) {
+        return jsonResponse({ ok: false, error: "RATE_LIMITED" }, 429, {
+          "Retry-After": String(rate.retryAfterSec),
+        });
+      }
+      const result = await handleCapture(headerKey, body, {
+        recordEvent,
+        authenticateDevice: async (credentialHash) => {
+          const { data, error } = await supabase.rpc(
+            "resolve_canonical_ingestion_credential",
+            { p_credential_hash: credentialHash },
+          ).maybeSingle();
+          if (error || !data) return { ok: false };
+          const row = data as {
+            id: string | null; // legacy_ingestion_connection_id
+            workspace_id: string;
+            account_id: string | null;
+            connector_installation_id: string;
+            device_credential_id: string;
+          };
+          if (!row.id) return { ok: false };
+
+          let financialSourceId: string | null = null;
+          if (row.account_id) {
+            const { data: acct } = await supabase
+              .from("accounts")
+              .select("financial_source_id")
+              .eq("id", row.account_id)
+              .maybeSingle();
+            financialSourceId = (acct?.financial_source_id as string | null) ??
+              null;
+          }
+
+          const route: CaptureRoute = {
+            deviceCredentialId: row.device_credential_id,
+            connectorInstallationId: row.connector_installation_id,
+            legacyIngestionConnectionId: row.id,
+            financialSourceId,
+            workspaceId: row.workspace_id,
+            accountId: row.account_id,
+          };
+          return { ok: true, route };
+        },
+        recordRawEvent: async (args) => {
+          const { data, error } = await supabase
+            .from("raw_financial_events")
+            .insert({
+              channel: "sms",
+              received_at: args.receivedAt,
+              payload_hash: args.payloadHash,
+              raw_payload: {
+                ingestion_source: "iphone_capture_v2",
+                raw_message: args.message,
+                client_version: args.clientVersion,
+                device_received_at: args.receivedAt,
+              },
+              ingestion_connection_id: args.route.legacyIngestionConnectionId,
+              financial_source_id: args.route.financialSourceId,
+              connector_installation_id: args.route.connectorInstallationId,
+              device_credential_id: args.route.deviceCredentialId,
+              provider_key: args.providerKey,
+              ingestion_origin: "iphone_capture_v2",
+              parse_status: "pending",
+              parser_version: null,
+            })
+            .select("id")
+            .maybeSingle();
+
+          if (data?.id) return { outcome: "queued", eventId: data.id };
+
+          if (error?.code === "23505") {
+            const { data: existing } = await supabase
+              .from("raw_financial_events")
+              .select("id")
+              .eq(
+                "ingestion_connection_id",
+                args.route.legacyIngestionConnectionId,
+              )
+              .eq("payload_hash", args.payloadHash)
+              .maybeSingle();
+            return {
+              outcome: "duplicate",
+              eventId: (existing?.id as string | null) ?? null,
+            };
+          }
+
+          // A genuine write failure: surface it so the device retries rather
+          // than silently dropping the message.
+          throw new Error(
+            `raw_event_insert_failed:${error?.code ?? "unknown"}`,
+          );
         },
       }, new Date());
       return jsonResponse(result.body, result.status, result.headers);
