@@ -9,6 +9,12 @@
 // "parseable vs review" call), but tight enough that unrelated SMS
 // (OTP codes, marketing, airtime top-up receipts) are turned away without
 // writing evidence.
+//
+// This module is ported verbatim to the Android companion
+// (`android/app/src/main/java/me/oneledger/companion/detection/ProviderMatchers.kt`,
+// ADR 0010 §2). The companion runs the same matchers on-device so a
+// non-financial notification never leaves the phone. When a matcher changes
+// here, change the Kotlin port and its `ProviderMatchersTest` in the same PR.
 
 export type DetectedProvider = {
   /** Canonical provider identifier, e.g. `mtn_momo`. */

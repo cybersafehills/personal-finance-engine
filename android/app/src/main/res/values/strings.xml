@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">OneLedger Companion</string>
+    <string name="notification_listener_label">OneLedger financial-notification capture</string>
+</resources>
