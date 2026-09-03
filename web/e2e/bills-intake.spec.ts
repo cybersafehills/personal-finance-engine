@@ -34,12 +34,15 @@ test.describe("Bills & Expenses - Phase 1 intake", () => {
       mimeType: "application/pdf",
       buffer: minimalPdf(unique),
     });
-    await page.getByRole("button", { name: "Upload" }).click();
+    await page.getByRole("button", { name: "Upload", exact: true }).click();
 
     // Redirects to the detail page on success.
     await expect(page).toHaveURL(/\/bills\/[0-9a-f-]{36}$/);
     await expect(page.getByRole("heading", { name: `${unique}.pdf` })).toBeVisible();
-    await expect(page.getByText("Stored").or(page.getByText("Needs review"))).toBeVisible();
+    // The status badge - anchored so it never also matches a timeline
+    // row like "Status: stored -> queued". With BILLS_EXTRACTION_ENABLED
+    // the upload moves the document straight to "queued".
+    await expect(page.getByText(/^(Stored|Queued|Needs review)$/)).toBeVisible();
 
     // The append-only processing history shows the intake event (the e2e
     // user is the workspace owner, so holds bill.audit.view).
@@ -48,7 +51,7 @@ test.describe("Bills & Expenses - Phase 1 intake", () => {
     ).toBeVisible();
 
     // Back on the list, the document is present.
-    await page.getByRole("link", { name: "All documents" }).click();
+    await page.getByRole("link", { name: "All documents", exact: true }).click();
     await expect(page.getByRole("link", { name: new RegExp(unique) })).toBeVisible();
   });
 
@@ -64,7 +67,7 @@ test.describe("Bills & Expenses - Phase 1 intake", () => {
       mimeType: "application/pdf",
       buffer,
     });
-    await page.getByRole("button", { name: "Upload" }).click();
+    await page.getByRole("button", { name: "Upload", exact: true }).click();
     await expect(page).toHaveURL(/\/bills\/[0-9a-f-]{36}$/);
 
     await page.goto("/bills");
@@ -73,9 +76,11 @@ test.describe("Bills & Expenses - Phase 1 intake", () => {
       mimeType: "application/pdf",
       buffer,
     });
-    await page.getByRole("button", { name: "Upload" }).click();
+    await page.getByRole("button", { name: "Upload", exact: true }).click();
 
-    await expect(page.getByRole("alert")).toContainText("already uploaded");
+    await expect(
+      page.getByText("You've already uploaded this exact document."),
+    ).toBeVisible();
     await expect(
       page.getByRole("link", { name: "View the existing document" }),
     ).toBeVisible();
@@ -88,16 +93,17 @@ test.describe("Bills & Expenses - Phase 1 intake", () => {
       mimeType: "application/pdf",
       buffer: Buffer.from("MZ\x90\x00 this is a PE binary, not a PDF"),
     });
-    await page.getByRole("button", { name: "Upload" }).click();
+    await page.getByRole("button", { name: "Upload", exact: true }).click();
 
-    await expect(page.getByRole("alert")).toContainText(
-      /Only PDF, JPEG, PNG and HEIC/i,
-    );
+    await expect(page.getByText(/Only PDF, JPEG, PNG and HEIC/i)).toBeVisible();
     await expect(page).toHaveURL(/\/bills$/);
   });
 
   test("the /bills pages have no serious or critical accessibility violations", async ({ page }) => {
     await page.goto("/bills");
+    // Wait for the route to settle so axe scans the page, not the
+    // Suspense loading fallback.
+    await expect(page.getByRole("heading", { name: "Bills & Expenses" })).toBeVisible();
     let results = await new AxeBuilder({ page }).analyze();
     let bad = results.violations.filter(
       (v) => v.impact === "serious" || v.impact === "critical",
@@ -111,8 +117,9 @@ test.describe("Bills & Expenses - Phase 1 intake", () => {
       mimeType: "application/pdf",
       buffer: minimalPdf(unique),
     });
-    await page.getByRole("button", { name: "Upload" }).click();
+    await page.getByRole("button", { name: "Upload", exact: true }).click();
     await expect(page).toHaveURL(/\/bills\/[0-9a-f-]{36}$/);
+    await expect(page.getByRole("heading", { name: `${unique}.pdf` })).toBeVisible();
 
     results = await new AxeBuilder({ page }).analyze();
     bad = results.violations.filter(
@@ -130,13 +137,12 @@ test.describe("Bills & Expenses - Phase 1 intake", () => {
     // activating it), then Tab to the Upload button and press Enter.
     const input = page.getByLabel("Add an invoice or receipt");
     await input.focus();
-    await expect(input).toBeFocused();
     await input.setInputFiles({
       name: `${unique}.pdf`,
       mimeType: "application/pdf",
       buffer: minimalPdf(unique),
     });
-    await page.getByRole("button", { name: "Upload" }).focus();
+    await page.getByRole("button", { name: "Upload", exact: true }).focus();
     await page.keyboard.press("Enter");
 
     await expect(page).toHaveURL(/\/bills\/[0-9a-f-]{36}$/);

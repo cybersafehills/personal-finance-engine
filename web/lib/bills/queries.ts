@@ -484,7 +484,10 @@ export async function getBillSupplierCandidates(
   const supabase = await supabaseSession();
   const { data, error } = await supabase
     .from("bill_supplier_candidates")
-    .select("id, supplier_id, score, match_reasons, suppliers(display_name, tax_id)")
+    // bill_supplier_candidates has two FKs to suppliers (the plain
+    // supplier_id FK and the composite (workspace_id, supplier_id) same-
+    // workspace guard), so PostgREST needs the column disambiguated.
+    .select("id, supplier_id, score, match_reasons, suppliers!supplier_id(display_name, tax_id)")
     .eq("bill_document_id", billDocumentId)
     .eq("is_current", true)
     .order("score", { ascending: false });

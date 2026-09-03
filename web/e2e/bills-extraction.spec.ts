@@ -33,29 +33,38 @@ test.describe("Bills & Expenses - Phase 2 extraction", () => {
       mimeType: "application/pdf",
       buffer: minimalPdf(unique),
     });
-    await page.getByRole("button", { name: "Upload" }).click();
+    await page.getByRole("button", { name: "Upload", exact: true }).click();
     await expect(page).toHaveURL(/\/bills\/[0-9a-f-]{36}$/);
     const detailUrl = page.url();
 
     // With extraction on, the upload queued the document.
-    await expect(page.getByText("Queued").or(page.getByText("Scanning"))).toBeVisible();
+    // Anchored so it matches only the status badge, never a timeline row
+    // such as "Status: stored -> queued".
+    await expect(page.getByText(/^(Queued|Scanning)$/)).toBeVisible();
 
-    // Run one worker tick.
-    const res = await request.post("/api/cron/process-bill-documents", {
-      headers: { "x-report-cron-secret": CRON_SECRET },
-    });
-    expect(res.ok()).toBeTruthy();
-    const summary = await res.json();
-    expect(summary.succeeded).toBeGreaterThanOrEqual(1);
+    // Drive the cron worker until THIS document reaches review. Other
+    // specs leave their own documents queued, and one tick only processes
+    // a bounded batch, so a single tick isn't guaranteed to pick this one.
+    let reachedReview = false;
+    for (let tick = 0; tick < 8 && !reachedReview; tick++) {
+      const res = await request.post("/api/cron/process-bill-documents", {
+        headers: { "x-report-cron-secret": CRON_SECRET },
+      });
+      expect(res.ok()).toBeTruthy();
+      await page.goto(detailUrl);
+      reachedReview = await page
+        .getByText("Needs review", { exact: true })
+        .isVisible();
+    }
 
-    await page.goto(detailUrl);
-    await expect(page.getByText("Needs review")).toBeVisible();
+    await expect(page.getByText("Needs review", { exact: true })).toBeVisible();
 
     await expect(page.getByRole("heading", { name: "Fields", exact: true })).toBeVisible();
     await expect(page.getByText("Kigali Office Supplies Ltd")).toBeVisible();
     await expect(page.getByText("RWF 141,600")).toBeVisible();
     await expect(page.getByText("2026-08-12")).toBeVisible();
-    await expect(page.getByText(/confidence/)).toBeVisible();
+    // One per extracted field - just assert the confidence label renders.
+    await expect(page.getByText(/confidence/).first()).toBeVisible();
 
     // Line items table rendered.
     await expect(page.getByRole("table", { name: "Extracted line items" })).toBeVisible();
@@ -78,8 +87,12 @@ test.describe("Bills & Expenses - Phase 2 extraction", () => {
       has: page.getByRole("heading", { name: "Fields", exact: true }),
     });
     await fieldsRegion.getByText("INV-2026-0442").locator("..").getByRole("button", { name: "Edit" }).click();
-    await page.getByRole("textbox").first().fill("INV-2026-0442-R1");
-    await page.getByRole("button", { name: "Save" }).click();
+    const editBox = page.getByRole("textbox").first();
+    await editBox.fill("INV-2026-0442-R1");
+    // Submit with Enter (the input handles it) rather than clicking Save -
+    // on the mobile layout the sticky header can overlap the Save button
+    // after it scrolls into view.
+    await editBox.press("Enter");
     await expect(page.getByText("INV-2026-0442-R1")).toBeVisible();
     await expect(page.getByText("(corrected)").first()).toBeVisible();
 
@@ -107,7 +120,7 @@ test.describe("Bills & Expenses - Phase 2 extraction", () => {
         mimeType: "application/pdf",
         buffer: minimalPdf(marker),
       });
-      await page.getByRole("button", { name: "Upload" }).click();
+      await page.getByRole("button", { name: "Upload", exact: true }).click();
       await expect(page).toHaveURL(/\/bills\/[0-9a-f-]{36}$/);
       const url = page.url();
       const res = await request.post("/api/cron/process-bill-documents", {
