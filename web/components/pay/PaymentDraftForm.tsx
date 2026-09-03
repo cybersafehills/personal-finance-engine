@@ -155,6 +155,7 @@ export function PaymentDraftForm({
               value={recipientId}
               onChange={(e) => setRecipientId(e.target.value)}
               className={field}
+              aria-label={t.recipient}
             >
               <option value="">Someone else…</option>
               {trustedRecipients.map((r) => (
