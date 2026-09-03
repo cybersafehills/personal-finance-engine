@@ -634,7 +634,9 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # Device pairing v2 (20261104000000) adds pairing_sessions (RLS enabled,
 # SELECT-own for authenticated) and connector_pairing_events (RLS enabled,
 # service-role-only, no authenticated policy) - 93 tables, 92 with RLS.
-if [ "$TABLE_COUNT" = "93" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Integrations Phase 3 P3-PR3 (20261111000000) adds accountant_packages
+# (RLS enabled, SELECT gated on integration.view) - 94 tables, 93 with RLS.
+if [ "$TABLE_COUNT" = "94" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -736,11 +738,13 @@ fi
 # Integrations Phase 3 P3-PR2 (20261110000000) adds a SELECT grant on the
 # pre-existing balance_reconciliations table (writes stay service-role only -
 # the reconcile-balances edge function is the sole writer). 126 + 1 = 127.
+# Integrations Phase 3 P3-PR3 (20261111000000) adds accountant_packages with a
+# SELECT-only grant for authenticated (writes service-role only). 127 + 1 = 128.
 AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and grantee = 'authenticated';")"
-if [ "$AUTHENTICATED_GRANT_COUNT" = "127" ]; then
-  pass "authenticated holds exactly the 127 table grants expected, no more"
+if [ "$AUTHENTICATED_GRANT_COUNT" = "128" ]; then
+  pass "authenticated holds exactly the 128 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 127 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 128 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -5413,6 +5417,76 @@ else
   pass "Integrations P3: balance_reconciliations INSERT is denied to authenticated (service-role only)"
 fi
 rm -f $ARTIFACT_DIR/pfe_p3_br.log
+
+# ===========================================================================
+# Integrations Phase 3 (20261111000000): accountant_packages + the
+# integration.accountant_package capability + the private bucket.
+# Reuses the INT_HH household + INT_MEMBER_USER / INT_VIEWER_USER fixtures.
+# ===========================================================================
+echo "=== Integrations P3: accountant package model + capability ==="
+
+P3_AP_MATRIX_MISMATCHES="$(psql -d pfe_rls -t -A -c "
+  with cells(kind, role) as (values
+    ('household','owner'), ('household','admin'),
+    ('household','member'), ('household','viewer'),
+    ('personal','owner'), ('personal','member')
+  ),
+  expected as (
+    select c.kind, c.role,
+      case
+        when c.kind = 'personal' then c.role = 'owner'
+        when c.role in ('owner', 'admin') then true
+        else false
+      end as allowed
+    from cells c
+  )
+  select count(*) from expected
+  where public.space_role_has_capability(kind, role, 'integration.accountant_package')
+    is distinct from allowed;")"
+P3_AP_UNKNOWN="$(psql -d pfe_rls -t -A -c "select public.space_role_has_capability('household', 'owner', 'integration.not_a_thing');")"
+if [ "$P3_AP_MATRIX_MISMATCHES" = "0" ] && [ "$P3_AP_UNKNOWN" = "f" ]; then
+  pass "Integrations P3: integration.accountant_package is owner/admin-only (member/viewer none), unknown still fails closed"
+else
+  fail "Integrations P3: accountant_package capability matrix wrong (cells=$P3_AP_MATRIX_MISMATCHES unknown=$P3_AP_UNKNOWN)"
+fi
+
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.space_member_capability_grants (workspace_id, user_id, capability) values ('$INT_HH', '$INT_VIEWER_USER', 'integration.accountant_package');" >/dev/null 2>$ARTIFACT_DIR/pfe_p3_apcap.log; then
+  pass "Integrations P3: the grants CHECK accepts integration.accountant_package"
+else
+  fail "Integrations P3: the grants CHECK rejected integration.accountant_package"
+fi
+rm -f $ARTIFACT_DIR/pfe_p3_apcap.log
+
+P3_AP="$(psql -d pfe_rls -t -A -c "insert into public.accountant_packages (workspace_id, created_by, period_start, period_end, status) values ('$INT_HH', '$USER_A', '2026-07-01', '2026-07-31', 'ready') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+P3_AP_MEMBER="$(as_user "$INT_MEMBER_USER" "select count(*) from public.accountant_packages where id = '$P3_AP';")"
+P3_AP_VIEWER="$(as_user "$INT_VIEWER_USER" "select count(*) from public.accountant_packages where id = '$P3_AP';")"
+P3_AP_OUTSIDER="$(as_user "$USER_B" "select count(*) from public.accountant_packages where id = '$P3_AP';")"
+if [ "$P3_AP_MEMBER" = "1" ] && [ "$P3_AP_VIEWER" = "0" ] && [ "$P3_AP_OUTSIDER" = "0" ]; then
+  pass "Integrations P3: accountant_packages is readable by a member with integration.view, hidden from a Space viewer and another tenant"
+else
+  fail "Integrations P3: accountant_packages RLS wrong (member=$P3_AP_MEMBER viewer=$P3_AP_VIEWER outsider=$P3_AP_OUTSIDER)"
+fi
+
+if as_user "$INT_MEMBER_USER" "insert into public.accountant_packages (workspace_id, created_by, period_start, period_end) values ('$INT_HH', '$INT_MEMBER_USER', '2026-07-01', '2026-07-31');" >/dev/null 2>$ARTIFACT_DIR/pfe_p3_ap.log; then
+  fail "Integrations P3: an authenticated user wrote to accountant_packages"
+else
+  pass "Integrations P3: accountant_packages INSERT is denied to authenticated (service-role only)"
+fi
+rm -f $ARTIFACT_DIR/pfe_p3_ap.log
+
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.accountant_packages (workspace_id, period_start, period_end) values ('$INT_HH', '2026-07-31', '2026-07-01');" >/dev/null 2>$ARTIFACT_DIR/pfe_p3_apperiod.log; then
+  fail "Integrations P3: accountant_packages accepted an inverted period"
+else
+  pass "Integrations P3: accountant_packages rejects period_end before period_start (accountant_packages_period_ordered)"
+fi
+rm -f $ARTIFACT_DIR/pfe_p3_apperiod.log
+
+P3_AP_BUCKET="$(psql -d pfe_rls -t -A -c "select count(*) from storage.buckets where id = 'integration-accountant-packages' and public = false;")"
+if [ "$P3_AP_BUCKET" = "1" ]; then
+  pass "Integrations P3: the private integration-accountant-packages storage bucket is registered (public = false)"
+else
+  fail "Integrations P3: integration-accountant-packages bucket missing or public (got $P3_AP_BUCKET)"
+fi
 
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="
