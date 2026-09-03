@@ -6,9 +6,8 @@ Function. ADR 0008 has the rationale; the migration
 `supabase/functions/capture/`, and the shared module
 `supabase/functions/_shared/pairing.ts` are the source of truth for behaviour.
 
-Status: **PR1 backend foundation.** Dark unless `DEVICE_PAIRING_V2=enabled`. No
-UI yet (the guided wizard is a follow-up). `ingest-momo` and the legacy
-`x-ingest-key` path are unchanged.
+Status: **PR1 backend + PR2 wizard.** Dark unless `DEVICE_PAIRING_V2=enabled`.
+`ingest-momo` and the legacy `x-ingest-key` path are unchanged.
 
 ## Roles
 
@@ -42,6 +41,39 @@ capture → 200 { "ok":true, "device_id":"<uuid>", "capture_url":"https://…/ca
 
 device: store device_secret + capture_url in Shortcut-local storage
 ```
+
+## Web wizard — `/integrations/connections/pair`
+
+Mobile-first. Runs entirely on the iPhone (Safari → Shortcuts → back to Safari);
+a desktop can drive it too but is never required. Gated by
+`devicePairingV2Enabled(process.env.DEVICE_PAIRING_V2)` — off ⇒ the route
+`redirect`s to `/integrations/connections`, and that page's "Connect iPhone" CTA is
+hidden (the manual `CreateConnectionForm` stays visible as before). On ⇒ the
+manual form moves under an "Advanced — manual setup" `<details>`.
+
+Steps (`web/components/PairWizard.tsx`):
+
+1. **Account** — which `accounts` row this phone feeds.
+2. **Install** — the OneLedger Capture Shortcut (`web/lib/capture-shortcut-guide.ts`,
+   rendered by the reused `ShortcutGuide`; "Get the ready-made Shortcut" button
+   when `NEXT_PUBLIC_MOMO_SHORTCUT_URL` is set).
+3. **Pair** — `startDevicePairing(accountId)` server action →
+   `requireMfaForSensitiveAction` → `generatePairingToken()` /
+   `hashPairingToken()` → `create_device_pairing_session`. Shows the `olp_` code
+   big + copyable, and an **Open OneLedger Capture** link
+   (`deviceCaptureShortcutRunUrl(token)` = `shortcuts://run-shortcut?name=OneLedger%20Capture&input=text&text=<token>`).
+   The wizard polls `getDevicePairingStatus(sessionId)` every 3 s and advances
+   itself on `consumed` — **no return URL from the Shortcut is needed**, however
+   the token reached the device. Past `expires_at` / `status="expired"` ⇒ "Get a
+   new code".
+4. **Automate** — the Apple-required Messages automation (static guidance;
+   `MOMO_SMS_SENDER` fills the sender when set).
+5. **Verify** — reuses `<ConnectionReadinessProbe credentialId={…} />`, which
+   polls `probeConnectorCredentialReadiness` and flips on `last_used_at` (set by
+   `op:"test"` or a real captured message). No synthetic send.
+
+The wizard never generates or displays the device secret — that is created by
+the Shortcut at `op:"pair"` time.
 
 ## `POST /capture`
 
@@ -113,7 +145,7 @@ numbers or workspace payloads. Events: `device_pairing_started`,
 
 | Name | Where | Effect |
 |---|---|---|
-| `DEVICE_PAIRING_V2` | Edge Function secret | exact `enabled` → the endpoint is live; otherwise 404 |
+| `DEVICE_PAIRING_V2` | Edge Function secret **and** web env | exact `enabled` → the `/capture` endpoint is live *and* the web wizard + "Connect iPhone" CTA appear; otherwise 404 / route redirects |
 | `ONELEDGER_CAPTURE_BASE_URL` | Edge Function secret | stable base (e.g. `https://api.oneledger.me/v1`) reported to devices as `capture_url`; falls back to the Supabase Functions URL |
 | `REPORT_CRON_SECRET` | web env | gates `POST /api/cron/expire-pairing-sessions` (`x-report-cron-secret`) |
 

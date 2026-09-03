@@ -462,3 +462,45 @@ Shortcut: `docs/oneledger-capture-shortcut.md`.
 - `deno test supabase/functions/_shared/tests supabase/functions/capture/tests`
   and `deno test web/lib` (`lib/pairing_test.ts`) all pass; `deno fmt`/`lint`/
   `check`, web `lint` / `tsc` / `next build --webpack` clean.
+
+---
+
+## PR9 — Device pairing wizard (web, mobile-first)
+
+**Problem.** PR8 shipped the pairing backend dark and headless — no way for a
+user to actually pair a phone.
+
+**Decisions.** Full contract in `docs/device-pairing.md` ("Web wizard").
+
+1. **`/integrations/connections/pair`** — a five-step wizard
+   (`web/components/PairWizard.tsx`) that runs start-to-finish **on the iPhone**:
+   choose account → install OneLedger Capture → pair (show `olp_` code + an
+   `shortcuts://run-shortcut` deep link, poll `getDevicePairingStatus` to
+   advance) → enable the Messages automation → verify (reuses
+   `ConnectionReadinessProbe`). A desktop can drive it too but is never
+   required; there is **no** "pair on computer, carry to phone" dependency.
+2. **Server actions** (`.../pair/actions.ts`): `startDevicePairing` (MFA-gated,
+   `generatePairingToken` → `create_device_pairing_session`) and
+   `getDevicePairingStatus` (RLS-scoped read). The wizard never sees the
+   device's own secret — the Shortcut generates that at `op:"pair"` time.
+3. **Gate** `devicePairingV2Enabled(process.env.DEVICE_PAIRING_V2)` — the same
+   exact-match var the Edge function reads, now read by the web app too. Off ⇒
+   the route redirects and the Connections page is byte-for-byte unchanged.
+4. **Advanced disclosure** — when the flag is on, the legacy
+   `CreateConnectionForm` + the raw endpoint guide move under a collapsed
+   "Advanced — manual setup" `<details>` (`AdvancedConnectionSetup.tsx`); the
+   primary CTA becomes "Connect iPhone".
+5. **`web/lib` additions** (pure, Deno-tested): `connectorKeyForProvider`,
+   `deviceCaptureShortcutRunUrl`, `devicePairingV2Enabled` in `pairing.ts`;
+   `capture-shortcut-guide.ts` (the thin-Shortcut steps, mirrors
+   `docs/oneledger-capture-shortcut.md`).
+
+**Not in this PR.** QR image + a cross-device session bridge (desktop users get
+the copyable code + a "open on your phone" line); the `op:"capture"` real
+message path; setup-funnel analytics; a `lib/onboarding.ts` checklist step; a
+published signed Shortcut.
+
+**Verification.** `deno test web/lib` (`pairing_test.ts` +
+`capture_shortcut_guide_test.ts`) pass; `npm run lint` (0 errors),
+`npx tsc --noEmit`, `npx next build --webpack` clean. Manual QA needs the local
+Supabase stack + `DEVICE_PAIRING_V2=enabled` — see `docs/device-pairing.md`.
