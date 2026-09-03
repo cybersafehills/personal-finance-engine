@@ -18,6 +18,7 @@ const KIND_LABELS: Record<FinancialInboxKind, string> = {
   needs_attribution: "Attribution",
   category_review: "Category",
   import_review: "Import",
+  sync_conflict: "Sync conflict",
   rule_suggestion: "Rule suggestion",
   budget_alert: "Budget",
 };

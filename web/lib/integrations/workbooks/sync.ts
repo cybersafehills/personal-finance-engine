@@ -6,6 +6,10 @@ import { buildExportDataset } from "../export/query.ts";
 import { datasetToSheetRows } from "../export/workbook.ts";
 import { normalizeSheetMap, type WorkbookProvider } from "./contract.ts";
 import { getWorkbookAdapter } from "./registry.ts";
+import {
+  diffWorkbookAgainstLedger,
+  type LedgerRowForDiff,
+} from "./diff.ts";
 
 export type WorkbookSyncResult =
   | { ok: true; syncRunId: string; counts: Record<string, number> }
@@ -102,43 +106,99 @@ export async function runWorkbookSync(
     });
   };
 
-  if (workbook.direction === "import") {
-    await finish("partial", { note: 0 }, { code: "inbound_not_wired" });
-    return { ok: false, error: "inbound sync is not available yet", syncRunId };
-  }
+  const doExport = workbook.direction === "export" ||
+    workbook.direction === "two_way";
+  const doImport = workbook.direction === "import" ||
+    workbook.direction === "two_way";
+  const sheetMap = normalizeSheetMap(workbook.sheet_map);
+  const adapter = getWorkbookAdapter(admin, {
+    provider,
+    workspaceId: input.workspaceId,
+    workbookId: workbook.id,
+  });
+  const counts: Record<string, number> = {};
+  let externalRef = workbook.external_ref as string | null;
 
   try {
-    const period = resolvePeriod({ kind: "relative", preset: "all" }, new Date());
-    const dataset = await buildExportDataset(
-      admin,
-      input.workspaceId,
-      { from: period.from, to: period.to, accountIds: null, directions: null },
-      period.label,
-    );
-    const sheets = datasetToSheetRows(dataset, normalizeSheetMap(workbook.sheet_map));
+    if (doExport) {
+      const period = resolvePeriod({ kind: "relative", preset: "all" }, new Date());
+      const dataset = await buildExportDataset(
+        admin,
+        input.workspaceId,
+        { from: period.from, to: period.to, accountIds: null, directions: null },
+        period.label,
+      );
+      const sheets = datasetToSheetRows(dataset, sheetMap);
+      const written = await adapter.writeAllSheets(externalRef, sheets);
+      externalRef = written.externalRef;
+      counts.updated = sheets.length;
+      counts.rows = dataset.transactions.length;
+    }
 
-    const adapter = getWorkbookAdapter(admin, {
-      provider,
-      workspaceId: input.workspaceId,
-      workbookId: workbook.id,
-    });
-    const written = await adapter.writeAllSheets(workbook.external_ref, sheets);
+    if (doImport) {
+      const sheets = await adapter.readAllSheets(externalRef);
+      const txnSheetName = sheetMap.transactions ?? "Transactions";
+      const txnSheet = sheets.find((s) => s.name === txnSheetName) ?? sheets[0];
+      const ledger = await loadLedgerForDiff(admin, input.workspaceId);
+      const diff = diffWorkbookAgainstLedger(txnSheet?.rows ?? [], ledger);
+      if (diff.conflicts.length > 0 && syncRunId) {
+        await admin.from("integration_conflicts").insert(
+          diff.conflicts.map((c) => ({
+            workspace_id: input.workspaceId,
+            sync_run_id: syncRunId,
+            connected_workbook_id: workbook.id,
+            ref_type: c.refType,
+            ref_id: c.refId,
+            field: c.field,
+            oneledger_value: c.oneledgerValue,
+            external_value: c.externalValue,
+            status: "open",
+          })),
+        );
+      }
+      counts.conflicts = diff.conflicts.length;
+      counts.matched = diff.matched;
+    }
 
-    const counts = {
-      updated: sheets.length,
-      rows: dataset.transactions.length,
-    };
-    await finish("succeeded", counts, null, written.externalRef);
+    await finish("succeeded", counts, null, externalRef ?? undefined);
     return { ok: true, syncRunId: syncRunId ?? "", counts };
   } catch (err) {
     const code = (err as { code?: string })?.code === "provider_not_configured"
       ? "provider_not_configured"
       : "workbook_sync_failed";
     const status = code === "provider_not_configured" ? "partial" : "failed";
-    await finish(status, { updated: 0 }, {
+    await finish(status, counts, {
       code,
       message: err instanceof Error ? err.message.slice(0, 200) : "failed",
     });
     return { ok: false, error: code, syncRunId };
   }
 }
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+async function loadLedgerForDiff(
+  admin: SupabaseClient,
+  workspaceId: string,
+): Promise<LedgerRowForDiff[]> {
+  const { data } = await admin
+    .from("transactions")
+    .select(
+      "id, occurred_at, counterparty_name, counterparty_reference, external_transaction_id, direction, amount_rwf, currency, category",
+    )
+    .eq("workspace_id", workspaceId)
+    .neq("dedupe_state", "merged")
+    .limit(20000);
+  return (data ?? []).map((t: any) => ({
+    id: t.id,
+    occurredAt: t.occurred_at,
+    description: t.counterparty_name ?? null,
+    reference: t.counterparty_reference ?? null,
+    externalId: t.external_transaction_id ?? null,
+    direction: t.direction,
+    amountMinor: t.amount_rwf,
+    currency: t.currency,
+    category: t.category ?? null,
+    accountName: null,
+  }));
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */

@@ -587,3 +587,145 @@ export async function disconnectWorkbook(
   revalidatePath("/integrations/sync");
   return { ok: true };
 }
+
+// --- workbook file upload (manual_file, inbound) + conflict resolution ------
+
+export async function uploadWorkbookFile(
+  workbookId: string,
+  formData: FormData,
+): Promise<SimpleResult> {
+  const access = await requireWorkbookAccess();
+  if (!access.ok) return access;
+  const admin = supabaseServer();
+
+  const { data: workbook } = await admin
+    .from("connected_workbooks")
+    .select("id, direction, destination_id")
+    .eq("id", workbookId)
+    .eq("workspace_id", access.workspaceId)
+    .maybeSingle();
+  if (!workbook) return { ok: false, error: "That workbook could not be found." };
+  const { data: destination } = await admin
+    .from("integration_destinations")
+    .select("provider")
+    .eq("id", workbook.destination_id)
+    .maybeSingle();
+  if (destination?.provider !== "manual_file") {
+    return { ok: false, error: "File upload is only for stored-file workbooks." };
+  }
+
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0) {
+    return { ok: false, error: "Choose an .xlsx file." };
+  }
+  if (!file.name.toLowerCase().endsWith(".xlsx")) {
+    return { ok: false, error: "Only .xlsx files are supported." };
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    return { ok: false, error: "That file is larger than the 10 MB limit." };
+  }
+
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const path = `${access.workspaceId}/${workbookId}.xlsx`;
+  const { error: uploadError } = await admin.storage
+    .from("integration-workbooks")
+    .upload(path, bytes, {
+      contentType:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      upsert: true,
+    });
+  if (uploadError) {
+    console.error("uploadWorkbookFile failed", uploadError.message);
+    return { ok: false, error: "Could not store the file." };
+  }
+  await admin
+    .from("connected_workbooks")
+    .update({ external_ref: path })
+    .eq("id", workbookId);
+
+  const result = await runWorkbookSync(admin, {
+    workbookId,
+    workspaceId: access.workspaceId,
+    trigger: "manual",
+  });
+  revalidatePath("/integrations/sync");
+  revalidatePath("/integrations/sync/conflicts");
+  return result.ok ? { ok: true } : { ok: false, error: result.error };
+}
+
+async function requireConflictAccess(): Promise<AccessOk | AccessErr> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!workspaceId || !isWorkbooksEnabled(workspaceId)) {
+    return { ok: false, error: "Conflict review isn’t enabled for this Space." };
+  }
+  const supabase = await supabaseSession();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "You need to be signed in." };
+  const { data: allowed, error } = await supabase.rpc("has_space_capability", {
+    p_workspace_id: workspaceId,
+    p_capability: "integration.conflict_resolve",
+  });
+  if (error || allowed !== true) {
+    return { ok: false, error: "You don’t have permission to resolve conflicts." };
+  }
+  return { ok: true, workspaceId, userId: user.id };
+}
+
+/** Keep-OneLedger / Ignore: a plain status update, no ledger write. */
+export async function resolveConflict(
+  conflictId: string,
+  resolution: "kept_oneledger" | "ignored",
+): Promise<SimpleResult> {
+  const access = await requireConflictAccess();
+  if (!access.ok) return access;
+  if (resolution !== "kept_oneledger" && resolution !== "ignored") {
+    return { ok: false, error: "Unknown resolution." };
+  }
+  const admin = supabaseServer();
+  const { error } = await admin
+    .from("integration_conflicts")
+    .update({
+      status: resolution,
+      resolved_by: access.userId,
+      resolved_at: new Date().toISOString(),
+    })
+    .eq("id", conflictId)
+    .eq("workspace_id", access.workspaceId)
+    .eq("status", "open");
+  if (error) return { ok: false, error: "Could not update the conflict." };
+  await admin.from("integration_events").insert({
+    workspace_id: access.workspaceId,
+    kind: "conflict.resolved",
+    severity: "info",
+    ref_type: "integration_conflict",
+    ref_id: conflictId,
+    summary: `Conflict ${resolution === "ignored" ? "ignored" : "kept as OneLedger"}`,
+    context: { actorUserId: access.userId, resolution },
+  });
+  revalidatePath("/integrations/sync/conflicts");
+  return { ok: true };
+}
+
+/** Accept external: applies one whitelisted field to the ledger via the RPC. */
+export async function applyConflict(conflictId: string): Promise<SimpleResult> {
+  const access = await requireConflictAccess();
+  if (!access.ok) return access;
+  const supabase = await supabaseSession();
+  const { error } = await supabase.rpc("apply_integration_conflict", {
+    p_conflict_id: conflictId,
+  });
+  if (error) {
+    console.error("applyConflict failed", error.message);
+    return {
+      ok: false,
+      error: error.message.includes("permission")
+        ? "You don’t have permission to resolve conflicts."
+        : "That conflict could not be applied.",
+    };
+  }
+  revalidatePath("/integrations/sync/conflicts");
+  revalidatePath("/transactions");
+  return { ok: true };
+}

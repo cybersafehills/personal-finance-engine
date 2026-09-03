@@ -23,6 +23,7 @@ import {
   listConnectedWorkbooks,
   listExportSchedules,
   listIntegrationDestinations,
+  listOpenConflicts,
   listSyncRuns,
 } from "../../../lib/integrations/queries";
 
@@ -59,7 +60,7 @@ export default async function SyncPage() {
     }))
     : [];
   const workbooksEnabled = isWorkbooksEnabled(workspaceId);
-  const [schedules, installations, destinations, workbooks, syncRuns] =
+  const [schedules, installations, destinations, workbooks, syncRuns, conflicts] =
     await Promise.all([
       listExportSchedules(),
       getCanonicalConnectorInstallations(),
@@ -68,6 +69,7 @@ export default async function SyncPage() {
       destinationsEnabled || workbooksEnabled
         ? listSyncRuns(15)
         : Promise.resolve([]),
+      workbooksEnabled ? listOpenConflicts() : Promise.resolve([]),
     ]);
 
   return (
@@ -152,6 +154,15 @@ export default async function SyncPage() {
           destinations={destinations.map((d) => ({ id: d.id, name: d.name }))}
         />
       </section>
+
+      {conflicts.length > 0 && (
+        <Link
+          href="/integrations/sync/conflicts"
+          className="mt-6 block rounded-card border border-attention/30 bg-attention-bg p-4 text-sm font-medium text-attention"
+        >
+          {conflicts.length} sync {conflicts.length === 1 ? "conflict" : "conflicts"} need a decision →
+        </Link>
+      )}
 
       {workbooksEnabled && (
         <section aria-labelledby="workbooks" className="mt-8">

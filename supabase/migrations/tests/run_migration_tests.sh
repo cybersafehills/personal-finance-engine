@@ -883,11 +883,13 @@ fi
 # Integrations Phase 1 PR4 (20261029000000) adds commit_import_batch and
 # rollback_import_batch (both integration.import_approve-gated SECURITY
 # DEFINER RPCs). = 91.
+# Integrations Phase 2 P2-PR5 (20261103000000) adds apply_integration_conflict
+# (integration.conflict_resolve-gated SECURITY DEFINER RPC). = 92.
 AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname = 'authenticated' where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "91" ]; then
-  pass "authenticated holds EXECUTE on exactly the 91 functions expected, no more"
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "92" ]; then
+  pass "authenticated holds EXECUTE on exactly the 92 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 91 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 92 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -4914,7 +4916,7 @@ fi
 # ===========================================================================
 echo "=== operational health snapshot ==="
 
-OPS_HEALTH_SHAPE="$(psql -d pfe_rls -t -A -c "set role service_role; with snapshot as (select public.get_operational_health_snapshot(60) as s) select (s ? 'captured_at') || '|' || (s ? 'window_minutes') || '|' || (s ? 'ingestion') || '|' || (s ? 'duplicates') || '|' || (s ? 'jobs') || '|' || (s ? 'email') || '|' || (s ? 'reconciliation') || '|' || (s ? 'integrations') || '|' || (jsonb_typeof(s->'ingestion'->'received') = 'number') || '|' || (jsonb_typeof(s->'integrations'->'export_jobs_stuck') = 'number') from snapshot;" | tail -1)"
+OPS_HEALTH_SHAPE="$(psql -d pfe_rls -t -A -c "set role service_role; with snapshot as (select public.get_operational_health_snapshot(60) as s) select (s ? 'captured_at') || '|' || (s ? 'window_minutes') || '|' || (s ? 'ingestion') || '|' || (s ? 'duplicates') || '|' || (s ? 'jobs') || '|' || (s ? 'email') || '|' || (s ? 'reconciliation') || '|' || (s ? 'integrations') || '|' || (jsonb_typeof(s->'ingestion'->'received') = 'number') || '|' || (jsonb_typeof(s->'integrations'->'open_conflicts') = 'number') from snapshot;" | tail -1)"
 if [ "$OPS_HEALTH_SHAPE" = "true|true|true|true|true|true|true|true|true|true" ] || [ "$OPS_HEALTH_SHAPE" = "t|t|t|t|t|t|t|t|t|t" ]; then
   pass "operational health returns aggregate metrics for all six monitored domains (incl. integrations)"
 else
@@ -5238,6 +5240,41 @@ if [ "$P2_DEST_MEMBER" = "1" ] && [ "$P2_RUN_MEMBER" = "1" ] && [ "$P2_DEST_VIEW
 else
   fail "Integrations P2: destinations RLS wrong (member d/r=$P2_DEST_MEMBER/$P2_RUN_MEMBER viewer=$P2_DEST_VIEWER outsider=$P2_DEST_OUTSIDER)"
 fi
+
+# ===========================================================================
+# Integrations Phase 2 (20261103000000): apply_integration_conflict.
+# Uses WORKSPACE_A (USER_A personal owner, has integration.conflict_resolve)
+# and USER_A's U_SRC / U_ACCT.
+# ===========================================================================
+echo "=== Integrations P2: apply_integration_conflict ==="
+
+P2_CTXN="$(psql -d pfe_rls -t -A -c "insert into public.transactions (source, financial_source_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version, counterparty_name, category) values ('manual', '$U_SRC', '$U_ACCT', '$WORKSPACE_A', 'other', 'out', 'success', 999, 0, '2026-08-25T09:00:00Z', 'test', 'Cafe', 'Meals') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+P2_CONF="$(psql -d pfe_rls -t -A -c "insert into public.integration_conflicts (workspace_id, ref_type, ref_id, field, oneledger_value, external_value, status) values ('$WORKSPACE_A', 'transaction', '$P2_CTXN', 'category', '\"Meals\"'::jsonb, '\"Coffee\"'::jsonb, 'open') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+P2_CONF_BAD="$(psql -d pfe_rls -t -A -c "insert into public.integration_conflicts (workspace_id, ref_type, ref_id, field, external_value, status) values ('$WORKSPACE_A', 'transaction', '$P2_CTXN', 'amount', '\"5\"'::jsonb, 'open') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+
+P2_APPLY="$(as_user "$USER_A" "select (j->>'applied')||','||(j->>'field') from (select public.apply_integration_conflict('$P2_CONF') as j) s;")"
+P2_TXN_CAT="$(psql -d pfe_rls -t -A -c "select category || '|' || category_source from public.transactions where id = '$P2_CTXN';")"
+P2_CONF_STATUS="$(psql -d pfe_rls -t -A -c "select status from public.integration_conflicts where id = '$P2_CONF';")"
+P2_CONF_AUDIT="$(psql -d pfe_rls -t -A -c "select count(*) from public.space_audit_events where workspace_id = '$WORKSPACE_A' and event_type = 'integration.conflict_resolved' and resource_id = '$P2_CONF';")"
+if [ "$P2_APPLY" = "true,category" ] && [ "$P2_TXN_CAT" = "Coffee|manual" ] && [ "$P2_CONF_STATUS" = "accepted_external" ] && [ "$P2_CONF_AUDIT" = "1" ]; then
+  pass "Integrations P2: apply_integration_conflict writes the whitelisted field, marks the conflict accepted_external, audits it"
+else
+  fail "Integrations P2: apply wrong (result=$P2_APPLY cat=$P2_TXN_CAT status=$P2_CONF_STATUS audit=$P2_CONF_AUDIT)"
+fi
+
+if as_user "$USER_B" "select public.apply_integration_conflict('$P2_CONF_BAD');" >/dev/null 2>$ARTIFACT_DIR/pfe_p2_conf.log; then
+  fail "Integrations P2: a non-member applied a conflict"
+else
+  pass "Integrations P2: apply_integration_conflict refuses a caller without integration.conflict_resolve"
+fi
+rm -f $ARTIFACT_DIR/pfe_p2_conf.log
+
+if as_user "$USER_A" "select public.apply_integration_conflict('$P2_CONF_BAD');" >/dev/null 2>$ARTIFACT_DIR/pfe_p2_conf2.log; then
+  fail "Integrations P2: apply_integration_conflict accepted a non-whitelisted field"
+else
+  pass "Integrations P2: apply_integration_conflict rejects a non-whitelisted field (amount)"
+fi
+rm -f $ARTIFACT_DIR/pfe_p2_conf2.log
 
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="

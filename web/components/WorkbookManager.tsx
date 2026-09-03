@@ -8,6 +8,7 @@ import {
   disconnectWorkbook,
   setWorkbookStatus,
   syncWorkbookNow,
+  uploadWorkbookFile,
 } from "../app/integrations/sync/actions";
 import { formatDateTime } from "../lib/format";
 import {
@@ -104,10 +105,27 @@ export function WorkbookManager({
                 <Badge variant={w.status === "active" ? "positive" : w.status === "error" ? "attention" : "neutral"}>
                   {w.status}
                 </Badge>
-                {w.direction !== "import" && (
-                  <button type="button" disabled={isPending} onClick={() => run(() => syncWorkbookNow(w.id), "Sync started.")} className="rounded-control border border-border-subtle bg-background px-3 py-1 text-sm font-medium disabled:opacity-50">
-                    Sync now
-                  </button>
+                <button type="button" disabled={isPending} onClick={() => run(() => syncWorkbookNow(w.id), "Sync started.")} className="rounded-control border border-border-subtle bg-background px-3 py-1 text-sm font-medium disabled:opacity-50">
+                  Sync now
+                </button>
+                {w.direction !== "export" && (
+                  <label className="rounded-control border border-border-subtle bg-background px-3 py-1 text-sm font-medium cursor-pointer">
+                    Upload edited
+                    <input
+                      type="file"
+                      accept=".xlsx"
+                      className="sr-only"
+                      disabled={isPending}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        const data = new FormData();
+                        data.set("file", file);
+                        run(() => uploadWorkbookFile(w.id, data), "File uploaded — checking for changes.");
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
                 )}
                 {w.externalRef && (
                   <a href={`/api/integrations/workbooks/${w.id}`} className="text-sm font-medium text-accent hover:underline">

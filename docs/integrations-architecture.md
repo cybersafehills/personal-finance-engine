@@ -324,6 +324,33 @@ RLS-scoped reads in `web/lib/integrations/queries.ts`.
   `GET /api/integrations/workbooks/[id]` → 10-min signed download of the
   `manual_file` xlsx.
 
+## Inbound changes + conflict review (P2-PR5, migration 20261103000000)
+
+- `workbooks/diff.ts` (**pure, tested**) — `diffWorkbookAgainstLedger`:
+  matches each external "Transactions" sheet row to a ledger row (by
+  external id, else amount+direction+day+description), emits a
+  `field_changed` conflict for a differing `category`/`description` and a
+  `row_only_in_workbook` conflict for an unmatched external row. **No
+  ledger write.**
+- `runWorkbookSync` now handles `import` / `two_way`: `readAllSheets` →
+  `diffWorkbookAgainstLedger` → insert `integration_conflicts` (status
+  `open`). `manual_file` reads the stored file; the `uploadWorkbookFile`
+  action lets the user re-upload an edited copy and re-runs the diff.
+- `apply_integration_conflict(p_conflict_id)` — `SECURITY DEFINER`,
+  `integration.conflict_resolve`-gated. Only `ref_type='transaction'` +
+  `field in ('category','description')`; sets that one field to the
+  external value (`category` also sets `category_source='manual'`), marks
+  the conflict `accepted_external`, audits `integration.conflict_resolved`.
+- Actions (`integration.conflict_resolve`): `resolveConflict`
+  (`kept_oneledger` / `ignored` — plain status update, no ledger write),
+  `applyConflict` (calls the RPC).
+- Surfaces: a `sync_conflict` Financial Inbox item (new
+  `FinancialInboxKind`), `/integrations/sync/conflicts` (`ConflictResolver`),
+  a banner + count on `/integrations/sync`.
+- `get_operational_health_snapshot` `integrations` block gains
+  `sync_runs_failed`, `sync_runs_stuck`, `open_conflicts`,
+  `oldest_open_conflict_age_seconds`, `destinations_needing_auth`.
+
 ## Feature flags
 
 `web/lib/integrations/gate.ts`, env-var convention shared with

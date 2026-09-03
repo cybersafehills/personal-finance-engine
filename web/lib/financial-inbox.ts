@@ -11,8 +11,11 @@ import {
 } from "./queries";
 import { isPaymentIntentSurfaceEnabled } from "./pay/gate";
 import { getReconciliationQueue } from "./pay/intents";
-import { isIntegrationsEnabled } from "./integrations/gate";
-import { listImportBatchesNeedingReview } from "./integrations/queries";
+import { isIntegrationsEnabled, isWorkbooksEnabled } from "./integrations/gate";
+import {
+  listImportBatchesNeedingReview,
+  listOpenConflicts,
+} from "./integrations/queries";
 import {
   buildFinancialInbox,
   type FinancialInbox,
@@ -34,6 +37,7 @@ export async function getFinancialInbox(): Promise<FinancialInbox> {
   const workspaceId = await getActiveWorkspaceId();
   const paymentEnabled = isPaymentIntentSurfaceEnabled(workspaceId);
   const integrationsEnabled = isIntegrationsEnabled(workspaceId);
+  const workbooksEnabled = isWorkbooksEnabled(workspaceId);
 
   const [
     categoryReview,
@@ -44,6 +48,7 @@ export async function getFinancialInbox(): Promise<FinancialInbox> {
     budgetSummary,
     reconciliation,
     importReviewBatches,
+    openConflicts,
   ] = await Promise.all([
     getReviewQueueTransactions(),
     getNeedsAttributionTransactions(),
@@ -57,6 +62,7 @@ export async function getFinancialInbox(): Promise<FinancialInbox> {
     integrationsEnabled
       ? listImportBatchesNeedingReview()
       : Promise.resolve([]),
+    workbooksEnabled ? listOpenConflicts() : Promise.resolve([]),
   ]);
 
   const items: FinancialInboxItem[] = [];
@@ -198,6 +204,21 @@ export async function getFinancialInbox(): Promise<FinancialInbox> {
       href: `/integrations/imports/${batch.id}`,
       actionableSince: batch.createdAt,
       affectedCount: needsReview + ready,
+    });
+  }
+
+  if (openConflicts.length > 0) {
+    const oldest = openConflicts[0];
+    items.push({
+      id: `sync-conflict:${oldest.workspaceId}`,
+      kind: "sync_conflict",
+      priority: "high",
+      title: "Sync conflicts need a decision",
+      description:
+        `${openConflicts.length} field ${openConflicts.length === 1 ? "difference" : "differences"} between OneLedger and a connected workbook.`,
+      href: "/integrations/sync/conflicts",
+      actionableSince: oldest.createdAt,
+      affectedCount: openConflicts.length,
     });
   }
 
