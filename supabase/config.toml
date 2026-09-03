@@ -472,6 +472,19 @@ verify_jwt = false
 enabled = true
 verify_jwt = false
 
+# Integrations Phase 3 (P3-PR2): the balance-reconciliation population job.
+# No JWT - an internal job invoked by the run-balance-reconciliation cron
+# with the service-role key as a bearer token, never by a browser. It is a
+# hard 404 until the exact-match Edge Function secret is set:
+#   BALANCE_RECONCILIATION_ENABLED = enabled
+# It only reads transactions and upserts balance_reconciliations (a
+# self-contained audit table), keyed by transaction_id so re-runs are
+# idempotent. Wire the schedule in the Dashboard (Edge Functions ->
+# Schedules) or via pg_cron once that is enabled - not scheduler-wired here.
+[functions.reconcile-balances]
+enabled = true
+verify_jwt = false
+
 [analytics]
 enabled = true
 port = 54327

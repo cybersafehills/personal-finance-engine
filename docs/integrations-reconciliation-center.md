@@ -15,14 +15,37 @@ row links to the screen that already owns that decision.
 | Sync conflicts | `web/lib/integrations/queries.ts` → `listOpenConflicts` | `/integrations/sync/conflicts` |
 
 A section renders as **"Coming soon"** (not "all clear") when its data source
-is gated off or not yet populated:
+is unavailable:
 
-- **Balance drift** is `available: false` until the P3-PR2 population job
-  (`supabase/functions/reconcile-balances` + the
-  `run-balance-reconciliation` cron) is shipped and activated — nothing
-  writes `balance_reconciliations` before that.
+- **Balance drift** reads `balance_reconciliations` (see the population job
+  below). It is `available: false` only if the read itself fails — an empty
+  result is a genuine "all clear".
 - **Payment matches** follows `isPaymentIntentSurfaceEnabled`.
 - **Sync conflicts** follows `isWorkbooksEnabled`.
+
+## Balance-drift population job (P3-PR2)
+
+`balance_reconciliations` has existed empty since Phase 3; P3-PR2 wires up a
+writer.
+
+- **Migration** `20261110000000_balance_reconciliation_access.sql` — adds an
+  authenticated `SELECT` policy scoped through
+  `account_id → accounts.workspace_id → is_workspace_member`. Writes stay
+  service-role only.
+- **Edge function** `supabase/functions/reconcile-balances/` — imports the
+  canonical `_shared/accounting.ts` + `_shared/reconciliation.ts` (never
+  reimplemented), runs `reconcileTransactions` per account with no opening
+  checkpoint (it bootstraps from the first reported balance), and **upserts
+  one row per checkpoint keyed by `transaction_id`** — idempotent re-runs.
+  Pure glue in `reconcile.ts` is unit-tested (`tests/reconcile_test.ts`).
+  Hard-404s unless the Edge secret `BALANCE_RECONCILIATION_ENABLED=enabled`
+  is set; requires the service-role key as a bearer token.
+- **Cron** `web/app/api/cron/run-balance-reconciliation/route.ts` —
+  `isAuthorizedCronRequest` + `BALANCE_RECONCILIATION_ENABLED === "true"`;
+  forwards an authenticated trigger to the function. **Not scheduler-wired**
+  (like every other cron here) — schedule the function directly in the
+  Supabase Dashboard (Edge Functions → Schedules) or via `pg_cron`.
+  Committed code is not proof the sweep is running.
 
 ## Code
 
@@ -44,7 +67,7 @@ is gated off or not yet populated:
 - Capability: viewing requires `integration.view` (enforced transitively by
   every underlying reader's own RLS — the Center adds no new table).
 
-## Not in this PR
+## Not yet
 
-Balance-drift data (P3-PR2). The Center already renders the section shell so
-turning the job on is the only change needed to light it up.
+The operational-health snapshot does not yet carry balance-drift metrics —
+that arrives with the P3-PR7 `get_operational_health_snapshot` extension.

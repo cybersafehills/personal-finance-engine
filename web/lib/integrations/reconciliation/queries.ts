@@ -10,6 +10,7 @@ import "server-only";
 import { getActiveWorkspaceId, getSpaceDuplicateReview } from "../../queries";
 import { isPaymentIntentSurfaceEnabled } from "../../pay/gate";
 import { getReconciliationQueue } from "../../pay/intents";
+import { supabaseSession } from "../../supabase-session-server";
 import { isWorkbooksEnabled } from "../gate";
 import { listOpenConflicts } from "../queries";
 import {
@@ -28,14 +29,39 @@ function earliest(values: (string | null | undefined)[]): string | null {
 }
 
 /**
- * Balance-drift snapshot. The `balance_reconciliations` table exists in
- * production but nothing populates it yet - the P3-PR2 edge function +
- * cron is what turns this section on. Until then it reports
- * `available: false`, which the Center renders as "coming soon" rather
- * than a misleading "all clear".
+ * Balance-drift snapshot from `balance_reconciliations` (populated by the
+ * P3-PR2 `reconcile-balances` job; RLS scopes rows to the caller's
+ * workspace accounts). Open = `mismatch` (the running balance disagrees
+ * with a reported one) or `pending_review` (an earlier unresolved pending
+ * transaction makes the checkpoint provisional). A hard `mismatch` is the
+ * urgent subset. `reconciled` / `insufficient_data` are not surfaced.
+ *
+ * Reports `available: false` only when the read itself fails (e.g. the
+ * migration granting SELECT has not been applied) - an empty result is a
+ * legitimate "all clear", not "coming soon".
  */
 export async function getBalanceMismatchSnapshot(): Promise<ReconSectionInput> {
-  return { key: "balance", openCount: 0, criticalCount: 0, available: false };
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("balance_reconciliations")
+    .select("status, created_at")
+    .in("status", ["mismatch", "pending_review"])
+    .order("created_at", { ascending: true })
+    .limit(500);
+
+  if (error) {
+    console.error("getBalanceMismatchSnapshot failed:", error.message);
+    return { key: "balance", openCount: 0, available: false };
+  }
+
+  const rows = (data ?? []) as { status: string; created_at: string }[];
+  return {
+    key: "balance",
+    openCount: rows.length,
+    criticalCount: rows.filter((r) => r.status === "mismatch").length,
+    oldestActionableAt: rows[0]?.created_at ?? null,
+    available: true,
+  };
 }
 
 async function getPaymentSnapshot(

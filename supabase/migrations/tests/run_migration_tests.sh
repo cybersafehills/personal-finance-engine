@@ -733,11 +733,14 @@ fi
 # connected_workbooks, integration_sync_runs and integration_conflicts with a
 # SELECT-only grant each; integration_destination_secrets gets NO authenticated
 # grant (service-role only). 122 + 4 = 126.
+# Integrations Phase 3 P3-PR2 (20261110000000) adds a SELECT grant on the
+# pre-existing balance_reconciliations table (writes stay service-role only -
+# the reconcile-balances edge function is the sole writer). 126 + 1 = 127.
 AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and grantee = 'authenticated';")"
-if [ "$AUTHENTICATED_GRANT_COUNT" = "126" ]; then
-  pass "authenticated holds exactly the 126 table grants expected, no more"
+if [ "$AUTHENTICATED_GRANT_COUNT" = "127" ]; then
+  pass "authenticated holds exactly the 127 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 126 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 127 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -5384,6 +5387,32 @@ else
   pass "Integrations P2: apply_integration_conflict rejects a non-whitelisted field (amount)"
 fi
 rm -f $ARTIFACT_DIR/pfe_p2_conf2.log
+
+# ===========================================================================
+# Integrations Phase 3 (20261110000000): balance_reconciliations read access.
+# A workspace member may SELECT reconciliation checkpoints for accounts in
+# their workspace; another tenant cannot; and authenticated still cannot
+# write (the reconcile-balances edge function is the sole writer).
+# ===========================================================================
+echo "=== Integrations P3: balance_reconciliations read access ==="
+
+P3_BRTXN="$(psql -d pfe_rls -t -A -c "insert into public.transactions (source, financial_source_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version, counterparty_name, balance_after_rwf) values ('manual', '$U_SRC', '$U_ACCT', '$WORKSPACE_A', 'other', 'out', 'success', 1200, 0, '2026-08-27T09:00:00Z', 'test', 'Shop', 8800) returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "insert into public.balance_reconciliations (account_id, transaction_id, expected_balance_rwf, reported_balance_rwf, difference_rwf, status, reason, calculated_at) values ('$U_ACCT', '$P3_BRTXN', 8900, 8800, -100, 'mismatch', 'expected_reported_disagree', now());" >/dev/null
+
+P3_BR_MEMBER="$(as_user "$USER_A" "select count(*) from public.balance_reconciliations where transaction_id = '$P3_BRTXN';")"
+P3_BR_OUTSIDER="$(as_user "$USER_B" "select count(*) from public.balance_reconciliations where transaction_id = '$P3_BRTXN';")"
+if [ "$P3_BR_MEMBER" = "1" ] && [ "$P3_BR_OUTSIDER" = "0" ]; then
+  pass "Integrations P3: balance_reconciliations is readable by the owning workspace's member, hidden from another tenant"
+else
+  fail "Integrations P3: balance_reconciliations RLS wrong (member=$P3_BR_MEMBER outsider=$P3_BR_OUTSIDER)"
+fi
+
+if as_user "$USER_A" "insert into public.balance_reconciliations (account_id, transaction_id, status, reason, calculated_at) values ('$U_ACCT', '$P3_BRTXN', 'insufficient_data', 'x', now());" >/dev/null 2>$ARTIFACT_DIR/pfe_p3_br.log; then
+  fail "Integrations P3: an authenticated user wrote to balance_reconciliations"
+else
+  pass "Integrations P3: balance_reconciliations INSERT is denied to authenticated (service-role only)"
+fi
+rm -f $ARTIFACT_DIR/pfe_p3_br.log
 
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="
