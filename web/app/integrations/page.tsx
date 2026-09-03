@@ -9,9 +9,11 @@ import {
   getIngestionConnections,
 } from "../../lib/queries";
 import {
+  isAccountantPackageEnabled,
   isExportCenterEnabled,
   isImportStudioEnabled,
   isIntegrationsEnabled,
+  isReconciliationCenterEnabled,
   isSyncEnabled,
 } from "../../lib/integrations/gate";
 import { getIntegrationActivity } from "../../lib/integrations/activity";
@@ -114,6 +116,8 @@ export default async function IntegrationsPage() {
   const importEnabled = isImportStudioEnabled(workspaceId);
   const exportEnabled = isExportCenterEnabled(workspaceId);
   const syncEnabled = isSyncEnabled(workspaceId);
+  const reconciliationEnabled = isReconciliationCenterEnabled(workspaceId);
+  const accountantEnabled = isAccountantPackageEnabled(workspaceId);
 
   return (
     <div>
@@ -261,6 +265,20 @@ export default async function IntegrationsPage() {
             body="Export transactions, income, and expenses as a structured Excel workbook or CSV."
             comingSoon={!exportEnabled}
           />
+          {reconciliationEnabled && (
+            <DataCard
+              href="/integrations/reconciliation"
+              title="Reconciliation"
+              body="Balance drift, unmatched payments, possible duplicates, and sync conflicts in one hub."
+            />
+          )}
+          {accountantEnabled && (
+            <DataCard
+              href="/integrations/accountant"
+              title="Accountant package"
+              body="A period-scoped ZIP — transactions, reconciliation summary, and a PDF cover — ready to hand off."
+            />
+          )}
           {syncEnabled && (
             <DataCard
               href="/integrations/sync"

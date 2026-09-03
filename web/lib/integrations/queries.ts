@@ -17,6 +17,19 @@ import type {
   ImportTemplate,
   IntegrationEvent,
 } from "./model.ts";
+import type {
+  AccountantPackage,
+  AccountantPackageFormat,
+  AccountantPackageManifest,
+  AccountantPackageStatus,
+} from "./accountant/model.ts";
+import {
+  type AccountingProviderKey,
+  type AccountMap,
+  type ConnectedLedger,
+  type LedgerStatus,
+  normalizeAccountMap,
+} from "./accounting/contract.ts";
 
 // RLS-scoped reads for the Integrations area. The database policies
 // (migration 20261027000000) already restrict every row to workspaces
@@ -271,6 +284,71 @@ export async function listExportJobs(limit = 50): Promise<ExportJob[]> {
     return [];
   }
   return (data ?? []).map(toExportJob);
+}
+
+const ACCOUNTANT_PACKAGE_COLUMNS =
+  "id, workspace_id, created_by, period_start, period_end, status, formats, storage_path, manifest, row_count, byte_size, error, requested_at, started_at, completed_at, created_at, updated_at";
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+function toAccountantPackage(row: any): AccountantPackage {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    createdBy: row.created_by ?? null,
+    periodStart: row.period_start,
+    periodEnd: row.period_end,
+    status: row.status as AccountantPackageStatus,
+    formats: (row.formats ?? []) as AccountantPackageFormat[],
+    storagePath: row.storage_path ?? null,
+    manifest: (row.manifest ?? {}) as AccountantPackageManifest,
+    rowCount: row.row_count ?? null,
+    byteSize: row.byte_size ?? null,
+    error: row.error ?? null,
+    requestedAt: row.requested_at,
+    startedAt: row.started_at ?? null,
+    completedAt: row.completed_at ?? null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
+export async function listAccountantPackages(
+  limit = 50,
+): Promise<AccountantPackage[]> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!workspaceId) return [];
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("accountant_packages")
+    .select(ACCOUNTANT_PACKAGE_COLUMNS)
+    .eq("workspace_id", workspaceId)
+    .order("requested_at", { ascending: false })
+    .limit(limit);
+  if (error) {
+    console.error("listAccountantPackages failed:", error.message);
+    return [];
+  }
+  return (data ?? []).map(toAccountantPackage);
+}
+
+export async function getAccountantPackage(
+  id: string,
+): Promise<AccountantPackage | null> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!workspaceId) return null;
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("accountant_packages")
+    .select(ACCOUNTANT_PACKAGE_COLUMNS)
+    .eq("id", id)
+    .eq("workspace_id", workspaceId)
+    .maybeSingle();
+  if (error || !data) {
+    if (error) console.error("getAccountantPackage failed:", error.message);
+    return null;
+  }
+  return toAccountantPackage(data);
 }
 
 export async function listExportTemplates(): Promise<ExportTemplate[]> {
@@ -569,6 +647,66 @@ export async function listConnectedWorkbooks(): Promise<ConnectedWorkbook[]> {
     return [];
   }
   return (data ?? []).map(toWorkbook);
+}
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+function toConnectedLedger(row: any): ConnectedLedger {
+  const dest = Array.isArray(row.destination)
+    ? row.destination[0]
+    : row.destination;
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    destinationId: row.destination_id,
+    provider: (dest?.provider ?? null) as AccountingProviderKey | null,
+    name: (dest?.name ?? "Ledger") as string,
+    externalRef: row.external_ref ?? null,
+    accountMap: normalizeAccountMap(row.account_map) as AccountMap,
+    direction: "export",
+    status: row.status as LedgerStatus,
+    lastSyncRunId: row.last_sync_run_id ?? null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
+const CONNECTED_LEDGER_SELECT =
+  "id, workspace_id, destination_id, external_ref, account_map, direction, status, last_sync_run_id, created_at, updated_at, destination:integration_destinations(provider, name)";
+
+export async function listConnectedLedgers(): Promise<ConnectedLedger[]> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!workspaceId) return [];
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("connected_ledgers")
+    .select(CONNECTED_LEDGER_SELECT)
+    .eq("workspace_id", workspaceId)
+    .order("created_at", { ascending: false });
+  if (error) {
+    console.error("listConnectedLedgers failed:", error.message);
+    return [];
+  }
+  return (data ?? []).map(toConnectedLedger);
+}
+
+export async function getConnectedLedger(
+  id: string,
+): Promise<ConnectedLedger | null> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!workspaceId) return null;
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("connected_ledgers")
+    .select(CONNECTED_LEDGER_SELECT)
+    .eq("id", id)
+    .eq("workspace_id", workspaceId)
+    .maybeSingle();
+  if (error || !data) {
+    if (error) console.error("getConnectedLedger failed:", error.message);
+    return null;
+  }
+  return toConnectedLedger(data);
 }
 
 export async function listSyncRuns(limit = 50): Promise<IntegrationSyncRun[]> {

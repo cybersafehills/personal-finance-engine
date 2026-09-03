@@ -109,3 +109,48 @@ export function isCloudStorageEnabled(workspaceId: string | null): boolean {
     envOptIn("INTEGRATIONS_CLOUD_STORAGE_ENABLED")
   );
 }
+
+// --- Phase 3 -----------------------------------------------------------------
+//
+//   INTEGRATIONS_RECONCILIATION_CENTER_ENABLED - the read-only surface that
+//     unifies balance drift, payment-intent matches, import duplicates and
+//     connected-workbook sync conflicts. On unless exactly "false".
+
+/** Reconciliation Center - a read-only hub over the existing review queues. */
+export function isReconciliationCenterEnabled(
+  workspaceId: string | null,
+): boolean {
+  return (
+    isIntegrationsEnabled(workspaceId) &&
+    envEnabled("INTEGRATIONS_RECONCILIATION_CENTER_ENABLED")
+  );
+}
+
+//   INTEGRATIONS_ACCOUNTANT_PACKAGE_ENABLED - the "Ready for Accountant"
+//     package (/integrations/accountant + its build cron). On unless
+//     exactly "false".
+
+/** "Ready for Accountant" package - period-scoped downloadable ZIP. */
+export function isAccountantPackageEnabled(
+  workspaceId: string | null,
+): boolean {
+  return (
+    isIntegrationsEnabled(workspaceId) &&
+    envEnabled("INTEGRATIONS_ACCOUNTANT_PACKAGE_ENABLED")
+  );
+}
+
+//   INTEGRATIONS_ACCOUNTING_CONNECTORS_ENABLED - the accounting destination
+//     type + connected ledgers (QuickBooks / Xero / Zoho Books / Odoo).
+//     OFF unless exactly "true"; each provider is additionally dark until
+//     its *_CLIENT_ID / *_SECRET env is set.
+
+/** Accounting connectors - opt-in with exactly "true". Requires Sync. */
+export function isAccountingConnectorsEnabled(
+  workspaceId: string | null,
+): boolean {
+  return (
+    isSyncEnabled(workspaceId) &&
+    envOptIn("INTEGRATIONS_ACCOUNTING_CONNECTORS_ENABLED")
+  );
+}

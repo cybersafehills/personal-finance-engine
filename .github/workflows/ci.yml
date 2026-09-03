@@ -62,6 +62,9 @@ jobs:
       - name: deno check (send-notifications entry point)
         run: deno check supabase/functions/send-notifications/index.ts
 
+      - name: deno check (reconcile-balances entry point)
+        run: deno check supabase/functions/reconcile-balances/index.ts
+
       - name: deno check (_shared entry points)
         run: |
           set -euo pipefail
@@ -74,6 +77,9 @@ jobs:
 
       - name: deno test (send-notifications)
         run: deno test supabase/functions/send-notifications/tests
+
+      - name: deno test (reconcile-balances)
+        run: deno test supabase/functions/reconcile-balances/tests
 
       - name: deno test (_shared)
         run: deno test supabase/functions/_shared/tests
