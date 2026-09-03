@@ -1576,7 +1576,7 @@ export async function getAttentionItems(): Promise<AttentionItem[]> {
         ? "Connection hasn't sent any data yet"
         : "Connections haven't sent any data yet",
       count: staleConnectionCount,
-      href: "/settings/connections",
+      href: "/integrations/connections",
     });
   }
 

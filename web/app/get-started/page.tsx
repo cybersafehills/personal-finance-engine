@@ -44,7 +44,7 @@ export default async function GetStartedPage() {
 
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
             <OnboardingChoiceLink
-              href="/settings/connections/setup"
+              href="/integrations/connections/setup"
             >
               <span className="block text-sm font-medium text-text-primary">
                 Link a device
@@ -54,7 +54,7 @@ export default async function GetStartedPage() {
               </span>
             </OnboardingChoiceLink>
             <OnboardingChoiceLink
-              href="/settings/connections"
+              href="/integrations/connections"
             >
               <span className="block text-sm font-medium text-text-primary">
                 Create a connection
@@ -147,7 +147,7 @@ export default async function GetStartedPage() {
         <p>
           Stuck on the Shortcut? See the{" "}
           <Link
-            href="/settings/connections/setup"
+            href="/integrations/connections/setup"
             className="font-medium text-accent hover:underline"
           >
             step-by-step setup guide

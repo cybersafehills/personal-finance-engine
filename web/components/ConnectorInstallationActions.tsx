@@ -6,7 +6,7 @@ import {
   renameConnectorInstallation,
   revokeConnectorInstallation,
   resumeConnectorInstallation,
-} from "../app/settings/connections/actions";
+} from "../app/integrations/connections/actions";
 import type { CanonicalConnectorInstallation } from "../lib/connector-read-model";
 
 type ActionResult = { ok: true } | { ok: false; error: string };

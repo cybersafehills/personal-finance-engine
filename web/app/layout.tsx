@@ -16,6 +16,7 @@ import {
   isPayServicesEnabled,
   isScanToPayEnabled,
 } from "../lib/pay/gate";
+import { isIntegrationsEnabled } from "../lib/integrations/gate";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -126,6 +127,8 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   const payEnabled = Boolean(user) && isPayServicesEnabled(activeWorkspaceId);
   const assistedPayEnabled = payEnabled && isAssistedPayEnabled(activeWorkspaceId);
   const scanToPayEnabled = payEnabled && isScanToPayEnabled(activeWorkspaceId);
+  const integrationsEnabled =
+    Boolean(user) && isIntegrationsEnabled(activeWorkspaceId);
 
   return (
     <html lang="en" className={`${geistSans.variable} h-full antialiased`}>
@@ -154,6 +157,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           payEnabled={payEnabled}
           assistedPayEnabled={assistedPayEnabled}
           scanToPayEnabled={scanToPayEnabled}
+          integrationsEnabled={integrationsEnabled}
           unreadNotificationCount={unreadNotificationCount}
         >
           {children}

@@ -6,7 +6,7 @@ into OneLedger automatically.
 > **Canonical source.** The step list and troubleshooting table below are
 > a readable mirror of `web/lib/shortcut-guide.ts`, which the app renders
 > at **Settings → Connections → Set up a device**
-> (`/settings/connections/setup`). Change the module; keep this file in
+> (`/integrations/connections/setup`). Change the module; keep this file in
 > step. `web/lib/shortcut-guide_test.ts` guards the module's structure and
 > that every troubleshooting row maps to a real `ingest-momo` response.
 

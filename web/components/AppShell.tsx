@@ -89,6 +89,7 @@ export function AppShell({
   payEnabled,
   assistedPayEnabled,
   scanToPayEnabled,
+  integrationsEnabled,
   unreadNotificationCount,
 }: {
   children: React.ReactNode;
@@ -102,6 +103,7 @@ export function AppShell({
   payEnabled: boolean;
   assistedPayEnabled: boolean;
   scanToPayEnabled: boolean;
+  integrationsEnabled: boolean;
   unreadNotificationCount: number;
 }) {
   const pathname = usePathname();
@@ -169,6 +171,7 @@ export function AppShell({
                 userEmail={userEmail}
                 workspaces={workspaces}
                 activeWorkspaceId={activeWorkspaceId}
+                integrationsEnabled={integrationsEnabled}
               />
             </div>
           </div>
@@ -235,6 +238,7 @@ export function AppShell({
             onClose={() => setMoreOpen(false)}
             payEnabled={payEnabled}
             assistedPayEnabled={assistedPayEnabled}
+            integrationsEnabled={integrationsEnabled}
           />
         </>
       )}

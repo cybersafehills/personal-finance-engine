@@ -34,7 +34,7 @@ off.
    path appears **only** here.
 
 3. **Endpoint URL is resolved server-side, once.**
-   `app/settings/connections/page.tsx` builds it from
+   `app/integrations/connections/page.tsx` builds it from
    `SUPABASE_URL ?? NEXT_PUBLIC_SUPABASE_URL` and passes it as a prop to
    `ConnectionItem` and `CreateConnectionForm`. No client component reads
    env; no dependency on `NEXT_PUBLIC_*` being set (it frequently isn't in
@@ -91,7 +91,7 @@ produce a signed `.shortcut` / iCloud link.
    (rows whose optional `responseKey` must exist in `INGEST_RESPONSE_HELP`
    — a test enforces this, tying the guide to PR1's contract module).
 
-2. **In-app guide at `/settings/connections/setup`.** Server component
+2. **In-app guide at `/integrations/connections/setup`.** Server component
    resolves the endpoint URL (same as the Connections page) and passes
    the built steps to `ShortcutGuide` (presentation only, reuses
    `CopyField` from `ConnectionDetails`). Linked from the Connections page
@@ -116,7 +116,7 @@ unconfirmed (placeholder + `MOMO_SMS_SENDER` override in place).
 
 **Manual verification.**
 
-- `/settings/connections/setup` renders 7 steps + troubleshooting table;
+- `/integrations/connections/setup` renders 7 steps + troubleshooting table;
   Step 3 shows the resolved endpoint URL with a copy button.
 - With `MOMO_SMS_SENDER` unset: placeholder + caveat box shown. With it
   set: real sender in Step 2, no caveat.

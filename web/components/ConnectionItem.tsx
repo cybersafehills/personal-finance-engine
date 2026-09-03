@@ -7,7 +7,7 @@ import {
   resumeConnection,
   revokeConnection,
   rotateConnection,
-} from "../app/settings/connections/actions";
+} from "../app/integrations/connections/actions";
 import { Badge } from "./Badge";
 import { RevealedSecret } from "./RevealedSecret";
 import { ConnectionDetails, ShortcutKeyInstructions } from "./ConnectionDetails";

@@ -620,10 +620,21 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # RLS-enabled aggregate table - 77 tables, 76 with RLS.
 # Connector adapter canaries (20261020000000) adds one service-only,
 # RLS-enabled installation allowlist - 79 tables, 78 with RLS.
+# Integrations Phase 1 PR1 (20261027000000) adds import_templates,
+# import_batches, import_records, export_templates, export_jobs and
+# integration_events - all RLS enabled, SELECT gated on the
+# integration.view capability, writes via service-role / PR2-5 RPCs -
+# 85 tables, 84 with RLS.
+# Integrations Phase 1 PR6 (20261031000000) adds export_schedules
+# (RLS enabled, SELECT gated on integration.view) - 86 tables, 85 with RLS.
+# Integrations Phase 2 P2-PR1 (20261101000000) adds integration_destinations,
+# integration_destination_secrets, connected_workbooks, integration_sync_runs
+# and integration_conflicts - all RLS enabled; the secrets table has zero
+# authenticated/anon grants - 91 tables, 90 with RLS.
 # Device pairing v2 (20261102000000) adds pairing_sessions (RLS enabled,
 # SELECT-own for authenticated) and connector_pairing_events (RLS enabled,
-# service-role-only, no authenticated policy) - 81 tables, 80 with RLS.
-if [ "$TABLE_COUNT" = "81" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# service-role-only, no authenticated policy) - 93 tables, 92 with RLS.
+if [ "$TABLE_COUNT" = "93" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -711,11 +722,22 @@ fi
 # for authenticated. 115 + 1 = 116. Connector Stage C routes connection
 # creation through an atomic RPC and revokes direct ingestion_connections
 # INSERT. 116 - 1 = 115.
+# Integrations Phase 1 PR1 (20261027000000) adds import_templates,
+# import_batches, import_records, export_templates, export_jobs and
+# integration_events - each with a SELECT-only grant for authenticated
+# (all writes go through service-role / PR2-5 SECURITY DEFINER RPCs).
+# 115 + 6 = 121.
+# Integrations Phase 1 PR6 (20261031000000) adds export_schedules with a
+# SELECT-only grant for authenticated. 121 + 1 = 122.
+# Integrations Phase 2 P2-PR1 (20261101000000) adds integration_destinations,
+# connected_workbooks, integration_sync_runs and integration_conflicts with a
+# SELECT-only grant each; integration_destination_secrets gets NO authenticated
+# grant (service-role only). 122 + 4 = 126.
 AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and grantee = 'authenticated';")"
-if [ "$AUTHENTICATED_GRANT_COUNT" = "115" ]; then
-  pass "authenticated holds exactly the 115 table grants expected, no more"
+if [ "$AUTHENTICATED_GRANT_COUNT" = "126" ]; then
+  pass "authenticated holds exactly the 126 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 115 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 126 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -861,15 +883,20 @@ fi
 # canonical settings cutover adds a readiness RPC and an installation-ID
 # pairing entry point. Profile onboarding adds three narrow authenticated
 # RPCs for its transactional stage writes. = 89.
+# Integrations Phase 1 PR4 (20261029000000) adds commit_import_batch and
+# rollback_import_batch (both integration.import_approve-gated SECURITY
+# DEFINER RPCs). = 91.
+# Integrations Phase 2 P2-PR5 (20261103000000) adds apply_integration_conflict
+# (integration.conflict_resolve-gated SECURITY DEFINER RPC). = 92.
 # Device pairing v2 (20261102000000) adds one authenticated RPC,
 # create_device_pairing_session. _enroll_ingestion_connection,
 # consume_device_pairing_session, and expire_stale_pairing_sessions are
-# service-role-only. = 90.
+# service-role-only. = 93.
 AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname = 'authenticated' where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "90" ]; then
-  pass "authenticated holds EXECUTE on exactly the 90 functions expected, no more"
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "93" ]; then
+  pass "authenticated holds EXECUTE on exactly the 93 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 90 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 93 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -4896,9 +4923,9 @@ fi
 # ===========================================================================
 echo "=== operational health snapshot ==="
 
-OPS_HEALTH_SHAPE="$(psql -d pfe_rls -t -A -c "set role service_role; with snapshot as (select public.get_operational_health_snapshot(60) as s) select (s ? 'captured_at') || '|' || (s ? 'window_minutes') || '|' || (s ? 'ingestion') || '|' || (s ? 'duplicates') || '|' || (s ? 'jobs') || '|' || (s ? 'email') || '|' || (s ? 'reconciliation') || '|' || (jsonb_typeof(s->'ingestion'->'received') = 'number') from snapshot;" | tail -1)"
-if [ "$OPS_HEALTH_SHAPE" = "true|true|true|true|true|true|true|true" ] || [ "$OPS_HEALTH_SHAPE" = "t|t|t|t|t|t|t|t" ]; then
-  pass "operational health returns aggregate metrics for all five monitored domains"
+OPS_HEALTH_SHAPE="$(psql -d pfe_rls -t -A -c "set role service_role; with snapshot as (select public.get_operational_health_snapshot(60) as s) select (s ? 'captured_at') || '|' || (s ? 'window_minutes') || '|' || (s ? 'ingestion') || '|' || (s ? 'duplicates') || '|' || (s ? 'jobs') || '|' || (s ? 'email') || '|' || (s ? 'reconciliation') || '|' || (s ? 'integrations') || '|' || (jsonb_typeof(s->'ingestion'->'received') = 'number') || '|' || (jsonb_typeof(s->'integrations'->'open_conflicts') = 'number') from snapshot;" | tail -1)"
+if [ "$OPS_HEALTH_SHAPE" = "true|true|true|true|true|true|true|true|true|true" ] || [ "$OPS_HEALTH_SHAPE" = "t|t|t|t|t|t|t|t|t|t" ]; then
+  pass "operational health returns aggregate metrics for all six monitored domains (incl. integrations)"
 else
   fail "operational health snapshot shape drifted ($OPS_HEALTH_SHAPE)"
 fi
@@ -5064,6 +5091,299 @@ if [ "$PAIR_ACL" = "true|false|false|false|false|false" ] || [ "$PAIR_ACL" = "t|
 else
   fail "Device pairing: privilege boundary is wrong ($PAIR_ACL)"
 fi
+
+# ===========================================================================
+# Integrations Phase 1 (20261026000000): the closed Spaces capability
+# catalog is extended with 8 integration.* capabilities. This verifies the
+# closed matrix for the new names (owner/admin all, member integration.view
+# only, viewer none, unknown integration.* fails closed) and that the
+# space_member_capability_grants CHECK moves in lockstep with the function.
+# Self-contained: its own household + member so it never depends on the
+# late state of earlier fixtures.
+# ===========================================================================
+echo "=== Integrations: integration.* capability catalog ==="
+
+INT_HH="$(as_user "$USER_A" "select public.create_household_workspace('Integrations Catalog HH');")"
+INT_MEMBER_USER="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('int-catalog-member@example.com') returning id;" | head -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.workspace_memberships (workspace_id, user_id, role, status, joined_at) values ('$INT_HH', '$INT_MEMBER_USER', 'member', 'active', now());" >/dev/null
+
+INT_MATRIX_MISMATCHES="$(psql -d pfe_rls -t -A -c "
+  with capabilities(capability) as (values
+    ('integration.view'), ('integration.import'),
+    ('integration.import_approve'), ('integration.export'),
+    ('integration.configure'), ('integration.connection_manage'),
+    ('integration.sync_manage'), ('integration.logs_view')
+  ),
+  cells(kind, role) as (values
+    ('household','owner'), ('household','admin'),
+    ('household','member'), ('household','viewer'),
+    ('personal','owner'), ('personal','member')
+  ),
+  expected as (
+    select c.kind, c.role, cap.capability,
+      case
+        when c.kind = 'personal' then c.role = 'owner'
+        when c.role in ('owner', 'admin') then true
+        when c.role = 'member' then cap.capability = 'integration.view'
+        else false
+      end as allowed
+    from cells c cross join capabilities cap
+  )
+  select count(*) from expected
+  where public.space_role_has_capability(kind, role, capability) is distinct from allowed;")"
+INT_UNKNOWN_OWNER="$(psql -d pfe_rls -t -A -c "select public.space_role_has_capability('household', 'owner', 'integration.bogus');")"
+INT_MEMBER_VIEW="$(as_user "$INT_MEMBER_USER" "select public.has_space_capability('$INT_HH', 'integration.view');")"
+INT_MEMBER_IMPORT="$(as_user "$INT_MEMBER_USER" "select public.has_space_capability('$INT_HH', 'integration.import');")"
+if [ "$INT_MATRIX_MISMATCHES" = "0" ] && [ "$INT_UNKNOWN_OWNER" = "f" ] && [ "$INT_MEMBER_VIEW" = "t" ] && [ "$INT_MEMBER_IMPORT" = "f" ]; then
+  pass "Integrations: 48 integration.* role/capability cells match (owner/admin all, member view-only, viewer none, unknown fails closed)"
+else
+  fail "Integrations: integration.* matrix mismatch (cells=$INT_MATRIX_MISMATCHES unknown_owner=$INT_UNKNOWN_OWNER member_view=$INT_MEMBER_VIEW member_import=$INT_MEMBER_IMPORT)"
+fi
+
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.space_member_capability_grants (workspace_id, user_id, capability) values ('$INT_HH', '$INT_MEMBER_USER', 'integration.export');" >/dev/null 2>$ARTIFACT_DIR/pfe_int_grant.log; then
+  psql -d pfe_rls -c "set role service_role; delete from public.space_member_capability_grants where workspace_id = '$INT_HH' and user_id = '$INT_MEMBER_USER' and capability = 'integration.export';" >/dev/null
+  pass "Integrations: the grants CHECK accepts a known integration.* capability"
+else
+  fail "Integrations: the grants CHECK rejected integration.export"
+fi
+rm -f $ARTIFACT_DIR/pfe_int_grant.log
+
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.space_member_capability_grants (workspace_id, user_id, capability) values ('$INT_HH', '$INT_MEMBER_USER', 'integration.bogus');" >/dev/null 2>$ARTIFACT_DIR/pfe_int_bogus.log; then
+  fail "Integrations: the grants CHECK accepted an unknown integration.* capability"
+else
+  pass "Integrations: the grants CHECK rejects a capability outside the extended catalog"
+fi
+rm -f $ARTIFACT_DIR/pfe_int_bogus.log
+
+# ===========================================================================
+# Integrations Phase 1 (20261027000000): the import/export data model.
+# RLS is SELECT-only for authenticated and gated on integration.view, so a
+# Space viewer sees nothing and another tenant sees nothing. Also proves
+# transactions accepts source='import' with import_batch_id lineage and
+# rejects import_batch_id on a non-import row. Reuses INT_HH (USER_A owner,
+# INT_MEMBER_USER member) plus USER_A's personal WORKSPACE_A / U_SRC / U_ACCT.
+# ===========================================================================
+echo "=== Integrations: import/export model + RLS ==="
+
+INT_VIEWER_USER="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('int-catalog-viewer@example.com') returning id;" | head -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.workspace_memberships (workspace_id, user_id, role, status, joined_at) values ('$INT_HH', '$INT_VIEWER_USER', 'viewer', 'active', now());" >/dev/null
+
+INT_BATCH="$(psql -d pfe_rls -t -A -c "insert into public.import_batches (workspace_id, created_by, source_kind, original_filename, status) values ('$INT_HH', '$USER_A', 'csv', 'august.csv', 'uploaded') returning id;" | head -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.import_records (import_batch_id, workspace_id, row_index, status) values ('$INT_BATCH', '$INT_HH', 0, 'needs_mapping');" >/dev/null
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.integration_events (workspace_id, kind, summary) values ('$INT_HH', 'import.uploaded', 'august.csv uploaded');" >/dev/null
+
+INT_MEMBER_SEES_BATCH="$(as_user "$INT_MEMBER_USER" "select count(*) from public.import_batches where id = '$INT_BATCH';")"
+INT_MEMBER_SEES_RECORD="$(as_user "$INT_MEMBER_USER" "select count(*) from public.import_records where import_batch_id = '$INT_BATCH';")"
+INT_MEMBER_SEES_EVENT="$(as_user "$INT_MEMBER_USER" "select count(*) from public.integration_events where workspace_id = '$INT_HH';")"
+INT_VIEWER_SEES="$(as_user "$INT_VIEWER_USER" "select count(*) from public.import_batches where id = '$INT_BATCH';")"
+INT_OUTSIDER_SEES="$(as_user "$USER_B" "select count(*) from public.import_batches where id = '$INT_BATCH';")"
+if [ "$INT_MEMBER_SEES_BATCH" = "1" ] && [ "$INT_MEMBER_SEES_RECORD" = "1" ] && [ "$INT_MEMBER_SEES_EVENT" = "1" ] && [ "$INT_VIEWER_SEES" = "0" ] && [ "$INT_OUTSIDER_SEES" = "0" ]; then
+  pass "Integrations: import_batches/records/events are readable by a member with integration.view, hidden from a Space viewer and from another tenant"
+else
+  fail "Integrations: import model RLS wrong (member b/r/e=$INT_MEMBER_SEES_BATCH/$INT_MEMBER_SEES_RECORD/$INT_MEMBER_SEES_EVENT viewer=$INT_VIEWER_SEES outsider=$INT_OUTSIDER_SEES)"
+fi
+
+# a member cannot write directly - every write is a service-role / RPC path.
+if as_user "$INT_MEMBER_USER" "insert into public.import_batches (workspace_id, created_by, source_kind, original_filename) values ('$INT_HH', '$INT_MEMBER_USER', 'csv', 'sneaky.csv');" >/dev/null 2>$ARTIFACT_DIR/pfe_int_write.log; then
+  fail "Integrations: a member inserted directly into import_batches (should be RPC/service-role only)"
+else
+  pass "Integrations: import_batches has no authenticated INSERT path"
+fi
+rm -f $ARTIFACT_DIR/pfe_int_write.log
+
+# transactions carries import lineage.
+INT_LEDGER_BATCH="$(psql -d pfe_rls -t -A -c "insert into public.import_batches (workspace_id, created_by, source_kind, original_filename, status) values ('$WORKSPACE_A', '$USER_A', 'csv', 'ledger.csv', 'imported') returning id;" | head -1)"
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.transactions (source, import_batch_id, financial_source_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version)
+  values ('import', '$INT_LEDGER_BATCH', '$U_SRC', '$U_ACCT', '$WORKSPACE_A', 'merchant_payment', 'out', 'success', 4200, 0, '2026-08-23T10:00:00Z', 'import-v1');" >/dev/null 2>$ARTIFACT_DIR/pfe_int_txn.log; then
+  pass "Integrations: transactions accepts source='import' with import_batch_id and no momo_message_id"
+else
+  fail "Integrations: a valid source='import' transaction was rejected ($(cat $ARTIFACT_DIR/pfe_int_txn.log))"
+fi
+rm -f $ARTIFACT_DIR/pfe_int_txn.log
+
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.transactions (source, import_batch_id, financial_source_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version)
+  values ('manual', '$INT_LEDGER_BATCH', '$U_SRC', '$U_ACCT', '$WORKSPACE_A', 'merchant_payment', 'out', 'success', 100, 0, '2026-08-23T11:00:00Z', 'import-v1');" >/dev/null 2>$ARTIFACT_DIR/pfe_int_txn2.log; then
+  fail "Integrations: import_batch_id was accepted on a source='manual' row (transactions_import_batch_only_for_import missing)"
+else
+  pass "Integrations: import_batch_id is rejected on a non-import transaction"
+fi
+rm -f $ARTIFACT_DIR/pfe_int_txn2.log
+
+# 20261028000000: the private import-source bucket exists and is not public.
+INT_BUCKET="$(psql -d pfe_rls -t -A -c "select count(*) from storage.buckets where id = 'integration-imports' and public = false;")"
+if [ "$INT_BUCKET" = "1" ]; then
+  pass "Integrations: the private integration-imports storage bucket is registered (public = false)"
+else
+  fail "Integrations: integration-imports bucket missing or public (got $INT_BUCKET)"
+fi
+
+# ===========================================================================
+# Integrations Phase 1 (20261029000000): commit_import_batch /
+# rollback_import_batch. Uses WORKSPACE_A (USER_A personal owner) and
+# USER_A's U_SRC -> U_ACCT from the Phase U PR7 fixture.
+# ===========================================================================
+echo "=== Integrations: commit / rollback import batch ==="
+
+INT_CB="$(psql -d pfe_rls -t -A -c "insert into public.import_batches (workspace_id, financial_source_id, created_by, source_kind, original_filename, status) values ('$WORKSPACE_A', '$U_SRC', '$USER_A', 'csv', 'commit.csv', 'validated') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "insert into public.import_records (import_batch_id, workspace_id, row_index, status, normalized) values ('$INT_CB', '$WORKSPACE_A', 0, 'ready', '{\"occurred_at\":\"2026-08-09T09:00:00Z\",\"amount_minor\":1500,\"direction\":\"out\",\"merchant\":\"UNIQUE MERCHANT\"}'::jsonb), ('$INT_CB', '$WORKSPACE_A', 1, 'ready', '{\"occurred_at\":\"2026-08-10T09:00:00Z\",\"amount_minor\":4200,\"direction\":\"out\",\"merchant\":\"DUP MERCHANT\"}'::jsonb), ('$INT_CB', '$WORKSPACE_A', 2, 'invalid', '{}'::jsonb);" >/dev/null
+
+INT_DUP_FP="$(psql -d pfe_rls -t -A -c "set role service_role; select public.compute_transaction_fingerprint('mtn_momo','',4200,'RWF','out','DUP MERCHANT','2026-08-10T09:00:00Z'::timestamptz);" | tail -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "insert into public.transactions (source, financial_source_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version, counterparty_name, dedupe_fingerprint) values ('manual', '$U_SRC', '$U_ACCT', '$WORKSPACE_A', 'other', 'out', 'success', 4200, 0, '2026-08-10T09:00:00Z', 'test', 'DUP MERCHANT', '$INT_DUP_FP');" >/dev/null
+
+INT_COMMIT="$(as_user "$USER_A" "select (j->>'created')||','||(j->>'flagged_possible_duplicate')||','||(j->>'skipped') from (select public.commit_import_batch('$INT_CB') as j) s;")"
+INT_TXN_COUNT="$(psql -d pfe_rls -t -A -c "select count(*) from public.transactions where import_batch_id = '$INT_CB' and source = 'import';")"
+INT_DUP_STATE="$(psql -d pfe_rls -t -A -c "select count(*) from public.transactions where import_batch_id = '$INT_CB' and dedupe_state = 'possible_duplicate';")"
+INT_BATCH_STATUS="$(psql -d pfe_rls -t -A -c "select status from public.import_batches where id = '$INT_CB';")"
+INT_COMMIT_AUDIT="$(psql -d pfe_rls -t -A -c "select count(*) from public.space_audit_events where workspace_id = '$WORKSPACE_A' and event_type = 'import.committed' and resource_id = '$INT_CB';")"
+if [ "$INT_COMMIT" = "2,1,0" ] && [ "$INT_TXN_COUNT" = "2" ] && [ "$INT_DUP_STATE" = "1" ] && [ "$INT_BATCH_STATUS" = "imported" ] && [ "$INT_COMMIT_AUDIT" = "1" ]; then
+  pass "Integrations: commit_import_batch creates one transaction per ready row, flags the Space fingerprint match, sets the batch imported, audits import.committed"
+else
+  fail "Integrations: commit wrong (result=$INT_COMMIT txns=$INT_TXN_COUNT dup=$INT_DUP_STATE status=$INT_BATCH_STATUS audit=$INT_COMMIT_AUDIT)"
+fi
+
+INT_RECOMMIT="$(as_user "$USER_A" "select (j->>'created') from (select public.commit_import_batch('$INT_CB') as j) s;")"
+INT_TXN_COUNT2="$(psql -d pfe_rls -t -A -c "select count(*) from public.transactions where import_batch_id = '$INT_CB';")"
+if [ "$INT_RECOMMIT" = "0" ] && [ "$INT_TXN_COUNT2" = "2" ]; then
+  pass "Integrations: re-committing the same batch is a no-op (payload_hash idempotency)"
+else
+  fail "Integrations: re-commit not idempotent (created=$INT_RECOMMIT txns=$INT_TXN_COUNT2)"
+fi
+
+if as_user "$USER_B" "select public.commit_import_batch('$INT_CB');" >/dev/null 2>$ARTIFACT_DIR/pfe_int_commit.log; then
+  fail "Integrations: a non-member committed an import batch"
+else
+  pass "Integrations: commit_import_batch refuses a caller without integration.import_approve"
+fi
+rm -f $ARTIFACT_DIR/pfe_int_commit.log
+
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "update public.transactions set category = 'Coffee', category_source = 'manual' where import_batch_id = '$INT_CB' and dedupe_state = 'unique';" >/dev/null
+INT_ROLLBACK="$(as_user "$USER_A" "select (j->>'removed')||','||(j->>'retained')||','||(j->>'complete') from (select public.rollback_import_batch('$INT_CB') as j) s;")"
+INT_LEFT="$(psql -d pfe_rls -t -A -c "select count(*) from public.transactions where import_batch_id = '$INT_CB';")"
+INT_RB_STATUS="$(psql -d pfe_rls -t -A -c "select status from public.import_batches where id = '$INT_CB';")"
+INT_RB_AUDIT="$(psql -d pfe_rls -t -A -c "select count(*) from public.space_audit_events where workspace_id = '$WORKSPACE_A' and event_type = 'import.rolled_back' and resource_id = '$INT_CB';")"
+if [ "$INT_ROLLBACK" = "1,1,false" ] && [ "$INT_LEFT" = "1" ] && [ "$INT_RB_STATUS" = "imported" ] && [ "$INT_RB_AUDIT" = "1" ]; then
+  pass "Integrations: rollback_import_batch removes untouched rows, retains the hand-edited one, keeps the batch imported, audits import.rolled_back"
+else
+  fail "Integrations: rollback wrong (result=$INT_ROLLBACK left=$INT_LEFT status=$INT_RB_STATUS audit=$INT_RB_AUDIT)"
+fi
+
+# 20261030000000: the private export bucket exists and is not public.
+INT_EXP_BUCKET="$(psql -d pfe_rls -t -A -c "select count(*) from storage.buckets where id = 'integration-exports' and public = false;")"
+if [ "$INT_EXP_BUCKET" = "1" ]; then
+  pass "Integrations: the private integration-exports storage bucket is registered (public = false)"
+else
+  fail "Integrations: integration-exports bucket missing or public (got $INT_EXP_BUCKET)"
+fi
+
+# 20261031000000: export_schedules RLS mirrors the rest of the model.
+INT_SCHED="$(psql -d pfe_rls -t -A -c "insert into public.export_schedules (workspace_id, created_by, name, cadence, hour, next_run_at) values ('$INT_HH', '$USER_A', 'Monthly', 'monthly', 6, now() + interval '1 day') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+INT_SCHED_MEMBER="$(as_user "$INT_MEMBER_USER" "select count(*) from public.export_schedules where id = '$INT_SCHED';")"
+INT_SCHED_VIEWER="$(as_user "$INT_VIEWER_USER" "select count(*) from public.export_schedules where id = '$INT_SCHED';")"
+INT_SCHED_OUTSIDER="$(as_user "$USER_B" "select count(*) from public.export_schedules where id = '$INT_SCHED';")"
+if [ "$INT_SCHED_MEMBER" = "1" ] && [ "$INT_SCHED_VIEWER" = "0" ] && [ "$INT_SCHED_OUTSIDER" = "0" ]; then
+  pass "Integrations: export_schedules is readable by a member with integration.view, hidden from a Space viewer and another tenant"
+else
+  fail "Integrations: export_schedules RLS wrong (member=$INT_SCHED_MEMBER viewer=$INT_SCHED_VIEWER outsider=$INT_SCHED_OUTSIDER)"
+fi
+
+# ===========================================================================
+# Integrations Phase 2 (20261101000000): destinations / workbooks / sync
+# runs / conflicts + the 3 new capabilities.
+# ===========================================================================
+echo "=== Integrations P2: destinations model + capabilities ==="
+
+P2_MATRIX_MISMATCHES="$(psql -d pfe_rls -t -A -c "
+  with capabilities(capability) as (values
+    ('integration.destination_manage'), ('integration.workbook_manage'),
+    ('integration.conflict_resolve')
+  ),
+  cells(kind, role) as (values
+    ('household','owner'), ('household','admin'),
+    ('household','member'), ('household','viewer'),
+    ('personal','owner'), ('personal','member')
+  ),
+  expected as (
+    select c.kind, c.role, cap.capability,
+      case
+        when c.kind = 'personal' then c.role = 'owner'
+        when c.role in ('owner', 'admin') then true
+        else false
+      end as allowed
+    from cells c cross join capabilities cap
+  )
+  select count(*) from expected
+  where public.space_role_has_capability(kind, role, capability) is distinct from allowed;")"
+P2_UNKNOWN="$(psql -d pfe_rls -t -A -c "select public.space_role_has_capability('household', 'owner', 'integration.bogus2');")"
+if [ "$P2_MATRIX_MISMATCHES" = "0" ] && [ "$P2_UNKNOWN" = "f" ]; then
+  pass "Integrations P2: the 3 new integration.* capabilities are owner/admin-only (member/viewer none), unknown still fails closed"
+else
+  fail "Integrations P2: capability matrix wrong (cells=$P2_MATRIX_MISMATCHES unknown=$P2_UNKNOWN)"
+fi
+
+P2_SECRET_GRANTS="$(psql -d pfe_rls -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and table_name='integration_destination_secrets' and grantee in ('anon','authenticated');")"
+if [ "$P2_SECRET_GRANTS" = "0" ]; then
+  pass "Integrations P2: integration_destination_secrets has zero anon/authenticated grants (service-role only)"
+else
+  fail "Integrations P2: integration_destination_secrets exposes $P2_SECRET_GRANTS anon/authenticated grant(s)"
+fi
+
+P2_WB_BUCKET="$(psql -d pfe_rls -t -A -c "select count(*) from storage.buckets where id = 'integration-workbooks' and public = false;")"
+if [ "$P2_WB_BUCKET" = "1" ]; then
+  pass "Integrations P2: the private integration-workbooks storage bucket is registered (public = false)"
+else
+  fail "Integrations P2: integration-workbooks bucket missing or public (got $P2_WB_BUCKET)"
+fi
+
+P2_DEST="$(psql -d pfe_rls -t -A -c "insert into public.integration_destinations (workspace_id, created_by, name, kind) values ('$INT_HH', '$USER_A', 'Accountant webhook', 'webhook') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "insert into public.integration_sync_runs (workspace_id, destination_id, trigger) values ('$INT_HH', '$P2_DEST', 'manual');" >/dev/null
+P2_DEST_MEMBER="$(as_user "$INT_MEMBER_USER" "select count(*) from public.integration_destinations where id = '$P2_DEST';")"
+P2_RUN_MEMBER="$(as_user "$INT_MEMBER_USER" "select count(*) from public.integration_sync_runs where destination_id = '$P2_DEST';")"
+P2_DEST_VIEWER="$(as_user "$INT_VIEWER_USER" "select count(*) from public.integration_destinations where id = '$P2_DEST';")"
+P2_DEST_OUTSIDER="$(as_user "$USER_B" "select count(*) from public.integration_destinations where id = '$P2_DEST';")"
+if [ "$P2_DEST_MEMBER" = "1" ] && [ "$P2_RUN_MEMBER" = "1" ] && [ "$P2_DEST_VIEWER" = "0" ] && [ "$P2_DEST_OUTSIDER" = "0" ]; then
+  pass "Integrations P2: destinations + sync_runs readable by a member with integration.view, hidden from a Space viewer and another tenant"
+else
+  fail "Integrations P2: destinations RLS wrong (member d/r=$P2_DEST_MEMBER/$P2_RUN_MEMBER viewer=$P2_DEST_VIEWER outsider=$P2_DEST_OUTSIDER)"
+fi
+
+# ===========================================================================
+# Integrations Phase 2 (20261103000000): apply_integration_conflict.
+# Uses WORKSPACE_A (USER_A personal owner, has integration.conflict_resolve)
+# and USER_A's U_SRC / U_ACCT.
+# ===========================================================================
+echo "=== Integrations P2: apply_integration_conflict ==="
+
+P2_CTXN="$(psql -d pfe_rls -t -A -c "insert into public.transactions (source, financial_source_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version, counterparty_name, category) values ('manual', '$U_SRC', '$U_ACCT', '$WORKSPACE_A', 'other', 'out', 'success', 999, 0, '2026-08-25T09:00:00Z', 'test', 'Cafe', 'Meals') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+P2_CONF="$(psql -d pfe_rls -t -A -c "insert into public.integration_conflicts (workspace_id, ref_type, ref_id, field, oneledger_value, external_value, status) values ('$WORKSPACE_A', 'transaction', '$P2_CTXN', 'category', '\"Meals\"'::jsonb, '\"Coffee\"'::jsonb, 'open') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+P2_CONF_BAD="$(psql -d pfe_rls -t -A -c "insert into public.integration_conflicts (workspace_id, ref_type, ref_id, field, external_value, status) values ('$WORKSPACE_A', 'transaction', '$P2_CTXN', 'amount', '\"5\"'::jsonb, 'open') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+
+P2_APPLY="$(as_user "$USER_A" "select (j->>'applied')||','||(j->>'field') from (select public.apply_integration_conflict('$P2_CONF') as j) s;")"
+P2_TXN_CAT="$(psql -d pfe_rls -t -A -c "select category || '|' || category_source from public.transactions where id = '$P2_CTXN';")"
+P2_CONF_STATUS="$(psql -d pfe_rls -t -A -c "select status from public.integration_conflicts where id = '$P2_CONF';")"
+P2_CONF_AUDIT="$(psql -d pfe_rls -t -A -c "select count(*) from public.space_audit_events where workspace_id = '$WORKSPACE_A' and event_type = 'integration.conflict_resolved' and resource_id = '$P2_CONF';")"
+if [ "$P2_APPLY" = "true,category" ] && [ "$P2_TXN_CAT" = "Coffee|manual" ] && [ "$P2_CONF_STATUS" = "accepted_external" ] && [ "$P2_CONF_AUDIT" = "1" ]; then
+  pass "Integrations P2: apply_integration_conflict writes the whitelisted field, marks the conflict accepted_external, audits it"
+else
+  fail "Integrations P2: apply wrong (result=$P2_APPLY cat=$P2_TXN_CAT status=$P2_CONF_STATUS audit=$P2_CONF_AUDIT)"
+fi
+
+if as_user "$USER_B" "select public.apply_integration_conflict('$P2_CONF_BAD');" >/dev/null 2>$ARTIFACT_DIR/pfe_p2_conf.log; then
+  fail "Integrations P2: a non-member applied a conflict"
+else
+  pass "Integrations P2: apply_integration_conflict refuses a caller without integration.conflict_resolve"
+fi
+rm -f $ARTIFACT_DIR/pfe_p2_conf.log
+
+if as_user "$USER_A" "select public.apply_integration_conflict('$P2_CONF_BAD');" >/dev/null 2>$ARTIFACT_DIR/pfe_p2_conf2.log; then
+  fail "Integrations P2: apply_integration_conflict accepted a non-whitelisted field"
+else
+  pass "Integrations P2: apply_integration_conflict rejects a non-whitelisted field (amount)"
+fi
+rm -f $ARTIFACT_DIR/pfe_p2_conf2.log
 
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="
