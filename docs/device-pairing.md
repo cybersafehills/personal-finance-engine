@@ -6,8 +6,10 @@ Function. ADR 0008 has the rationale; the migration
 `supabase/functions/capture/`, and the shared module
 `supabase/functions/_shared/pairing.ts` are the source of truth for behaviour.
 
-Status: **PR1 backend + PR2 wizard.** Dark unless `DEVICE_PAIRING_V2=enabled`.
-`ingest-momo` and the legacy `x-ingest-key` path are unchanged.
+Status: **backend + wizard + QR handoff + `op:"capture"` writer.** Dark unless
+`DEVICE_PAIRING_V2=enabled`. `ingest-momo` and the legacy `x-ingest-key` path
+are unchanged. The processor that normalizes captured evidence into
+`transactions` is a follow-up PR (ADR 0009).
 
 ## Roles
 
@@ -65,7 +67,10 @@ Steps (`web/components/PairWizard.tsx`):
    The wizard polls `getDevicePairingStatus(sessionId)` every 3 s and advances
    itself on `consumed` — **no return URL from the Shortcut is needed**, however
    the token reached the device. Past `expires_at` / `status="expired"` ⇒ "Get a
-   new code".
+   new code". On a **fine-pointer** device (a computer) it also renders a QR
+   code of `pairHandoffUrl(origin, token)` (`web/components/QrCode.tsx`, matrix
+   from `web/lib/qr.ts` → `uqr`) — scan it to jump straight to the `/pair`
+   handoff on a phone. No QR on touch devices.
 4. **Automate** — the Apple-required Messages automation (static guidance;
    `MOMO_SMS_SENDER` fills the sender when set).
 5. **Verify** — reuses `<ConnectionReadinessProbe credentialId={…} />`, which
@@ -74,6 +79,25 @@ Steps (`web/components/PairWizard.tsx`):
 
 The wizard never generates or displays the device secret — that is created by
 the Shortcut at `op:"pair"` time.
+
+## Public `/pair` handoff — `web/app/pair/page.tsx`
+
+The cross-device bridge. A phone scans the desktop wizard's QR and lands here
+with `?c=<olp_ token>`.
+
+- **No auth** — added to `PUBLIC_PATHS` in `web/proxy.ts`. The phone never needs
+  an OneLedger session; the OneLedger Capture Shortcut is what redeems the code.
+- **Calls no RPC.** It renders the code big + copyable, a **Run OneLedger
+  Capture** deep link (auto-attempted once on mount), and inline install steps
+  (`web/components/PairHandoff.tsx`).
+- Gated by `devicePairingV2Enabled(DEVICE_PAIRING_V2)` → `notFound()` (404) when
+  off. `c` is validated against `PAIRING_TOKEN_PATTERN`; missing/invalid renders
+  a calm "this link is no longer valid — get a fresh code" state (HTTP 200).
+- `export const metadata = { referrer: "no-referrer" }` — the single-use,
+  ~10-minute token rides in the URL so it can be scanned; keeping it out of
+  `Referer` is the same posture as a magic link. The database still re-checks
+  the token on redemption (single use, TTL) — the URL is a transport, not the
+  security boundary.
 
 ## `POST /capture`
 
@@ -101,6 +125,29 @@ optional. Proves the credential authenticates and the endpoint is reachable.
 Bumps `device_credentials.last_used_at`, records `device_test_succeeded`.
 **Never** creates a transaction or `raw_financial_events` row. `200 { "ok": true, "test": true }`.
 
+### `op:"capture"`  (ADR 0009)
+
+A real inbound transaction message. Header `x-device-key: pfe_…`. Body: the
+universal envelope, `message` **required**.
+
+1. Authenticate the device credential (`resolve_canonical_ingestion_credential`)
+   → uniform `401 INVALID_DEVICE_CREDENTIAL` on any failure.
+2. Validate the envelope → `400 INVALID_CAPTURE_PAYLOAD` + `capture_rejected`.
+3. `detectProvider(message)` (`_shared/providers.ts`) → null → `422
+   UNKNOWN_PROVIDER` + `capture_rejected`, **no evidence written**.
+4. Write **one** `raw_financial_events` row: `channel:'sms'`,
+   `parse_status:'pending'`, `ingestion_origin:'iphone_capture_v2'`,
+   `provider_key`, canonical provenance (`ingestion_connection_id` =
+   `legacy_ingestion_connection_id`, `connector_installation_id`,
+   `device_credential_id`, `financial_source_id`). `payload_hash` = the same
+   normalized-message SHA-256 `ingest-momo` uses.
+   - insert OK → `202 { "ok": true, "status": "queued", "event_id": "…" }` +
+     `capture_accepted`.
+   - `(ingestion_connection_id, payload_hash)` conflict → `200 { "ok": true,
+     "status": "duplicate" }`.
+5. **Never** creates a `transactions` row. A separate `process-raw-events`
+   processor (follow-up PR) normalizes pending capture rows.
+
 ## Universal capture envelope
 
 Validated by `validateCaptureEnvelope` in `_shared/pairing.ts`. Unknown
@@ -122,9 +169,12 @@ top-level keys are rejected.
 | `PAIRING_NO_ROUTE` | 400 | new installation with no `intended_account_id` |
 | `PAIRING_ALREADY_USED` | 409 | token already consumed |
 | `PAIRING_EXPIRED` | 410 | token past its 10-minute TTL (or already swept) |
-| `INVALID_DEVICE_CREDENTIAL` | 401 | `op:"test"` — unknown / inactive / revoked credential (uniform, no oracle) |
+| `INVALID_DEVICE_CREDENTIAL` | 401 | `op:"test"` / `op:"capture"` — unknown / inactive / revoked credential (uniform, no oracle) |
 | `INVALID_CAPTURE_PAYLOAD` | 400 | envelope failed validation |
+| `UNKNOWN_PROVIDER` | 422 | `op:"capture"` — `detectProvider` didn't recognise the message; no evidence stored |
 | `RATE_LIMITED` | 429 | per-isolate limiter (`Retry-After` header set) |
+
+Success statuses for `op:"capture"`: `202 queued` (new evidence row) · `200 duplicate`.
 
 ## Rate limits (per Edge isolate, coarse)
 
@@ -132,6 +182,7 @@ top-level keys are rejected.
 |---|---|---|
 | `pair` (keyed by client IP) | 60 s | 10 |
 | `test` (keyed by device-secret prefix) | 60 s | 30 |
+| `capture` (keyed by device-secret prefix) | 60 s | 60 |
 
 ## Audit — `connector_pairing_events`
 
@@ -139,14 +190,15 @@ Service-role-only, RLS on, no authenticated policy. Rows carry only IDs and a
 machine `reason_code` — never tokens, secrets, message bodies, amounts, phone
 numbers or workspace payloads. Events: `device_pairing_started`,
 `device_paired`, `device_pairing_failed`, `device_test_succeeded`,
-`device_test_failed`, `capture_rejected`.
+`device_test_failed`, `capture_accepted`, `capture_rejected`.
 
 ## Flags / config
 
 | Name | Where | Effect |
 |---|---|---|
-| `DEVICE_PAIRING_V2` | Edge Function secret **and** web env | exact `enabled` → the `/capture` endpoint is live *and* the web wizard + "Connect iPhone" CTA appear; otherwise 404 / route redirects |
+| `DEVICE_PAIRING_V2` | Edge Function secret **and** web env | exact `enabled` → the `/capture` endpoint is live *and* the web wizard + `/pair` + "Connect iPhone" CTA appear; otherwise 404 / route redirects |
 | `ONELEDGER_CAPTURE_BASE_URL` | Edge Function secret | stable base (e.g. `https://api.oneledger.me/v1`) reported to devices as `capture_url`; falls back to the Supabase Functions URL |
+| `NEXT_PUBLIC_MOMO_SHORTCUT_URL` | web env | when set, an "Add OneLedger Capture" link on the wizard install step **and** the `/pair` handoff page |
 | `REPORT_CRON_SECRET` | web env | gates `POST /api/cron/expire-pairing-sessions` (`x-report-cron-secret`) |
 
 ## Provisioning `api.oneledger.me` (operator task)

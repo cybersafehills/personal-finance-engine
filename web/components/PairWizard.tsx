@@ -1,13 +1,23 @@
 "use client";
 
-import { useCallback, useEffect, useState, useTransition } from "react";
+import {
+  useCallback,
+  useEffect,
+  useState,
+  useSyncExternalStore,
+  useTransition,
+} from "react";
 import Link from "next/link";
 import type { AccountRow } from "../lib/queries";
 import {
   captureShortcutGuideSteps,
   CAPTURE_SHORTCUT_TROUBLESHOOTING,
 } from "../lib/capture-shortcut-guide";
-import { deviceCaptureShortcutRunUrl } from "../lib/pairing";
+import {
+  deviceCaptureShortcutRunUrl,
+  pairHandoffUrl,
+} from "../lib/pairing";
+import { QrCode } from "./QrCode";
 import { ShortcutGuide } from "./ShortcutGuide";
 import { ConnectionReadinessProbe } from "./ConnectionReadinessProbe";
 import {
@@ -49,6 +59,20 @@ export function PairWizard({
   const [pairError, setPairError] = useState<string | null>(null);
   const [expired, setExpired] = useState(false);
   const [isStarting, startTransition] = useTransition();
+
+  // Only offer the QR on a device with a fine pointer (a computer) — a phone
+  // scanning a QR of its own screen makes no sense. Server snapshot is false,
+  // so SSR + first client paint render no QR, then it appears if relevant.
+  const isPointerFine = useSyncExternalStore(
+    (onChange) => {
+      const mq = globalThis.matchMedia("(pointer: fine)");
+      mq.addEventListener("change", onChange);
+      return () => mq.removeEventListener("change", onChange);
+    },
+    () => globalThis.matchMedia("(pointer: fine)").matches,
+    () => false,
+  );
+  const handoffOrigin = isPointerFine ? globalThis.location.origin : null;
 
   const beginPairing = useCallback(() => {
     setPairError(null);
@@ -251,13 +275,21 @@ export function PairWizard({
                 itself.
               </p>
 
-              <p className="text-xs text-text-muted">
-                On a computer? Open{" "}
-                <span className="font-medium">
-                  oneledger.me/integrations/connections/pair
-                </span>{" "}
-                on the phone you want to connect, and enter the code there.
-              </p>
+              {handoffOrigin && (
+                <div className="flex flex-col gap-2">
+                  <QrCode
+                    value={pairHandoffUrl(handoffOrigin, session.token)}
+                    label="QR code to open pairing on your phone"
+                    className="h-40 w-40 text-text-primary"
+                  />
+                  <p className="text-xs text-text-muted">
+                    On a computer? Scan this with your phone&apos;s camera — or
+                    open{" "}
+                    <span className="font-medium">oneledger.me/pair</span>{" "}
+                    on the phone and type the code.
+                  </p>
+                </div>
+              )}
             </div>
           )}
 

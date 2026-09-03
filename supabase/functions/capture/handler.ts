@@ -2,14 +2,16 @@
 // index.ts wires these to the real Supabase service-role client; the tests
 // wire fakes - no live database or HTTP server needed.
 //
-// Two operations in PR1:
-//   op:"pair" - exchange a one-time pairing token + a device-generated secret
-//               for a scoped device credential. Never echoes the secret.
-//   op:"test" - prove an existing device credential authenticates and the
-//               endpoint is reachable. Writes NO ledger data.
-//
-// The real inbound-message path (op:"capture") is a follow-up PR; this file
-// deliberately has no transaction/raw-event writes.
+// Operations:
+//   op:"pair"    - exchange a one-time pairing token + a device-generated
+//                  secret for a scoped device credential. Never echoes it.
+//   op:"test"    - prove a device credential authenticates and the endpoint
+//                  is reachable. Writes NO ledger data.
+//   op:"capture" - a real inbound transaction message. Authenticates,
+//                  validates, detects the provider, and writes ONE canonical
+//                  raw_financial_events evidence row (parse_status='pending').
+//                  It never creates a `transactions` row - a separate
+//                  processor normalizes pending capture rows (ADR 0009).
 
 import {
   type CaptureEnvelope,
@@ -21,6 +23,8 @@ import {
   sha256Hex,
   validateCaptureEnvelope,
 } from "../_shared/pairing.ts";
+import { detectProvider } from "../_shared/providers.ts";
+import { normalizeMessage } from "../ingest-momo/parser-utils.ts";
 
 export type HandlerResult = {
   status: number;
@@ -34,6 +38,7 @@ export type PairingEvent = {
     | "device_pairing_failed"
     | "device_test_succeeded"
     | "device_test_failed"
+    | "capture_accepted"
     | "capture_rejected";
   reasonCode?: string | null;
   pairingSessionId?: string | null;
@@ -238,6 +243,124 @@ export async function handleTest(
   });
 
   return { status: 200, body: { ok: true, test: true } };
+}
+
+// ---------------------------------------------------------------------------
+// op:"capture"
+// ---------------------------------------------------------------------------
+
+/** Trusted routing scope for a captured message - all server-resolved from the credential. */
+export type CaptureRoute = {
+  deviceCredentialId: string;
+  connectorInstallationId: string;
+  /** Paired devices always carry a legacy mapping (canonical auth requires it). */
+  legacyIngestionConnectionId: string;
+  financialSourceId: string | null;
+  workspaceId: string;
+  accountId: string | null;
+};
+
+export type CaptureRecordResult = {
+  outcome: "queued" | "duplicate";
+  eventId: string | null;
+};
+
+export type CaptureDeps = {
+  authenticateDevice: (
+    credentialHash: string,
+  ) => Promise<{ ok: true; route: CaptureRoute } | { ok: false }>;
+  /**
+   * Writes ONE `raw_financial_events` row (parse_status='pending', canonical
+   * provenance, ingestion_origin='iphone_capture_v2'). On a
+   * (ingestion_connection_id, payload_hash) conflict it reports "duplicate"
+   * and writes nothing new.
+   */
+  recordRawEvent: (args: {
+    route: CaptureRoute;
+    payloadHash: string;
+    message: string;
+    receivedAt: string;
+    providerKey: string;
+    clientVersion: string;
+  }) => Promise<CaptureRecordResult>;
+  recordEvent: (event: PairingEvent) => Promise<void>;
+};
+
+export async function handleCapture(
+  headerKey: string | null,
+  input: unknown,
+  deps: CaptureDeps,
+  now: Date,
+): Promise<HandlerResult> {
+  if (!headerKey || !DEVICE_SECRET_PATTERN.test(headerKey)) {
+    return {
+      status: 401,
+      body: { ok: false, error: "INVALID_DEVICE_CREDENTIAL" },
+    };
+  }
+
+  const auth = await deps.authenticateDevice(await sha256Hex(headerKey));
+  if (!auth.ok) {
+    return {
+      status: 401,
+      body: { ok: false, error: "INVALID_DEVICE_CREDENTIAL" },
+    };
+  }
+  const route = auth.route;
+
+  const envelope = validateCaptureEnvelope(input, now, {
+    requireMessage: true,
+  });
+  if (!envelope.ok) {
+    await deps.recordEvent({
+      event: "capture_rejected",
+      reasonCode: envelope.code,
+      deviceCredentialId: route.deviceCredentialId,
+      connectorInstallationId: route.connectorInstallationId,
+    });
+    return { status: 400, body: { ok: false, error: envelope.code } };
+  }
+  const message = envelope.value.message as string; // requireMessage → non-null
+
+  const provider = detectProvider(message);
+  if (!provider) {
+    await deps.recordEvent({
+      event: "capture_rejected",
+      reasonCode: "UNKNOWN_PROVIDER",
+      deviceCredentialId: route.deviceCredentialId,
+      connectorInstallationId: route.connectorInstallationId,
+    });
+    // Same posture as ingest-momo's not_rwf_message: an unrecognised message
+    // is turned away, not stored as evidence.
+    return { status: 422, body: { ok: false, error: "UNKNOWN_PROVIDER" } };
+  }
+
+  // Same normalized-message digest ingest-momo uses, so a message that arrives
+  // through both paths for one connection collapses to a single evidence row.
+  const payloadHash = await sha256Hex(normalizeMessage(message));
+
+  const recorded = await deps.recordRawEvent({
+    route,
+    payloadHash,
+    message,
+    receivedAt: envelope.value.received_at,
+    providerKey: provider.providerKey,
+    clientVersion: envelope.value.client_version,
+  });
+
+  if (recorded.outcome === "duplicate") {
+    return { status: 200, body: { ok: true, status: "duplicate" } };
+  }
+
+  await deps.recordEvent({
+    event: "capture_accepted",
+    deviceCredentialId: route.deviceCredentialId,
+    connectorInstallationId: route.connectorInstallationId,
+  });
+  return {
+    status: 202,
+    body: { ok: true, status: "queued", event_id: recorded.eventId },
+  };
 }
 
 export type { CaptureEnvelope };

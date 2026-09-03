@@ -97,6 +97,18 @@ No forced cutover. Existing `x-ingest-key` connections keep working through
 offer "upgrade this connection" for legacy rows; this PR only lays the
 foundation.
 
+### 5. Cross-device handoff (`/pair`)
+
+Setup often starts on a desktop but must finish on the phone. The desktop wizard
+renders a QR of a public, no-auth `https://oneledger.me/pair?c=<token>` page; the
+phone scans it, sees the code, and one tap runs the Capture Shortcut. The page
+calls no RPC — the Shortcut redeems, and the desktop wizard's existing 3-second
+poll advances itself. The single-use ~10-minute token rides in the URL query
+(same tradeoff as a magic link): mitigated with `referrer: no-referrer`, and the
+DB still enforces single use + TTL on redemption, so the URL is a transport, not
+the trust boundary. QR generation is `web/lib/qr.ts`, a thin wrapper over `uqr`
+(MIT, zero runtime deps), round-trip verified against the repo's `jsqr` decoder.
+
 ## Consequences
 
 - One new short-lived table, one redacted audit table, one authenticated RPC,

@@ -504,3 +504,78 @@ published signed Shortcut.
 `capture_shortcut_guide_test.ts`) pass; `npm run lint` (0 errors),
 `npx tsc --noEmit`, `npx next build --webpack` clean. Manual QA needs the local
 Supabase stack + `DEVICE_PAIRING_V2=enabled` — see `docs/device-pairing.md`.
+
+---
+
+## PR11 — QR / cross-device pairing handoff
+
+**Problem.** The PR9 wizard runs on the phone start-to-finish, but a user who
+opens it on a **desktop** still has to hand-copy a 34-char `olp_` code to the
+phone — the `shortcuts://` deep link no-ops on a computer.
+
+**Decisions.** Contract in `docs/device-pairing.md` ("Public `/pair` handoff");
+rationale in ADR 0008 §5.
+
+1. **`web/lib/qr.ts`** — a thin wrapper over `uqr` (MIT, **zero runtime
+   dependencies**): `qrMatrix(text)` (grid) + `qrSvg(text)`. `web/lib/qr_test.ts`
+   round-trips the output through the `jsqr` decoder already in the repo. (A
+   hand-vendored encoder was attempted first per the plan but had a decode bug;
+   `uqr` is the pragmatic zero-dep choice.)
+2. **`web/components/QrCode.tsx`** — renders `qrMatrix` as a real inline
+   `<svg><path/></svg>` (no `dangerouslySetInnerHTML`), `currentColor`,
+   `role="img"`.
+3. **Wizard pair step** — on a fine-pointer device only
+   (`useSyncExternalStore` over `matchMedia("(pointer: fine)")`), shows a QR of
+   `pairHandoffUrl(origin, token)` alongside the existing code + deep link.
+4. **`/pair`** (`web/app/pair/page.tsx`) — a **public** (`PUBLIC_PATHS += /pair`),
+   no-RPC landing page. `?c=<token>` → the code big + copyable + a **Run
+   OneLedger Capture** deep link (auto-tried once) + inline install steps
+   (`PairHandoff.tsx`). `notFound()` when `DEVICE_PAIRING_V2` is unset; invalid
+   `c` → a calm "link expired" state; `referrer: no-referrer`.
+5. **`web/lib/pairing.ts`** — `pairHandoffPath` / `pairHandoffUrl`.
+
+**Not in this PR.** A stateful cross-device session bridge (the phone stays
+anonymous — the token is the only thing that crosses); the `op:"capture"`
+real-message path; setup-funnel analytics.
+
+**Verification.** `deno test web/lib` (`qr_test.ts` round-trip + `pairing_test.ts`)
+pass; `npm run lint` 0 errors; `npx tsc --noEmit` + `npx next build --webpack`
+clean (`/pair` builds). `curl /pair?c=<valid>` → code + run button + the
+`no-referrer` meta; `curl /pair` (no code) → "no longer valid".
+
+---
+
+## PR14 — op:"capture" ingestion + provider detection
+
+**Problem.** A paired device (PR8) could `pair`/`test` but not send a real
+transaction message over `/capture`. The parse→transaction pipeline lives
+inline in the 1285-line `ingest-momo/index.ts` — the repo's most
+safety-critical function.
+
+**Decisions.** Full rationale in `docs/adr/0009-async-capture-ingestion.md`.
+
+1. **`op:"capture"` is a thin, evidence-first writer.** Authenticate device
+   credential → validate the universal envelope → `detectProvider(message)` →
+   write **one** `raw_financial_events` row (`parse_status='pending'`,
+   `ingestion_origin='iphone_capture_v2'`, `provider_key`, canonical
+   provenance) → `202 { status:"queued" }`. Never creates a `transactions`
+   row. Unknown provider → `422 UNKNOWN_PROVIDER`, no evidence. Redelivery
+   (same `(ingestion_connection_id, payload_hash)`) → `200 duplicate`.
+2. **Provider detection is a registry** — `supabase/functions/_shared/providers.ts`,
+   `detectProvider` over `PROVIDER_MATCHERS`. Adding Airtel / a bank = append a
+   matcher. MTN MoMo is the only registered one (RWF + an MTN token or a MoMo
+   verb).
+3. **Migration `20261105000000_capture_ingestion.sql`** — two nullable
+   `raw_financial_events` columns (`ingestion_origin`, `provider_key`), a
+   `capture_accepted` audit event value, a partial index for the future
+   processor sweep. Additive; `ingest-momo` untouched.
+
+**Not in this PR — the next one:** `process-raw-events` Edge Function + cron;
+extract `ingest-momo` steps 9–22 into `_shared/ingestion-pipeline.ts`; migrate
+`ingest-momo` onto it; normalization / accounting / categorization / budget
+sweep for capture rows.
+
+**Verification.** `deno test supabase/functions/_shared/tests
+supabase/functions/capture/tests` (provider + capture cases) pass;
+`ingest-momo/tests` untouched and green; `run_migration_tests.sh` 382 pass
+(4 new capture assertions); `deno fmt`/`lint`/`check` clean.

@@ -1,5 +1,8 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
+  type CaptureDeps,
+  type CaptureRoute,
+  handleCapture,
   handlePair,
   type HandlerResult,
   handleTest,
@@ -189,4 +192,168 @@ Deno.test("handleTest: a bad envelope is rejected and audited, credential untouc
   assertEquals(res.body.error, "INVALID_CAPTURE_PAYLOAD");
   assertEquals(touched.length, 0);
   assertEquals(events.at(-1)?.event, "capture_rejected");
+});
+
+// ---------------------------------------------------------------------------
+// op:"capture"
+// ---------------------------------------------------------------------------
+
+const MTN_SMS =
+  "TxId:29946098339*S*Your payment of 4,000 RWF to KMLVIO CENTER AND MILK ZONE SHOP 093011 was completed at 2026-08-18 11:02:56. Balance: 3,675 RWF. Fee 0 RWF.*EN#";
+
+const ROUTE: CaptureRoute = {
+  deviceCredentialId: "dc-7",
+  connectorInstallationId: "ci-7",
+  legacyIngestionConnectionId: "leg-7",
+  financialSourceId: "fs-7",
+  workspaceId: "ws-7",
+  accountId: "acc-7",
+};
+
+function captureDeps(overrides: Partial<CaptureDeps> = {}) {
+  const rec = recorder();
+  const inserts: Array<Record<string, unknown>> = [];
+  const deps: CaptureDeps = {
+    recordEvent: rec.recordEvent,
+    authenticateDevice: () => Promise.resolve({ ok: true, route: ROUTE }),
+    recordRawEvent: (args) => {
+      inserts.push(args as unknown as Record<string, unknown>);
+      return Promise.resolve({ outcome: "queued", eventId: "evt-1" });
+    },
+    ...overrides,
+  };
+  return { deps, events: rec.events, inserts };
+}
+
+Deno.test("handleCapture: valid MTN message → 202 queued + capture_accepted, canonical route passed through", async () => {
+  const { deps, events, inserts } = captureDeps();
+  const res: HandlerResult = await handleCapture(
+    SECRET,
+    {
+      op: "capture",
+      message: MTN_SMS,
+      received_at: "2026-09-03T11:59:00.000Z",
+      client_version: "1.0.0",
+    },
+    deps,
+    NOW,
+  );
+
+  assertEquals(res.status, 202);
+  assertEquals(res.body, { ok: true, status: "queued", event_id: "evt-1" });
+  assertEquals(events.at(-1)?.event, "capture_accepted");
+  assertEquals(inserts.length, 1);
+  assertEquals(inserts[0].providerKey, "mtn_momo");
+  assertEquals(
+    (inserts[0].route as CaptureRoute).legacyIngestionConnectionId,
+    "leg-7",
+  );
+  assert(/^[0-9a-f]{64}$/.test(inserts[0].payloadHash as string));
+});
+
+Deno.test("handleCapture: redelivery → 200 duplicate, no capture_accepted", async () => {
+  const { deps, events } = captureDeps({
+    recordRawEvent: () =>
+      Promise.resolve({ outcome: "duplicate", eventId: "evt-1" }),
+  });
+  const res = await handleCapture(
+    SECRET,
+    {
+      op: "capture",
+      message: MTN_SMS,
+      client_version: "1.0.0",
+    },
+    deps,
+    NOW,
+  );
+  assertEquals(res.status, 200);
+  assertEquals(res.body, { ok: true, status: "duplicate" });
+  assert(!events.some((e) => e.event === "capture_accepted"));
+});
+
+Deno.test("handleCapture: unknown provider → 422, no evidence write, capture_rejected", async () => {
+  let recorded = false;
+  const { deps, events } = captureDeps({
+    recordRawEvent: () => {
+      recorded = true;
+      return Promise.resolve({ outcome: "queued", eventId: "x" });
+    },
+  });
+  const res = await handleCapture(
+    SECRET,
+    {
+      op: "capture",
+      message: "Your OneLedger code is 4821.",
+      client_version: "1.0.0",
+    },
+    deps,
+    NOW,
+  );
+  assertEquals(res.status, 422);
+  assertEquals(res.body.error, "UNKNOWN_PROVIDER");
+  assertEquals(recorded, false);
+  assertEquals(events.at(-1)?.reasonCode, "UNKNOWN_PROVIDER");
+});
+
+Deno.test("handleCapture: bad envelope → 400 + capture_rejected, nothing written", async () => {
+  let recorded = false;
+  const { deps, events } = captureDeps({
+    recordRawEvent: () => {
+      recorded = true;
+      return Promise.resolve({ outcome: "queued", eventId: "x" });
+    },
+  });
+  const res = await handleCapture(
+    SECRET,
+    {
+      op: "capture",
+      client_version: "nope",
+    },
+    deps,
+    NOW,
+  );
+  assertEquals(res.status, 400);
+  assertEquals(res.body.error, "INVALID_CAPTURE_PAYLOAD");
+  assertEquals(recorded, false);
+  assertEquals(events.at(-1)?.event, "capture_rejected");
+});
+
+Deno.test("handleCapture: missing / bad / unknown credential → uniform 401, no oracle", async () => {
+  const rejecting = captureDeps({
+    authenticateDevice: () => Promise.resolve({ ok: false }),
+  });
+  for (
+    const key of [null, "not-a-secret", SECRET] as Array<string | null>
+  ) {
+    const res = await handleCapture(
+      key,
+      {
+        op: "capture",
+        message: MTN_SMS,
+        client_version: "1.0.0",
+      },
+      rejecting.deps,
+      NOW,
+    );
+    assertEquals(res.status, 401);
+    assertEquals(res.body.error, "INVALID_DEVICE_CREDENTIAL");
+  }
+});
+
+Deno.test("handleCapture: never returns a transaction id / never claims a ledger write", async () => {
+  const { deps } = captureDeps();
+  const res = await handleCapture(
+    SECRET,
+    {
+      op: "capture",
+      message: MTN_SMS,
+      client_version: "1.0.0",
+    },
+    deps,
+    NOW,
+  );
+  const s = JSON.stringify(res.body);
+  assert(!s.includes("transaction_id"));
+  assert(!s.includes('"processed"'));
+  assertEquals(res.body.status, "queued");
 });
