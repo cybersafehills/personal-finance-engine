@@ -2,7 +2,7 @@ import { Skeleton } from "../components/Skeleton";
 
 export default function HomeLoading() {
   return (
-    <div className="flex flex-col gap-5" aria-busy="true" aria-label="Loading">
+    <div className="flex flex-col gap-5" role="status" aria-busy="true" aria-label="Loading">
       <Skeleton className="h-32 rounded-card" />
       <div className="grid grid-cols-2 gap-3">
         <Skeleton className="h-20 rounded-card" />
