@@ -1,5 +1,8 @@
 import { assert, assertEquals, assertMatch } from "jsr:@std/assert@1";
 import {
+  connectorKeyForProvider,
+  deviceCaptureShortcutRunUrl,
+  devicePairingV2Enabled,
   generatePairingToken,
   hashPairingToken,
   PAIRING_TOKEN_PATTERN,
@@ -63,4 +66,33 @@ Deno.test("pairingErrorMessage: every known code has non-technical copy; unknown
     pairingErrorMessage(null),
     "Something went wrong. Please try again in a moment.",
   );
+});
+
+Deno.test("devicePairingV2Enabled: fail-closed - only the exact string enables", () => {
+  assertEquals(devicePairingV2Enabled("enabled"), true);
+  for (const v of ["true", "1", "ENABLED", "", " enabled", undefined]) {
+    assertEquals(devicePairingV2Enabled(v as string | undefined), false);
+  }
+});
+
+Deno.test("connectorKeyForProvider: mirrors the DB backfill CASE", () => {
+  assertEquals(connectorKeyForProvider("mtn_momo"), "mtn_momo_sms_v1");
+  assertEquals(connectorKeyForProvider("airtel_money"), "airtel_money_sms_v1");
+  assertEquals(connectorKeyForProvider("bank"), "bank_legacy_push_v1");
+  assertEquals(connectorKeyForProvider("other"), "generic_legacy_push_v1");
+  assertEquals(connectorKeyForProvider(""), "generic_legacy_push_v1");
+  // every result satisfies connector_installations.connector_key's CHECK
+  for (const p of ["mtn_momo", "airtel_money", "bank", "whatever"]) {
+    assertMatch(connectorKeyForProvider(p), /^[a-z][a-z0-9_]{2,63}$/);
+  }
+});
+
+Deno.test("deviceCaptureShortcutRunUrl: runs the Capture Shortcut with the token as input", () => {
+  const { token } = generatePairingToken();
+  const url = deviceCaptureShortcutRunUrl(token);
+  assert(url.startsWith("shortcuts://run-shortcut?"));
+  const q = new URLSearchParams(url.slice(url.indexOf("?") + 1));
+  assertEquals(q.get("name"), "OneLedger Capture");
+  assertEquals(q.get("input"), "text");
+  assertEquals(q.get("text"), token);
 });

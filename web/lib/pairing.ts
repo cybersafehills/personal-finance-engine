@@ -113,3 +113,47 @@ export function pairingErrorMessage(code: string | null | undefined): string {
   if (code && code in PAIRING_ERROR_COPY) return PAIRING_ERROR_COPY[code];
   return "Something went wrong. Please try again in a moment.";
 }
+
+/** Fail-closed gate for the pairing wizard - same env var the `capture` Edge Function reads. */
+export function devicePairingV2Enabled(value: string | undefined): boolean {
+  return value === "enabled";
+}
+
+/**
+ * `accounts.provider` -> the connector adapter contract key. Mirrors the CASE
+ * in `backfill_legacy_ingestion_connection`
+ * (supabase/migrations/20261012000000_connector_model_stage_b_backfill.sql), so
+ * a pairing session's `connector_key` lines up with what enrollment will stamp.
+ */
+export function connectorKeyForProvider(provider: string): string {
+  switch (provider) {
+    case "mtn_momo":
+      return "mtn_momo_sms_v1";
+    case "airtel_money":
+      return "airtel_money_sms_v1";
+    case "bank":
+      return "bank_legacy_push_v1";
+    default:
+      return "generic_legacy_push_v1";
+  }
+}
+
+export const CAPTURE_SHORTCUT_NAME = "OneLedger Capture";
+
+/**
+ * `shortcuts://run-shortcut?...` deep link that runs the installed Capture
+ * Shortcut on this iPhone, passing the pairing token as its text input. A
+ * harmless no-op on a desktop browser (the wizard's poll is what actually
+ * advances the flow, however the token reaches the device).
+ */
+export function deviceCaptureShortcutRunUrl(
+  token: string,
+  name: string = CAPTURE_SHORTCUT_NAME,
+): string {
+  const params = new URLSearchParams({
+    name,
+    input: "text",
+    text: token,
+  });
+  return `shortcuts://run-shortcut?${params.toString()}`;
+}
