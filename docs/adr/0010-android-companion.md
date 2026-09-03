@@ -120,9 +120,11 @@ with no companion-specific server work.
 - `capture_url` comes from the `op:"pair"` response and is persisted per ADR
   0008 §3, so the eventual move to `api.oneledger.me` needs no app update.
 - Build-time `DEFAULT_CAPTURE_BASE_URL` (BuildConfig) is used **only** for the
-  first `op:"pair"` call before a `capture_url` has been issued; debug and
-  release flavours point at the staging and production Supabase Functions URLs
-  respectively.
+  first `op:"pair"` call before a `capture_url` has been issued. Both build
+  types point at OneLedger's single Supabase Functions URL
+  (`zttxsaiywkfrbdxgzbjd`); there is no separate staging project — environments
+  are separated by feature flags and workspace allowlists. A debug build can be
+  repointed at a branch/preview backend by editing the `debug { … }` field.
 
 ### 7. Web wizard (follow-up, not this PR)
 

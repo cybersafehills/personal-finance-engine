@@ -54,10 +54,12 @@ Then:
 ./gradlew :app:assembleDebug
 ```
 
-`DEFAULT_CAPTURE_BASE_URL` is a `buildConfigField` per build type (staging /
-production Supabase Functions URL). It is used **only** for the first
+`DEFAULT_CAPTURE_BASE_URL` is a `buildConfigField` set to OneLedger's Supabase
+Functions URL (`https://zttxsaiywkfrbdxgzbjd.functions.supabase.co` — one
+project for both build types; a public ref). It is used **only** for the first
 `op:"pair"` call; every call afterward uses the `capture_url` the server handed
-back at pair time, so moving to `api.oneledger.me` needs no app update.
+back at pair time, so moving to `api.oneledger.me` needs no app update. To test
+a debug build against a branch/preview backend, edit the `debug { … }` line.
 
 ## Server flag
 
