@@ -109,3 +109,19 @@ export function isCloudStorageEnabled(workspaceId: string | null): boolean {
     envOptIn("INTEGRATIONS_CLOUD_STORAGE_ENABLED")
   );
 }
+
+// --- Phase 3 -----------------------------------------------------------------
+//
+//   INTEGRATIONS_RECONCILIATION_CENTER_ENABLED - the read-only surface that
+//     unifies balance drift, payment-intent matches, import duplicates and
+//     connected-workbook sync conflicts. On unless exactly "false".
+
+/** Reconciliation Center - a read-only hub over the existing review queues. */
+export function isReconciliationCenterEnabled(
+  workspaceId: string | null,
+): boolean {
+  return (
+    isIntegrationsEnabled(workspaceId) &&
+    envEnabled("INTEGRATIONS_RECONCILIATION_CENTER_ENABLED")
+  );
+}
