@@ -5,6 +5,7 @@ import {
   AccountingProviderNotConfiguredError,
   isAccountingProviderKey,
   isRealAccountingProvider,
+  ledgerMapKeyForCategory,
   normalizeAccountMap,
 } from "./contract.ts";
 
@@ -57,6 +58,13 @@ Deno.test("normalizeAccountMap drops over-long keys/values", () => {
     normalizeAccountMap({ [longKey]: "1", ok: longVal, good: "2" }),
     { good: "2" },
   );
+});
+
+Deno.test("ledgerMapKeyForCategory namespaces and falls back", () => {
+  assertEquals(ledgerMapKeyForCategory("Meals"), "category:Meals");
+  assertEquals(ledgerMapKeyForCategory("  Travel  "), "category:Travel");
+  assertEquals(ledgerMapKeyForCategory(null), "category:uncategorised");
+  assertEquals(ledgerMapKeyForCategory(""), "category:uncategorised");
 });
 
 Deno.test("AccountingProviderNotConfiguredError carries the shared code", () => {

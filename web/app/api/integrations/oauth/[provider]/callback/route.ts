@@ -2,12 +2,18 @@ import { NextRequest, NextResponse } from "next/server";
 import { getActiveWorkspaceId } from "../../../../../../lib/queries";
 import { supabaseServer } from "../../../../../../lib/supabase-server";
 import { siteUrl } from "../../../../../../lib/site-url";
-import { isCloudStorageEnabled } from "../../../../../../lib/integrations/gate";
+import {
+  isAccountingConnectorsEnabled,
+  isCloudStorageEnabled,
+} from "../../../../../../lib/integrations/gate";
 import { isCloudStorageProviderKey } from "../../../../../../lib/integrations/destinations/cloud-storage/contract";
 import { getCloudStorageClient } from "../../../../../../lib/integrations/destinations/cloud-storage/registry";
+import { isAccountingProviderKey } from "../../../../../../lib/integrations/accounting/contract";
+import { getAccountingAdapter } from "../../../../../../lib/integrations/accounting/registry";
 
-// OAuth redirect target. Validates the state cookie (CSRF), exchanges the
-// code for tokens, stores them in the service-role-only
+// OAuth redirect target for both cloud-storage destinations and accounting
+// ledgers. Validates the state cookie (CSRF), exchanges the code for
+// tokens, stores them in the service-role-only
 // integration_destination_secrets, and marks the destination active.
 // Session-authenticated via the app middleware.
 
@@ -19,17 +25,62 @@ function back(reason: string): NextResponse {
   return res;
 }
 
+type TokenSet = {
+  accessToken: string;
+  refreshToken: string | null;
+  expiresAt: string | null;
+  scope: string | null;
+};
+
+type CallbackFlow = {
+  kind: "cloud_storage" | "accounting";
+  enabled: boolean;
+  connectedEventKind: string;
+  exchangeCode(p: {
+    code: string;
+    redirectUri: string;
+    codeVerifier?: string;
+  }): Promise<TokenSet>;
+};
+
+function resolveFlow(
+  provider: string,
+  workspaceId: string,
+): CallbackFlow | null {
+  if (isCloudStorageProviderKey(provider)) {
+    return {
+      kind: "cloud_storage",
+      enabled: isCloudStorageEnabled(workspaceId),
+      connectedEventKind: "destination.connected",
+      exchangeCode: (p) => getCloudStorageClient(provider).exchangeCode(p),
+    };
+  }
+  if (isAccountingProviderKey(provider)) {
+    return {
+      kind: "accounting",
+      enabled: isAccountingConnectorsEnabled(workspaceId),
+      connectedEventKind: "ledger.connected",
+      exchangeCode: (p) => getAccountingAdapter(provider).exchangeCode(p),
+    };
+  }
+  return null;
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ provider: string }> },
 ) {
   const { provider } = await params;
   const workspaceId = await getActiveWorkspaceId();
-  if (!workspaceId || !isCloudStorageEnabled(workspaceId)) {
+  if (!workspaceId) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
-  if (!isCloudStorageProviderKey(provider)) {
+  const flow = resolveFlow(provider, workspaceId);
+  if (!flow) {
     return NextResponse.json({ error: "unknown provider" }, { status: 400 });
+  }
+  if (!flow.enabled) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
   const url = request.nextUrl;
@@ -63,14 +114,14 @@ export async function GET(
     .eq("workspace_id", workspaceId)
     .maybeSingle();
   if (
-    !destination || destination.kind !== "cloud_storage" ||
+    !destination || destination.kind !== flow.kind ||
     destination.provider !== provider
   ) {
     return back("mismatch");
   }
 
   try {
-    const tokens = await getCloudStorageClient(provider).exchangeCode({
+    const tokens = await flow.exchangeCode({
       code,
       redirectUri: `${siteUrl()}/api/integrations/oauth/${provider}/callback`,
       codeVerifier: txn.codeVerifier,
@@ -89,9 +140,15 @@ export async function GET(
       .from("integration_destinations")
       .update({ status: "active", last_error_code: null })
       .eq("id", txn.destinationId);
+    if (flow.kind === "accounting") {
+      await admin
+        .from("connected_ledgers")
+        .update({ status: "active" })
+        .eq("destination_id", txn.destinationId);
+    }
     await admin.from("integration_events").insert({
       workspace_id: workspaceId,
-      kind: "destination.connected",
+      kind: flow.connectedEventKind,
       severity: "info",
       ref_type: "integration_destination",
       ref_id: txn.destinationId,

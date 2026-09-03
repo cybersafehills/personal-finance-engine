@@ -190,3 +190,38 @@ export class AccountingProviderNotConfiguredError extends Error {
     this.name = "AccountingProviderNotConfiguredError";
   }
 }
+
+// --- read-model types (client-safe) ----------------------------------------
+
+export const LEDGER_STATUSES = [
+  "active",
+  "paused",
+  "needs_auth",
+  "error",
+  "disconnected",
+] as const;
+export type LedgerStatus = (typeof LEDGER_STATUSES)[number];
+
+export type ConnectedLedger = {
+  id: string;
+  workspaceId: string;
+  destinationId: string;
+  provider: AccountingProviderKey | null;
+  name: string;
+  externalRef: string | null;
+  accountMap: AccountMap;
+  direction: "export";
+  status: LedgerStatus;
+  lastSyncRunId: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/**
+ * Build an `account:<category>` mapping key from a transaction's category
+ * (the primary key the account_map is expected to hold; a per-account
+ * fallback can be added later).
+ */
+export function ledgerMapKeyForCategory(category: string | null): string {
+  return `category:${(category ?? "").trim() || "uncategorised"}`;
+}

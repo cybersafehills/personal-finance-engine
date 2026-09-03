@@ -6,10 +6,16 @@ import { supabaseSession } from "../../../lib/supabase-session-server";
 import { supabaseServer } from "../../../lib/supabase-server";
 import { hashToken } from "../../../lib/credentials";
 import {
+  isAccountingConnectorsEnabled,
   isCloudStorageEnabled,
   isDestinationsEnabled,
   isWorkbooksEnabled,
 } from "../../../lib/integrations/gate";
+import {
+  isAccountingProviderKey,
+  normalizeAccountMap,
+} from "../../../lib/integrations/accounting/contract";
+import { runLedgerSync } from "../../../lib/integrations/accounting/sync";
 import {
   isRealWorkbookProvider,
   normalizeSheetMap,
@@ -727,5 +733,188 @@ export async function applyConflict(conflictId: string): Promise<SimpleResult> {
   }
   revalidatePath("/integrations/sync/conflicts");
   revalidatePath("/transactions");
+  return { ok: true };
+}
+
+// --- accounting ledgers (Phase 3, P3-PR6) ---------------------------------
+
+async function requireLedgerAccess(): Promise<AccessOk | AccessErr> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!workspaceId || !isAccountingConnectorsEnabled(workspaceId)) {
+    return {
+      ok: false,
+      error: "Accounting connectors aren’t enabled for this Space.",
+    };
+  }
+  const supabase = await supabaseSession();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "You need to be signed in." };
+  const { data: allowed, error } = await supabase.rpc("has_space_capability", {
+    p_workspace_id: workspaceId,
+    p_capability: "integration.ledger_manage",
+  });
+  if (error || allowed !== true) {
+    return {
+      ok: false,
+      error: "You don’t have permission to manage accounting ledgers.",
+    };
+  }
+  return { ok: true, workspaceId, userId: user.id };
+}
+
+export type ConnectLedgerResult =
+  | { ok: true; ledgerId: string; needsAuth: boolean }
+  | { ok: false; error: string };
+
+export async function connectLedger(input: {
+  name: string;
+  provider: string;
+}): Promise<ConnectLedgerResult> {
+  const access = await requireLedgerAccess();
+  if (!access.ok) return access;
+  const { workspaceId, userId } = access;
+
+  const name = (input.name ?? "").trim();
+  if (!name || name.length > 80) {
+    return { ok: false, error: "Give the ledger a short name." };
+  }
+  if (!isAccountingProviderKey(input.provider)) {
+    return { ok: false, error: "Unknown accounting provider." };
+  }
+  const provider = input.provider;
+
+  const admin = supabaseServer();
+  const { data: destination, error: destError } = await admin
+    .from("integration_destinations")
+    .insert({
+      workspace_id: workspaceId,
+      created_by: userId,
+      name,
+      kind: "accounting",
+      provider,
+      config: {},
+      // every accounting provider needs OAuth before it can do anything.
+      status: "needs_auth",
+    })
+    .select("id")
+    .single();
+  if (destError || !destination) {
+    console.error("connectLedger destination failed", destError?.message);
+    return { ok: false, error: "Could not create the ledger link." };
+  }
+
+  const { data: ledger, error: ledgerError } = await admin
+    .from("connected_ledgers")
+    .insert({
+      workspace_id: workspaceId,
+      destination_id: destination.id,
+      account_map: {},
+      direction: "export",
+      status: "needs_auth",
+      created_by: userId,
+    })
+    .select("id")
+    .single();
+  if (ledgerError || !ledger) {
+    await admin.from("integration_destinations").delete().eq("id", destination.id);
+    console.error("connectLedger ledger failed", ledgerError?.message);
+    return { ok: false, error: "Could not create the ledger." };
+  }
+
+  await admin.from("integration_events").insert({
+    workspace_id: workspaceId,
+    kind: "ledger.connected",
+    severity: "info",
+    ref_type: "connected_ledger",
+    ref_id: ledger.id,
+    summary: `Ledger "${name}" (${provider}) added`,
+    context: { actorUserId: userId, provider },
+  });
+
+  revalidatePath("/integrations/sync");
+  return { ok: true, ledgerId: ledger.id, needsAuth: true };
+}
+
+export async function updateLedgerAccountMap(
+  ledgerId: string,
+  accountMap: unknown,
+): Promise<SimpleResult> {
+  const access = await requireLedgerAccess();
+  if (!access.ok) return access;
+  const admin = supabaseServer();
+  const { error } = await admin
+    .from("connected_ledgers")
+    .update({ account_map: normalizeAccountMap(accountMap) })
+    .eq("id", ledgerId)
+    .eq("workspace_id", access.workspaceId);
+  if (error) return { ok: false, error: "Could not save the account map." };
+  revalidatePath("/integrations/sync");
+  return { ok: true };
+}
+
+export async function setLedgerStatus(
+  ledgerId: string,
+  status: "active" | "paused",
+): Promise<SimpleResult> {
+  const access = await requireLedgerAccess();
+  if (!access.ok) return access;
+  const admin = supabaseServer();
+  const { error } = await admin
+    .from("connected_ledgers")
+    .update({ status })
+    .eq("id", ledgerId)
+    .eq("workspace_id", access.workspaceId)
+    .not("status", "in", "(disconnected)");
+  if (error) return { ok: false, error: "Could not update the ledger." };
+  revalidatePath("/integrations/sync");
+  return { ok: true };
+}
+
+export async function syncLedgerNow(ledgerId: string): Promise<SimpleResult> {
+  const access = await requireLedgerAccess();
+  if (!access.ok) return access;
+  const admin = supabaseServer();
+  const result = await runLedgerSync(admin, {
+    ledgerId,
+    workspaceId: access.workspaceId,
+    trigger: "manual",
+  });
+  revalidatePath("/integrations/sync");
+  if (result.ok) return { ok: true };
+  // A dark-provider "failure" is the expected state while unconfigured -
+  // surface it plainly rather than as an error toast.
+  if (
+    result.error === "provider_not_configured" ||
+    result.error === "provider_push_not_implemented"
+  ) {
+    return {
+      ok: false,
+      error: "This provider isn’t available yet — the sync was recorded but nothing was pushed.",
+    };
+  }
+  return { ok: false, error: "The ledger sync did not complete." };
+}
+
+export async function disconnectLedger(ledgerId: string): Promise<SimpleResult> {
+  const access = await requireLedgerAccess();
+  if (!access.ok) return access;
+  const admin = supabaseServer();
+  const { data: ledger } = await admin
+    .from("connected_ledgers")
+    .select("destination_id")
+    .eq("id", ledgerId)
+    .eq("workspace_id", access.workspaceId)
+    .maybeSingle();
+  if (!ledger) return { ok: false, error: "That ledger could not be found." };
+
+  await admin.from("connected_ledgers").delete().eq("id", ledgerId);
+  await admin
+    .from("integration_destinations")
+    .delete()
+    .eq("id", ledger.destination_id)
+    .eq("workspace_id", access.workspaceId);
+  revalidatePath("/integrations/sync");
   return { ok: true };
 }

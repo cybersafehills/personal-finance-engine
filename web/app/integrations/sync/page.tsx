@@ -11,6 +11,7 @@ import {
   getCanonicalConnectorInstallations,
 } from "../../../lib/queries";
 import {
+  isAccountingConnectorsEnabled,
   isCloudStorageEnabled,
   isDestinationsEnabled,
   isSyncEnabled,
@@ -18,8 +19,12 @@ import {
 } from "../../../lib/integrations/gate";
 import { CLOUD_STORAGE_PROVIDER_META } from "../../../lib/integrations/destinations/cloud-storage/contract";
 import { configuredCloudProviders } from "../../../lib/integrations/destinations/cloud-storage/registry";
+import { ACCOUNTING_PROVIDER_META } from "../../../lib/integrations/accounting/contract";
+import { configuredAccountingProviders } from "../../../lib/integrations/accounting/registry";
 import { WorkbookManager } from "../../../components/WorkbookManager";
+import { LedgerManager } from "../../../components/LedgerManager";
 import {
+  listConnectedLedgers,
   listConnectedWorkbooks,
   listExportSchedules,
   listIntegrationDestinations,
@@ -60,17 +65,36 @@ export default async function SyncPage() {
     }))
     : [];
   const workbooksEnabled = isWorkbooksEnabled(workspaceId);
-  const [schedules, installations, destinations, workbooks, syncRuns, conflicts] =
-    await Promise.all([
-      listExportSchedules(),
-      getCanonicalConnectorInstallations(),
-      destinationsEnabled ? listIntegrationDestinations() : Promise.resolve([]),
-      workbooksEnabled ? listConnectedWorkbooks() : Promise.resolve([]),
-      destinationsEnabled || workbooksEnabled
-        ? listSyncRuns(15)
-        : Promise.resolve([]),
-      workbooksEnabled ? listOpenConflicts() : Promise.resolve([]),
-    ]);
+  const ledgersEnabled = isAccountingConnectorsEnabled(workspaceId);
+  const ledgerProviders = ledgersEnabled
+    ? (() => {
+      const configured = new Set(configuredAccountingProviders());
+      return Object.values(ACCOUNTING_PROVIDER_META).map((m) => ({
+        key: m.key,
+        label: m.label,
+        configured: configured.has(m.key),
+      }));
+    })()
+    : [];
+  const [
+    schedules,
+    installations,
+    destinations,
+    workbooks,
+    ledgers,
+    syncRuns,
+    conflicts,
+  ] = await Promise.all([
+    listExportSchedules(),
+    getCanonicalConnectorInstallations(),
+    destinationsEnabled ? listIntegrationDestinations() : Promise.resolve([]),
+    workbooksEnabled ? listConnectedWorkbooks() : Promise.resolve([]),
+    ledgersEnabled ? listConnectedLedgers() : Promise.resolve([]),
+    destinationsEnabled || workbooksEnabled || ledgersEnabled
+      ? listSyncRuns(15)
+      : Promise.resolve([]),
+    workbooksEnabled ? listOpenConflicts() : Promise.resolve([]),
+  ]);
 
   return (
     <div>
@@ -175,6 +199,21 @@ export default async function SyncPage() {
             ledger.
           </p>
           <WorkbookManager workbooks={workbooks} />
+        </section>
+      )}
+
+      {ledgersEnabled && (
+        <section aria-labelledby="ledgers" className="mt-8">
+          <h2 id="ledgers" className="mb-2 text-sm font-semibold text-text-primary">
+            Accounting ledgers
+          </h2>
+          <p className="mb-3 text-sm text-text-muted">
+            Push OneLedger transactions into QuickBooks, Xero, Zoho Books, or
+            Odoo. Export direction only; each provider needs its own
+            authorisation and is not available on this deployment until
+            configured.
+          </p>
+          <LedgerManager ledgers={ledgers} providers={ledgerProviders} />
         </section>
       )}
 

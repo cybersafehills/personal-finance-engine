@@ -23,6 +23,13 @@ import type {
   AccountantPackageManifest,
   AccountantPackageStatus,
 } from "./accountant/model.ts";
+import {
+  type AccountingProviderKey,
+  type AccountMap,
+  type ConnectedLedger,
+  type LedgerStatus,
+  normalizeAccountMap,
+} from "./accounting/contract.ts";
 
 // RLS-scoped reads for the Integrations area. The database policies
 // (migration 20261027000000) already restrict every row to workspaces
@@ -640,6 +647,66 @@ export async function listConnectedWorkbooks(): Promise<ConnectedWorkbook[]> {
     return [];
   }
   return (data ?? []).map(toWorkbook);
+}
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+function toConnectedLedger(row: any): ConnectedLedger {
+  const dest = Array.isArray(row.destination)
+    ? row.destination[0]
+    : row.destination;
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    destinationId: row.destination_id,
+    provider: (dest?.provider ?? null) as AccountingProviderKey | null,
+    name: (dest?.name ?? "Ledger") as string,
+    externalRef: row.external_ref ?? null,
+    accountMap: normalizeAccountMap(row.account_map) as AccountMap,
+    direction: "export",
+    status: row.status as LedgerStatus,
+    lastSyncRunId: row.last_sync_run_id ?? null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
+const CONNECTED_LEDGER_SELECT =
+  "id, workspace_id, destination_id, external_ref, account_map, direction, status, last_sync_run_id, created_at, updated_at, destination:integration_destinations(provider, name)";
+
+export async function listConnectedLedgers(): Promise<ConnectedLedger[]> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!workspaceId) return [];
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("connected_ledgers")
+    .select(CONNECTED_LEDGER_SELECT)
+    .eq("workspace_id", workspaceId)
+    .order("created_at", { ascending: false });
+  if (error) {
+    console.error("listConnectedLedgers failed:", error.message);
+    return [];
+  }
+  return (data ?? []).map(toConnectedLedger);
+}
+
+export async function getConnectedLedger(
+  id: string,
+): Promise<ConnectedLedger | null> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!workspaceId) return null;
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("connected_ledgers")
+    .select(CONNECTED_LEDGER_SELECT)
+    .eq("id", id)
+    .eq("workspace_id", workspaceId)
+    .maybeSingle();
+  if (error || !data) {
+    if (error) console.error("getConnectedLedger failed:", error.message);
+    return null;
+  }
+  return toConnectedLedger(data);
 }
 
 export async function listSyncRuns(limit = 50): Promise<IntegrationSyncRun[]> {
