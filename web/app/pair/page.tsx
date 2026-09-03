@@ -22,15 +22,18 @@ export default async function PairPage({
   const raw = params.c;
   const code = typeof raw === "string" ? raw : "";
   const valid = PAIRING_TOKEN_PATTERN.test(code);
+  const platform = params.p === "android" ? "android" : "ios";
 
   const shortcutUrl = process.env.NEXT_PUBLIC_MOMO_SHORTCUT_URL?.trim() || null;
+  const androidCompanionUrl =
+    process.env.NEXT_PUBLIC_ANDROID_COMPANION_URL?.trim() || null;
 
   return (
     <div className="mx-auto flex max-w-sm flex-col gap-6 py-10">
       <div className="text-center">
         <OneLedgerLogo height={36} className="mx-auto mb-4" />
         <h1 className="text-xl font-semibold text-text-primary">
-          Connect this iPhone
+          {platform === "android" ? "Connect this phone" : "Connect this iPhone"}
         </h1>
         <p className="mt-1 text-sm text-text-muted">
           Automatically record supported transaction messages in OneLedger.
@@ -38,7 +41,14 @@ export default async function PairPage({
       </div>
 
       {valid
-        ? <PairHandoff token={code} shortcutUrl={shortcutUrl} />
+        ? (
+          <PairHandoff
+            token={code}
+            platform={platform}
+            shortcutUrl={shortcutUrl}
+            companionUrl={androidCompanionUrl}
+          />
+        )
         : (
           <div className="flex flex-col gap-3 rounded-card border border-border-subtle bg-surface p-4 text-sm text-text-secondary">
             <p className="font-medium text-text-primary">

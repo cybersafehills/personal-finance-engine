@@ -139,15 +139,53 @@ export function connectorKeyForProvider(provider: string): string {
 }
 
 export const PAIR_HANDOFF_QUERY = "c";
+export const PAIR_HANDOFF_PLATFORM_QUERY = "p";
 
-/** Path of the public cross-device handoff page for a pairing token. */
-export function pairHandoffPath(token: string): string {
-  return `/pair?${PAIR_HANDOFF_QUERY}=${encodeURIComponent(token)}`;
+/** Which kind of phone the wizard is pairing. Drives copy, the install guide,
+ *  and which deep link the Pair step / `/pair` handoff offers. */
+export type PairPlatform = "ios" | "android";
+
+export function isPairPlatform(value: unknown): value is PairPlatform {
+  return value === "ios" || value === "android";
+}
+
+/**
+ * Path of the public cross-device handoff page for a pairing token. `ios` is
+ * the default and adds no query param, so existing links stay byte-stable;
+ * `android` appends `&p=android` so `/pair` can offer the Companion deep link
+ * instead of the Shortcut one.
+ */
+export function pairHandoffPath(
+  token: string,
+  platform: PairPlatform = "ios",
+): string {
+  const base = `/pair?${PAIR_HANDOFF_QUERY}=${encodeURIComponent(token)}`;
+  return platform === "android"
+    ? `${base}&${PAIR_HANDOFF_PLATFORM_QUERY}=android`
+    : base;
 }
 
 /** Absolute handoff URL to encode into the desktop wizard's QR code. */
-export function pairHandoffUrl(origin: string, token: string): string {
-  return `${origin.replace(/\/+$/, "")}${pairHandoffPath(token)}`;
+export function pairHandoffUrl(
+  origin: string,
+  token: string,
+  platform: PairPlatform = "ios",
+): string {
+  return `${origin.replace(/\/+$/, "")}${pairHandoffPath(token, platform)}`;
+}
+
+export const ANDROID_COMPANION_PACKAGE = "me.oneledger.companion";
+
+/**
+ * `oneledger://pair?c=<token>` — matches the OneLedger Companion's
+ * AndroidManifest intent filter (scheme `oneledger`, host `pair`). Opens the
+ * app straight onto the pairing screen with the code prefilled. A harmless
+ * no-op when the app isn't installed (same tradeoff as
+ * `deviceCaptureShortcutRunUrl` on iOS); the wizard's poll is what actually
+ * advances the flow, however the token reaches the device.
+ */
+export function androidCompanionPairUrl(token: string): string {
+  return `oneledger://pair?${PAIR_HANDOFF_QUERY}=${encodeURIComponent(token)}`;
 }
 
 export const CAPTURE_SHORTCUT_NAME = "OneLedger Capture";

@@ -47,50 +47,69 @@ device: store device_secret + capture_url in Shortcut-local storage
 
 ## Web wizard — `/integrations/connections/pair`
 
-Mobile-first. Runs entirely on the iPhone (Safari → Shortcuts → back to Safari);
-a desktop can drive it too but is never required. Gated by
-`devicePairingV2Enabled(process.env.DEVICE_PAIRING_V2)` — off ⇒ the route
-`redirect`s to `/integrations/connections`, and that page's "Connect iPhone" CTA is
-hidden (the manual `CreateConnectionForm` stays visible as before). On ⇒ the
-manual form moves under an "Advanced — manual setup" `<details>`.
+Mobile-first. Runs entirely on the phone (Safari/Chrome → the Shortcut or the
+Companion app → back to the browser); a desktop can drive it too but is never
+required. Gated by `devicePairingV2Enabled(process.env.DEVICE_PAIRING_V2)` —
+off ⇒ the route `redirect`s to `/integrations/connections`, and that page's
+"Connect a phone" CTA is hidden (the manual `CreateConnectionForm` stays visible
+as before). On ⇒ the manual form moves under an "Advanced — manual setup"
+`<details>`.
 
-Steps (`web/components/PairWizard.tsx`):
+Steps (`web/components/PairWizard.tsx`). Step 1 picks **iPhone** or **Android
+phone** (`platform` state, default `ios`); the label of step 4 and the copy /
+deep link / install guide of steps 2–5 follow that choice. The `olp_` code, the
+poll, and the server actions are identical for both — the pairing protocol is
+platform-neutral (ADR 0008 §Consequences).
 
-1. **Account** — which `accounts` row this phone feeds.
-2. **Install** — the OneLedger Capture Shortcut (`web/lib/capture-shortcut-guide.ts`,
-   rendered by the reused `ShortcutGuide`; "Get the ready-made Shortcut" button
-   when `NEXT_PUBLIC_MOMO_SHORTCUT_URL` is set).
+1. **Account** — phone type + which `accounts` row this phone feeds.
+2. **Install** —
+   - iOS: the OneLedger Capture Shortcut (`web/lib/capture-shortcut-guide.ts`,
+     `ShortcutGuide`; "Get the ready-made Shortcut" when
+     `NEXT_PUBLIC_MOMO_SHORTCUT_URL` is set).
+   - Android: `AndroidCompanionGuide` — install the OneLedger Companion
+     (`android/`, ADR 0010); "Get the OneLedger Companion app" when
+     `NEXT_PUBLIC_ANDROID_COMPANION_URL` is set.
 3. **Pair** — `startDevicePairing(accountId)` server action →
    `requireMfaForSensitiveAction` → `generatePairingToken()` /
    `hashPairingToken()` → `create_device_pairing_session`. Shows the `olp_` code
-   big + copyable, and an **Open OneLedger Capture** link
-   (`deviceCaptureShortcutRunUrl(token)` = `shortcuts://run-shortcut?name=OneLedger%20Capture&input=text&text=<token>`).
+   big + copyable, plus a deep link:
+   - iOS: **Open OneLedger Capture** —
+     `deviceCaptureShortcutRunUrl(token)` (`shortcuts://run-shortcut?name=OneLedger%20Capture&input=text&text=<token>`).
+   - Android: **Open in OneLedger Companion** —
+     `androidCompanionPairUrl(token)` (`oneledger://pair?c=<token>`, the
+     Companion's manifest intent filter).
    The wizard polls `getDevicePairingStatus(sessionId)` every 3 s and advances
-   itself on `consumed` — **no return URL from the Shortcut is needed**, however
-   the token reached the device. Past `expires_at` / `status="expired"` ⇒ "Get a
-   new code". On a **fine-pointer** device (a computer) it also renders a QR
-   code of `pairHandoffUrl(origin, token)` (`web/components/QrCode.tsx`, matrix
-   from `web/lib/qr.ts` → `uqr`) — scan it to jump straight to the `/pair`
-   handoff on a phone. No QR on touch devices.
-4. **Automate** — the Apple-required Messages automation (static guidance;
-   `MOMO_SMS_SENDER` fills the sender when set).
+   itself on `consumed` — **no return URL from the device is needed**, however
+   the token reached it. Past `expires_at` / `status="expired"` ⇒ "Get a new
+   code". On a **fine-pointer** device (a computer) it also renders a QR of
+   `pairHandoffUrl(origin, token, platform)` — the Android variant carries
+   `&p=android` so the `/pair` handoff offers the Companion, not the Shortcut.
+4. **Automate** (iOS) — the Apple-required Messages automation (`MOMO_SMS_SENDER`
+   fills the sender when set). **Allow access** (Android) — turn on the
+   OS notification-listener permission for the Companion; the app has its own
+   CTA button for this, so the step is expectation-setting.
 5. **Verify** — reuses `<ConnectionReadinessProbe credentialId={…} />`, which
    polls `probeConnectorCredentialReadiness` and flips on `last_used_at` (set by
-   `op:"test"` or a real captured message). No synthetic send.
+   `op:"test"` — the Companion sends one at pair time — or a real captured
+   message). No synthetic send.
 
 The wizard never generates or displays the device secret — that is created by
-the Shortcut at `op:"pair"` time.
+the Shortcut / Companion at `op:"pair"` time.
 
 ## Public `/pair` handoff — `web/app/pair/page.tsx`
 
 The cross-device bridge. A phone scans the desktop wizard's QR and lands here
-with `?c=<olp_ token>`.
+with `?c=<olp_ token>` (and `&p=android` when the wizard was in the Android
+branch — `params.p` picks the `PairHandoff` variant; anything but `android`
+means iOS).
 
 - **No auth** — added to `PUBLIC_PATHS` in `web/proxy.ts`. The phone never needs
-  an OneLedger session; the OneLedger Capture Shortcut is what redeems the code.
-- **Calls no RPC.** It renders the code big + copyable, a **Run OneLedger
-  Capture** deep link (auto-attempted once on mount), and inline install steps
-  (`web/components/PairHandoff.tsx`).
+  an OneLedger session; the OneLedger Capture Shortcut (iOS) or the OneLedger
+  Companion app (Android) is what redeems the code.
+- **Calls no RPC.** It renders the code big + copyable, a deep link
+  auto-attempted once on mount — **Run OneLedger Capture**
+  (`shortcuts://…`) or **Open in OneLedger Companion** (`oneledger://pair?c=…`) —
+  and inline install steps (`web/components/PairHandoff.tsx`).
 - Gated by `devicePairingV2Enabled(DEVICE_PAIRING_V2)` → `notFound()` (404) when
   off. `c` is validated against `PAIRING_TOKEN_PATTERN`; missing/invalid renders
   a calm "this link is no longer valid — get a fresh code" state (HTTP 200).
@@ -202,7 +221,8 @@ numbers or workspace payloads. Events: `device_pairing_started`,
 |---|---|---|
 | `DEVICE_PAIRING_V2` | Edge Function secret **and** web env | exact `enabled` → the `/capture` endpoint is live *and* the web wizard + `/pair` + "Connect iPhone" CTA appear; otherwise 404 / route redirects |
 | `ONELEDGER_CAPTURE_BASE_URL` | Edge Function secret | stable base (e.g. `https://api.oneledger.me/v1`) reported to devices as `capture_url`; falls back to the Supabase Functions URL |
-| `NEXT_PUBLIC_MOMO_SHORTCUT_URL` | web env | when set, an "Add OneLedger Capture" link on the wizard install step **and** the `/pair` handoff page |
+| `NEXT_PUBLIC_MOMO_SHORTCUT_URL` | web env | when set, an "Add OneLedger Capture" link on the wizard install step (iOS) **and** the `/pair` handoff page |
+| `NEXT_PUBLIC_ANDROID_COMPANION_URL` | web env | when set, a "Get the OneLedger Companion app" link on the wizard install step (Android) **and** the `/pair` handoff page. Optional — the Android guide renders without it |
 | `REPORT_CRON_SECRET` | web env | gates `POST /api/cron/expire-pairing-sessions` (`x-report-cron-secret`) |
 
 ## Provisioning `api.oneledger.me` (operator task)

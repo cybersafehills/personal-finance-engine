@@ -93,7 +93,7 @@ export default async function ConnectionsPage() {
             href="/integrations/connections/pair"
             className="mb-4 inline-flex min-h-11 w-fit items-center rounded-control bg-accent px-4 text-sm font-medium text-accent-foreground"
           >
-            Connect iPhone
+            Connect a phone
           </Link>
         )
         : (

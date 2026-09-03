@@ -1,23 +1,37 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { deviceCaptureShortcutRunUrl } from "../lib/pairing";
+import {
+  androidCompanionPairUrl,
+  deviceCaptureShortcutRunUrl,
+  type PairPlatform,
+} from "../lib/pairing";
 
 /**
  * The body of the public `/pair` page. It calls no API — the OneLedger Capture
- * Shortcut is what redeems the code. On mount it makes one best-effort attempt
- * to open the Shortcut directly; otherwise the user taps the button.
+ * Shortcut (iOS) or the OneLedger Companion app (Android) is what redeems the
+ * code. On mount it makes one best-effort attempt to open that app directly;
+ * otherwise the user taps the button. The platform comes from `?p=` on the
+ * handoff URL the desktop wizard put in the QR.
  */
 export function PairHandoff({
   token,
+  platform = "ios",
   shortcutUrl,
+  companionUrl = null,
 }: {
   token: string;
-  /** A signed .shortcut / iCloud link, when one is published. */
+  platform?: PairPlatform;
+  /** A signed .shortcut / iCloud link, when one is published (iOS). */
   shortcutUrl: string | null;
+  /** A Play listing / signed APK link, when one is published (Android). */
+  companionUrl?: string | null;
 }) {
   const [copied, setCopied] = useState(false);
-  const runUrl = deviceCaptureShortcutRunUrl(token);
+  const isAndroid = platform === "android";
+  const runUrl = isAndroid
+    ? androidCompanionPairUrl(token)
+    : deviceCaptureShortcutRunUrl(token);
 
   useEffect(() => {
     // One shot — don't fight the user if they come back to this tab.
@@ -56,32 +70,59 @@ export function PairHandoff({
         href={runUrl}
         className="inline-flex min-h-11 items-center justify-center rounded-control bg-accent px-4 text-sm font-medium text-accent-foreground"
       >
-        Run OneLedger Capture
+        {isAndroid ? "Open in OneLedger Companion" : "Run OneLedger Capture"}
       </a>
 
       <div className="flex flex-col gap-2 text-sm text-text-secondary">
         <p className="font-medium text-text-primary">
-          Don&apos;t have the Shortcut yet?
+          {isAndroid
+            ? "Don't have the Companion app yet?"
+            : "Don't have the Shortcut yet?"}
         </p>
-        {shortcutUrl
+        {isAndroid
           ? (
-            <a
-              href={shortcutUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-medium text-accent hover:underline"
-            >
-              Add OneLedger Capture
-            </a>
+            companionUrl
+              ? (
+                <a
+                  href={companionUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-medium text-accent hover:underline"
+                >
+                  Get the OneLedger Companion app
+                </a>
+              )
+              : (
+                <ol className="flex flex-col gap-1">
+                  <li>1. Install the OneLedger Companion on this phone.</li>
+                  <li>
+                    2. Open it, then come back and tap &ldquo;Open in OneLedger
+                    Companion&rdquo; above — or just type the code into the app.
+                  </li>
+                </ol>
+              )
           )
           : (
-            <ol className="flex flex-col gap-1">
-              <li>1. Open the Shortcuts app.</li>
-              <li>
-                2. Add the OneLedger Capture Shortcut, then come back and tap
-                &ldquo;Run OneLedger Capture&rdquo; above.
-              </li>
-            </ol>
+            shortcutUrl
+              ? (
+                <a
+                  href={shortcutUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-medium text-accent hover:underline"
+                >
+                  Add OneLedger Capture
+                </a>
+              )
+              : (
+                <ol className="flex flex-col gap-1">
+                  <li>1. Open the Shortcuts app.</li>
+                  <li>
+                    2. Add the OneLedger Capture Shortcut, then come back and tap
+                    &ldquo;Run OneLedger Capture&rdquo; above.
+                  </li>
+                </ol>
+              )
           )}
       </div>
 

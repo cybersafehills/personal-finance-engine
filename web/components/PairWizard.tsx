@@ -14,11 +14,14 @@ import {
   CAPTURE_SHORTCUT_TROUBLESHOOTING,
 } from "../lib/capture-shortcut-guide";
 import {
+  androidCompanionPairUrl,
   deviceCaptureShortcutRunUrl,
+  type PairPlatform,
   pairHandoffUrl,
 } from "../lib/pairing";
 import { QrCode } from "./QrCode";
 import { ShortcutGuide } from "./ShortcutGuide";
+import { AndroidCompanionGuide } from "./AndroidCompanionGuide";
 import { ConnectionReadinessProbe } from "./ConnectionReadinessProbe";
 import {
   type DevicePairingStatus,
@@ -29,7 +32,10 @@ import {
 
 type Session = Extract<StartDevicePairingResult, { ok: true }>;
 
-const STEPS = ["Account", "Install", "Pair", "Automate", "Verify"] as const;
+const STEP_LABELS: Record<PairPlatform, readonly string[]> = {
+  ios: ["Account", "Install", "Pair", "Automate", "Verify"],
+  android: ["Account", "Install", "Pair", "Allow access", "Verify"],
+};
 type StepKey = "service" | "install" | "pair" | "automate" | "verify" | "done";
 const STEP_INDEX: Record<Exclude<StepKey, "done">, number> = {
   service: 0,
@@ -45,12 +51,17 @@ export function PairWizard({
   accounts,
   shortcutUrl,
   mtnSender,
+  androidCompanionUrl = null,
 }: {
   accounts: AccountRow[];
   shortcutUrl: string | null;
   mtnSender: string | null;
+  androidCompanionUrl?: string | null;
 }) {
   const [step, setStep] = useState<StepKey>("service");
+  const [platform, setPlatform] = useState<PairPlatform>("ios");
+  const isAndroid = platform === "android";
+  const steps = STEP_LABELS[platform];
   const [accountId, setAccountId] = useState(accounts[0]?.id ?? "");
   const [session, setSession] = useState<Session | null>(null);
   const [deviceCredentialId, setDeviceCredentialId] = useState<string | null>(
@@ -135,7 +146,7 @@ export function PairWizard({
           className="flex items-center gap-2 text-xs font-medium"
           aria-label="Setup progress"
         >
-          {STEPS.map((label, i) => {
+          {steps.map((label, i) => {
             const current = i === STEP_INDEX[step as Exclude<StepKey, "done">];
             const done = i < STEP_INDEX[step as Exclude<StepKey, "done">];
             return (
@@ -160,7 +171,7 @@ export function PairWizard({
                 >
                   {label}
                 </span>
-                {i < STEPS.length - 1 && (
+                {i < steps.length - 1 && (
                   <span aria-hidden className="text-text-muted">·</span>
                 )}
               </li>
@@ -171,9 +182,32 @@ export function PairWizard({
 
       {step === "service" && (
         <StepShell
-          title="Which account does this iPhone feed?"
-          hint="Transactions this phone captures will be recorded against this account."
+          title="Set up this phone"
+          hint="Pick the kind of phone and the account its transactions belong to."
         >
+          <fieldset className="flex flex-col gap-1 text-sm">
+            <legend className="mb-1 font-medium text-text-secondary">
+              Phone type
+            </legend>
+            <div className="flex gap-2">
+              {(["ios", "android"] as const).map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  aria-pressed={platform === p}
+                  onClick={() => setPlatform(p)}
+                  className={`min-h-11 flex-1 rounded-control border px-3 text-sm font-medium ${
+                    platform === p
+                      ? "border-accent bg-accent text-accent-foreground"
+                      : "border-border-strong text-text-secondary"
+                  }`}
+                >
+                  {p === "ios" ? "iPhone" : "Android phone"}
+                </button>
+              ))}
+            </div>
+          </fieldset>
+
           {accounts.length === 0
             ? (
               <p className="text-sm text-text-muted">
@@ -206,20 +240,28 @@ export function PairWizard({
 
       {step === "install" && (
         <StepShell
-          title="Add OneLedger Capture to this iPhone"
-          hint="A small Shortcut that forwards supported transaction messages. It never shows you a link, a key, or code."
+          title={isAndroid
+            ? "Install the OneLedger Companion app"
+            : "Add OneLedger Capture to this iPhone"}
+          hint={isAndroid
+            ? "A small app that forwards only supported transaction notifications. It never reads SMS and ignores everything else on the device."
+            : "A small Shortcut that forwards supported transaction messages. It never shows you a link, a key, or code."}
         >
-          <ShortcutGuide
-            steps={captureShortcutGuideSteps({ shortcutUrl, mtnSender })}
-            troubleshooting={CAPTURE_SHORTCUT_TROUBLESHOOTING}
-            shortcutUrl={shortcutUrl}
-          />
+          {isAndroid
+            ? <AndroidCompanionGuide companionUrl={androidCompanionUrl} />
+            : (
+              <ShortcutGuide
+                steps={captureShortcutGuideSteps({ shortcutUrl, mtnSender })}
+                troubleshooting={CAPTURE_SHORTCUT_TROUBLESHOOTING}
+                shortcutUrl={shortcutUrl}
+              />
+            )}
         </StepShell>
       )}
 
       {step === "pair" && (
         <StepShell
-          title="Pair this iPhone"
+          title={isAndroid ? "Pair this phone" : "Pair this iPhone"}
           hint="OneLedger and your phone swap a one-time code for a private key. You never type the key."
         >
           {pairError && (
@@ -260,10 +302,14 @@ export function PairWizard({
               </div>
 
               <a
-                href={deviceCaptureShortcutRunUrl(session.token)}
+                href={isAndroid
+                  ? androidCompanionPairUrl(session.token)
+                  : deviceCaptureShortcutRunUrl(session.token)}
                 className="inline-flex min-h-11 w-fit items-center rounded-control bg-accent px-4 text-sm font-medium text-accent-foreground"
               >
-                Open OneLedger Capture
+                {isAndroid
+                  ? "Open in OneLedger Companion"
+                  : "Open OneLedger Capture"}
               </a>
 
               <p className="flex items-center gap-2 text-xs text-text-secondary">
@@ -271,14 +317,18 @@ export function PairWizard({
                   aria-hidden
                   className="inline-block h-2 w-2 animate-pulse rounded-full bg-accent"
                 />
-                Waiting for this iPhone to connect… this screen moves on by
+                Waiting for this phone to connect… this screen moves on by
                 itself.
               </p>
 
               {handoffOrigin && (
                 <div className="flex flex-col gap-2">
                   <QrCode
-                    value={pairHandoffUrl(handoffOrigin, session.token)}
+                    value={pairHandoffUrl(
+                      handoffOrigin,
+                      session.token,
+                      platform,
+                    )}
                     label="QR code to open pairing on your phone"
                     className="h-40 w-40 text-text-primary"
                   />
@@ -311,7 +361,40 @@ export function PairWizard({
         </StepShell>
       )}
 
-      {step === "automate" && (
+      {step === "automate" && isAndroid && (
+        <StepShell
+          title="Allow notification access"
+          hint="One system permission lets the Companion see supported transaction notifications. It’s the only manual step left."
+        >
+          <ol className="flex flex-col gap-3 text-sm text-text-secondary">
+            <li>
+              1. The Companion app shows a{" "}
+              <span className="font-medium">Turn on notification access</span>
+              {" "}
+              button after pairing — tap it. (Or open{" "}
+              <span className="font-medium">
+                Settings → Notification access
+              </span>{" "}
+              yourself.)
+            </li>
+            <li>
+              2. In the system list, find{" "}
+              <span className="font-medium">OneLedger Companion</span> and turn
+              it on. Confirm the Android prompt.
+            </li>
+            <li>
+              3. Return to the Companion. It only ever forwards messages that
+              match a supported provider — everything else stays on the phone.
+            </li>
+          </ol>
+          <p className="rounded-control border border-border-subtle bg-surface p-3 text-xs text-text-muted">
+            You can revoke this any time under Settings → Notification access.
+            The Companion will show the connection as needing attention.
+          </p>
+        </StepShell>
+      )}
+
+      {step === "automate" && !isAndroid && (
         <StepShell
           title="Turn on transaction messages"
           hint="Apple needs you to allow this one automation. It’s the only manual step left."
@@ -349,10 +432,14 @@ export function PairWizard({
       {step === "verify" && (
         <StepShell
           title="Checking the connection"
-          hint="Run “Test OneLedger connection” from Shortcuts, or just wait for your next MoMo message."
+          hint={isAndroid
+            ? "The Companion sent a test the moment it paired. Otherwise, just wait for your next MoMo message."
+            : "Run “Test OneLedger connection” from Shortcuts, or just wait for your next MoMo message."}
         >
           <ul className="flex flex-col gap-2 text-sm">
-            <li className="text-money-positive">✓ iPhone paired</li>
+            <li className="text-money-positive">
+              ✓ {isAndroid ? "Phone" : "iPhone"} paired
+            </li>
             <li className="text-money-positive">✓ Secure connection established</li>
             <li className="flex flex-col gap-1 text-text-secondary">
               <span>○ Waiting for the first transaction message</span>
@@ -370,7 +457,7 @@ export function PairWizard({
       {step === "done" && (
         <div className="flex flex-col gap-3 rounded-card border border-border-subtle bg-surface p-6">
           <h2 className="text-base font-semibold text-text-primary">
-            Your iPhone is connected
+            Your {isAndroid ? "phone" : "iPhone"} is connected
           </h2>
           <p className="text-sm text-text-secondary">
             Supported transaction messages from this phone are now recorded in

@@ -1,10 +1,12 @@
 import { assert, assertEquals, assertMatch } from "jsr:@std/assert@1";
 import {
+  androidCompanionPairUrl,
   connectorKeyForProvider,
   deviceCaptureShortcutRunUrl,
   devicePairingV2Enabled,
   generatePairingToken,
   hashPairingToken,
+  isPairPlatform,
   pairHandoffPath,
   pairHandoffUrl,
   PAIRING_TOKEN_PATTERN,
@@ -114,4 +116,39 @@ Deno.test("pairHandoffPath / pairHandoffUrl: /pair?c=<token>, origin trailing sl
   const parsed = new URL(pairHandoffUrl("https://oneledger.me", token));
   assertEquals(parsed.pathname, "/pair");
   assertMatch(parsed.searchParams.get("c")!, PAIRING_TOKEN_PATTERN);
+});
+
+Deno.test("pairHandoffPath/Url: android appends &p=android, ios stays byte-stable", () => {
+  const { token } = generatePairingToken();
+  // ios is the default and adds nothing — existing links keep their exact shape
+  assertEquals(pairHandoffPath(token), `/pair?c=${token}`);
+  assertEquals(pairHandoffPath(token, "ios"), `/pair?c=${token}`);
+  assertEquals(pairHandoffPath(token, "android"), `/pair?c=${token}&p=android`);
+  assertEquals(
+    pairHandoffUrl("https://oneledger.me/", token, "android"),
+    `https://oneledger.me/pair?c=${token}&p=android`,
+  );
+  const parsed = new URL(
+    pairHandoffUrl("https://oneledger.me", token, "android"),
+  );
+  assertEquals(parsed.searchParams.get("p"), "android");
+  assertMatch(parsed.searchParams.get("c")!, PAIRING_TOKEN_PATTERN);
+});
+
+Deno.test("androidCompanionPairUrl: oneledger://pair?c=<token> matching the app's intent filter", () => {
+  const { token } = generatePairingToken();
+  const url = androidCompanionPairUrl(token);
+  assert(url.startsWith("oneledger://pair?"));
+  const parsed = new URL(url);
+  assertEquals(parsed.protocol, "oneledger:");
+  assertEquals(parsed.host, "pair");
+  assertEquals(parsed.searchParams.get("c"), token);
+});
+
+Deno.test("isPairPlatform: only 'ios' and 'android'", () => {
+  assert(isPairPlatform("ios"));
+  assert(isPairPlatform("android"));
+  for (const v of ["", "IOS", "web", "macos", null, undefined, 1]) {
+    assert(!isPairPlatform(v));
+  }
 });

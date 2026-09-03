@@ -19,11 +19,14 @@ export default async function PairDevicePage() {
 
   const shortcutUrl = process.env.NEXT_PUBLIC_MOMO_SHORTCUT_URL?.trim() || null;
   const mtnSender = process.env.MOMO_SMS_SENDER?.trim() || null;
+  // A Play listing / signed APK link for the OneLedger Companion, once published.
+  const androidCompanionUrl =
+    process.env.NEXT_PUBLIC_ANDROID_COMPANION_URL?.trim() || null;
 
   return (
     <div>
       <PageHeader
-        title="Connect your iPhone"
+        title="Connect your phone"
         subtitle="Automatically record supported transaction messages in OneLedger"
         backHref="/integrations/connections"
         backLabel="Connections"
@@ -32,6 +35,7 @@ export default async function PairDevicePage() {
         accounts={activeAccounts}
         shortcutUrl={shortcutUrl}
         mtnSender={mtnSender}
+        androidCompanionUrl={androidCompanionUrl}
       />
     </div>
   );
