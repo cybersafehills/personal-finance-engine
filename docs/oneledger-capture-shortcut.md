@@ -47,15 +47,15 @@ text) and needs no interaction.
 |---|---|---|
 | 1 | **Get File** `OneLedger/config.json` → **Get Dictionary from Input** | Fails closed if the phone was never connected. |
 | 2 | **Get Dictionary Value** `secret` and `url` | |
-| 3 | **Dictionary** → `message: <Shortcut Input>`, `received_at: <Current Date, ISO 8601>`, `client_version: 1.0.0` | The universal capture envelope. |
+| 3 | **Dictionary** → `op: capture`, `message: <Shortcut Input>`, `received_at: <Current Date, ISO 8601>`, `client_version: 1.0.0` | The universal capture envelope. |
 | 4 | **Get Contents of URL** | `POST` to `url`; Headers `x-device-key: <secret>`; Request Body `JSON` = the Dictionary. |
-| 5 | *(optional)* **If** the response `ok` is not `true` and `error` is `INVALID_DEVICE_CREDENTIAL` → **Show Notification** "Reconnect this iPhone to OneLedger." | Everything else stays silent. |
+| 5 | *(optional)* **If** the response `ok` is not `true` and `error` is `INVALID_DEVICE_CREDENTIAL` → **Show Notification** "Reconnect this iPhone to OneLedger." | Everything else stays silent (`202 queued` / `200 duplicate` / `422 UNKNOWN_PROVIDER` are all fine to ignore). |
 
-> The real message path (`op:"capture"`) is a follow-up backend PR. Until it
-> ships, Shortcut B points at the existing `ingest-momo` endpoint and sends
-> `{ message, received_at }` with the `x-ingest-key` header — the pairing flow
-> above still provisions the credential, and switching Shortcut B to `/capture`
-> later is a URL + header change with no re-pairing.
+> `op:"capture"` accepts the message as **queued evidence** (`202`) — the
+> transaction appears once the OneLedger processor normalizes it (ADR 0009).
+> Until that processor ships you may keep Shortcut B pointed at the legacy
+> `ingest-momo` endpoint (`{ message, received_at }` + `x-ingest-key` header);
+> switching to `/capture` later is a URL + header change with no re-pairing.
 
 ---
 
