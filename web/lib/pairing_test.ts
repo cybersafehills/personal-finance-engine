@@ -5,6 +5,8 @@ import {
   devicePairingV2Enabled,
   generatePairingToken,
   hashPairingToken,
+  pairHandoffPath,
+  pairHandoffUrl,
   PAIRING_TOKEN_PATTERN,
   pairingErrorMessage,
   pairingTokenPrefix,
@@ -95,4 +97,21 @@ Deno.test("deviceCaptureShortcutRunUrl: runs the Capture Shortcut with the token
   assertEquals(q.get("name"), "OneLedger Capture");
   assertEquals(q.get("input"), "text");
   assertEquals(q.get("text"), token);
+});
+
+Deno.test("pairHandoffPath / pairHandoffUrl: /pair?c=<token>, origin trailing slash tolerated", () => {
+  const { token } = generatePairingToken();
+  assertEquals(pairHandoffPath(token), `/pair?c=${token}`); // tokens are URL-safe
+  assertEquals(
+    pairHandoffUrl("https://oneledger.me/", token),
+    `https://oneledger.me/pair?c=${token}`,
+  );
+  assertEquals(
+    pairHandoffUrl("https://oneledger.me", token),
+    `https://oneledger.me/pair?c=${token}`,
+  );
+  // round-trips through URL + PAIRING_TOKEN_PATTERN
+  const parsed = new URL(pairHandoffUrl("https://oneledger.me", token));
+  assertEquals(parsed.pathname, "/pair");
+  assertMatch(parsed.searchParams.get("c")!, PAIRING_TOKEN_PATTERN);
 });

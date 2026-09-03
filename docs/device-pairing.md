@@ -65,7 +65,10 @@ Steps (`web/components/PairWizard.tsx`):
    The wizard polls `getDevicePairingStatus(sessionId)` every 3 s and advances
    itself on `consumed` — **no return URL from the Shortcut is needed**, however
    the token reached the device. Past `expires_at` / `status="expired"` ⇒ "Get a
-   new code".
+   new code". On a **fine-pointer** device (a computer) it also renders a QR
+   code of `pairHandoffUrl(origin, token)` (`web/components/QrCode.tsx`, matrix
+   from `web/lib/qr.ts` → `uqr`) — scan it to jump straight to the `/pair`
+   handoff on a phone. No QR on touch devices.
 4. **Automate** — the Apple-required Messages automation (static guidance;
    `MOMO_SMS_SENDER` fills the sender when set).
 5. **Verify** — reuses `<ConnectionReadinessProbe credentialId={…} />`, which
@@ -74,6 +77,25 @@ Steps (`web/components/PairWizard.tsx`):
 
 The wizard never generates or displays the device secret — that is created by
 the Shortcut at `op:"pair"` time.
+
+## Public `/pair` handoff — `web/app/pair/page.tsx`
+
+The cross-device bridge. A phone scans the desktop wizard's QR and lands here
+with `?c=<olp_ token>`.
+
+- **No auth** — added to `PUBLIC_PATHS` in `web/proxy.ts`. The phone never needs
+  an OneLedger session; the OneLedger Capture Shortcut is what redeems the code.
+- **Calls no RPC.** It renders the code big + copyable, a **Run OneLedger
+  Capture** deep link (auto-attempted once on mount), and inline install steps
+  (`web/components/PairHandoff.tsx`).
+- Gated by `devicePairingV2Enabled(DEVICE_PAIRING_V2)` → `notFound()` (404) when
+  off. `c` is validated against `PAIRING_TOKEN_PATTERN`; missing/invalid renders
+  a calm "this link is no longer valid — get a fresh code" state (HTTP 200).
+- `export const metadata = { referrer: "no-referrer" }` — the single-use,
+  ~10-minute token rides in the URL so it can be scanned; keeping it out of
+  `Referer` is the same posture as a magic link. The database still re-checks
+  the token on redemption (single use, TTL) — the URL is a transport, not the
+  security boundary.
 
 ## `POST /capture`
 
@@ -145,8 +167,9 @@ numbers or workspace payloads. Events: `device_pairing_started`,
 
 | Name | Where | Effect |
 |---|---|---|
-| `DEVICE_PAIRING_V2` | Edge Function secret **and** web env | exact `enabled` → the `/capture` endpoint is live *and* the web wizard + "Connect iPhone" CTA appear; otherwise 404 / route redirects |
+| `DEVICE_PAIRING_V2` | Edge Function secret **and** web env | exact `enabled` → the `/capture` endpoint is live *and* the web wizard + `/pair` + "Connect iPhone" CTA appear; otherwise 404 / route redirects |
 | `ONELEDGER_CAPTURE_BASE_URL` | Edge Function secret | stable base (e.g. `https://api.oneledger.me/v1`) reported to devices as `capture_url`; falls back to the Supabase Functions URL |
+| `NEXT_PUBLIC_MOMO_SHORTCUT_URL` | web env | when set, an "Add OneLedger Capture" link on the wizard install step **and** the `/pair` handoff page |
 | `REPORT_CRON_SECRET` | web env | gates `POST /api/cron/expire-pairing-sessions` (`x-report-cron-secret`) |
 
 ## Provisioning `api.oneledger.me` (operator task)

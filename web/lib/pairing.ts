@@ -138,6 +138,18 @@ export function connectorKeyForProvider(provider: string): string {
   }
 }
 
+export const PAIR_HANDOFF_QUERY = "c";
+
+/** Path of the public cross-device handoff page for a pairing token. */
+export function pairHandoffPath(token: string): string {
+  return `/pair?${PAIR_HANDOFF_QUERY}=${encodeURIComponent(token)}`;
+}
+
+/** Absolute handoff URL to encode into the desktop wizard's QR code. */
+export function pairHandoffUrl(origin: string, token: string): string {
+  return `${origin.replace(/\/+$/, "")}${pairHandoffPath(token)}`;
+}
+
 export const CAPTURE_SHORTCUT_NAME = "OneLedger Capture";
 
 /**

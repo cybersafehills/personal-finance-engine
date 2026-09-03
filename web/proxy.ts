@@ -29,6 +29,11 @@ const PUBLIC_PATHS = [
   // account yet. The page itself bounces an unauthenticated visitor to
   // /login or /signup with ?next= pointing back here.
   "/invite",
+  // Cross-device pairing handoff (device pairing v2). A phone scans a QR
+  // from another device's wizard and lands here with a one-time code; it
+  // needs no OneLedger session — the OneLedger Capture Shortcut redeems
+  // the code. Renders 404 when DEVICE_PAIRING_V2 is unset.
+  "/pair",
 ];
 
 // Of those, only these should redirect an already-signed-in user away -

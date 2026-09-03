@@ -1,5 +1,9 @@
 {
   "compilerOptions": {
     "lib": ["deno.window"]
+  },
+  "imports": {
+    "uqr": "npm:uqr@0.1.3",
+    "jsqr": "npm:jsqr@1.4.0"
   }
 }

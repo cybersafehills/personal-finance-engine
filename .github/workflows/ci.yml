@@ -89,7 +89,11 @@ jobs:
       # formatting/lint rules - only `deno test`'s type-check + assertions
       # apply here.
       - name: deno test (web/lib)
-        run: deno test web/lib
+        # --config: web/lib/deno.json carries the "deno.window" lib and the
+        # bare-specifier import map (uqr, jsqr) these modules use. Deno does
+        # not auto-discover a per-directory config when invoked from the repo
+        # root, so it must be passed explicitly.
+        run: deno test --config web/lib/deno.json web/lib
 
   migration-tests:
     name: Migration chain tests (disposable PostgreSQL 17)
