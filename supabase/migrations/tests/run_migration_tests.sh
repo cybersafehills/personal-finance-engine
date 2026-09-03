@@ -636,7 +636,9 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # service-role-only, no authenticated policy) - 93 tables, 92 with RLS.
 # Integrations Phase 3 P3-PR3 (20261111000000) adds accountant_packages
 # (RLS enabled, SELECT gated on integration.view) - 94 tables, 93 with RLS.
-if [ "$TABLE_COUNT" = "94" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Integrations Phase 3 P3-PR5 (20261112000000) adds connected_ledgers
+# (RLS enabled, SELECT gated on integration.view) - 95 tables, 94 with RLS.
+if [ "$TABLE_COUNT" = "95" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -740,11 +742,13 @@ fi
 # the reconcile-balances edge function is the sole writer). 126 + 1 = 127.
 # Integrations Phase 3 P3-PR3 (20261111000000) adds accountant_packages with a
 # SELECT-only grant for authenticated (writes service-role only). 127 + 1 = 128.
+# Integrations Phase 3 P3-PR5 (20261112000000) adds connected_ledgers with a
+# SELECT-only grant for authenticated (writes service-role only). 128 + 1 = 129.
 AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and grantee = 'authenticated';")"
-if [ "$AUTHENTICATED_GRANT_COUNT" = "128" ]; then
-  pass "authenticated holds exactly the 128 table grants expected, no more"
+if [ "$AUTHENTICATED_GRANT_COUNT" = "129" ]; then
+  pass "authenticated holds exactly the 129 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 128 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 129 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -5486,6 +5490,78 @@ if [ "$P3_AP_BUCKET" = "1" ]; then
   pass "Integrations P3: the private integration-accountant-packages storage bucket is registered (public = false)"
 else
   fail "Integrations P3: integration-accountant-packages bucket missing or public (got $P3_AP_BUCKET)"
+fi
+
+# ===========================================================================
+# Integrations Phase 3 (20261112000000): accounting connectors -
+# integration.ledger_manage / integration.ledger_sync + connected_ledgers +
+# the widened integration_destinations 'accounting' kind.
+# ===========================================================================
+echo "=== Integrations P3: accounting connector model + capabilities ==="
+
+P3_LEDGER_MATRIX="$(psql -d pfe_rls -t -A -c "
+  with caps(capability) as (values
+    ('integration.ledger_manage'), ('integration.ledger_sync')
+  ),
+  cells(kind, role) as (values
+    ('household','owner'), ('household','admin'),
+    ('household','member'), ('household','viewer'),
+    ('personal','owner'), ('personal','member')
+  ),
+  expected as (
+    select c.kind, c.role, cap.capability,
+      case
+        when c.kind = 'personal' then c.role = 'owner'
+        when c.role in ('owner', 'admin') then true
+        else false
+      end as allowed
+    from cells c cross join caps cap
+  )
+  select count(*) from expected
+  where public.space_role_has_capability(kind, role, capability) is distinct from allowed;")"
+P3_LEDGER_UNKNOWN="$(psql -d pfe_rls -t -A -c "select public.space_role_has_capability('household', 'owner', 'integration.ledger_bogus');")"
+if [ "$P3_LEDGER_MATRIX" = "0" ] && [ "$P3_LEDGER_UNKNOWN" = "f" ]; then
+  pass "Integrations P3: integration.ledger_manage / .ledger_sync are owner/admin-only (member/viewer none), unknown fails closed"
+else
+  fail "Integrations P3: ledger capability matrix wrong (cells=$P3_LEDGER_MATRIX unknown=$P3_LEDGER_UNKNOWN)"
+fi
+
+P3_DEST="$(psql -d pfe_rls -t -A -c "insert into public.integration_destinations (workspace_id, name, kind, provider, created_by) values ('$INT_HH', 'QB', 'accounting', 'quickbooks', '$USER_A') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+if [ -n "$P3_DEST" ]; then
+  pass "Integrations P3: integration_destinations accepts the widened kind='accounting' + provider='quickbooks'"
+else
+  fail "Integrations P3: integration_destinations rejected an accounting destination"
+fi
+
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.integration_destinations (workspace_id, name, kind, provider) values ('$INT_HH', 'Bad', 'accounting', 'sage');" >/dev/null 2>$ARTIFACT_DIR/pfe_p3_dest.log; then
+  fail "Integrations P3: integration_destinations accepted an unknown provider"
+else
+  pass "Integrations P3: integration_destinations still rejects an unknown provider after the widen"
+fi
+rm -f $ARTIFACT_DIR/pfe_p3_dest.log
+
+P3_LEDGER="$(psql -d pfe_rls -t -A -c "insert into public.connected_ledgers (workspace_id, destination_id, external_ref, created_by) values ('$INT_HH', '$P3_DEST', 'realm-1', '$USER_A') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+P3_LEDGER_MEMBER="$(as_user "$INT_MEMBER_USER" "select count(*) from public.connected_ledgers where id = '$P3_LEDGER';")"
+P3_LEDGER_VIEWER="$(as_user "$INT_VIEWER_USER" "select count(*) from public.connected_ledgers where id = '$P3_LEDGER';")"
+P3_LEDGER_OUTSIDER="$(as_user "$USER_B" "select count(*) from public.connected_ledgers where id = '$P3_LEDGER';")"
+if [ "$P3_LEDGER_MEMBER" = "1" ] && [ "$P3_LEDGER_VIEWER" = "0" ] && [ "$P3_LEDGER_OUTSIDER" = "0" ]; then
+  pass "Integrations P3: connected_ledgers is readable by a member with integration.view, hidden from a Space viewer and another tenant"
+else
+  fail "Integrations P3: connected_ledgers RLS wrong (member=$P3_LEDGER_MEMBER viewer=$P3_LEDGER_VIEWER outsider=$P3_LEDGER_OUTSIDER)"
+fi
+
+if as_user "$INT_MEMBER_USER" "insert into public.connected_ledgers (workspace_id, destination_id) values ('$INT_HH', '$P3_DEST');" >/dev/null 2>$ARTIFACT_DIR/pfe_p3_ledger.log; then
+  fail "Integrations P3: an authenticated user wrote to connected_ledgers"
+else
+  pass "Integrations P3: connected_ledgers INSERT is denied to authenticated (service-role only)"
+fi
+rm -f $ARTIFACT_DIR/pfe_p3_ledger.log
+
+P3_SYNC_LEDGER_COL="$(psql -d pfe_rls -t -A -c "select count(*) from information_schema.columns where table_schema='public' and table_name='integration_sync_runs' and column_name='connected_ledger_id';")"
+if [ "$P3_SYNC_LEDGER_COL" = "1" ]; then
+  pass "Integrations P3: integration_sync_runs gained connected_ledger_id"
+else
+  fail "Integrations P3: integration_sync_runs.connected_ledger_id missing"
 fi
 
 # ===========================================================================

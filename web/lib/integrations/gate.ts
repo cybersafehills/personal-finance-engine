@@ -139,3 +139,18 @@ export function isAccountantPackageEnabled(
     envEnabled("INTEGRATIONS_ACCOUNTANT_PACKAGE_ENABLED")
   );
 }
+
+//   INTEGRATIONS_ACCOUNTING_CONNECTORS_ENABLED - the accounting destination
+//     type + connected ledgers (QuickBooks / Xero / Zoho Books / Odoo).
+//     OFF unless exactly "true"; each provider is additionally dark until
+//     its *_CLIENT_ID / *_SECRET env is set.
+
+/** Accounting connectors - opt-in with exactly "true". Requires Sync. */
+export function isAccountingConnectorsEnabled(
+  workspaceId: string | null,
+): boolean {
+  return (
+    isSyncEnabled(workspaceId) &&
+    envOptIn("INTEGRATIONS_ACCOUNTING_CONNECTORS_ENABLED")
+  );
+}
