@@ -351,6 +351,28 @@ RLS-scoped reads in `web/lib/integrations/queries.ts`.
   `sync_runs_failed`, `sync_runs_stuck`, `open_conflicts`,
   `oldest_open_conflict_age_seconds`, `destinations_needing_auth`.
 
+## Sync-engine hardening + polling cron (P2-PR6, no migration)
+
+- `web/lib/integrations/sync-engine.ts` (**pure, tested**) —
+  `classifyFailure` (`transient` / `permanent` / `needs_auth`),
+  `backoffSeconds` (`60·2ⁿ`, capped at 1h), `nextAttemptState(attempt,
+  code)` → re-queue with `next_attempt_at` up to `MAX_SYNC_ATTEMPTS` (5),
+  or terminal `failed` (+ `markNeedsAuth` for the auth class).
+- `runWorkbookSync` applies that on failure: dark-provider codes stay a
+  `partial` run; real failures re-queue (`status='queued'`, `attempt++`,
+  `next_attempt_at`) or fail, and a `needs_auth` failure flips the
+  workbook + destination to `needs_auth` and writes an in-app
+  `notifications` row for the owner. `runWorkbookSync` now takes an
+  `attempt` so a retry chain is tracked across runs.
+- `web/app/api/cron/run-integration-syncs/route.ts` — cron-secret auth;
+  fails runs stuck in `running` past a 15-min lease, and re-invokes
+  `runWorkbookSync` for due `queued` workbook runs (claim = mark the
+  queued run `superseded_by_retry`, then run a fresh one at the carried
+  attempt). Not yet scheduler-wired.
+- Docs: `integrations-destinations.md`,
+  `integrations-connected-workbooks.md`; `authorization-matrix.md` +3
+  rows; `integrations-connector-howto.md` outbound-adapter section.
+
 ## Feature flags
 
 `web/lib/integrations/gate.ts`, env-var convention shared with

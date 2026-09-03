@@ -41,6 +41,29 @@ new provider is an addition, not a redesign.
    and `get_operational_health_snapshot` see it. No raw payloads, no
    secrets, no financial values in `context`.
 
+## Outbound adapters (Phase 2)
+
+Delivery *out* of OneLedger uses a separate, parallel set of contracts —
+the inbound `connector-adapter.ts` is not involved:
+
+- **Cloud storage** — `destinations/cloud-storage/contract.ts`
+  (`CloudStorageClient`: `authUrl` / `exchangeCode` / `refresh` /
+  `listFolders` / `uploadFile`). `registry.ts` decides configured vs dark
+  from the provider's `*_CLIENT_ID` / `*_SECRET`. A dark provider's client
+  throws `ProviderNotConfiguredError` from every method; the OAuth routes
+  turn that into a 501 and the delivery path records a `partial` run.
+- **Spreadsheets** — `workbooks/contract.ts` (`WorkbookAdapter`:
+  `getRevision` / `writeAllSheets` / `readAllSheets`). `manual_file` is
+  the reference real implementation; `google_sheets` / `excel_365` are
+  stubs.
+- **Webhook** — no adapter; `destinations/webhook.ts` (signer + SSRF
+  guard) + `destinations/deliver.ts`.
+
+Adding a real cloud/spreadsheet provider = implement its client against
+the interface, register the env-var gate, wire `listFolders` / row-level
+`writeAllSheets`, and never let it report success it didn't achieve
+(`provider_upload_not_implemented` is the honest placeholder).
+
 ## Where NOT to start
 
 Do not add Airtel / bank API / email / receipt connectors as enums or

@@ -10,6 +10,7 @@ import {
   diffWorkbookAgainstLedger,
   type LedgerRowForDiff,
 } from "./diff.ts";
+import { nextAttemptState } from "../sync-engine.ts";
 
 export type WorkbookSyncResult =
   | { ok: true; syncRunId: string; counts: Record<string, number> }
@@ -27,6 +28,8 @@ export async function runWorkbookSync(
     workbookId: string;
     workspaceId: string;
     trigger: "manual" | "scheduled" | "poll";
+    /** attempt number of the retry chain this run belongs to (0 = first). */
+    attempt?: number;
   },
 ): Promise<WorkbookSyncResult> {
   const { data: workbook } = await admin
@@ -58,6 +61,7 @@ export async function runWorkbookSync(
       trigger: input.trigger,
       direction: workbook.direction,
       status: "running",
+      attempt: input.attempt ?? 0,
       started_at: new Date().toISOString(),
     })
     .select("id")
@@ -163,16 +167,93 @@ export async function runWorkbookSync(
     await finish("succeeded", counts, null, externalRef ?? undefined);
     return { ok: true, syncRunId: syncRunId ?? "", counts };
   } catch (err) {
-    const code = (err as { code?: string })?.code === "provider_not_configured"
+    const errCode = (err as { code?: string })?.code;
+    const code = errCode === "provider_not_configured"
       ? "provider_not_configured"
+      : errCode === "provider_upload_not_implemented"
+      ? "provider_upload_not_implemented"
       : "workbook_sync_failed";
-    const status = code === "provider_not_configured" ? "partial" : "failed";
-    await finish(status, counts, {
-      code,
-      message: err instanceof Error ? err.message.slice(0, 200) : "failed",
+    const message = err instanceof Error ? err.message.slice(0, 200) : "failed";
+
+    // Dark-provider states: a `partial` run, no retry.
+    if (code === "provider_not_configured" || code === "provider_upload_not_implemented") {
+      await finish("partial", counts, { code, message });
+      return { ok: false, error: code, syncRunId };
+    }
+
+    // Real failure: let the retry policy decide.
+    const state = nextAttemptState(input.attempt ?? 0, code, Date.now());
+    if (syncRunId) {
+      await admin
+        .from("integration_sync_runs")
+        .update({
+          status: state.status,
+          counts,
+          error: { code, message },
+          attempt: state.attempt,
+          next_attempt_at: state.nextAttemptAtMs
+            ? new Date(state.nextAttemptAtMs).toISOString()
+            : null,
+          finished_at: state.status === "failed" ? new Date().toISOString() : null,
+        })
+        .eq("id", syncRunId);
+    }
+    const wbStatus = state.markNeedsAuth
+      ? "needs_auth"
+      : state.status === "failed"
+      ? "error"
+      : "active";
+    await admin
+      .from("connected_workbooks")
+      .update({ last_sync_run_id: syncRunId ?? null, status: wbStatus })
+      .eq("id", workbook.id);
+    if (state.markNeedsAuth) {
+      await admin
+        .from("integration_destinations")
+        .update({ status: "needs_auth", last_error_code: code })
+        .eq("id", workbook.destination_id);
+      await notifyWorkbookOwner(admin, {
+        workspaceId: input.workspaceId,
+        workbookId: workbook.id,
+        title: "A connected workbook needs re-authorising",
+        body: "A sync failed because the workbook’s connection is no longer valid.",
+      });
+    }
+    await admin.from("integration_events").insert({
+      workspace_id: input.workspaceId,
+      kind: "workbook.sync_failed",
+      severity: "warning",
+      ref_type: "connected_workbook",
+      ref_id: workbook.id,
+      summary: state.status === "queued"
+        ? `Workbook sync failed — retrying (attempt ${state.attempt})`
+        : "Workbook sync failed",
+      context: { provider, code, trigger: input.trigger },
     });
     return { ok: false, error: code, syncRunId };
   }
+}
+
+async function notifyWorkbookOwner(
+  admin: SupabaseClient,
+  p: { workspaceId: string; workbookId: string; title: string; body: string },
+): Promise<void> {
+  const { data: wb } = await admin
+    .from("connected_workbooks")
+    .select("created_by")
+    .eq("id", p.workbookId)
+    .maybeSingle();
+  if (!wb?.created_by) return;
+  await admin.from("notifications").insert({
+    workspace_id: p.workspaceId,
+    user_id: wb.created_by,
+    event_key: "integration.workbook_needs_auth",
+    channel: "in_app",
+    title: p.title,
+    body: p.body,
+    resource_type: "connected_workbook",
+    resource_id: p.workbookId,
+  });
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
