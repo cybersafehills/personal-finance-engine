@@ -107,6 +107,16 @@ export async function createAccountantPackage(
     return { ok: false, error: "Could not start the package build." };
   }
 
+  await admin.from("integration_events").insert({
+    workspace_id: workspaceId,
+    kind: "accountant_package.created",
+    severity: "info",
+    ref_type: "accountant_package",
+    ref_id: pkg.id,
+    summary: `Accountant package requested (${bounds.start} — ${bounds.end})`,
+    context: { actorUserId: userId },
+  });
+
   const estimate = await countExportRows(admin, workspaceId, {
     from: `${bounds.start}T00:00:00.000Z`,
     to: `${bounds.end}T23:59:59.999Z`,

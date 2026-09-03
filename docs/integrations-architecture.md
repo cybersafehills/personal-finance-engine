@@ -373,6 +373,76 @@ RLS-scoped reads in `web/lib/integrations/queries.ts`.
   `integrations-connected-workbooks.md`; `authorization-matrix.md` +3
   rows; `integrations-connector-howto.md` outbound-adapter section.
 
+# Phase 3 — Reconciliation, Accountant Handoff & Accounting Connectors
+
+## Reconciliation Center (P3-PR1, no migration; P3-PR2, migration 20261117000000)
+
+A read-only hub at `/integrations/reconciliation` that unifies the four
+existing "these disagree, a human decides" queues — balance drift, payment
+matches, possible duplicates, connected-workbook sync conflicts — each row
+linking to the surface that already resolves it. Pure ranked-summary engine
+`web/lib/integrations/reconciliation/summary.ts`; server-only assembler
+`queries.ts` over the existing readers. P3-PR2 adds the balance-drift data
+source: an authenticated `SELECT` policy on the pre-existing
+`balance_reconciliations` (scoped `account → workspace`), the
+`reconcile-balances` Edge Function (imports the canonical `_shared`
+accounting/reconciliation engines, upserts one checkpoint per transaction by
+`transaction_id`), and the `run-balance-reconciliation` cron. See
+`integrations-reconciliation-center.md`.
+
+## Ready-for-Accountant package (P3-PR3, migration 20261118000000; P3-PR4)
+
+`accountant_packages` (RLS SELECT on `integration.view`, writes service-role)
++ private bucket `integration-accountant-packages` + capability
+`integration.accountant_package`. `accountant/build.ts` reuses the Export
+Center engine (`buildExportDataset` / `buildCsv` / `buildXlsx`), adds a
+`@react-pdf/renderer` cover and a redacted `MANIFEST.json`, zips with `jszip`,
+and hands the ZIP out only through a 300-second signed URL
+(`GET /api/integrations/accountant/[id]`). Small builds run inline in
+`createAccountantPackage`; `build-accountant-packages` cron handles large /
+stuck ones + a 30-day retention purge. See
+`integrations-accountant-package.md`.
+
+## Accounting connectors (P3-PR5, migration 20261119000000; P3-PR6)
+
+A parallel to connected workbooks for accounting systems — QuickBooks / Xero
+/ Zoho Books / Odoo — **export direction only**, every provider **dark**.
+`integration_destinations` widened (`kind='accounting'`, four provider keys);
+`connected_ledgers` (`account_map` jsonb: OneLedger category key → external
+account id; RLS SELECT on `integration.view`); `integration_sync_runs` gains
+`connected_ledger_id`; capabilities `integration.ledger_manage` /
+`integration.ledger_sync`.
+
+- `accounting/contract.ts` (**pure, tested**) — `AccountingAdapter`
+  (`authUrl` / `exchangeCode` / `refresh` / `listAccounts` / `pushEntries` /
+  `getRevision`), `normalizeAccountMap`, `AccountingProviderNotConfiguredError`.
+- `accounting/registry.ts` — configured vs dark from `*_CLIENT_ID` /
+  `*_SECRET`; a dark adapter throws `provider_not_configured` from every
+  method, a configured one gets real OAuth but `pushEntries` /
+  `listAccounts` / `getRevision` throw `provider_push_not_implemented`.
+- `accounting/sync.ts` → `runLedgerSync` mirrors `runWorkbookSync`: builds the
+  full dataset, maps each transaction's category via `account_map`, calls
+  `pushEntries`; a dark provider is a `partial` run (no retry), a real
+  failure runs through `sync-engine.ts:nextAttemptState`.
+- The OAuth routes `oauth/[provider]/{start,callback}` branch by provider
+  family (cloud-storage OR accounting) via `resolveFlow`; tokens land in the
+  service-role-only `integration_destination_secrets`.
+- `/integrations/sync` gains an "Accounting ledgers" section
+  (`LedgerManager.tsx`). See `integrations-accounting-connectors.md`.
+
+## Cron, health & notifications (P3-PR7, migration 20261120000000)
+
+- `run-integration-syncs` also retries due `queued` runs tied to a
+  `connected_ledger_id`.
+- `get_operational_health_snapshot`'s `integrations` block gains
+  `accountant_packages_created` / `_failed`,
+  `oldest_pending_accountant_package_age_seconds`, `ledger_syncs_failed`,
+  `ledgers_needing_auth` — still identifier-free, service-role only.
+- Notifications (in-app outbox): accountant package failed to build; ledger
+  sync flipped to `needs_auth`.
+- Activity: `integration_events` gains `accountant_package.created` /
+  `.completed` / `.failed`, `ledger.connected` / `.synced` / `.sync_failed`.
+
 ## Feature flags
 
 `web/lib/integrations/gate.ts`, env-var convention shared with
@@ -391,6 +461,11 @@ gate server-side.
 | `INTEGRATIONS_WORKBOOKS_ENABLED` | **off** | Connected Workbooks + conflict review |
 | `INTEGRATIONS_CLOUD_STORAGE_ENABLED` | **off** | Cloud-storage destination type |
 | `GOOGLE_DRIVE_*` / `MICROSOFT_*` / `DROPBOX_*` | absent = provider dark | enables one OAuth provider |
+| `INTEGRATIONS_RECONCILIATION_CENTER_ENABLED` | on | Reconciliation Center |
+| `BALANCE_RECONCILIATION_ENABLED` | **off** | `run-balance-reconciliation` cron → `reconcile-balances` fn (fn also needs its own `=enabled` Edge secret) |
+| `INTEGRATIONS_ACCOUNTANT_PACKAGE_ENABLED` | on | Ready-for-Accountant package + cron |
+| `INTEGRATIONS_ACCOUNTING_CONNECTORS_ENABLED` | **off** | `accounting` destination type + connected ledgers |
+| `QUICKBOOKS_*` / `XERO_*` / `ZOHO_BOOKS_*` / `ODOO_*` | absent = provider dark | enables one accounting OAuth provider |
 
 ## Authorization
 
@@ -398,8 +473,14 @@ Integration actions are gated by the closed Spaces capability catalog
 (`space_role_has_capability` + the `space_member_capability_grants` CHECK,
 migration `20261010000000`). Phase 1 adds `integration.*` capabilities:
 `view`, `import`, `import_approve`, `export`, `configure`, `connection_manage`,
-`sync_manage`, `logs_view`. Unknown capability names still fail closed for every
-role including owner/admin.
+`sync_manage`, `logs_view`; Phase 2 adds `destination_manage`,
+`workbook_manage`, `conflict_resolve`; Phase 3 adds `accountant_package`,
+`ledger_manage`, `ledger_sync`. All owner+admin only except `integration.view`
+(also member). Unknown capability names still fail closed for every role
+including owner/admin. Because Phase 3 and the Bills & Expenses work landed
+concurrently, each `create or replace` of `space_role_has_capability` must
+carry the **union** of every phase's capability set — re-declaring the
+function must never silently drop one.
 
 ## Reuse map
 
@@ -423,6 +504,9 @@ installation != source != account != device credential.
 
 ## Deferred to later phases
 
-Connected workbooks, cloud spreadsheet/storage connectors, two-way sync,
-accounting connectors, Reconciliation Center, "Ready for Accountant" package,
-developer API + outbound webhooks + connector SDK, integration marketplace.
+Real accounting-provider push implementations (adapters ship dark);
+import-direction accounting sync (pull from QuickBooks/Xero/…); developer
+public API + inbound webhooks + connector SDK; integration marketplace;
+unrestricted two-way sync without conflict review; per-member
+`grant_space_capability` support for the `integration.*` capability family
+(the RPC's allowlist currently stops at Phase 2 + `bill.*`).

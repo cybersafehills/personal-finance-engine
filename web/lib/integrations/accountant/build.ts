@@ -217,6 +217,31 @@ export async function runAccountantPackageBuild(
       summary: "Accountant package failed to build",
       context: {},
     });
+    await notifyPackageCreator(admin, pkg.workspace_id, packageId);
     return { ok: false, error: "The accountant package could not be built." };
   }
+}
+
+async function notifyPackageCreator(
+  admin: Admin,
+  workspaceId: string,
+  packageId: string,
+): Promise<void> {
+  const { data: pkg } = await admin
+    .from("accountant_packages")
+    .select("created_by, period_start, period_end")
+    .eq("id", packageId)
+    .maybeSingle();
+  if (!pkg?.created_by) return;
+  await admin.from("notifications").insert({
+    workspace_id: workspaceId,
+    user_id: pkg.created_by,
+    event_key: "integration.accountant_package_failed",
+    channel: "in_app",
+    title: "An accountant package failed to build",
+    body:
+      `The package for ${pkg.period_start} — ${pkg.period_end} did not finish. You can try building it again.`,
+    resource_type: "accountant_package",
+    resource_id: packageId,
+  });
 }

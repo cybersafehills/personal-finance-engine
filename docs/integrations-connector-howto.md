@@ -58,11 +58,21 @@ the inbound `connector-adapter.ts` is not involved:
   stubs.
 - **Webhook** — no adapter; `destinations/webhook.ts` (signer + SSRF
   guard) + `destinations/deliver.ts`.
+- **Accounting** (Phase 3) — `accounting/contract.ts` (`AccountingAdapter`:
+  `authUrl` / `exchangeCode` / `refresh` / `listAccounts` / `pushEntries` /
+  `getRevision`) + `accounting/registry.ts`. QuickBooks / Xero / Zoho Books
+  / Odoo are all **dark**: unconfigured → `provider_not_configured`;
+  configured → real OAuth but `pushEntries` throws
+  `provider_push_not_implemented`. `accounting/sync.ts:runLedgerSync` maps a
+  transaction's category to an external account id via the ledger's
+  `account_map`, then calls `pushEntries`; a dark result is a `partial`
+  sync run.
 
-Adding a real cloud/spreadsheet provider = implement its client against
-the interface, register the env-var gate, wire `listFolders` / row-level
-`writeAllSheets`, and never let it report success it didn't achieve
-(`provider_upload_not_implemented` is the honest placeholder).
+Adding a real cloud/spreadsheet/accounting provider = implement its client
+against the interface, register the env-var gate, wire the real methods, and
+never let it report success it didn't achieve
+(`provider_upload_not_implemented` / `provider_push_not_implemented` are the
+honest placeholders).
 
 ## Where NOT to start
 

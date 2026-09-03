@@ -4960,6 +4960,20 @@ else
   fail "operational health snapshot shape drifted ($OPS_HEALTH_SHAPE)"
 fi
 
+# Integrations Phase 3 P3-PR7 (20261120000000): the integrations block gains
+# accountant-package + connected-ledger aggregates, still identifier-free.
+OPS_HEALTH_P3="$(psql -d pfe_rls -t -A -c "set role service_role; select
+  (jsonb_typeof(s->'integrations'->'accountant_packages_failed') = 'number') || '|' ||
+  (jsonb_typeof(s->'integrations'->'oldest_pending_accountant_package_age_seconds') = 'number') || '|' ||
+  (jsonb_typeof(s->'integrations'->'ledger_syncs_failed') = 'number') || '|' ||
+  (jsonb_typeof(s->'integrations'->'ledgers_needing_auth') = 'number')
+  from (select public.get_operational_health_snapshot(60) as s) q;" | tail -1)"
+if [ "$OPS_HEALTH_P3" = "true|true|true|true" ] || [ "$OPS_HEALTH_P3" = "t|t|t|t" ]; then
+  pass "Integrations P3: operational health exposes accountant-package + ledger aggregates as numbers"
+else
+  fail "Integrations P3: operational health P3 keys drifted ($OPS_HEALTH_P3)"
+fi
+
 OPS_HEALTH_CLAMP="$(psql -d pfe_rls -t -A -c "set role service_role; select (public.get_operational_health_snapshot(1)->>'window_minutes') || '|' || (public.get_operational_health_snapshot(999999)->>'window_minutes');" | tail -1)"
 if [ "$OPS_HEALTH_CLAMP" = "5|10080" ]; then
   pass "operational health clamps observation windows to 5 minutes through 7 days"
