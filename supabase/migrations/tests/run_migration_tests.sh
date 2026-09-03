@@ -631,7 +631,10 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # integration_destination_secrets, connected_workbooks, integration_sync_runs
 # and integration_conflicts - all RLS enabled; the secrets table has zero
 # authenticated/anon grants - 91 tables, 90 with RLS.
-if [ "$TABLE_COUNT" = "91" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Device pairing v2 (20261104000000) adds pairing_sessions (RLS enabled,
+# SELECT-own for authenticated) and connector_pairing_events (RLS enabled,
+# service-role-only, no authenticated policy) - 93 tables, 92 with RLS.
+if [ "$TABLE_COUNT" = "93" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -885,11 +888,15 @@ fi
 # DEFINER RPCs). = 91.
 # Integrations Phase 2 P2-PR5 (20261103000000) adds apply_integration_conflict
 # (integration.conflict_resolve-gated SECURITY DEFINER RPC). = 92.
+# Device pairing v2 (20261104000000) adds one authenticated RPC,
+# create_device_pairing_session. _enroll_ingestion_connection,
+# consume_device_pairing_session, and expire_stale_pairing_sessions are
+# service-role-only. = 93.
 AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname = 'authenticated' where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "92" ]; then
-  pass "authenticated holds EXECUTE on exactly the 92 functions expected, no more"
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "93" ]; then
+  pass "authenticated holds EXECUTE on exactly the 93 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 92 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 93 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -4981,6 +4988,108 @@ if [ "$ONBOARDING_ACL" = "true|false|true|false" ] || [ "$ONBOARDING_ACL" = "t|f
   pass "onboarding RPCs are authenticated-only"
 else
   fail "onboarding RPC privileges are incorrect ($ONBOARDING_ACL)"
+fi
+
+# ===========================================================================
+# Device pairing v2 (20261104000000): one-time pairing handshake.
+# ===========================================================================
+echo "=== Device pairing v2: session lifecycle ==="
+
+PAIR_OWNER="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('pairing-owner@example.com') returning id;" | head -1)"
+PAIR_OTHER="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('pairing-other@example.com') returning id;" | head -1)"
+PAIR_WS="$(psql -d pfe_rls -t -A -c "select w.id from public.workspaces w join public.workspace_memberships m on m.workspace_id = w.id where m.user_id = '$PAIR_OWNER' and w.kind = 'personal';" | head -1)"
+PAIR_SOURCE="$(psql -d pfe_rls -t -A -c "set role service_role; insert into public.financial_sources (owner_user_id, provider, source_type, display_name, currency) values ('$PAIR_OWNER', 'mtn_momo', 'mobile_money', 'Pairing source', 'RWF') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+PAIR_ACCOUNT="$(psql -d pfe_rls -t -A -c "set role service_role; insert into public.accounts (workspace_id, financial_source_id, name, provider, currency) values ('$PAIR_WS', '$PAIR_SOURCE', 'Pairing account', 'mtn_momo', 'RWF') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+
+PAIR_TOKEN_HASH="$(printf 'a%.0s' $(seq 1 64))"
+PAIR_CRED_HASH="$(printf '1%.0s' $(seq 1 64))"
+
+# Happy path: authenticated owner records a session; service-role redeems it.
+PAIR_SESSION="$(as_user "$PAIR_OWNER" "select public.create_device_pairing_session('mtn_momo_sms_v1', 'mtn_momo', '$PAIR_WS', 'My iPhone', '$PAIR_TOKEN_HASH', 'olp_aaaa', '$PAIR_ACCOUNT', null);")"
+PAIR_CONSUME="$(psql -d pfe_rls -t -A -c "set role service_role; select device_credential_id || '|' || connector_installation_id || '|' || (legacy_ingestion_connection_id is not null) from public.consume_device_pairing_session('$PAIR_TOKEN_HASH', '$PAIR_CRED_HASH', 'pfe_aaaa', '1.0.0', 'ios', 'My iPhone');" | grep -Eo '[0-9a-f-]{36}\|[0-9a-f-]{36}\|(t|true)' | head -1)"
+PAIR_CRED_ID="$(printf '%s' "$PAIR_CONSUME" | cut -d'|' -f1)"
+PAIR_STATE="$(psql -d pfe_rls -t -A -c "select ps.status || '|' || (select count(*) from public.device_credentials dc where dc.id = '$PAIR_CRED_ID' and dc.credential_hash = '$PAIR_CRED_HASH' and dc.status = 'active') || '|' || (select count(*) from public.connector_pairing_events e where e.pairing_session_id = ps.id and e.event = 'device_paired') from public.pairing_sessions ps where ps.token_hash = '$PAIR_TOKEN_HASH';")"
+if [ "$PAIR_STATE" = "consumed|1|1" ]; then
+  pass "Device pairing: a pending token redeems once into a scoped, active device credential and a device_paired event"
+else
+  fail "Device pairing: redemption state is wrong ($PAIR_STATE / consume=$PAIR_CONSUME)"
+fi
+
+# The plaintext token never reaches the database - only its hash is stored.
+PAIR_PLAINTEXT="$(psql -d pfe_rls -t -A -c "select count(*) from information_schema.columns where table_schema='public' and table_name='pairing_sessions' and column_name in ('token','token_plaintext','pairing_token');")"
+if [ "$PAIR_PLAINTEXT" = "0" ]; then
+  pass "Device pairing: pairing_sessions stores no plaintext token column"
+else
+  fail "Device pairing: pairing_sessions exposes a plaintext token column"
+fi
+
+# Single-use: a second redemption of the same token is refused.
+if psql -d pfe_rls -t -A -c "set role service_role; select public.consume_device_pairing_session('$PAIR_TOKEN_HASH', '$PAIR_CRED_HASH', 'pfe_aaaa', '1.0.0', 'ios', 'My iPhone');" >/dev/null 2>$ARTIFACT_DIR/pfe_pair_reuse.log; then
+  fail "Device pairing: a consumed token could be redeemed again"
+else
+  if grep -q 'PAIRING_ALREADY_USED' $ARTIFACT_DIR/pfe_pair_reuse.log; then
+    pass "Device pairing: a consumed token is refused with PAIRING_ALREADY_USED"
+  else
+    fail "Device pairing: token reuse failed with an unexpected error ($(tail -1 $ARTIFACT_DIR/pfe_pair_reuse.log))"
+  fi
+fi
+rm -f $ARTIFACT_DIR/pfe_pair_reuse.log
+
+# TTL: an expired pending session is swept and then refuses redemption.
+PAIR_TOKEN_HASH2="$(printf 'b%.0s' $(seq 1 64))"
+as_user "$PAIR_OWNER" "select public.create_device_pairing_session('mtn_momo_sms_v1', 'mtn_momo', '$PAIR_WS', 'Old iPhone', '$PAIR_TOKEN_HASH2', 'olp_bbbb', '$PAIR_ACCOUNT', null);" >/dev/null
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; update public.pairing_sessions set expires_at = now() - interval '1 minute' where token_hash = '$PAIR_TOKEN_HASH2';" >/dev/null
+PAIR_SWEPT="$(psql -d pfe_rls -t -A -c "set role service_role; select public.expire_stale_pairing_sessions();" | grep -Eo '[0-9]+' | head -1)"
+PAIR_EXPIRED_STATUS="$(psql -d pfe_rls -t -A -c "select status from public.pairing_sessions where token_hash = '$PAIR_TOKEN_HASH2';")"
+if [ "$PAIR_SWEPT" -ge 1 ] && [ "$PAIR_EXPIRED_STATUS" = "expired" ]; then
+  pass "Device pairing: expire_stale_pairing_sessions flips lapsed pending sessions to expired"
+else
+  fail "Device pairing: stale sweep did not expire the session (swept=$PAIR_SWEPT status=$PAIR_EXPIRED_STATUS)"
+fi
+if psql -d pfe_rls -t -A -c "set role service_role; select public.consume_device_pairing_session('$PAIR_TOKEN_HASH2', '$PAIR_CRED_HASH', 'pfe_bbbb', '1.0.0', 'ios', 'Old iPhone');" >/dev/null 2>$ARTIFACT_DIR/pfe_pair_expired.log; then
+  fail "Device pairing: an expired token could be redeemed"
+else
+  grep -q 'PAIRING_EXPIRED' $ARTIFACT_DIR/pfe_pair_expired.log \
+    && pass "Device pairing: an expired token is refused with PAIRING_EXPIRED" \
+    || fail "Device pairing: expired redemption failed with an unexpected error ($(tail -1 $ARTIFACT_DIR/pfe_pair_expired.log))"
+fi
+rm -f $ARTIFACT_DIR/pfe_pair_expired.log
+
+# A malformed credential on an otherwise-valid pending token is refused
+# without consuming it (the device can retry within the TTL).
+PAIR_TOKEN_HASH3="$(printf 'c%.0s' $(seq 1 64))"
+as_user "$PAIR_OWNER" "select public.create_device_pairing_session('mtn_momo_sms_v1', 'mtn_momo', '$PAIR_WS', 'Retry iPhone', '$PAIR_TOKEN_HASH3', 'olp_cccc', '$PAIR_ACCOUNT', null);" >/dev/null
+psql -d pfe_rls -t -A -c "set role service_role; select public.consume_device_pairing_session('$PAIR_TOKEN_HASH3', 'not-a-valid-hash', 'bad', '1.0.0', 'ios', 'Retry iPhone');" >/dev/null 2>$ARTIFACT_DIR/pfe_pair_badcred.log || true
+PAIR_RETRY_STATUS="$(psql -d pfe_rls -t -A -c "select status from public.pairing_sessions where token_hash = '$PAIR_TOKEN_HASH3';")"
+if [ "$PAIR_RETRY_STATUS" = "pending" ] && grep -q 'PAIRING_BAD_CREDENTIAL' $ARTIFACT_DIR/pfe_pair_badcred.log; then
+  pass "Device pairing: a malformed device credential is refused (PAIRING_BAD_CREDENTIAL) and the token stays pending"
+else
+  fail "Device pairing: bad-credential handling drifted (status=$PAIR_RETRY_STATUS)"
+fi
+rm -f $ARTIFACT_DIR/pfe_pair_badcred.log
+
+# RLS: another user cannot see the owner's pairing session by id, and
+# token_hash is not even column-readable by authenticated.
+PAIR_CROSS="$(as_user "$PAIR_OTHER" "select count(*) from public.pairing_sessions where id = '$PAIR_SESSION';")"
+PAIR_OWNER_SEES="$(as_user "$PAIR_OWNER" "select count(*) from public.pairing_sessions where id = '$PAIR_SESSION';")"
+if [ "$PAIR_CROSS" = "0" ] && [ "$PAIR_OWNER_SEES" = "1" ]; then
+  pass "Device pairing: a user reads only their own pairing sessions"
+else
+  fail "Device pairing: pairing session RLS is wrong (other=$PAIR_CROSS owner=$PAIR_OWNER_SEES)"
+fi
+if as_user "$PAIR_OWNER" "select token_hash from public.pairing_sessions where id = '$PAIR_SESSION';" >/dev/null 2>$ARTIFACT_DIR/pfe_pair_hash.log; then
+  fail "Device pairing: token_hash is readable by an authenticated user"
+else
+  pass "Device pairing: token_hash is never column-granted to authenticated"
+fi
+rm -f $ARTIFACT_DIR/pfe_pair_hash.log
+
+# Privilege boundary.
+PAIR_ACL="$(psql -d pfe_rls -t -A -c "select has_function_privilege('authenticated', 'public.create_device_pairing_session(text,text,uuid,text,text,text,uuid,uuid)', 'execute') || '|' || has_function_privilege('anon', 'public.create_device_pairing_session(text,text,uuid,text,text,text,uuid,uuid)', 'execute') || '|' || has_function_privilege('authenticated', 'public.consume_device_pairing_session(text,text,text,text,text,text)', 'execute') || '|' || has_function_privilege('authenticated', 'public.expire_stale_pairing_sessions()', 'execute') || '|' || has_function_privilege('authenticated', 'public._enroll_ingestion_connection(uuid,uuid,uuid,text,text,text,text)', 'execute') || '|' || has_table_privilege('authenticated', 'public.connector_pairing_events', 'select');")"
+if [ "$PAIR_ACL" = "true|false|false|false|false|false" ] || [ "$PAIR_ACL" = "t|f|f|f|f|f" ]; then
+  pass "Device pairing: only create_device_pairing_session is authenticated-callable; redemption/cleanup/enrollment stay service-role-only"
+else
+  fail "Device pairing: privilege boundary is wrong ($PAIR_ACL)"
 fi
 
 # ===========================================================================

@@ -401,3 +401,64 @@ user. CI-only (needs the local stack).
 - `GET /api/admin/email-log?outcome=failed` with the cron secret returns
   `{ count, rows }`; without it, 401.
 - tsc, build, eslint, `deno test web/lib` clean.
+
+---
+
+## PR8 — Device pairing v2: backend foundation
+
+**Problem.** PR1–PR3 surfaced the ingest contract, wrote a Shortcut build
+guide, and added a readiness probe — but a non-technical user still had to
+copy a permanent `x-ingest-key`, an endpoint URL and a JSON body into
+Shortcuts (`ConnectionDetails.tsx`). `ONELEDGER_AUDIT.md` F7 /
+`CLAUDE_CODE_HANDOFF.md` §10.
+
+**Decisions.** Full rationale in `docs/adr/0008-consumer-device-pairing.md`;
+protocol and contract in `docs/device-pairing.md`.
+
+1. **`pairing_sessions`** (migration `20261104000000_device_pairing_v2.sql`) —
+   a short-lived (10-minute), single-use pairing *intent*. Only
+   `sha256(token)` is stored; the plaintext pairing token is shown once by the
+   web app and never persisted. Redeemed exactly once for a scoped
+   `device_credentials` row the user never sees.
+2. **`consume_device_pairing_session(...)`** is `service_role`-only and derives
+   owner / workspace / account / provider from the trusted session row, then
+   reuses the existing enrollment path. The body of
+   `create_ingestion_connection_dual_write` was factored into
+   `_enroll_ingestion_connection(...)` so the owner is a parameter, not
+   `auth.uid()`. No Stage E work — legacy `ingestion_connections` stays live
+   and every paired device keeps a `legacy_ingestion_connection_id` mapping.
+3. **`capture` Edge Function** (`verify_jwt = false`, hard 404 unless
+   `DEVICE_PAIRING_V2=enabled`). `op:"pair"` exchanges the token + a
+   device-generated `pfe_…` secret for `{ device_id, capture_url }`;
+   `op:"test"` proves the credential + reachability and **writes no ledger
+   data**. Real message capture (`op:"capture"`) is a follow-up PR;
+   `ingest-momo` is untouched.
+4. **Stable endpoint.** The function reports `ONELEDGER_CAPTURE_BASE_URL`
+   (e.g. `https://api.oneledger.me/v1`) as `capture_url`, falling back to the
+   Supabase Functions URL. Devices store whatever `capture_url` they were
+   handed, so provisioning the subdomain later reconfigures nothing.
+5. **Audit** — `connector_pairing_events`, service-role-only, IDs + a machine
+   `reason_code` only (no tokens/secrets/message text).
+6. **Cleanup** — `POST /api/cron/expire-pairing-sessions` →
+   `expire_stale_pairing_sessions()` (reuses `REPORT_CRON_SECRET`).
+7. **`web/lib/pairing.ts`** — pure token generation / hashing / non-technical
+   error copy, for the wizard PR's Server Action.
+
+**Flags.** `DEVICE_PAIRING_V2` (exact `enabled`, else 404),
+`ONELEDGER_CAPTURE_BASE_URL` (optional). Dark by default; not deployed while
+main CI is red.
+
+**Not in this PR.** The guided wizard UI, QR / desktop→iPhone handoff, the
+`op:"capture"` universal message path, hiding `ConnectionDetails` HTTP
+mechanics behind Advanced, setup-funnel analytics, and a signed "OneLedger
+Capture" Shortcut (`NEXT_PUBLIC_MOMO_SHORTCUT_URL`). Spec for the thin
+Shortcut: `docs/oneledger-capture-shortcut.md`.
+
+**Verification.**
+
+- `supabase/migrations/tests/run_migration_tests.sh` — 9 new device-pairing
+  assertions (redeem-once, expired, already-used, bad-credential, RLS,
+  privilege boundary); table/RLS/grant counts bumped to 81 / 90.
+- `deno test supabase/functions/_shared/tests supabase/functions/capture/tests`
+  and `deno test web/lib` (`lib/pairing_test.ts`) all pass; `deno fmt`/`lint`/
+  `check`, web `lint` / `tsc` / `next build --webpack` clean.
