@@ -504,3 +504,41 @@ published signed Shortcut.
 `capture_shortcut_guide_test.ts`) pass; `npm run lint` (0 errors),
 `npx tsc --noEmit`, `npx next build --webpack` clean. Manual QA needs the local
 Supabase stack + `DEVICE_PAIRING_V2=enabled` — see `docs/device-pairing.md`.
+
+---
+
+## PR11 — QR / cross-device pairing handoff
+
+**Problem.** The PR9 wizard runs on the phone start-to-finish, but a user who
+opens it on a **desktop** still has to hand-copy a 34-char `olp_` code to the
+phone — the `shortcuts://` deep link no-ops on a computer.
+
+**Decisions.** Contract in `docs/device-pairing.md` ("Public `/pair` handoff");
+rationale in ADR 0008 §5.
+
+1. **`web/lib/qr.ts`** — a thin wrapper over `uqr` (MIT, **zero runtime
+   dependencies**): `qrMatrix(text)` (grid) + `qrSvg(text)`. `web/lib/qr_test.ts`
+   round-trips the output through the `jsqr` decoder already in the repo. (A
+   hand-vendored encoder was attempted first per the plan but had a decode bug;
+   `uqr` is the pragmatic zero-dep choice.)
+2. **`web/components/QrCode.tsx`** — renders `qrMatrix` as a real inline
+   `<svg><path/></svg>` (no `dangerouslySetInnerHTML`), `currentColor`,
+   `role="img"`.
+3. **Wizard pair step** — on a fine-pointer device only
+   (`useSyncExternalStore` over `matchMedia("(pointer: fine)")`), shows a QR of
+   `pairHandoffUrl(origin, token)` alongside the existing code + deep link.
+4. **`/pair`** (`web/app/pair/page.tsx`) — a **public** (`PUBLIC_PATHS += /pair`),
+   no-RPC landing page. `?c=<token>` → the code big + copyable + a **Run
+   OneLedger Capture** deep link (auto-tried once) + inline install steps
+   (`PairHandoff.tsx`). `notFound()` when `DEVICE_PAIRING_V2` is unset; invalid
+   `c` → a calm "link expired" state; `referrer: no-referrer`.
+5. **`web/lib/pairing.ts`** — `pairHandoffPath` / `pairHandoffUrl`.
+
+**Not in this PR.** A stateful cross-device session bridge (the phone stays
+anonymous — the token is the only thing that crosses); the `op:"capture"`
+real-message path; setup-funnel analytics.
+
+**Verification.** `deno test web/lib` (`qr_test.ts` round-trip + `pairing_test.ts`)
+pass; `npm run lint` 0 errors; `npx tsc --noEmit` + `npx next build --webpack`
+clean (`/pair` builds). `curl /pair?c=<valid>` → code + run button + the
+`no-referrer` meta; `curl /pair` (no code) → "no longer valid".
