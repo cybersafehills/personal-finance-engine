@@ -9,7 +9,7 @@ import {
   type Finding,
   type ValidationContext,
   type ValidationResult,
-} from "./types";
+} from "./types.ts";
 
 function minor(ctx: ValidationContext, key: string): bigint | null {
   const v = ctx.fields[key]?.normalized;

@@ -1,16 +1,16 @@
 import {
   parseAndValidateExtraction,
   type ExtractionModelOutput,
-} from "./schema";
-import { EXTRACTION_RULESET_VERSION } from "./prompt";
-import type { ExtractionCallResult } from "./types";
+} from "./schema.ts";
+import { EXTRACTION_RULESET_VERSION } from "./prompt.ts";
+import type { ExtractionCallResult } from "./types.ts";
 import {
   normalizeCurrencyCode,
   normalizeDate,
   normalizeDecimalString,
   normalizeMoneyToMinor,
   normalizeTaxRate,
-} from "../normalize";
+} from "../normalize.ts";
 
 // Turns a raw provider response into the payload for the
 // record_bill_extraction() RPC: parse -> validate shape -> normalise

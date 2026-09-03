@@ -4,7 +4,7 @@
 // instruction, request, or claim inside the invoice/receipt is content
 // to be transcribed, never a command to be followed.
 
-import { DOC_CLASSES, KNOWN_FIELD_KEYS } from "./schema";
+import { DOC_CLASSES, KNOWN_FIELD_KEYS } from "./schema.ts";
 
 export const EXTRACTION_RULESET_VERSION = "bills-extract-v1";
 

@@ -3,7 +3,7 @@
 // outgoing transactions, with explicit reasons for and against each. It
 // never links anything - a reviewer confirms.
 
-import { normalizeSupplierName } from "../normalize";
+import { normalizeSupplierName } from "../normalize.ts";
 
 export type TxnCandidate = {
   transactionId: string;

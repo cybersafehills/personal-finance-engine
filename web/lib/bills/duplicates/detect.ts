@@ -4,7 +4,7 @@
 // identity against every other non-terminal document in the workspace.
 // Never auto-resolves; it only produces ranked candidates for a reviewer.
 
-import { normalizeSupplierName } from "../normalize";
+import { normalizeSupplierName } from "../normalize.ts";
 
 export type Fingerprint = {
   billDocumentId: string;

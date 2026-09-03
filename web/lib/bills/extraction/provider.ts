@@ -4,11 +4,11 @@ import OpenAI from "openai";
 import {
   EXTRACTION_SYSTEM_PROMPT,
   buildExtractionUserPrompt,
-} from "./prompt";
+} from "./prompt.ts";
 import type {
   ExtractionCallResult,
   ExtractionProviderName,
-} from "./types";
+} from "./types.ts";
 
 // The one network boundary for document classification + extraction
 // (master prompt §17). Provider is pluggable via AI_PROVIDER
@@ -24,7 +24,7 @@ const DEFAULT_ANTHROPIC_MODEL = "claude-haiku-4-5-20251001";
 const DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
 const MAX_OUTPUT_TOKENS = 4096;
 
-export type { ExtractionCallResult, ExtractionProviderName } from "./types";
+export type { ExtractionCallResult, ExtractionProviderName } from "./types.ts";
 
 export function resolveExtractionProvider(): ExtractionProviderName {
   const p = process.env.AI_PROVIDER?.toLowerCase();
