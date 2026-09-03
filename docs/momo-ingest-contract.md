@@ -18,6 +18,13 @@ POST https://<project-ref>.supabase.co/functions/v1/ingest-momo
 renders the fully-resolved URL per environment; `web/lib/ingest.ts`
 → `buildIngestEndpointUrl()` builds it.
 
+> **Device pairing v2 (ADR 0008, `docs/device-pairing.md`).** This
+> key-in-a-header contract is the legacy path. A newer `capture` Edge
+> Function lets a device exchange a one-time pairing token for its own
+> scoped credential (no user-visible key), behind
+> `DEVICE_PAIRING_V2=enabled`. It is additive and does not change anything
+> below; existing `x-ingest-key` connections keep working unchanged.
+
 ## Authentication — key only, no Supabase JWT
 
 `supabase/config.toml` sets `[functions.ingest-momo] verify_jwt = false`.

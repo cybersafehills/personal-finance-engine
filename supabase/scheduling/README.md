@@ -63,6 +63,12 @@ curl -X POST https://www.oneledger.me/api/cron/generate-reports \
 
 curl -X POST https://www.oneledger.me/api/cron/deliver-reports \
   -H "x-report-cron-secret: <the REPORT_CRON_SECRET value>"
+
+# Device pairing v2 cleanup (ADR 0008): flips lapsed `pending` pairing
+# sessions to `expired`. Redemption already refuses a stale token, so this
+# is housekeeping. Idempotent; returns {"expired":<n>}.
+curl -X POST https://www.oneledger.me/api/cron/expire-pairing-sessions \
+  -H "x-report-cron-secret: <the REPORT_CRON_SECRET value>"
 ```
 
 Both are safe to call at any time, any number of times - every candidate

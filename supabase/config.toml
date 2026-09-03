@@ -457,6 +457,21 @@ verify_jwt = false
 enabled = true
 verify_jwt = false
 
+# Device pairing v2 capture endpoint (docs/device-pairing.md, ADR 0008).
+# No JWT: a device authenticates with a one-time pairing token (op:"pair")
+# or its own hashed device credential (op:"test", x-device-key header) -
+# never a browser session. It is a hard 404 until the exact-match Edge
+# Function secret is set:
+#   DEVICE_PAIRING_V2 = enabled
+# Optional: ONELEDGER_CAPTURE_BASE_URL = https://api.oneledger.me/v1
+#   The stable address returned to paired devices as `capture_url`. Until
+#   the subdomain is provisioned the function reports its own Supabase
+#   Functions URL, so nothing has to be reconfigured when it goes live.
+# This function never touches the live ingest-momo x-ingest-key path.
+[functions.capture]
+enabled = true
+verify_jwt = false
+
 [analytics]
 enabled = true
 port = 54327
