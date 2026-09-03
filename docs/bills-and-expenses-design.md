@@ -29,8 +29,11 @@ layout in `web/app/bills/[id]/page.tsx`.
 Phase 8 — no migration: `web/lib/bills/notify.ts` (worker-wired,
 flag-gated, redacted) + `web/lib/bills/monitoring.ts` +
 `web/app/api/cron/bill-monitoring/`, `supabase/scheduling/activate_bill_workers.sql`
-(manual), `docs/bills-verification-runbook.md`, a Settings link, and
-`web/e2e/bills-a11y.spec.ts` (responsive axe + keyboard).
+(manual), `docs/bills-verification-runbook.md`, and
+`web/e2e/bills-a11y.spec.ts` (responsive axe + keyboard). During the dark
+phase `/bills` is reached by direct URL only; nav/Settings placement is a
+GA decision (it would otherwise change the committed Settings visual
+snapshot the moment `BILLS_ENABLED` is set in any environment).
 
 ---
 
@@ -502,7 +505,7 @@ request-clarification flow; nav placement (`MOVABLE_NAV_KEYS`).
 | **5 — Supplier resolution** *(built)* | `suppliers` (name_key non-unique, TIN unique) / `supplier_aliases` / `bill_supplier_candidates`; `bill_documents.supplier_id`; SQL-ranked `search_suppliers`; `bill.manage`-gated `create_supplier` (TIN guard, never merges); `bill.review`-gated `link_bill_supplier`; service_role-only `record_bill_supplier_candidates` wired into the worker; `BillSupplierPanel` on the detail page. | Behind `BILLS_EXTRACTION_ENABLED` |
 | **6 — Transaction matching & posting** *(built)* | `bills` (one per document) / `bill_transaction_links` / `bill_transaction_match_candidates`; service_role-only `get_bill_transaction_search_set` + `record_bill_transaction_match_candidates`; pure `web/lib/bills/matching/score.ts` wired into the worker; `approve_bill` (blocking-finding + unresolved-duplicate + no-self-approval guards); idempotent `post_bill` (→ matched / posted); `confirm`/`unlink` link adjustments; `BillLedgerPanel`. `transactions` is only read. | **Yes** |
 | **7 — Review workspace & UX** *(built)* | `bill_comments` + `review_revision` columns; `bill.review`-gated `correct_bill_field` (raw/normalised preserved, bumps `review_revision`) + `add_bill_comment`; `record_bill_validation` re-issued to stamp the revision; **`approve_bill` re-issued with a `stale_validation` guard** (no approving a check older than the last correction) that prefers a user correction over the model value; shared `web/lib/bills/revalidate.ts`; two-column document-alongside-review layout with inline field editing + auto re-check, `BillDocumentPreview` (native `<object>` / `<img>` from the signed-URL route), notes, and status filter chips on the landing page. | **Yes** |
-| **8 — Notifications, monitoring, rollout hardening** *(built)* | `notify.ts` — the worker emails owner/admin + `bill.review` grantees "a document is ready" (link only, no supplier/amount/OCR text; `BILLS_NOTIFICATIONS_ENABLED`, de-duped per document). `monitoring.ts` + `/api/cron/bill-monitoring` — coarse `[bill-metrics]` aggregate logs (queue depth, in-flight, needs-review, failed, posted/matched 24h, oldest-review age, approval turnaround). `activate_bill_workers.sql` — manual pg_cron activation (reuses `REPORT_CRON_SECRET`). `bills-verification-runbook.md` — release order, config table, e2e verification, failure-recovery, rollback. `bills-a11y.spec.ts` — serious/critical axe on `/bills` + `/bills/[id]` at 1280 and 390 px + keyboard filters. Settings link (gated on `isBillsEnabled`). | **Yes** |
+| **8 — Notifications, monitoring, rollout hardening** *(built)* | `notify.ts` — the worker emails owner/admin + `bill.review` grantees "a document is ready" (link only, no supplier/amount/OCR text; `BILLS_NOTIFICATIONS_ENABLED`, de-duped per document). `monitoring.ts` + `/api/cron/bill-monitoring` — coarse `[bill-metrics]` aggregate logs (queue depth, in-flight, needs-review, failed, posted/matched 24h, oldest-review age, approval turnaround). `activate_bill_workers.sql` — manual pg_cron activation (reuses `REPORT_CRON_SECRET`). `bills-verification-runbook.md` — release order, config table, e2e verification, failure-recovery, rollback. `bills-a11y.spec.ts` — serious/critical axe on `/bills` + `/bills/[id]` at 1280 and 390 px + keyboard filters. No nav/Settings entry during the dark phase (`/bills` by direct URL only). | **Yes** |
 
 Release order per phase (master prompt §24): additive migration bakes →
 backend services → worker → provider config → API → frontend → feature
