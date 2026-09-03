@@ -12,6 +12,8 @@ import { ConnectionItem } from "../../../components/ConnectionItem";
 import { CreateConnectionForm } from "../../../components/CreateConnectionForm";
 import { ConnectorInstallationItem } from "../../../components/ConnectorInstallationItem";
 import { canonicalConnectionsUiEnabled } from "../../../lib/connector-ui-mode";
+import { devicePairingV2Enabled } from "../../../lib/pairing";
+import { AdvancedConnectionSetup } from "../../../components/AdvancedConnectionSetup";
 import { isPlatformAdmin } from "../../../lib/pay/admin";
 
 export const dynamic = "force-dynamic";
@@ -53,6 +55,29 @@ export default async function ConnectionsPage() {
     process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL,
   );
 
+  const pairingWizardEnabled = devicePairingV2Enabled(
+    process.env.DEVICE_PAIRING_V2,
+  );
+
+  const manualSetup = (
+    <>
+      <p className="text-sm text-text-secondary">
+        Manual setup for other apps, testing, or a non-iPhone device.{" "}
+        <Link
+          href="/integrations/connections/setup"
+          className="font-medium text-accent hover:underline"
+        >
+          iPhone Shortcut guide
+        </Link>
+        .
+      </p>
+      <CreateConnectionForm
+        accounts={activeAccounts}
+        ingestEndpointUrl={ingestEndpointUrl}
+      />
+    </>
+  );
+
   return (
     <div>
       <PageHeader
@@ -62,16 +87,27 @@ export default async function ConnectionsPage() {
         backLabel="Integrations"
       />
 
-      <p className="mb-3 text-sm text-text-secondary">
-        New here?{" "}
-        <Link
-          href="/integrations/connections/setup"
-          className="font-medium text-accent hover:underline"
-        >
-          Set up a device with an iPhone Shortcut
-        </Link>
-        .
-      </p>
+      {pairingWizardEnabled
+        ? (
+          <Link
+            href="/integrations/connections/pair"
+            className="mb-4 inline-flex min-h-11 w-fit items-center rounded-control bg-accent px-4 text-sm font-medium text-accent-foreground"
+          >
+            Connect iPhone
+          </Link>
+        )
+        : (
+          <p className="mb-3 text-sm text-text-secondary">
+            New here?{" "}
+            <Link
+              href="/integrations/connections/setup"
+              className="font-medium text-accent hover:underline"
+            >
+              Set up a device with an iPhone Shortcut
+            </Link>
+            .
+          </p>
+        )}
 
       <div className="flex flex-col gap-3">
         {canonicalPreviewEnabled ? (
@@ -108,10 +144,14 @@ export default async function ConnectionsPage() {
           )
         )}
 
-        <CreateConnectionForm
-          accounts={activeAccounts}
-          ingestEndpointUrl={ingestEndpointUrl}
-        />
+        {pairingWizardEnabled
+          ? <AdvancedConnectionSetup>{manualSetup}</AdvancedConnectionSetup>
+          : (
+            <CreateConnectionForm
+              accounts={activeAccounts}
+              ingestEndpointUrl={ingestEndpointUrl}
+            />
+          )}
       </div>
     </div>
   );
