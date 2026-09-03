@@ -19,27 +19,47 @@ Deno.test("captureShortcutGuideSteps: numbered 1..N, every body paragraph non-em
 Deno.test("captureShortcutGuideSteps: sender placeholder vs a real sender", () => {
   const withoutSender = captureShortcutGuideSteps({});
   assert(
-    withoutSender.some((s) => s.body.some((p) => p.includes(MTN_SENDER_PLACEHOLDER))),
+    withoutSender.some((s) =>
+      s.body.some((p) => p.includes(MTN_SENDER_PLACEHOLDER))
+    ),
   );
   const withSender = captureShortcutGuideSteps({ mtnSender: "M-Money" });
   assert(withSender.some((s) => s.body.some((p) => p.includes("M-Money"))));
   assert(
-    !withSender.some((s) => s.body.some((p) => p.includes(MTN_SENDER_PLACEHOLDER))),
+    !withSender.some((s) =>
+      s.body.some((p) => p.includes(MTN_SENDER_PLACEHOLDER))
+    ),
   );
 });
 
 Deno.test("captureShortcutGuideSteps: step 1 wording reflects whether a signed link exists", () => {
   const noLink = captureShortcutGuideSteps({})[0].body.join(" ");
-  const link = captureShortcutGuideSteps({ shortcutUrl: "https://x/s.shortcut" })[0]
+  const link = captureShortcutGuideSteps({
+    shortcutUrl: "https://x/s.shortcut",
+  })[0]
     .body.join(" ");
   assert(link.includes("Get the ready-made Shortcut"));
+  assert(link.includes("Add Shortcut"));
   assert(!noLink.includes("Get the ready-made Shortcut"));
+  // With no published Shortcut the fallback must not point at a link that
+  // isn't on screen - it sends the user to Advanced connection instead.
+  assert(!noLink.toLowerCase().includes("add link"));
+  assert(noLink.includes("Advanced connection"));
 });
 
 Deno.test("captureShortcutGuideSteps: never leaks HTTP mechanics to the user", () => {
   const text = captureShortcutGuideSteps({ mtnSender: "M-Money" })
     .flatMap((s) => [s.title, ...s.body]).join(" ").toLowerCase();
-  for (const leak of ["http", "json", "x-ingest-key", "x-device-key", "header", "post "]) {
+  for (
+    const leak of [
+      "http",
+      "json",
+      "x-ingest-key",
+      "x-device-key",
+      "header",
+      "post ",
+    ]
+  ) {
     assert(!text.includes(leak), `guide mentions "${leak}"`);
   }
 });

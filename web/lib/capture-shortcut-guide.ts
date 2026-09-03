@@ -26,12 +26,12 @@ export function captureShortcutGuideSteps(opts: {
       title: "Add the OneLedger Capture Shortcut",
       body: hasLink
         ? [
-          "Tap “Get the ready-made Shortcut” above and add it. It arrives as two Shortcuts: “Connect to OneLedger” (you run this once) and “OneLedger Capture” (the automation runs this for you).",
-          "You don’t need to open or edit either one.",
+          "Tap “Get the ready-made Shortcut” above. Your iPhone opens the Shortcuts app and shows a preview — scroll to the bottom and tap “Add Shortcut”.",
+          "You’ll end up with two: “Connect to OneLedger” (you run this once, in the next step) and “OneLedger Capture” (the automation runs it for you). You don’t need to open or edit either one.",
         ]
         : [
-          "In the Shortcuts app, add the OneLedger Capture Shortcut. Your OneLedger setup screen has the add link; it installs “Connect to OneLedger” (run once) and “OneLedger Capture” (used by the automation).",
-          "Nothing inside the Shortcut needs editing — no address, no key, no code.",
+          "Guided setup needs the “OneLedger Capture” Shortcut, which isn’t published for this OneLedger yet — so there’s nothing to add on this screen.",
+          "Connect this iPhone with “Advanced connection” on the Connections page instead, or ask whoever set up OneLedger to finish publishing the Shortcut.",
         ],
     },
     {
@@ -64,7 +64,8 @@ export function captureShortcutGuideSteps(opts: {
 
 export const CAPTURE_SHORTCUT_TROUBLESHOOTING: GuideTroubleshootRow[] = [
   {
-    symptom: "“Open OneLedger Capture” does nothing / an error about a missing Shortcut.",
+    symptom:
+      "“Open OneLedger Capture” does nothing / an error about a missing Shortcut.",
     fix:
       "The Shortcut isn’t installed yet, or has a different name. Add it from step 1, then try again. On a computer this button is expected to do nothing — use the code on your phone.",
   },
