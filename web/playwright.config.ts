@@ -62,8 +62,20 @@ export default defineConfig({
     // SCAN_TO_PAY_ENABLED is opt-in (off unless exactly "true", unlike the
     // other Pay flags) - pay-scan.spec.ts needs the server-side gate open
     // to render the "Scan to pay" launcher entry + its server actions.
-    // Inert for every other spec (nothing else routes through that gate).
-    env: { PORT: String(PORT), SCAN_TO_PAY_ENABLED: "true" },
+    // BILLS_ENABLED / BILLS_EXTRACTION_ENABLED turn on the Bills &
+    // Expenses surface and its Phase 2 worker for bills-intake.spec.ts /
+    // bills-extraction.spec.ts. AI_PROVIDER=mock makes the extractor
+    // return a deterministic invoice with no API key. REPORT_CRON_SECRET
+    // lets the extraction spec drive the cron route directly. All inert
+    // for every other spec (nothing else routes through those gates).
+    env: {
+      PORT: String(PORT),
+      SCAN_TO_PAY_ENABLED: "true",
+      BILLS_ENABLED: "true",
+      BILLS_EXTRACTION_ENABLED: "true",
+      AI_PROVIDER: "mock",
+      REPORT_CRON_SECRET: "e2e-bills-cron-secret",
+    },
   },
 
   projects: [

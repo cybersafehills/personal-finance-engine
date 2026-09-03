@@ -1,5 +1,5 @@
 // Pure types + vocabularies for the "Ready for Accountant" package
-// (Integrations Phase 3, migration 20261111000000). No server-only import -
+// (Integrations Phase 3, migration 20261118000000). No server-only import -
 // reusable on the client and unit-testable.
 
 export const ACCOUNTANT_PACKAGE_STATUSES = [

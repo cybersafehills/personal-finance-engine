@@ -6,10 +6,11 @@ Function. ADR 0008 has the rationale; the migration
 `supabase/functions/capture/`, and the shared module
 `supabase/functions/_shared/pairing.ts` are the source of truth for behaviour.
 
-Status: **backend + wizard + QR handoff + `op:"capture"` writer.** Dark unless
-`DEVICE_PAIRING_V2=enabled`. `ingest-momo` and the legacy `x-ingest-key` path
-are unchanged. The processor that normalizes captured evidence into
-`transactions` is a follow-up PR (ADR 0009).
+Status: **backend + wizard + QR handoff + `op:"capture"` writer + raw-events
+processor.** Dark unless `DEVICE_PAIRING_V2=enabled`. `ingest-momo` and the
+legacy `x-ingest-key` path are unchanged. Captured evidence is normalized into
+`transactions` by `supabase/functions/process-raw-events` — see
+`docs/ingestion-pipeline.md`.
 
 ## Roles
 
@@ -145,8 +146,11 @@ universal envelope, `message` **required**.
      `capture_accepted`.
    - `(ingestion_connection_id, payload_hash)` conflict → `200 { "ok": true,
      "status": "duplicate" }`.
-5. **Never** creates a `transactions` row. A separate `process-raw-events`
-   processor (follow-up PR) normalizes pending capture rows.
+5. **Never** creates a `transactions` row. `supabase/functions/process-raw-events`
+   (scheduled, `docs/ingestion-pipeline.md`) claims the `pending` row, synthesizes
+   a `momo_messages` row, and runs `_shared/ingestion-pipeline.ts` to produce the
+   transaction. `parse_status` moves `pending → processing → normalized |
+   superseded | rejected | failed` (transient failures return to `pending`).
 
 ## Universal capture envelope
 

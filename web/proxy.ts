@@ -112,6 +112,14 @@ export const config = {
   // did 307 every one of those images to /login for a logged-out
   // visitor, so an installed iOS PWA never got its apple-touch-startup-
   // image and fell back to a black launch screen.
+  //
+  // /v1/* is excluded: on api.oneledger.me these paths are rewritten
+  // (next.config.ts, host-scoped) straight to the Supabase Edge Functions
+  // gateway, which does its own x-device-key / x-processor-secret auth and
+  // runs verify_jwt=false. This proxy runs before next.config rewrites, so
+  // without the exclusion every device POST to https://api.oneledger.me/v1/*
+  // was 307'd to /login before the rewrite could fire. The main domains
+  // serve no /v1/* route, so excluding it there is a harmless 404.
   matcher:
-    "/((?!_next/static|_next/image|favicon.ico|icon.png|apple-icon.png|api/cron|api/health/email|api/admin/operational-health|brand/).*)",
+    "/((?!_next/static|_next/image|favicon.ico|icon.png|apple-icon.png|api/cron|api/health/email|api/admin/operational-health|brand/|v1/).*)",
 };

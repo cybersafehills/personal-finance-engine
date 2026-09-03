@@ -634,11 +634,18 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # Device pairing v2 (20261104000000) adds pairing_sessions (RLS enabled,
 # SELECT-own for authenticated) and connector_pairing_events (RLS enabled,
 # service-role-only, no authenticated policy) - 93 tables, 92 with RLS.
-# Integrations Phase 3 P3-PR3 (20261111000000) adds accountant_packages
-# (RLS enabled, SELECT gated on integration.view) - 94 tables, 93 with RLS.
-# Integrations Phase 3 P3-PR5 (20261112000000) adds connected_ledgers
-# (RLS enabled, SELECT gated on integration.view) - 95 tables, 94 with RLS.
-if [ "$TABLE_COUNT" = "95" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Bills & Expenses phases 1-7 (2026111x-2026112x) add 17 RLS-enabled tables
+# (bill_documents, bill_document_artifacts, bill_processing_events,
+# bill_processing_policies, bill_extractions, bill_extracted_fields,
+# bill_line_items, bill_validations, bill_validation_findings,
+# bill_duplicate_candidates, suppliers, supplier_aliases,
+# bill_supplier_candidates, bills, bill_transaction_links,
+# bill_transaction_match_candidates, bill_comments) - 110 tables, 109 with RLS.
+# Integrations Phase 3 P3-PR3 (20261118000000) adds accountant_packages
+# (RLS enabled, SELECT gated on integration.view) - 111 tables, 110 with RLS.
+# Integrations Phase 3 P3-PR5 (20261119000000) adds connected_ledgers
+# (RLS enabled, SELECT gated on integration.view) - 112 tables, 111 with RLS.
+if [ "$TABLE_COUNT" = "112" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -737,18 +744,21 @@ fi
 # connected_workbooks, integration_sync_runs and integration_conflicts with a
 # SELECT-only grant each; integration_destination_secrets gets NO authenticated
 # grant (service-role only). 122 + 4 = 126.
-# Integrations Phase 3 P3-PR2 (20261110000000) adds a SELECT grant on the
+# Bills & Expenses phases 1-7 add select-only grants across the 17 new
+# bill_* / suppliers / bills tables plus (select, update) on
+# bill_processing_policies. 126 + 18 = 144.
+# Integrations Phase 3 P3-PR2 (20261117000000) adds a SELECT grant on the
 # pre-existing balance_reconciliations table (writes stay service-role only -
-# the reconcile-balances edge function is the sole writer). 126 + 1 = 127.
-# Integrations Phase 3 P3-PR3 (20261111000000) adds accountant_packages with a
-# SELECT-only grant for authenticated (writes service-role only). 127 + 1 = 128.
-# Integrations Phase 3 P3-PR5 (20261112000000) adds connected_ledgers with a
-# SELECT-only grant for authenticated (writes service-role only). 128 + 1 = 129.
+# the reconcile-balances edge function is the sole writer). 144 + 1 = 145.
+# Integrations Phase 3 P3-PR3 (20261118000000) adds accountant_packages with a
+# SELECT-only grant for authenticated (writes service-role only). 145 + 1 = 146.
+# Integrations Phase 3 P3-PR5 (20261119000000) adds connected_ledgers with a
+# SELECT-only grant for authenticated (writes service-role only). 146 + 1 = 147.
 AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and grantee = 'authenticated';")"
-if [ "$AUTHENTICATED_GRANT_COUNT" = "129" ]; then
-  pass "authenticated holds exactly the 129 table grants expected, no more"
+if [ "$AUTHENTICATED_GRANT_COUNT" = "147" ]; then
+  pass "authenticated holds exactly the 147 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 129 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 147 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -904,10 +914,19 @@ fi
 # consume_device_pairing_session, and expire_stale_pairing_sessions are
 # service-role-only. = 93.
 AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname = 'authenticated' where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "93" ]; then
-  pass "authenticated holds EXECUTE on exactly the 93 functions expected, no more"
+# Bills & Expenses phases 1-7 add authenticated-callable RPCs:
+# create_bill_document, transition_bill_document, record_bill_original_
+# download, get_or_create_bill_processing_policy, retry_bill_extraction,
+# retry_bill_validation, resolve_bill_duplicate_candidate, search_suppliers,
+# create_supplier, link_bill_supplier, confirm_bill_transaction_match,
+# unlink_bill_transaction, approve_bill, post_bill, correct_bill_field,
+# add_bill_comment. Internal helpers (record_bill_event, record_bill_*,
+# system_transition_bill_document, get_bill_*_search_set, ...) stay
+# service_role-only. 93 + 15 = 108.
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "108" ]; then
+  pass "authenticated holds EXECUTE on exactly the 108 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 93 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 108 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -5397,7 +5416,7 @@ fi
 rm -f $ARTIFACT_DIR/pfe_p2_conf2.log
 
 # ===========================================================================
-# Integrations Phase 3 (20261110000000): balance_reconciliations read access.
+# Integrations Phase 3 (20261117000000): balance_reconciliations read access.
 # A workspace member may SELECT reconciliation checkpoints for accounts in
 # their workspace; another tenant cannot; and authenticated still cannot
 # write (the reconcile-balances edge function is the sole writer).
@@ -5423,7 +5442,7 @@ fi
 rm -f $ARTIFACT_DIR/pfe_p3_br.log
 
 # ===========================================================================
-# Integrations Phase 3 (20261111000000): accountant_packages + the
+# Integrations Phase 3 (20261118000000): accountant_packages + the
 # integration.accountant_package capability + the private bucket.
 # Reuses the INT_HH household + INT_MEMBER_USER / INT_VIEWER_USER fixtures.
 # ===========================================================================
@@ -5493,7 +5512,7 @@ else
 fi
 
 # ===========================================================================
-# Integrations Phase 3 (20261112000000): accounting connectors -
+# Integrations Phase 3 (20261119000000): accounting connectors -
 # integration.ledger_manage / integration.ledger_sync + connected_ledgers +
 # the widened integration_destinations 'accounting' kind.
 # ===========================================================================
@@ -5631,6 +5650,802 @@ else
   fi
 fi
 rm -f $ARTIFACT_DIR/pfe_cap_evt.log
+
+# ===========================================================================
+# Raw-events processor (20261106000000): claim / release RPCs + lifecycle.
+# ===========================================================================
+echo "=== Raw-events processor: claim / release / parse_status ==="
+
+PRC_OWNER="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('processor-owner@example.com') returning id;" | head -1)"
+PRC_WS="$(psql -d pfe_rls -t -A -c "select w.id from public.workspaces w join public.workspace_memberships m on m.workspace_id = w.id where m.user_id = '$PRC_OWNER' and w.kind = 'personal';" | head -1)"
+PRC_SRC="$(psql -d pfe_rls -t -A -c "set role service_role; insert into public.financial_sources (owner_user_id, provider, source_type, display_name, currency) values ('$PRC_OWNER', 'mtn_momo', 'mobile_money', 'Processor source', 'RWF') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+PRC_ACC="$(psql -d pfe_rls -t -A -c "set role service_role; insert into public.accounts (workspace_id, financial_source_id, name, provider, currency) values ('$PRC_WS', '$PRC_SRC', 'Processor account', 'mtn_momo', 'RWF') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+PRC_CONN="$(as_user "$PRC_OWNER" "select public.create_ingestion_connection_dual_write('$PRC_WS', '$PRC_ACC', 'Processor phone', 'mtn_momo', 'processor-hash', 'prc_pfx');")"
+
+PRC_HASH="$(printf 'f%.0s' $(seq 1 64))"
+PRC_EVT="$(psql -d pfe_rls -t -A -c "set role service_role; insert into public.raw_financial_events (channel, received_at, payload_hash, raw_payload, ingestion_connection_id, financial_source_id, provider_key, ingestion_origin, parse_status) values ('sms', now(), '$PRC_HASH', '{\"raw_message\":\"x\"}'::jsonb, '$PRC_CONN', '$PRC_SRC', 'mtn_momo', 'iphone_capture_v2', 'pending') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+
+PRC_CLAIM="$(psql -d pfe_rls -t -A -c "set role service_role; select id || '|' || ingestion_connection_id || '|' || payload_hash from public.claim_pending_capture_events(10);" | grep -Eo "$PRC_EVT\|[0-9a-f-]{36}\|$PRC_HASH" | head -1)"
+PRC_STATUS_AFTER="$(psql -d pfe_rls -t -A -c "select parse_status from public.raw_financial_events where id = '$PRC_EVT';")"
+if [ -n "$PRC_CLAIM" ] && [ "$PRC_STATUS_AFTER" = "processing" ]; then
+  pass "Raw-events processor: claim_pending_capture_events leases the row (pending → processing) and returns its provenance"
+else
+  fail "Raw-events processor: claim did not lease the row (claim='$PRC_CLAIM' status='$PRC_STATUS_AFTER')"
+fi
+
+PRC_RECLAIM="$(psql -d pfe_rls -t -A -c "set role service_role; select count(*) from (select id from public.claim_pending_capture_events(10)) c where c.id = '$PRC_EVT';" | tail -1)"
+if [ "$PRC_RECLAIM" = "0" ]; then
+  pass "Raw-events processor: a second claim skips a row already in 'processing'"
+else
+  fail "Raw-events processor: a processing row was claimed again (reclaim count=$PRC_RECLAIM)"
+fi
+
+PRC_RELEASED="$(psql -d pfe_rls -t -A -c "set role service_role; select public.release_stale_processing_capture_events(interval '0 seconds');" | grep -Eo '[0-9]+' | head -1)"
+PRC_STATUS_RELEASED="$(psql -d pfe_rls -t -A -c "select parse_status from public.raw_financial_events where id = '$PRC_EVT';")"
+if [ "$PRC_RELEASED" -ge 1 ] && [ "$PRC_STATUS_RELEASED" = "pending" ]; then
+  pass "Raw-events processor: release_stale_processing_capture_events returns stuck rows to 'pending'"
+else
+  fail "Raw-events processor: stale release did not reset the row (n=$PRC_RELEASED status=$PRC_STATUS_RELEASED)"
+fi
+
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; update public.raw_financial_events set parse_status = 'failed' where id = '$PRC_EVT';" >/dev/null
+PRC_FAILED_OK="$(psql -d pfe_rls -t -A -c "select parse_status from public.raw_financial_events where id = '$PRC_EVT';")"
+if [ "$PRC_FAILED_OK" = "failed" ]; then
+  pass "Raw-events processor: parse_status accepts the new 'failed' terminal value"
+else
+  fail "Raw-events processor: parse_status did not accept 'failed'"
+fi
+
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.momo_messages (source, ingestion_connection_id, raw_message, message_fingerprint, processing_status) values ('iphone_capture_v2', '$PRC_CONN', 'x', '$PRC_HASH', 'processing');" >/dev/null
+if psql -d pfe_rls -c "set role service_role; insert into public.momo_messages (source, raw_message, message_fingerprint, processing_status) values ('bogus_src', 'y', '$(printf 'a%.0s' $(seq 1 64))', 'processing');" >/dev/null 2>$ARTIFACT_DIR/pfe_prc_src.log; then
+  fail "Raw-events processor: momo_messages.source accepted a bogus value"
+else
+  grep -q "violates check constraint" $ARTIFACT_DIR/pfe_prc_src.log \
+    && pass "Raw-events processor: momo_messages.source accepts 'iphone_capture_v2', rejects an unknown value" \
+    || fail "Raw-events processor: momo_messages.source insert failed for an unexpected reason"
+fi
+rm -f $ARTIFACT_DIR/pfe_prc_src.log
+
+PRC_ACL="$(psql -d pfe_rls -t -A -c "select has_function_privilege('authenticated', 'public.claim_pending_capture_events(integer)', 'execute') || '|' || has_function_privilege('anon', 'public.claim_pending_capture_events(integer)', 'execute') || '|' || has_function_privilege('authenticated', 'public.release_stale_processing_capture_events(interval)', 'execute') || '|' || has_function_privilege('service_role', 'public.claim_pending_capture_events(integer)', 'execute');")"
+if [ "$PRC_ACL" = "false|false|false|true" ] || [ "$PRC_ACL" = "f|f|f|t" ]; then
+  pass "Raw-events processor: claim / release RPCs are service-role-only"
+else
+  fail "Raw-events processor: RPC privileges are wrong ($PRC_ACL)"
+fi
+
+# ===========================================================================
+# Bills & Expenses Phase 1 (20261110000000): lifecycle CHECK, per-workspace
+# checksum uniqueness, transition matrix + capability gating, the
+# record_bill_event lockdown, original-artifact immutability, and
+# cross-workspace RLS isolation. Reuses the pfe_rls database + USER_A /
+# USER_B set up for the RLS block above (BILL_WS_A is resolved below).
+# ===========================================================================
+echo "=== Bills Phase 1: intake, lifecycle, audit, isolation ==="
+
+BILL_CHK_A="$(printf 'a%.0s' $(seq 1 64))"
+# USER_A's personal workspace specifically (they also own the Phase Q
+# household) - owner of a personal Space holds every bill.* capability.
+BILL_WS_A="$(psql -d pfe_rls -t -A -c "select w.id from public.workspaces w join public.workspace_memberships m on m.workspace_id = w.id where m.user_id = '$USER_A' and w.kind = 'personal' and m.status = 'active' limit 1;")"
+
+# The two Storage buckets exist.
+BILL_BUCKETS="$(psql -d pfe_rls -t -A -c "select count(*) from storage.buckets where id in ('bill-documents','bill-derivatives') and public = false;")"
+if [ "$BILL_BUCKETS" = "2" ]; then
+  pass "Bills Phase 1: both private Storage buckets exist (bill-documents, bill-derivatives)"
+else
+  fail "Bills Phase 1: expected 2 private bill buckets, found $BILL_BUCKETS"
+fi
+
+# The lifecycle CHECK rejects an unknown status (service_role insert).
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.bill_documents (workspace_id, status, original_filename, sanitized_filename, storage_key, mime_type, byte_size, checksum_sha256)
+  values ('$BILL_WS_A', 'not_a_real_state', 'x.pdf', 'x.pdf', '$BILL_WS_A/z.pdf', 'application/pdf', 10, '$BILL_CHK_A');
+" >/dev/null 2>&1; then
+  fail "Bills Phase 1: bill_documents accepted an unknown lifecycle status"
+else
+  pass "Bills Phase 1: bill_documents rejects an unknown lifecycle status"
+fi
+
+# create_bill_document as USER_A (owner of their personal workspace, so it
+# holds every bill.* capability via the matrix) succeeds and returns ok.
+BILL_CREATE="$(as_user "$USER_A" "select (public.create_bill_document(jsonb_build_object(
+  'workspace_id', '$BILL_WS_A',
+  'original_filename', 'invoice.pdf',
+  'sanitized_filename', 'invoice.pdf',
+  'storage_key', '$BILL_WS_A/${BILL_CHK_A}.pdf',
+  'mime_type', 'application/pdf',
+  'byte_size', 2048,
+  'page_count', 1,
+  'checksum_sha256', '$BILL_CHK_A'
+)))->>'ok';")"
+BILL_ID="$(as_user "$USER_A" "select id from public.bill_documents where checksum_sha256 = '$BILL_CHK_A';")"
+if [ "$BILL_CREATE" = "true" ] && [ -n "$BILL_ID" ]; then
+  pass "Bills Phase 1: create_bill_document records the document for a member holding bill.upload"
+else
+  fail "Bills Phase 1: create_bill_document did not succeed (ok=$BILL_CREATE id=$BILL_ID)"
+fi
+
+# It also wrote the immutable original artifact and a processing event.
+BILL_ORIG_ARTIFACT="$(psql -d pfe_rls -t -A -c "select count(*) from public.bill_document_artifacts where bill_document_id = '$BILL_ID' and kind = 'original';")"
+BILL_RECEIVED_EVENT="$(psql -d pfe_rls -t -A -c "select count(*) from public.bill_processing_events where bill_document_id = '$BILL_ID' and event_type = 'document_received';")"
+BILL_AUDIT_EVENT="$(psql -d pfe_rls -t -A -c "select count(*) from public.space_audit_events where workspace_id = '$BILL_WS_A' and event_type = 'bill.uploaded' and resource_id = '$BILL_ID';")"
+if [ "$BILL_ORIG_ARTIFACT" = "1" ] && [ "$BILL_RECEIVED_EVENT" = "1" ] && [ "$BILL_AUDIT_EVENT" = "1" ]; then
+  pass "Bills Phase 1: create_bill_document writes the original artifact + a processing event + a space audit event"
+else
+  fail "Bills Phase 1: expected original=1 received_event=1 audit=1, got $BILL_ORIG_ARTIFACT / $BILL_RECEIVED_EVENT / $BILL_AUDIT_EVENT"
+fi
+
+# A byte-identical re-upload is a surfaced duplicate, not a second row or a raw error.
+BILL_DUP="$(as_user "$USER_A" "select (public.create_bill_document(jsonb_build_object(
+  'workspace_id', '$BILL_WS_A',
+  'original_filename', 'invoice-again.pdf',
+  'sanitized_filename', 'invoice-again.pdf',
+  'storage_key', '$BILL_WS_A/${BILL_CHK_A}.pdf',
+  'mime_type', 'application/pdf',
+  'byte_size', 2048,
+  'checksum_sha256', '$BILL_CHK_A'
+)))->>'error';")"
+BILL_ROW_COUNT="$(psql -d pfe_rls -t -A -c "select count(*) from public.bill_documents where checksum_sha256 = '$BILL_CHK_A';")"
+if [ "$BILL_DUP" = "duplicate_document" ] && [ "$BILL_ROW_COUNT" = "1" ]; then
+  pass "Bills Phase 1: a byte-identical re-upload returns duplicate_document and does not create a second row"
+else
+  fail "Bills Phase 1: duplicate handling wrong (error=$BILL_DUP rows=$BILL_ROW_COUNT)"
+fi
+
+# transition_bill_document: stored -> needs_review is allowed; a same-state
+# call no-ops; an invalid hop returns { ok:false } rather than raising.
+BILL_T1="$(as_user "$USER_A" "select (public.transition_bill_document('$BILL_ID', 'needs_review'))->>'status';")"
+BILL_T2="$(as_user "$USER_A" "select (public.transition_bill_document('$BILL_ID', 'needs_review'))->>'changed';")"
+BILL_T3="$(as_user "$USER_A" "select (public.transition_bill_document('$BILL_ID', 'posted'))->>'error';")"
+if [ "$BILL_T1" = "needs_review" ] && [ "$BILL_T2" = "false" ] && [ "$BILL_T3" = "invalid_transition" ]; then
+  pass "Bills Phase 1: transition_bill_document enforces the lifecycle matrix and no-ops a repeat"
+else
+  fail "Bills Phase 1: transition matrix wrong (t1=$BILL_T1 t2=$BILL_T2 t3=$BILL_T3)"
+fi
+
+# record_bill_event is not callable by an authenticated user directly.
+if as_user "$USER_A" "select public.record_bill_event('$BILL_ID', '$BILL_WS_A', 'user', 'x');" >/dev/null 2>$ARTIFACT_DIR/pfe_bill_evt.log; then
+  fail "Bills Phase 1: record_bill_event was callable by an authenticated user"
+else
+  pass "Bills Phase 1: record_bill_event is not authenticated-callable"
+fi
+rm -f $ARTIFACT_DIR/pfe_bill_evt.log
+
+# The stored original artifact cannot be updated or deleted (service_role).
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "update public.bill_document_artifacts set mime_type = 'image/png' where bill_document_id = '$BILL_ID' and kind = 'original';" >/dev/null 2>&1; then
+  fail "Bills Phase 1: a kind=original artifact was updatable"
+else
+  pass "Bills Phase 1: a kind=original artifact cannot be updated"
+fi
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "delete from public.bill_document_artifacts where bill_document_id = '$BILL_ID' and kind = 'original';" >/dev/null 2>&1; then
+  fail "Bills Phase 1: a kind=original artifact was deletable"
+else
+  pass "Bills Phase 1: a kind=original artifact cannot be deleted"
+fi
+
+# Cross-workspace RLS: USER_B cannot see USER_A's bill document.
+BILL_B_SEES="$(as_user "$USER_B" "select count(*) from public.bill_documents where id = '$BILL_ID';")"
+if [ "$BILL_B_SEES" = "0" ]; then
+  pass "Bills Phase 1: a non-member cannot read another workspace's bill document"
+else
+  fail "Bills Phase 1: RLS isolation breach - USER_B read USER_A's bill document"
+fi
+
+# The capability matrix places bill.* where Phase 1 intends.
+BILL_CAP1="$(psql -d pfe_rls -t -A -c "select public.space_role_has_capability('household', 'member', 'bill.upload');")"
+BILL_CAP2="$(psql -d pfe_rls -t -A -c "select public.space_role_has_capability('household', 'member', 'bill.approve');")"
+BILL_CAP3="$(psql -d pfe_rls -t -A -c "select public.space_role_has_capability('household', 'admin', 'bill.approve');")"
+if [ "$BILL_CAP1" = "t" ] && [ "$BILL_CAP2" = "f" ] && [ "$BILL_CAP3" = "t" ]; then
+  pass "Bills Phase 1: capability matrix - member has bill.upload not bill.approve; admin has bill.approve"
+else
+  fail "Bills Phase 1: capability matrix wrong (member.upload=$BILL_CAP1 member.approve=$BILL_CAP2 admin.approve=$BILL_CAP3)"
+fi
+
+# ===========================================================================
+# Bills & Expenses Phase 2 (20261111000000): the three extraction tables,
+# record_bill_extraction / system_transition_bill_document being
+# service_role-only, a full worker round-trip (queued -> ... -> extracting
+# -> record -> needs_review with doc_class + fields + line items),
+# is_current supersession, retry_bill_extraction, and cross-workspace RLS.
+# Reuses pfe_rls + USER_A / USER_B / BILL_WS_A.
+# ===========================================================================
+echo "=== Bills Phase 2: classification + extraction ==="
+
+BILL2_CHK="$(printf 'c%.0s' $(seq 1 64))"
+BILL2_CHK_FAIL="$(printf 'd%.0s' $(seq 1 64))"
+
+# record_bill_extraction and system_transition_bill_document are not
+# authenticated-callable.
+if as_user "$USER_A" "select public.record_bill_extraction('{}'::jsonb);" >/dev/null 2>$ARTIFACT_DIR/pfe_b2_rec.log; then
+  fail "Bills Phase 2: record_bill_extraction was callable by an authenticated user"
+else
+  pass "Bills Phase 2: record_bill_extraction is service_role-only"
+fi
+rm -f $ARTIFACT_DIR/pfe_b2_rec.log
+if as_user "$USER_A" "select public.system_transition_bill_document('00000000-0000-0000-0000-000000000000'::uuid, 'scanning');" >/dev/null 2>$ARTIFACT_DIR/pfe_b2_sys.log; then
+  fail "Bills Phase 2: system_transition_bill_document was callable by an authenticated user"
+else
+  pass "Bills Phase 2: system_transition_bill_document is service_role-only"
+fi
+rm -f $ARTIFACT_DIR/pfe_b2_sys.log
+
+# Create + queue a document, then drive it through the worker hops as
+# service_role, then record a successful extraction.
+BILL2_ID="$(as_user "$USER_A" "select (public.create_bill_document(jsonb_build_object(
+  'workspace_id', '$BILL_WS_A', 'original_filename', 'inv2.pdf', 'sanitized_filename', 'inv2.pdf',
+  'storage_key', '$BILL_WS_A/${BILL2_CHK}.pdf', 'mime_type', 'application/pdf',
+  'byte_size', 4096, 'checksum_sha256', '$BILL2_CHK')))->>'id';")"
+as_user "$USER_A" "select public.transition_bill_document('$BILL2_ID', 'queued');" >/dev/null
+psql -d pfe_rls -t -A -c "set role service_role;
+  select public.system_transition_bill_document('$BILL2_ID', 'scanning');
+  select public.system_transition_bill_document('$BILL2_ID', 'classifying');
+  select public.system_transition_bill_document('$BILL2_ID', 'extracting');" >/dev/null
+
+BILL2_REC="$(psql -d pfe_rls -t -A -c "set role service_role; select (public.record_bill_extraction(jsonb_build_object(
+  'bill_document_id', '$BILL2_ID', 'workspace_id', '$BILL_WS_A', 'status', 'succeeded',
+  'provider', 'mock', 'model', 'mock', 'doc_class', 'supplier_invoice', 'doc_class_confidence', 0.95,
+  'fields', jsonb_build_array(
+     jsonb_build_object('field_key','total','value_type','money_minor','raw_value','141,600','normalized_value','141600','currency','RWF','confidence',0.95,'source_page',1),
+     jsonb_build_object('field_key','issue_date','value_type','date','raw_value','12/08/2026','normalized_value','2026-08-12','confidence',0.9,'source_page',1)),
+  'line_items', jsonb_build_array(
+     jsonb_build_object('line_index',0,'description','A4 paper','unit_price_minor',18000,'currency','RWF','line_total_minor',72000,'source_page',1))
+)))->>'status';" | tail -1)"
+
+BILL2_STATUS="$(psql -d pfe_rls -t -A -c "select status from public.bill_documents where id = '$BILL2_ID';")"
+BILL2_DOCCLASS="$(psql -d pfe_rls -t -A -c "select doc_class from public.bill_documents where id = '$BILL2_ID';")"
+BILL2_FIELDS="$(psql -d pfe_rls -t -A -c "select count(*) from public.bill_extracted_fields where bill_document_id = '$BILL2_ID';")"
+BILL2_LINES="$(psql -d pfe_rls -t -A -c "select count(*) from public.bill_line_items where bill_document_id = '$BILL2_ID';")"
+BILL2_CURRENT="$(psql -d pfe_rls -t -A -c "select count(*) from public.bill_extractions where bill_document_id = '$BILL2_ID' and is_current;")"
+if [ "$BILL2_REC" = "validating" ] && [ "$BILL2_STATUS" = "validating" ] && [ "$BILL2_DOCCLASS" = "supplier_invoice" ] \
+   && [ "$BILL2_FIELDS" = "2" ] && [ "$BILL2_LINES" = "1" ] && [ "$BILL2_CURRENT" = "1" ]; then
+  pass "Bills Phase 2: record_bill_extraction writes the run + fields + lines, stamps doc_class, advances to validating (Phase 3 re-issue)"
+else
+  fail "Bills Phase 2: extraction round-trip wrong (rec=$BILL2_REC status=$BILL2_STATUS class=$BILL2_DOCCLASS fields=$BILL2_FIELDS lines=$BILL2_LINES current=$BILL2_CURRENT)"
+fi
+
+# A second successful run supersedes the first as is_current.
+psql -d pfe_rls -t -A -c "set role service_role; select public.record_bill_extraction(jsonb_build_object(
+  'bill_document_id', '$BILL2_ID', 'workspace_id', '$BILL_WS_A', 'status', 'succeeded',
+  'provider', 'mock', 'model', 'mock', 'doc_class', 'receipt', 'fields', '[]'::jsonb, 'line_items', '[]'::jsonb));" >/dev/null
+BILL2_CURRENT2="$(psql -d pfe_rls -t -A -c "select count(*) from public.bill_extractions where bill_document_id = '$BILL2_ID' and is_current;")"
+BILL2_RUNS="$(psql -d pfe_rls -t -A -c "select count(*) from public.bill_extractions where bill_document_id = '$BILL2_ID';")"
+if [ "$BILL2_CURRENT2" = "1" ] && [ "$BILL2_RUNS" = "2" ]; then
+  pass "Bills Phase 2: a new extraction run supersedes the previous is_current (partial-unique holds)"
+else
+  fail "Bills Phase 2: is_current supersession wrong (current=$BILL2_CURRENT2 runs=$BILL2_RUNS)"
+fi
+
+# A failed extraction moves the document to processing_failed; an
+# authorised reviewer re-queues it.
+BILL2F_ID="$(as_user "$USER_A" "select (public.create_bill_document(jsonb_build_object(
+  'workspace_id', '$BILL_WS_A', 'original_filename', 'bad.pdf', 'sanitized_filename', 'bad.pdf',
+  'storage_key', '$BILL_WS_A/${BILL2_CHK_FAIL}.pdf', 'mime_type', 'application/pdf',
+  'byte_size', 10, 'checksum_sha256', '$BILL2_CHK_FAIL')))->>'id';")"
+as_user "$USER_A" "select public.transition_bill_document('$BILL2F_ID', 'queued');" >/dev/null
+psql -d pfe_rls -t -A -c "set role service_role;
+  select public.system_transition_bill_document('$BILL2F_ID', 'scanning');
+  select public.system_transition_bill_document('$BILL2F_ID', 'classifying');
+  select public.system_transition_bill_document('$BILL2F_ID', 'extracting');
+  select public.record_bill_extraction(jsonb_build_object('bill_document_id','$BILL2F_ID','workspace_id','$BILL_WS_A','status','failed','error',jsonb_build_object('kind','invalid_response')));" >/dev/null
+BILL2F_STATUS="$(psql -d pfe_rls -t -A -c "select status from public.bill_documents where id = '$BILL2F_ID';")"
+BILL2F_RETRY="$(as_user "$USER_A" "select (public.retry_bill_extraction('$BILL2F_ID'))->>'status';")"
+BILL2F_STATUS2="$(psql -d pfe_rls -t -A -c "select status from public.bill_documents where id = '$BILL2F_ID';")"
+if [ "$BILL2F_STATUS" = "processing_failed" ] && [ "$BILL2F_RETRY" = "queued" ] && [ "$BILL2F_STATUS2" = "queued" ]; then
+  pass "Bills Phase 2: a failed extraction -> processing_failed; retry_bill_extraction re-queues it"
+else
+  fail "Bills Phase 2: failure/retry path wrong (failed=$BILL2F_STATUS retry=$BILL2F_RETRY requeued=$BILL2F_STATUS2)"
+fi
+
+# Cross-workspace RLS on the extraction tables.
+BILL2_B_SEES="$(as_user "$USER_B" "select count(*) from public.bill_extracted_fields where bill_document_id = '$BILL2_ID';")"
+if [ "$BILL2_B_SEES" = "0" ]; then
+  pass "Bills Phase 2: a non-member cannot read another workspace's extracted fields"
+else
+  fail "Bills Phase 2: RLS isolation breach on bill_extracted_fields"
+fi
+
+# ===========================================================================
+# Bills & Expenses Phase 3 (20261112000000): record_bill_validation being
+# service_role-only, a full validation run inserting findings + advancing
+# validating -> needs_review, is_current supersession, and cross-workspace
+# RLS on the two validation tables. Reuses pfe_rls + USER_A / USER_B /
+# BILL_WS_A.
+# ===========================================================================
+echo "=== Bills Phase 3: deterministic validation ==="
+
+BILL3_CHK="$(printf 'e%.0s' $(seq 1 64))"
+
+if as_user "$USER_A" "select public.record_bill_validation('{}'::jsonb);" >/dev/null 2>$ARTIFACT_DIR/pfe_b3.log; then
+  fail "Bills Phase 3: record_bill_validation was callable by an authenticated user"
+else
+  pass "Bills Phase 3: record_bill_validation is service_role-only"
+fi
+rm -f $ARTIFACT_DIR/pfe_b3.log
+
+# Drive a fresh document to 'validating' via extraction, then run validation.
+BILL3_ID="$(as_user "$USER_A" "select (public.create_bill_document(jsonb_build_object(
+  'workspace_id', '$BILL_WS_A', 'original_filename', 'v.pdf', 'sanitized_filename', 'v.pdf',
+  'storage_key', '$BILL_WS_A/${BILL3_CHK}.pdf', 'mime_type', 'application/pdf',
+  'byte_size', 4096, 'checksum_sha256', '$BILL3_CHK')))->>'id';")"
+as_user "$USER_A" "select public.transition_bill_document('$BILL3_ID', 'queued');" >/dev/null
+BILL3_EXT="$(psql -d pfe_rls -t -A -c "set role service_role;
+  select public.system_transition_bill_document('$BILL3_ID', 'scanning');
+  select public.system_transition_bill_document('$BILL3_ID', 'classifying');
+  select public.system_transition_bill_document('$BILL3_ID', 'extracting');
+  select (public.record_bill_extraction(jsonb_build_object(
+    'bill_document_id','$BILL3_ID','workspace_id','$BILL_WS_A','status','succeeded',
+    'provider','mock','model','mock','doc_class','supplier_invoice',
+    'fields', jsonb_build_array(jsonb_build_object('field_key','total','value_type','money_minor','normalized_value','150000','currency','RWF','source_page',1)),
+    'line_items','[]'::jsonb)))->>'status';" | tail -1)"
+BILL3_STATUS_MID="$(psql -d pfe_rls -t -A -c "select status from public.bill_documents where id = '$BILL3_ID';")"
+
+BILL3_VAL="$(psql -d pfe_rls -t -A -c "set role service_role; select (public.record_bill_validation(jsonb_build_object(
+  'bill_document_id','$BILL3_ID','workspace_id','$BILL_WS_A','status','succeeded',
+  'findings', jsonb_build_array(
+     jsonb_build_object('rule_id','arithmetic_total_mismatch','severity','blocking','title','Totals do not add up','detail','x','affected_fields',jsonb_build_array('total','subtotal'),'blocks_approval',true),
+     jsonb_build_object('rule_id','future_issue_date','severity','warning','title','Future date','detail','y','affected_fields',jsonb_build_array('issue_date'),'blocks_approval',false))
+)))->>'blocking';" | tail -1)"
+BILL3_STATUS_END="$(psql -d pfe_rls -t -A -c "select status from public.bill_documents where id = '$BILL3_ID';")"
+BILL3_FINDINGS="$(psql -d pfe_rls -t -A -c "select count(*) from public.bill_validation_findings where bill_document_id = '$BILL3_ID';")"
+BILL3_COUNTS="$(psql -d pfe_rls -t -A -c "select blocking_count || '/' || warning_count from public.bill_validations where bill_document_id = '$BILL3_ID' and is_current;")"
+if [ "$BILL3_EXT" = "validating" ] && [ "$BILL3_STATUS_MID" = "validating" ] && [ "$BILL3_VAL" = "1" ] \
+   && [ "$BILL3_STATUS_END" = "needs_review" ] && [ "$BILL3_FINDINGS" = "2" ] && [ "$BILL3_COUNTS" = "1/1" ]; then
+  pass "Bills Phase 3: record_bill_validation inserts findings, tallies severities, advances validating -> needs_review"
+else
+  fail "Bills Phase 3: validation round-trip wrong (ext=$BILL3_EXT mid=$BILL3_STATUS_MID blk=$BILL3_VAL end=$BILL3_STATUS_END findings=$BILL3_FINDINGS counts=$BILL3_COUNTS)"
+fi
+
+# A second run supersedes the previous is_current.
+psql -d pfe_rls -t -A -c "set role service_role; select public.record_bill_validation(jsonb_build_object(
+  'bill_document_id','$BILL3_ID','workspace_id','$BILL_WS_A','status','succeeded','findings','[]'::jsonb));" >/dev/null
+BILL3_CUR="$(psql -d pfe_rls -t -A -c "select count(*) from public.bill_validations where bill_document_id = '$BILL3_ID' and is_current;")"
+BILL3_RUNS="$(psql -d pfe_rls -t -A -c "select count(*) from public.bill_validations where bill_document_id = '$BILL3_ID';")"
+if [ "$BILL3_CUR" = "1" ] && [ "$BILL3_RUNS" = "2" ]; then
+  pass "Bills Phase 3: a new validation run supersedes the previous is_current"
+else
+  fail "Bills Phase 3: is_current supersession wrong (current=$BILL3_CUR runs=$BILL3_RUNS)"
+fi
+
+BILL3_B_SEES="$(as_user "$USER_B" "select count(*) from public.bill_validation_findings where bill_document_id = '$BILL3_ID';")"
+if [ "$BILL3_B_SEES" = "0" ]; then
+  pass "Bills Phase 3: a non-member cannot read another workspace's validation findings"
+else
+  fail "Bills Phase 3: RLS isolation breach on bill_validation_findings"
+fi
+
+# ===========================================================================
+# Bills & Expenses Phase 4 (20261113000000): get_bill_document_fingerprints
+# + record_bill_duplicate_candidates being service_role-only, a two-document
+# content-duplicate round-trip, resolve_bill_duplicate_candidate being
+# member + bill.review gated, and cross-workspace RLS. Reuses pfe_rls +
+# USER_A / USER_B / BILL_WS_A.
+# ===========================================================================
+echo "=== Bills Phase 4: duplicate detection ==="
+
+BILL4A_CHK="$(printf 'f%.0s' $(seq 1 64))"
+BILL4B_CHK="$(printf '9%.0s' $(seq 1 64))"
+
+if as_user "$USER_A" "select public.record_bill_duplicate_candidates('{}'::jsonb);" >/dev/null 2>$ARTIFACT_DIR/pfe_b4a.log; then
+  fail "Bills Phase 4: record_bill_duplicate_candidates was authenticated-callable"
+else
+  pass "Bills Phase 4: record_bill_duplicate_candidates is service_role-only"
+fi
+rm -f $ARTIFACT_DIR/pfe_b4a.log
+if as_user "$USER_A" "select * from public.get_bill_document_fingerprints('$BILL_WS_A', '00000000-0000-0000-0000-000000000000');" >/dev/null 2>$ARTIFACT_DIR/pfe_b4b.log; then
+  fail "Bills Phase 4: get_bill_document_fingerprints was authenticated-callable"
+else
+  pass "Bills Phase 4: get_bill_document_fingerprints is service_role-only"
+fi
+rm -f $ARTIFACT_DIR/pfe_b4b.log
+
+# Two documents with the same extracted identity, both driven to 'validating'.
+make_bill4_doc() {
+  local chk="$1" name="$2"
+  local id
+  id="$(as_user "$USER_A" "select (public.create_bill_document(jsonb_build_object(
+    'workspace_id','$BILL_WS_A','original_filename','$name','sanitized_filename','$name',
+    'storage_key','$BILL_WS_A/${chk}.pdf','mime_type','application/pdf',
+    'byte_size',4096,'checksum_sha256','$chk')))->>'id';")"
+  as_user "$USER_A" "select public.transition_bill_document('$id','queued');" >/dev/null
+  psql -d pfe_rls -t -A -c "set role service_role;
+    select public.system_transition_bill_document('$id','scanning');
+    select public.system_transition_bill_document('$id','classifying');
+    select public.system_transition_bill_document('$id','extracting');
+    select public.record_bill_extraction(jsonb_build_object(
+      'bill_document_id','$id','workspace_id','$BILL_WS_A','status','succeeded',
+      'provider','mock','model','mock','doc_class','supplier_invoice',
+      'fields', jsonb_build_array(
+        jsonb_build_object('field_key','supplier_name','value_type','string','normalized_value','Kigali Office Supplies Ltd','source_page',1),
+        jsonb_build_object('field_key','invoice_number','value_type','string','normalized_value','INV-2026-0442','source_page',1),
+        jsonb_build_object('field_key','issue_date','value_type','date','normalized_value','2026-08-12','source_page',1),
+        jsonb_build_object('field_key','currency','value_type','string','normalized_value','RWF','source_page',1),
+        jsonb_build_object('field_key','total','value_type','money_minor','normalized_value','141600','currency','RWF','source_page',1)),
+      'line_items','[]'::jsonb));" >/dev/null
+  echo "$id"
+}
+BILL4A_ID="$(make_bill4_doc "$BILL4A_CHK" a4.pdf)"
+BILL4B_ID="$(make_bill4_doc "$BILL4B_CHK" b4.pdf)"
+
+# get_bill_document_fingerprints for B returns A (and not B itself).
+BILL4_FP="$(psql -d pfe_rls -t -A -c "set role service_role; select count(*) from public.get_bill_document_fingerprints('$BILL_WS_A', '$BILL4B_ID') where bill_document_id = '$BILL4A_ID';" | tail -1)"
+BILL4_FP_SELF="$(psql -d pfe_rls -t -A -c "set role service_role; select count(*) from public.get_bill_document_fingerprints('$BILL_WS_A', '$BILL4B_ID') where bill_document_id = '$BILL4B_ID';" | tail -1)"
+if [ "$BILL4_FP" = "1" ] && [ "$BILL4_FP_SELF" = "0" ]; then
+  pass "Bills Phase 4: get_bill_document_fingerprints returns the workspace's other current-extraction documents, excluding the subject"
+else
+  fail "Bills Phase 4: fingerprint set wrong (sawA=$BILL4_FP sawSelf=$BILL4_FP_SELF)"
+fi
+
+# Record a candidate for B pointing at A.
+BILL4_REC="$(psql -d pfe_rls -t -A -c "set role service_role; select (public.record_bill_duplicate_candidates(jsonb_build_object(
+  'bill_document_id','$BILL4B_ID','workspace_id','$BILL_WS_A',
+  'candidates', jsonb_build_array(jsonb_build_object(
+    'candidate_document_id','$BILL4A_ID','relation','probable','score',0.96,
+    'signals', jsonb_build_array('document_number','supplier_name','total'))))))->>'candidates';" | tail -1)"
+BILL4_ROWS="$(psql -d pfe_rls -t -A -c "select count(*) from public.bill_duplicate_candidates where bill_document_id = '$BILL4B_ID' and is_current;")"
+BILL4_EVENT="$(psql -d pfe_rls -t -A -c "select count(*) from public.bill_processing_events where bill_document_id = '$BILL4B_ID' and event_type = 'duplicate_detected';")"
+if [ "$BILL4_REC" = "1" ] && [ "$BILL4_ROWS" = "1" ] && [ "$BILL4_EVENT" = "1" ]; then
+  pass "Bills Phase 4: record_bill_duplicate_candidates writes the candidate + a duplicate_detected event"
+else
+  fail "Bills Phase 4: candidate write wrong (rec=$BILL4_REC rows=$BILL4_ROWS event=$BILL4_EVENT)"
+fi
+
+BILL4_CID="$(psql -d pfe_rls -t -A -c "select id from public.bill_duplicate_candidates where bill_document_id = '$BILL4B_ID' and is_current limit 1;")"
+
+# A non-member cannot resolve it.
+if as_user "$USER_B" "select public.resolve_bill_duplicate_candidate('$BILL4_CID', 'dismissed');" >/dev/null 2>$ARTIFACT_DIR/pfe_b4c.log; then
+  fail "Bills Phase 4: a non-member resolved a duplicate candidate"
+else
+  pass "Bills Phase 4: resolve_bill_duplicate_candidate refuses a non-member"
+fi
+rm -f $ARTIFACT_DIR/pfe_b4c.log
+
+# The owner (bill.review via personal-owner) resolves it; audit recorded.
+BILL4_RES="$(as_user "$USER_A" "select (public.resolve_bill_duplicate_candidate('$BILL4_CID', 'dismissed'))->>'resolution';")"
+BILL4_RES_ROW="$(psql -d pfe_rls -t -A -c "select resolution from public.bill_duplicate_candidates where id = '$BILL4_CID';")"
+BILL4_AUDIT="$(psql -d pfe_rls -t -A -c "select count(*) from public.space_audit_events where workspace_id = '$BILL_WS_A' and event_type = 'bill.duplicate_resolved';")"
+if [ "$BILL4_RES" = "dismissed" ] && [ "$BILL4_RES_ROW" = "dismissed" ] && [ "$BILL4_AUDIT" -ge "1" ]; then
+  pass "Bills Phase 4: a bill.review holder resolves a candidate and it writes a space audit event"
+else
+  fail "Bills Phase 4: resolve wrong (res=$BILL4_RES row=$BILL4_RES_ROW audit=$BILL4_AUDIT)"
+fi
+
+# Cross-workspace RLS.
+BILL4_B_SEES="$(as_user "$USER_B" "select count(*) from public.bill_duplicate_candidates where bill_document_id = '$BILL4B_ID';")"
+if [ "$BILL4_B_SEES" = "0" ]; then
+  pass "Bills Phase 4: a non-member cannot read another workspace's duplicate candidates"
+else
+  fail "Bills Phase 4: RLS isolation breach on bill_duplicate_candidates"
+fi
+
+# ===========================================================================
+# Bills & Expenses Phase 5 (20261114000000): create_supplier being
+# bill.manage-gated + its TIN guard, search_suppliers ranking + member
+# gate, link_bill_supplier being bill.review-gated,
+# record_bill_supplier_candidates being service_role-only, and
+# cross-workspace RLS. Reuses pfe_rls + USER_A / USER_B / BILL_WS_A /
+# BILL4A_ID.
+# ===========================================================================
+echo "=== Bills Phase 5: supplier resolution ==="
+
+if as_user "$USER_A" "select public.record_bill_supplier_candidates('{}'::jsonb);" >/dev/null 2>$ARTIFACT_DIR/pfe_b5.log; then
+  fail "Bills Phase 5: record_bill_supplier_candidates was authenticated-callable"
+else
+  pass "Bills Phase 5: record_bill_supplier_candidates is service_role-only"
+fi
+rm -f $ARTIFACT_DIR/pfe_b5.log
+
+# create_supplier (USER_A is a personal-workspace owner -> holds bill.manage).
+BILL5_SUP="$(as_user "$USER_A" "select (public.create_supplier(jsonb_build_object(
+  'workspace_id','$BILL_WS_A','display_name','Kigali Office Supplies Ltd',
+  'name_key','kigali office supplies','tax_id','TIN123','email','ops@kos.example')))->>'id';")"
+if [ -n "$BILL5_SUP" ] && [ "$BILL5_SUP" != "" ]; then
+  pass "Bills Phase 5: create_supplier creates a supplier for a bill.manage holder"
+else
+  fail "Bills Phase 5: create_supplier returned no id ($BILL5_SUP)"
+fi
+
+# A second create with the same TIN is refused (returns existing id).
+BILL5_DUP="$(as_user "$USER_A" "select (public.create_supplier(jsonb_build_object(
+  'workspace_id','$BILL_WS_A','display_name','KOS again','name_key','kos again','tax_id','tin123')))->>'error';")"
+BILL5_SUP_COUNT="$(psql -d pfe_rls -t -A -c "select count(*) from public.suppliers where workspace_id = '$BILL_WS_A' and lower(tax_id) = 'tin123';")"
+if [ "$BILL5_DUP" = "tax_id_exists" ] && [ "$BILL5_SUP_COUNT" = "1" ]; then
+  pass "Bills Phase 5: create_supplier refuses a duplicate TIN and never merges"
+else
+  fail "Bills Phase 5: TIN guard wrong (err=$BILL5_DUP count=$BILL5_SUP_COUNT)"
+fi
+
+# search_suppliers ranking.
+BILL5_S_NAME="$(psql -d pfe_rls -t -A \
+  -c "set role authenticated" \
+  -c "select set_config('request.jwt.claim.sub','$USER_A',false)" \
+  -c "select score from public.search_suppliers('$BILL_WS_A', 'kigali office supplies', null, 10) limit 1" | tail -1)"
+BILL5_S_TIN="$(psql -d pfe_rls -t -A \
+  -c "set role authenticated" \
+  -c "select set_config('request.jwt.claim.sub','$USER_A',false)" \
+  -c "select score from public.search_suppliers('$BILL_WS_A', null, 'TIN123', 10) limit 1" | tail -1)"
+if awk "BEGIN{exit !($BILL5_S_NAME >= 0.89 && $BILL5_S_NAME <= 1)}" \
+   && awk "BEGIN{exit !($BILL5_S_TIN >= 0.98 && $BILL5_S_TIN <= 1)}"; then
+  pass "Bills Phase 5: search_suppliers ranks an exact name_key ~0.9 and an exact TIN ~0.99"
+else
+  fail "Bills Phase 5: search_suppliers ranking wrong (name=$BILL5_S_NAME tin=$BILL5_S_TIN)"
+fi
+
+# search_suppliers refuses a non-member.
+if as_user "$USER_B" "select * from public.search_suppliers('$BILL_WS_A', 'kigali', null, 5);" >/dev/null 2>$ARTIFACT_DIR/pfe_b5b.log; then
+  fail "Bills Phase 5: search_suppliers ran for a non-member"
+else
+  pass "Bills Phase 5: search_suppliers refuses a non-member"
+fi
+rm -f $ARTIFACT_DIR/pfe_b5b.log
+
+# link_bill_supplier: bill.review holder links; non-member refused.
+if as_user "$USER_B" "select public.link_bill_supplier('$BILL4A_ID', '$BILL5_SUP');" >/dev/null 2>$ARTIFACT_DIR/pfe_b5c.log; then
+  fail "Bills Phase 5: a non-member linked a supplier"
+else
+  pass "Bills Phase 5: link_bill_supplier refuses a non-member"
+fi
+rm -f $ARTIFACT_DIR/pfe_b5c.log
+BILL5_LINK="$(as_user "$USER_A" "select (public.link_bill_supplier('$BILL4A_ID', '$BILL5_SUP'))->>'ok';")"
+BILL5_LINKED="$(psql -d pfe_rls -t -A -c "select supplier_id from public.bill_documents where id = '$BILL4A_ID';")"
+BILL5_LINK_EVT="$(psql -d pfe_rls -t -A -c "select count(*) from public.bill_processing_events where bill_document_id = '$BILL4A_ID' and event_type = 'supplier_linked';")"
+if [ "$BILL5_LINK" = "true" ] && [ "$BILL5_LINKED" = "$BILL5_SUP" ] && [ "$BILL5_LINK_EVT" = "1" ]; then
+  pass "Bills Phase 5: link_bill_supplier sets bill_documents.supplier_id and journals it"
+else
+  fail "Bills Phase 5: link wrong (ok=$BILL5_LINK linked=$BILL5_LINKED evt=$BILL5_LINK_EVT)"
+fi
+
+# record_bill_supplier_candidates (service_role) for BILL4B_ID.
+BILL5_REC="$(psql -d pfe_rls -t -A -c "set role service_role; select (public.record_bill_supplier_candidates(jsonb_build_object(
+  'bill_document_id','$BILL4B_ID','workspace_id','$BILL_WS_A',
+  'candidates', jsonb_build_array(jsonb_build_object('supplier_id','$BILL5_SUP','score',0.9,'match_reasons',jsonb_build_array('name_exact'))))))->>'candidates';" | tail -1)"
+BILL5_CAND="$(psql -d pfe_rls -t -A -c "select count(*) from public.bill_supplier_candidates where bill_document_id = '$BILL4B_ID' and is_current;")"
+if [ "$BILL5_REC" = "1" ] && [ "$BILL5_CAND" = "1" ]; then
+  pass "Bills Phase 5: record_bill_supplier_candidates writes the candidate set"
+else
+  fail "Bills Phase 5: candidate write wrong (rec=$BILL5_REC cand=$BILL5_CAND)"
+fi
+
+# Cross-workspace RLS.
+BILL5_B_SEES="$(as_user "$USER_B" "select count(*) from public.suppliers where workspace_id = '$BILL_WS_A';")"
+if [ "$BILL5_B_SEES" = "0" ]; then
+  pass "Bills Phase 5: a non-member cannot read another workspace's suppliers"
+else
+  fail "Bills Phase 5: RLS isolation breach on suppliers"
+fi
+
+# ===========================================================================
+# Bills & Expenses Phase 6 (20261115000000): approve_bill guards
+# (blocking finding / unresolved duplicate / self-approval in a
+# multi-member workspace), idempotent post_bill (repeat with the same key
+# is a no-op; a different key after posting is rejected), link -> matched
+# vs no-link -> posted, service_role-only match generation, and
+# cross-workspace RLS. Reuses pfe_rls + USER_A / USER_B / BILL_WS_A and
+# the Phase Q/R household Q_HH (USER_A owner + USER_R admin).
+# ===========================================================================
+echo "=== Bills Phase 6: transaction matching & posting ==="
+
+# A workspace transaction to link (manual source, so no momo_messages row).
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role;
+  insert into public.accounts (id, workspace_id, name, provider, currency)
+  values ('00000000-0000-0000-0000-00000000b601', '$BILL_WS_A', 'Cash', 'other', 'RWF');
+  insert into public.transactions
+    (id, account_id, workspace_id, source, transaction_type, direction, status,
+     amount_rwf, fee_rwf, occurred_at, parser_version, currency, counterparty_name)
+  values ('00000000-0000-0000-0000-00000000b6c1', '00000000-0000-0000-0000-00000000b601',
+     '$BILL_WS_A', 'manual', 'merchant_payment', 'out', 'success', 141600, 0,
+     '2026-08-13T09:00:00Z', 'test', 'RWF', 'Kigali Office Supplies Ltd');" >/dev/null
+BILL6_TXN="00000000-0000-0000-0000-00000000b6c1"
+
+# Helper: create a document + full extraction + a validation run, leaving
+# it at needs_review. $1 = checksum, $2 = workspace, $3 = optional
+# blocking-finding flag, $4 = actor user id for create.
+make_review_doc() {
+  local chk="$1" ws="$2" blocking="${3:-}" actor="${4:-$USER_A}"
+  local id
+  id="$(as_user "$actor" "select (public.create_bill_document(jsonb_build_object(
+    'workspace_id','$ws','original_filename','x.pdf','sanitized_filename','x.pdf',
+    'storage_key','$ws/${chk}.pdf','mime_type','application/pdf',
+    'byte_size',4096,'checksum_sha256','$chk')))->>'id';")"
+  as_user "$actor" "select public.transition_bill_document('$id','queued');" >/dev/null
+  psql -d pfe_rls -t -A -c "set role service_role;
+    select public.system_transition_bill_document('$id','scanning');
+    select public.system_transition_bill_document('$id','classifying');
+    select public.system_transition_bill_document('$id','extracting');
+    select public.record_bill_extraction(jsonb_build_object(
+      'bill_document_id','$id','workspace_id','$ws','status','succeeded',
+      'provider','mock','model','mock','doc_class','supplier_invoice',
+      'fields', jsonb_build_array(
+        jsonb_build_object('field_key','supplier_name','value_type','string','normalized_value','Kigali Office Supplies Ltd','source_page',1),
+        jsonb_build_object('field_key','invoice_number','value_type','string','normalized_value','INV-2026-0442','source_page',1),
+        jsonb_build_object('field_key','issue_date','value_type','date','normalized_value','2026-08-12','source_page',1),
+        jsonb_build_object('field_key','currency','value_type','string','normalized_value','RWF','source_page',1),
+        jsonb_build_object('field_key','total','value_type','money_minor','normalized_value','141600','currency','RWF','source_page',1)),
+      'line_items','[]'::jsonb));" >/dev/null
+  if [ "$blocking" = "blocking" ]; then
+    psql -d pfe_rls -t -A -c "set role service_role; select public.record_bill_validation(jsonb_build_object(
+      'bill_document_id','$id','workspace_id','$ws','status','succeeded',
+      'findings', jsonb_build_array(jsonb_build_object('rule_id','arithmetic_total_mismatch','severity','blocking','title','x','detail','y','affected_fields','[]'::jsonb,'blocks_approval',true))));" >/dev/null
+  else
+    psql -d pfe_rls -t -A -c "set role service_role; select public.record_bill_validation(jsonb_build_object(
+      'bill_document_id','$id','workspace_id','$ws','status','succeeded','findings','[]'::jsonb));" >/dev/null
+  fi
+  echo "$id"
+}
+
+# record_bill_transaction_match_candidates is service_role-only.
+if as_user "$USER_A" "select public.record_bill_transaction_match_candidates('{}'::jsonb);" >/dev/null 2>$ARTIFACT_DIR/pfe_b6.log; then
+  fail "Bills Phase 6: record_bill_transaction_match_candidates was authenticated-callable"
+else
+  pass "Bills Phase 6: record_bill_transaction_match_candidates is service_role-only"
+fi
+rm -f $ARTIFACT_DIR/pfe_b6.log
+
+# --- happy path in BILL_WS_A --------------------------------------
+# BILL_WS_A (USER_A's personal workspace) also has USER_C as a seeded
+# member from the RLS block. Grant USER_C bill.upload/review so they can
+# submit a document, then USER_A (owner, not the submitter) approves it -
+# exercising the normal separation-of-duties path.
+as_user "$USER_A" "select public.grant_space_capability('$BILL_WS_A', '$USER_C', 'bill.upload');" >/dev/null
+as_user "$USER_A" "select public.grant_space_capability('$BILL_WS_A', '$USER_C', 'bill.review');" >/dev/null
+BILL6_DOC="$(make_review_doc "$(printf 'ab%.0s' $(seq 1 32))" "$BILL_WS_A" "" "$USER_C")"
+BILL6_APP="$(as_user "$USER_A" "select (public.approve_bill(jsonb_build_object('bill_document_id','$BILL6_DOC')))->>'bill_id';")"
+BILL6_DOC_ST="$(psql -d pfe_rls -t -A -c "select status from public.bill_documents where id = '$BILL6_DOC';")"
+BILL6_APP2="$(as_user "$USER_A" "select (public.approve_bill(jsonb_build_object('bill_document_id','$BILL6_DOC')))->>'bill_id';")"
+if [ -n "$BILL6_APP" ] && [ "$BILL6_DOC_ST" = "approved" ] && [ "$BILL6_APP2" = "$BILL6_APP" ]; then
+  pass "Bills Phase 6: approve_bill creates the bills row, moves the document to approved, and is idempotent"
+else
+  fail "Bills Phase 6: approve wrong (bill=$BILL6_APP st=$BILL6_DOC_ST idem=$BILL6_APP2)"
+fi
+
+# search set finds the transaction.
+BILL6_SET="$(psql -d pfe_rls -t -A -c "set role service_role; select count(*) from public.get_bill_transaction_search_set('$BILL6_DOC') where transaction_id = '$BILL6_TXN';" | tail -1)"
+if [ "$BILL6_SET" = "1" ]; then
+  pass "Bills Phase 6: get_bill_transaction_search_set finds an outgoing transaction near the issue date"
+else
+  fail "Bills Phase 6: search set missed the transaction ($BILL6_SET)"
+fi
+
+# post with a link -> matched; repeat with the same key -> no-op.
+BILL6_POST="$(as_user "$USER_A" "select (public.post_bill(jsonb_build_object(
+  'bill_document_id','$BILL6_DOC','idempotency_key','k1',
+  'transaction_ids', jsonb_build_array('$BILL6_TXN'))))->>'status';")"
+BILL6_LINKS="$(psql -d pfe_rls -t -A -c "select count(*) from public.bill_transaction_links l join public.bills b on b.id = l.bill_id where b.bill_document_id = '$BILL6_DOC';")"
+BILL6_POST_AGAIN="$(as_user "$USER_A" "select (public.post_bill(jsonb_build_object(
+  'bill_document_id','$BILL6_DOC','idempotency_key','k1',
+  'transaction_ids', jsonb_build_array('$BILL6_TXN'))))->>'already';")"
+BILL6_LINKS2="$(psql -d pfe_rls -t -A -c "select count(*) from public.bill_transaction_links l join public.bills b on b.id = l.bill_id where b.bill_document_id = '$BILL6_DOC';")"
+BILL6_DIFFKEY="$(as_user "$USER_A" "select (public.post_bill(jsonb_build_object('bill_document_id','$BILL6_DOC','idempotency_key','k2')))->>'error';")"
+BILL6_DOC_ST2="$(psql -d pfe_rls -t -A -c "select status from public.bill_documents where id = '$BILL6_DOC';")"
+if [ "$BILL6_POST" = "matched" ] && [ "$BILL6_LINKS" = "1" ] && [ "$BILL6_POST_AGAIN" = "true" ] \
+   && [ "$BILL6_LINKS2" = "1" ] && [ "$BILL6_DIFFKEY" = "already_posted" ] && [ "$BILL6_DOC_ST2" = "matched" ]; then
+  pass "Bills Phase 6: post_bill links the transaction (-> matched), is idempotent on its key, and rejects a different key after posting"
+else
+  fail "Bills Phase 6: post wrong (post=$BILL6_POST links=$BILL6_LINKS again=$BILL6_POST_AGAIN links2=$BILL6_LINKS2 diff=$BILL6_DIFFKEY st=$BILL6_DOC_ST2)"
+fi
+
+# post with no link -> posted (unpaid obligation).
+BILL6_DOC_U="$(make_review_doc "$(printf 'ba%.0s' $(seq 1 32))" "$BILL_WS_A" "" "$USER_C")"
+as_user "$USER_A" "select public.approve_bill(jsonb_build_object('bill_document_id','$BILL6_DOC_U'));" >/dev/null
+BILL6_POST_U="$(as_user "$USER_A" "select (public.post_bill(jsonb_build_object('bill_document_id','$BILL6_DOC_U','idempotency_key','ku')))->>'status';")"
+BILL6_PAID_U="$(psql -d pfe_rls -t -A -c "select paid_state from public.bills where bill_document_id = '$BILL6_DOC_U';")"
+if [ "$BILL6_POST_U" = "posted" ] && [ "$BILL6_PAID_U" = "unpaid" ]; then
+  pass "Bills Phase 6: post_bill with no transactions posts an unpaid obligation (-> posted)"
+else
+  fail "Bills Phase 6: unpaid post wrong (status=$BILL6_POST_U paid=$BILL6_PAID_U)"
+fi
+
+# --- approve_bill guards -----------------------------------------
+BILL6_DOC_BLK="$(make_review_doc "$(printf 'bc%.0s' $(seq 1 32))" "$BILL_WS_A" blocking)"
+BILL6_BLK="$(as_user "$USER_A" "select (public.approve_bill(jsonb_build_object('bill_document_id','$BILL6_DOC_BLK')))->>'error';")"
+if [ "$BILL6_BLK" = "blocking_findings" ]; then
+  pass "Bills Phase 6: approve_bill refuses a document with a blocking validation finding"
+else
+  fail "Bills Phase 6: blocking-finding guard wrong ($BILL6_BLK)"
+fi
+
+BILL6_DOC_DUP="$(make_review_doc "$(printf 'bd%.0s' $(seq 1 32))" "$BILL_WS_A")"
+psql -d pfe_rls -t -A -c "set role service_role; select public.record_bill_duplicate_candidates(jsonb_build_object(
+  'bill_document_id','$BILL6_DOC_DUP','workspace_id','$BILL_WS_A',
+  'candidates', jsonb_build_array(jsonb_build_object('candidate_document_id','$BILL6_DOC','relation','probable','score',0.9,'signals','[]'::jsonb))));" >/dev/null
+BILL6_DUP="$(as_user "$USER_A" "select (public.approve_bill(jsonb_build_object('bill_document_id','$BILL6_DOC_DUP')))->>'error';")"
+if [ "$BILL6_DUP" = "unresolved_duplicate" ]; then
+  pass "Bills Phase 6: approve_bill refuses a document with an unresolved probable duplicate"
+else
+  fail "Bills Phase 6: unresolved-duplicate guard wrong ($BILL6_DUP)"
+fi
+
+# self-approval in a multi-member workspace (Q_HH: USER_A owner + USER_R admin).
+BILL6_HH_DOC="$(make_review_doc "$(printf 'be%.0s' $(seq 1 32))" "$Q_HH" "" "$USER_A")"
+BILL6_SELF="$(as_user "$USER_A" "select (public.approve_bill(jsonb_build_object('bill_document_id','$BILL6_HH_DOC')))->>'error';")"
+BILL6_OTHER="$(as_user "$USER_R" "select (public.approve_bill(jsonb_build_object('bill_document_id','$BILL6_HH_DOC')))->>'bill_id';")"
+if [ "$BILL6_SELF" = "self_approval_forbidden" ] && [ -n "$BILL6_OTHER" ]; then
+  pass "Bills Phase 6: approve_bill blocks self-approval in a multi-member workspace but allows another approver"
+else
+  fail "Bills Phase 6: self-approval guard wrong (self=$BILL6_SELF other=$BILL6_OTHER)"
+fi
+
+# capability + RLS.
+if as_user "$USER_B" "select public.approve_bill(jsonb_build_object('bill_document_id','$BILL6_DOC_U'));" >/dev/null 2>$ARTIFACT_DIR/pfe_b6b.log; then
+  fail "Bills Phase 6: a non-member approved a bill"
+else
+  pass "Bills Phase 6: approve_bill refuses a non-member"
+fi
+rm -f $ARTIFACT_DIR/pfe_b6b.log
+BILL6_B_SEES="$(as_user "$USER_B" "select count(*) from public.bills where workspace_id = '$BILL_WS_A';")"
+if [ "$BILL6_B_SEES" = "0" ]; then
+  pass "Bills Phase 6: a non-member cannot read another workspace's bills"
+else
+  fail "Bills Phase 6: RLS isolation breach on bills"
+fi
+
+# ===========================================================================
+# Bills & Expenses Phase 7 (20261116000000): correct_bill_field provenance
+# + review_revision bump, the stale_validation approve guard and its
+# clearance by a fresh validation run, add_bill_comment being
+# bill.review-gated, and cross-workspace RLS on bill_comments. Reuses
+# pfe_rls + USER_A / USER_B / USER_C / BILL_WS_A (USER_C was granted
+# bill.upload/review in the Phase 6 block).
+# ===========================================================================
+echo "=== Bills Phase 7: review workspace ==="
+
+BILL7_DOC="$(make_review_doc "$(printf 'ca%.0s' $(seq 1 32))" "$BILL_WS_A" "" "$USER_C")"
+
+# correct_bill_field is bill.review-gated.
+if as_user "$USER_B" "select public.correct_bill_field('$BILL7_DOC', 'total', '999');" >/dev/null 2>$ARTIFACT_DIR/pfe_b7.log; then
+  fail "Bills Phase 7: a non-member corrected a field"
+else
+  pass "Bills Phase 7: correct_bill_field refuses a non-member"
+fi
+rm -f $ARTIFACT_DIR/pfe_b7.log
+
+# A correction preserves raw/normalized, writes user_corrected_value, and
+# bumps review_revision.
+as_user "$USER_C" "select public.correct_bill_field('$BILL7_DOC', 'total', '150000');" >/dev/null
+BILL7_FIELD="$(psql -d pfe_rls -t -A -c "select user_corrected_value || '|' || coalesce(normalized_value,'') || '|' || (corrected_by is not null)
+  from public.bill_extracted_fields f join public.bill_extractions e on e.id = f.extraction_id
+  where e.bill_document_id = '$BILL7_DOC' and e.is_current and f.field_key = 'total';")"
+BILL7_REV="$(psql -d pfe_rls -t -A -c "select review_revision from public.bill_documents where id = '$BILL7_DOC';")"
+BILL7_EVT="$(psql -d pfe_rls -t -A -c "select count(*) from public.bill_processing_events where bill_document_id = '$BILL7_DOC' and event_type = 'field_corrected';")"
+if [ "$BILL7_FIELD" = "150000|141600|true" ] && [ "$BILL7_REV" = "1" ] && [ "$BILL7_EVT" = "1" ]; then
+  pass "Bills Phase 7: correct_bill_field writes user_corrected_value (raw/normalized preserved), bumps review_revision, journals it"
+else
+  fail "Bills Phase 7: correction wrong (field=$BILL7_FIELD rev=$BILL7_REV evt=$BILL7_EVT)"
+fi
+
+# approve_bill now refuses because the current validation predates the
+# correction; a fresh validation clears it.
+BILL7_STALE="$(as_user "$USER_A" "select (public.approve_bill(jsonb_build_object('bill_document_id','$BILL7_DOC')))->>'error';")"
+psql -d pfe_rls -t -A -c "set role service_role; select public.record_bill_validation(jsonb_build_object(
+  'bill_document_id','$BILL7_DOC','workspace_id','$BILL_WS_A','status','succeeded','findings','[]'::jsonb));" >/dev/null
+BILL7_OK="$(as_user "$USER_A" "select (public.approve_bill(jsonb_build_object('bill_document_id','$BILL7_DOC')))->>'bill_id';")"
+BILL7_TOTAL="$(psql -d pfe_rls -t -A -c "select total_minor from public.bills where bill_document_id = '$BILL7_DOC';")"
+if [ "$BILL7_STALE" = "stale_validation" ] && [ -n "$BILL7_OK" ] && [ "$BILL7_TOTAL" = "150000" ]; then
+  pass "Bills Phase 7: approve_bill refuses a validation older than the last correction, then succeeds after a re-check (and uses the corrected total)"
+else
+  fail "Bills Phase 7: stale-validation guard wrong (stale=$BILL7_STALE ok=$BILL7_OK total=$BILL7_TOTAL)"
+fi
+
+# add_bill_comment.
+BILL7_C_DOC="$(make_review_doc "$(printf 'cb%.0s' $(seq 1 32))" "$BILL_WS_A" "" "$USER_C")"
+BILL7_COMMENT="$(as_user "$USER_C" "select (public.add_bill_comment('$BILL7_C_DOC', 'Please check the tax line.'))->>'ok';")"
+BILL7_C_ROWS="$(psql -d pfe_rls -t -A -c "select count(*) from public.bill_comments where bill_document_id = '$BILL7_C_DOC';")"
+if [ "$BILL7_COMMENT" = "true" ] && [ "$BILL7_C_ROWS" = "1" ]; then
+  pass "Bills Phase 7: add_bill_comment records an internal note for a bill.review holder"
+else
+  fail "Bills Phase 7: comment wrong (ok=$BILL7_COMMENT rows=$BILL7_C_ROWS)"
+fi
+if as_user "$USER_B" "select public.add_bill_comment('$BILL7_C_DOC', 'x');" >/dev/null 2>$ARTIFACT_DIR/pfe_b7c.log; then
+  fail "Bills Phase 7: a non-member added a comment"
+else
+  pass "Bills Phase 7: add_bill_comment refuses a non-member"
+fi
+rm -f $ARTIFACT_DIR/pfe_b7c.log
+
+BILL7_B_SEES="$(as_user "$USER_B" "select count(*) from public.bill_comments where bill_document_id = '$BILL7_C_DOC';")"
+if [ "$BILL7_B_SEES" = "0" ]; then
+  pass "Bills Phase 7: a non-member cannot read another workspace's comments"
+else
+  fail "Bills Phase 7: RLS isolation breach on bill_comments"
+fi
 
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="

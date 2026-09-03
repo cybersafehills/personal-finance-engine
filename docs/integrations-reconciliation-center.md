@@ -28,7 +28,7 @@ is unavailable:
 `balance_reconciliations` has existed empty since Phase 3; P3-PR2 wires up a
 writer.
 
-- **Migration** `20261110000000_balance_reconciliation_access.sql` — adds an
+- **Migration** `20261117000000_balance_reconciliation_access.sql` — adds an
   authenticated `SELECT` policy scoped through
   `account_id → accounts.workspace_id → is_workspace_member`. Writes stay
   service-role only.

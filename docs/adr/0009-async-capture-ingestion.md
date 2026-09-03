@@ -35,19 +35,24 @@ evidence row. A conflict → `200 { status: "duplicate" }`.
 
 ### 2. A separate processor normalizes pending capture rows
 
-Turning `pending` `raw_financial_events` into `transactions` (parse, accounting
-effect, account re‑check, categorization, transaction‑level dedupe, budget
-sweep) is done by a **`process-raw-events`** Edge Function + cron — a follow‑up
-PR. That PR extracts `ingest-momo` steps 9–22 into a shared
-`_shared/ingestion-pipeline.ts` used by both the processor and (migrated onto
-it) `ingest-momo` itself, so there is one normalization implementation
-(brief §52, §90).
+**Implemented** (`supabase/functions/process-raw-events`,
+`docs/ingestion-pipeline.md`). Turning `pending` `raw_financial_events` into
+`transactions` (parse, accounting effect, account re‑check, categorization,
+transaction‑level dedupe, budget sweep) runs as a scheduled Edge Function that
+claims a batch (`claim_pending_capture_events`, `FOR UPDATE SKIP LOCKED`),
+synthesizes a `momo_messages` row per pending row, and calls
+`_shared/ingestion-pipeline.ts` `normalizeInboundMessage(...)`.
 
-Splitting the writer from the processor keeps the risky refactor of the live
-money path isolated, with the full `ingest-momo/tests` suite as the guardrail.
-Safe to ship the writer first: the feature is dark behind `DEVICE_PAIRING_V2`,
-no device points its Messages automation at `op:"capture"` yet, and queued
-evidence is never lost.
+`_shared/ingestion-pipeline.ts` is a new, fully fake‑tested dependency‑injected
+module. **`ingest-momo/index.ts` keeps its own inline copy of this logic** —
+migrating it onto the shared module is a later PR, once the module is proven on
+the (dark, low‑volume) capture channel. Until then the two implementations are
+kept in step by hand; the shared module + its tests are the reference. This
+inverts the risk: the new path gets the new tested code; the proven live path is
+untouched.
+
+Gated by `DEVICE_PAIRING_V2=enabled` **and** a `RAW_EVENTS_PROCESSOR_SECRET`
+(`X-Processor-Secret` header). Dark otherwise.
 
 ### 3. Provider detection is a registry, not a hard‑coded parser
 

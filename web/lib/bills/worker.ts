@@ -1,0 +1,401 @@
+import "server-only";
+import { supabaseServer } from "../supabase-server";
+import { classifyAndExtract } from "./extraction/provider";
+import { buildExtractionRecordPayload } from "./extraction";
+import { revalidateBillDocument } from "./revalidate";
+import { scoreDuplicates, type Fingerprint } from "./duplicates/detect";
+import { scoreTransactionMatches, type TxnCandidate } from "./matching/score";
+import { notifyBillReadyForReview } from "./notify";
+import { normalizeSupplierName } from "./normalize";
+import { logBillError } from "./analytics";
+
+// The Bills & Expenses processing worker (master prompt §18). Invoked by
+// the cron route app/api/cron/process-bill-documents; runs with the
+// service-role client. Each document is processed independently and
+// idempotently:
+//   queued -> (claim) scanning -> classifying -> extracting
+//         -> record_bill_extraction -> validating
+//         -> runValidation -> record_bill_validation -> needs_review
+// A document already at 'validating' (a previous tick claimed it, then
+// died before the validation step) is picked up and just re-validated -
+// record_bill_validation flips is_current so this is safe to repeat.
+//
+// Not wired to a scheduler yet (supabase/scheduling/). Does nothing
+// unless BILLS_ENABLED and BILLS_EXTRACTION_ENABLED are both "true".
+
+const DEFAULT_BATCH = 5;
+const ORIGINAL_BUCKET = "bill-documents";
+
+function configuredBatch(): number {
+  const raw = Number(process.env.BILL_WORKER_BATCH_SIZE);
+  return Number.isFinite(raw) && raw > 0 && raw <= 50 ? Math.floor(raw) : DEFAULT_BATCH;
+}
+
+export type BillProcessingTickSummary = {
+  claimed: number;
+  succeeded: number;
+  failed: number;
+  skipped: number;
+  validated: number;
+  errors: string[];
+};
+
+function envEnabledOptIn(name: string): boolean {
+  return process.env[name] === "true";
+}
+
+type Admin = ReturnType<typeof supabaseServer>;
+
+export async function runBillProcessingTick(
+  batchSize = configuredBatch(),
+): Promise<BillProcessingTickSummary> {
+  const summary: BillProcessingTickSummary = {
+    claimed: 0,
+    succeeded: 0,
+    failed: 0,
+    skipped: 0,
+    validated: 0,
+    errors: [],
+  };
+
+  if (!envEnabledOptIn("BILLS_ENABLED") || !envEnabledOptIn("BILLS_EXTRACTION_ENABLED")) {
+    return summary;
+  }
+
+  const admin = supabaseServer();
+
+  const { data: candidates, error } = await admin
+    .from("bill_documents")
+    .select("id, workspace_id, storage_key, mime_type, status")
+    .in("status", ["queued", "validating"])
+    .order("uploaded_at", { ascending: true })
+    .limit(batchSize);
+
+  if (error) {
+    logBillError("record", error);
+    summary.errors.push("queue_query_failed");
+    return summary;
+  }
+
+  for (const doc of candidates ?? []) {
+    try {
+      if (doc.status === "queued") {
+        const claim = await systemTransition(admin, doc.id, "scanning");
+        if (!claim || claim.changed === false || claim.ok === false) {
+          summary.skipped += 1;
+          continue;
+        }
+        summary.claimed += 1;
+
+        await systemTransition(admin, doc.id, "classifying");
+        await systemTransition(admin, doc.id, "extracting");
+
+        const { data: blob, error: dlError } = await admin.storage
+          .from(ORIGINAL_BUCKET)
+          .download(doc.storage_key);
+        if (dlError || !blob) {
+          await recordExtractionFailure(admin, doc.id, doc.workspace_id, { kind: "download_failed" });
+          summary.failed += 1;
+          continue;
+        }
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+
+        const call = await classifyAndExtract({ bytes, mimeType: doc.mime_type });
+        const payload = buildExtractionRecordPayload({
+          billDocumentId: doc.id,
+          workspaceId: doc.workspace_id,
+          call,
+        });
+
+        const { data: rpc, error: rpcError } = await admin.rpc("record_bill_extraction", { payload });
+        if (rpcError) {
+          logBillError("record", rpcError);
+          await recordExtractionFailure(admin, doc.id, doc.workspace_id, { kind: "record_failed" });
+          summary.failed += 1;
+          continue;
+        }
+        const result = rpc as { ok: boolean; status?: string };
+        if (result?.status !== "validating") {
+          summary.failed += 1;
+          continue;
+        }
+      }
+
+      // Validation step (for a freshly-extracted doc, or a doc that was
+      // stuck at 'validating'). Shared with the "re-check" action.
+      const validated = await revalidateBillDocument(admin, doc.id, doc.workspace_id);
+      if (validated.ok) summary.validated += 1;
+
+      // Content-duplicate detection + supplier resolution - both
+      // non-fatal (a failure here just means no candidates this tick).
+      try {
+        await detectDuplicates(admin, doc.id, doc.workspace_id);
+      } catch (err) {
+        logBillError("record", err);
+      }
+      try {
+        await resolveSupplier(admin, doc.id, doc.workspace_id);
+      } catch (err) {
+        logBillError("record", err);
+      }
+      try {
+        await matchTransactions(admin, doc.id, doc.workspace_id);
+      } catch (err) {
+        logBillError("record", err);
+      }
+      if (validated.ok) {
+        try {
+          await notifyBillReadyForReview(admin, doc.id, doc.workspace_id);
+        } catch (err) {
+          logBillError("record", err);
+        }
+      }
+
+      summary.succeeded += 1;
+    } catch (err) {
+      logBillError("record", err);
+      summary.errors.push("doc_processing_exception");
+      summary.failed += 1;
+    }
+  }
+
+  return summary;
+}
+
+async function systemTransition(
+  admin: Admin,
+  id: string,
+  toState: string,
+): Promise<{ ok: boolean; changed?: boolean } | null> {
+  const { data, error } = await admin.rpc("system_transition_bill_document", {
+    p_id: id,
+    p_to_state: toState,
+    p_reason: null,
+  });
+  if (error) {
+    logBillError("transition", error);
+    return null;
+  }
+  return data as { ok: boolean; changed?: boolean };
+}
+
+async function recordExtractionFailure(
+  admin: Admin,
+  billDocumentId: string,
+  workspaceId: string,
+  error: Record<string, unknown>,
+): Promise<void> {
+  await admin.rpc("record_bill_extraction", {
+    payload: { bill_document_id: billDocumentId, workspace_id: workspaceId, status: "failed", error },
+  });
+}
+
+
+function fieldValue(
+  rows: Array<{ field_key: string; normalized_value: string | null; raw_value: string | null }> | null,
+  key: string,
+): string | null {
+  const r = (rows ?? []).find((x) => x.field_key === key);
+  return r ? (r.normalized_value ?? r.raw_value) : null;
+}
+
+async function detectDuplicates(
+  admin: Admin,
+  billDocumentId: string,
+  workspaceId: string,
+): Promise<void> {
+  const { data: extraction } = await admin
+    .from("bill_extractions")
+    .select("id")
+    .eq("bill_document_id", billDocumentId)
+    .eq("is_current", true)
+    .maybeSingle();
+  if (!extraction) return;
+
+  const [{ data: fieldRows }, { data: priorRows }, { data: policyRow }] = await Promise.all([
+    admin
+      .from("bill_extracted_fields")
+      .select("field_key, normalized_value, raw_value")
+      .eq("extraction_id", extraction.id),
+    admin.rpc("get_bill_document_fingerprints", {
+      p_workspace_id: workspaceId,
+      p_exclude_document_id: billDocumentId,
+    }),
+    admin
+      .from("bill_processing_policies")
+      .select("duplicate_amount_tolerance_minor")
+      .eq("workspace_id", workspaceId)
+      .maybeSingle(),
+  ]);
+
+  const subject: Fingerprint = {
+    billDocumentId,
+    status: "needs_review",
+    supplierName: fieldValue(fieldRows, "supplier_name"),
+    invoiceNumber: fieldValue(fieldRows, "invoice_number"),
+    receiptNumber: fieldValue(fieldRows, "receipt_number"),
+    issueDate: fieldValue(fieldRows, "issue_date"),
+    currency: fieldValue(fieldRows, "currency"),
+    totalMinor: fieldValue(fieldRows, "total"),
+  };
+
+  const priors: Fingerprint[] = (
+    (priorRows ?? []) as Array<Record<string, string | null>>
+  ).map((r) => ({
+    billDocumentId: r.bill_document_id as string,
+    status: (r.status as string) ?? "",
+    supplierName: r.supplier_name,
+    invoiceNumber: r.invoice_number,
+    receiptNumber: r.receipt_number,
+    issueDate: r.issue_date,
+    currency: r.currency,
+    totalMinor: r.total_minor,
+  }));
+
+  const tolerance = policyRow?.duplicate_amount_tolerance_minor
+    ? BigInt(policyRow.duplicate_amount_tolerance_minor)
+    : 0n;
+
+  const candidates = scoreDuplicates(subject, priors, { amountToleranceMinor: tolerance });
+
+  await admin.rpc("record_bill_duplicate_candidates", {
+    payload: {
+      bill_document_id: billDocumentId,
+      workspace_id: workspaceId,
+      candidates: candidates.map((c) => ({
+        candidate_document_id: c.candidateDocumentId,
+        relation: c.relation,
+        score: c.score,
+        signals: c.signals,
+        detail: c.detail,
+      })),
+    },
+  });
+}
+
+async function resolveSupplier(
+  admin: Admin,
+  billDocumentId: string,
+  workspaceId: string,
+): Promise<void> {
+  const { data: doc } = await admin
+    .from("bill_documents")
+    .select("supplier_id")
+    .eq("id", billDocumentId)
+    .maybeSingle();
+  if (doc?.supplier_id) return; // a reviewer already linked one
+
+  const { data: extraction } = await admin
+    .from("bill_extractions")
+    .select("id")
+    .eq("bill_document_id", billDocumentId)
+    .eq("is_current", true)
+    .maybeSingle();
+  if (!extraction) return;
+
+  const { data: fieldRows } = await admin
+    .from("bill_extracted_fields")
+    .select("field_key, normalized_value, raw_value")
+    .eq("extraction_id", extraction.id)
+    .in("field_key", ["supplier_name", "supplier_tax_id"]);
+
+  const name = fieldValue(fieldRows, "supplier_name");
+  const taxId = fieldValue(fieldRows, "supplier_tax_id");
+  if (!name && !taxId) return;
+
+  const { data: matches, error } = await admin.rpc("search_suppliers", {
+    p_workspace_id: workspaceId,
+    p_query: name ? normalizeSupplierName(name) : null,
+    p_tax_id: taxId,
+    p_limit: 8,
+  });
+  if (error) {
+    logBillError("record", error);
+    return;
+  }
+
+  const candidates = ((matches ?? []) as Array<{ id: string; score: number; match_reasons: string[] }>)
+    .filter((m) => Number(m.score) >= 0.5)
+    .map((m) => ({
+      supplier_id: m.id,
+      score: Number(m.score),
+      match_reasons: m.match_reasons ?? [],
+    }));
+
+  await admin.rpc("record_bill_supplier_candidates", {
+    payload: { bill_document_id: billDocumentId, workspace_id: workspaceId, candidates },
+  });
+}
+
+async function matchTransactions(
+  admin: Admin,
+  billDocumentId: string,
+  workspaceId: string,
+): Promise<void> {
+  const { data: doc } = await admin
+    .from("bill_documents")
+    .select("status")
+    .eq("id", billDocumentId)
+    .maybeSingle();
+  if (!doc || doc.status !== "needs_review") return; // only pre-approval
+
+  const { data: extraction } = await admin
+    .from("bill_extractions")
+    .select("id")
+    .eq("bill_document_id", billDocumentId)
+    .eq("is_current", true)
+    .maybeSingle();
+  if (!extraction) return;
+
+  const { data: fieldRows } = await admin
+    .from("bill_extracted_fields")
+    .select("field_key, normalized_value, raw_value")
+    .eq("extraction_id", extraction.id)
+    .in("field_key", ["total", "currency", "issue_date", "supplier_name", "invoice_number"]);
+
+  const totalMinor = fieldValue(fieldRows, "total");
+  if (!totalMinor) return;
+
+  const { data: txns, error } = await admin.rpc("get_bill_transaction_search_set", {
+    p_bill_document_id: billDocumentId,
+  });
+  if (error) {
+    logBillError("record", error);
+    return;
+  }
+
+  const candidates: TxnCandidate[] = (
+    (txns ?? []) as Array<Record<string, string | null>>
+  ).map((t) => ({
+    transactionId: t.transaction_id as string,
+    occurredAt: t.occurred_at as string,
+    amountMinor: t.amount_minor != null ? String(t.amount_minor) : "0",
+    currency: (t.currency as string) ?? "",
+    counterpartyName: t.counterparty_name,
+    counterpartyReference: t.counterparty_reference,
+  }));
+
+  const matches = scoreTransactionMatches(
+    {
+      totalMinor,
+      currency: fieldValue(fieldRows, "currency"),
+      issueDate: fieldValue(fieldRows, "issue_date"),
+      supplierName: fieldValue(fieldRows, "supplier_name"),
+      invoiceNumber: fieldValue(fieldRows, "invoice_number"),
+    },
+    candidates,
+  );
+
+  await admin.rpc("record_bill_transaction_match_candidates", {
+    payload: {
+      bill_document_id: billDocumentId,
+      workspace_id: workspaceId,
+      candidates: matches.map((m) => ({
+        transaction_id: m.transactionId,
+        score: m.score,
+        reasons_for: m.reasonsFor,
+        reasons_against: m.reasonsAgainst,
+      })),
+    },
+  });
+}

@@ -29,7 +29,7 @@ oneledger-accountant-package.zip
 
 ## Lifecycle
 
-`accountant_packages` (migration `20261111000000`): `queued → building →
+`accountant_packages` (migration `20261118000000`): `queued → building →
 ready | failed`, keyed by `id`, ZIP path
 `{workspace_id}/{package_id}/oneledger-accountant-package.zip`.
 
@@ -54,5 +54,5 @@ ready | failed`, keyed by `id`, ZIP path
   `"false"`; also requires `INTEGRATIONS_ENABLED` + the workspace
   allowlist). `gate.ts:isAccountantPackageEnabled`.
 - Capability: `integration.accountant_package` (owner/admin only — migration
-  `20261111000000`). `accountant_packages` SELECT is RLS-gated on
+  `20261118000000`). `accountant_packages` SELECT is RLS-gated on
   `integration.view`; every write is service-role only.

@@ -24,6 +24,10 @@ returns boolean
 language sql
 immutable
 as $$
+  -- Union of the closed integration.* set, the Bills & Expenses bill.* set
+  -- (20261110000000), the accountant-package capability (20261118000000),
+  -- and this PR's two ledger.* capabilities. Re-declaring the function must
+  -- never silently drop a capability another merged phase added.
   select coalesce(
     p_capability in (
       'space.manage_settings', 'space.delete', 'space.transfer_ownership',
@@ -36,6 +40,9 @@ as $$
       'integration.logs_view',
       'integration.destination_manage', 'integration.workbook_manage',
       'integration.conflict_resolve',
+      'bill.upload', 'bill.review', 'bill.approve', 'bill.post',
+      'bill.manage', 'bill.download_original', 'bill.audit.view',
+      'bill.configure',
       'integration.accountant_package',
       'integration.ledger_manage', 'integration.ledger_sync'
     )
@@ -46,7 +53,8 @@ as $$
         then p_capability not in ('space.delete', 'space.transfer_ownership')
       when p_role = 'member'
         then p_capability in (
-          'transaction.create', 'transaction.categorize', 'integration.view'
+          'transaction.create', 'transaction.categorize', 'integration.view',
+          'bill.upload', 'bill.review'
         )
       else false
     end,
@@ -55,7 +63,7 @@ as $$
 $$;
 
 comment on function public.space_role_has_capability is
-  'Closed Spaces capability matrix. Unknown and null capabilities always fail closed. Owner: all 26 known capabilities. Admin: all except space.delete / space.transfer_ownership. Member: transaction.create / transaction.categorize / integration.view. Viewer: none.';
+  'Closed Spaces capability matrix. Unknown and null capabilities always fail closed. Owner: all 34 known capabilities. Admin: all except space.delete / space.transfer_ownership. Member: transaction.create / transaction.categorize / integration.view / bill.upload / bill.review. Viewer: none.';
 
 alter table public.space_member_capability_grants
   drop constraint if exists space_member_capability_grants_known_capability;
@@ -73,6 +81,9 @@ alter table public.space_member_capability_grants
     'integration.logs_view',
     'integration.destination_manage', 'integration.workbook_manage',
     'integration.conflict_resolve',
+    'bill.upload', 'bill.review', 'bill.approve', 'bill.post',
+    'bill.manage', 'bill.download_original', 'bill.audit.view',
+    'bill.configure',
     'integration.accountant_package',
     'integration.ledger_manage', 'integration.ledger_sync'
   )) not valid;

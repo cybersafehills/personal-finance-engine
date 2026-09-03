@@ -485,6 +485,19 @@ verify_jwt = false
 enabled = true
 verify_jwt = false
 
+# Raw-events processor (docs/ingestion-pipeline.md, ADR 0009). Claims
+# `pending` capture raw_financial_events rows and normalizes them into
+# transactions via _shared/ingestion-pipeline.ts. No JWT - it is an
+# internal, scheduled worker. It is a no-op (404 / 401) until BOTH are set:
+#   DEVICE_PAIRING_V2 = enabled
+#   RAW_EVENTS_PROCESSOR_SECRET = <a >= 32-char high-entropy secret>
+# presented in the X-Processor-Secret header. Wire the schedule via
+# pg_cron (supabase/scheduling/activate_raw_events_processor.sql) or the
+# Dashboard, every 1-2 minutes. It never touches ingest-momo.
+[functions.process-raw-events]
+enabled = true
+verify_jwt = false
+
 [analytics]
 enabled = true
 port = 54327
