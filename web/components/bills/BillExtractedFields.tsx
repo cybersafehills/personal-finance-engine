@@ -118,7 +118,12 @@ export function BillExtractedFields({
       </dl>
 
       {lineItems.length > 0 && (
-        <div className="overflow-x-auto">
+        <div
+          className="overflow-x-auto"
+          tabIndex={0}
+          role="group"
+          aria-label="Extracted line items"
+        >
           <table className="w-full min-w-[36rem] border-collapse text-sm">
             <caption className="sr-only">Extracted line items</caption>
             <thead>

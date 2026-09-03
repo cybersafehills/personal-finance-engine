@@ -36,7 +36,7 @@ test.describe("Bills & Expenses - a11y & responsive", () => {
       mimeType: "application/pdf",
       buffer: minimalPdf(marker),
     });
-    await page.getByRole("button", { name: "Upload" }).click();
+    await page.getByRole("button", { name: "Upload", exact: true }).click();
     await expect(page).toHaveURL(/\/bills\/[0-9a-f-]{36}$/);
     const detailUrl = page.url();
 

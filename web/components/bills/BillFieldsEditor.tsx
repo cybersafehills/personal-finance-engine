@@ -215,7 +215,14 @@ export function BillFieldsEditor({
       )}
 
       {lineItems.length > 0 && (
-        <div className="overflow-x-auto">
+        // Focusable + named so keyboard users can scroll the table
+        // horizontally (axe scrollable-region-focusable).
+        <div
+          className="overflow-x-auto"
+          tabIndex={0}
+          role="group"
+          aria-label="Extracted line items"
+        >
           <table className="w-full min-w-[32rem] border-collapse text-sm">
             <caption className="sr-only">Extracted line items</caption>
             <thead>
