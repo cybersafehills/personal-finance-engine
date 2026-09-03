@@ -140,7 +140,7 @@ export function ConnectionDetails({
         </div>
 
         <Link
-          href="/settings/connections/setup"
+          href="/integrations/connections/setup"
           className="text-xs font-medium text-accent hover:underline"
         >
           Full step-by-step Shortcut guide →
@@ -191,7 +191,7 @@ export function ShortcutKeyInstructions({
         Save. Messages already forwarded are unaffected. Never built the
         automation?{" "}
         <Link
-          href="/settings/connections/setup"
+          href="/integrations/connections/setup"
           className="font-medium text-accent hover:underline"
         >
           Follow the step-by-step guide

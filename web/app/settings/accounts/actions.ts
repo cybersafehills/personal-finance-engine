@@ -60,7 +60,7 @@ export async function createAccount(
   }
 
   revalidatePath("/settings/accounts");
-  revalidatePath("/settings/connections");
+  revalidatePath("/integrations/connections");
 
   return { ok: true };
 }
@@ -86,7 +86,7 @@ export async function renameAccount(
   }
 
   revalidatePath("/settings/accounts");
-  revalidatePath("/settings/connections");
+  revalidatePath("/integrations/connections");
 
   return { ok: true };
 }
@@ -159,7 +159,7 @@ export async function archiveAccount(
   }
 
   revalidatePath("/settings/accounts");
-  revalidatePath("/settings/connections");
+  revalidatePath("/integrations/connections");
 
   return { ok: true };
 }

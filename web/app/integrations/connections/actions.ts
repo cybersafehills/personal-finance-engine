@@ -19,7 +19,7 @@ export async function pairMtnMomoAdapterCanary(
   connectionId: string,
   msisdn: string,
 ): Promise<ConnectionActionResult> {
-  await requireMfaForSensitiveAction("/settings/connections");
+  await requireMfaForSensitiveAction("/integrations/connections");
 
   let identity: Awaited<ReturnType<typeof buildMtnMomoPairingIdentity>>;
   try {
@@ -45,7 +45,7 @@ export async function pairMtnMomoAdapterCanary(
     };
   }
 
-  revalidatePath("/settings/connections");
+  revalidatePath("/integrations/connections");
   return { ok: true };
 }
 
@@ -53,7 +53,7 @@ export async function pairMtnMomoAdapterCanaryByInstallation(
   connectorInstallationId: string,
   msisdn: string,
 ): Promise<ConnectionActionResult> {
-  await requireMfaForSensitiveAction("/settings/connections");
+  await requireMfaForSensitiveAction("/integrations/connections");
 
   let identity: Awaited<ReturnType<typeof buildMtnMomoPairingIdentity>>;
   try {
@@ -82,7 +82,7 @@ export async function pairMtnMomoAdapterCanaryByInstallation(
     };
   }
 
-  revalidatePath("/settings/connections");
+  revalidatePath("/integrations/connections");
   return { ok: true };
 }
 
@@ -90,7 +90,7 @@ export async function setMtnMomoAdapterCanaryEnabled(
   connectorInstallationId: string,
   enabled: boolean,
 ): Promise<ConnectionActionResult> {
-  await requireMfaForSensitiveAction("/settings/connections");
+  await requireMfaForSensitiveAction("/integrations/connections");
   const supabase = await supabaseSession();
   const { error } = await supabase.rpc(
     "set_connector_adapter_canary_enabled",
@@ -104,7 +104,7 @@ export async function setMtnMomoAdapterCanaryEnabled(
     return { ok: false, error: "Could not update the MTN canary." };
   }
 
-  revalidatePath("/settings/connections");
+  revalidatePath("/integrations/connections");
   return { ok: true };
 }
 
@@ -123,7 +123,7 @@ export async function createConnection(
   provider: string,
   accountId: string,
 ): Promise<CreateConnectionResult> {
-  await requireMfaForSensitiveAction("/settings/connections");
+  await requireMfaForSensitiveAction("/integrations/connections");
   const trimmedLabel = label.trim();
 
   if (!trimmedLabel) {
@@ -159,7 +159,7 @@ export async function createConnection(
     return { ok: false, error: "Could not create the connection." };
   }
 
-  revalidatePath("/settings/connections");
+  revalidatePath("/integrations/connections");
 
   return { ok: true, secret: credential.secret };
 }
@@ -168,7 +168,7 @@ export async function createConnection(
 export async function rotateConnection(
   connectionId: string,
 ): Promise<CreateConnectionResult> {
-  await requireMfaForSensitiveAction("/settings/connections");
+  await requireMfaForSensitiveAction("/integrations/connections");
   const credential = await generateIngestionCredential();
 
   const supabase = await supabaseSession();
@@ -192,7 +192,7 @@ export async function rotateConnection(
     return { ok: false, error: "Could not rotate the connection." };
   }
 
-  revalidatePath("/settings/connections");
+  revalidatePath("/integrations/connections");
 
   return { ok: true, secret: credential.secret };
 }
@@ -201,7 +201,7 @@ export async function rotateConnection(
 export async function revokeConnection(
   connectionId: string,
 ): Promise<ConnectionActionResult> {
-  await requireMfaForSensitiveAction("/settings/connections");
+  await requireMfaForSensitiveAction("/integrations/connections");
   const supabase = await supabaseSession();
   const { data: connection, error: mappingError } = await supabase
     .from("ingestion_connections")
@@ -221,7 +221,7 @@ export async function revokeConnection(
     return { ok: false, error: "Could not revoke the connection." };
   }
 
-  revalidatePath("/settings/connections");
+  revalidatePath("/integrations/connections");
 
   return { ok: true };
 }
@@ -246,7 +246,7 @@ export async function pauseConnection(
     return { ok: false, error: "Could not pause the connection." };
   }
 
-  revalidatePath("/settings/connections");
+  revalidatePath("/integrations/connections");
 
   return { ok: true };
 }
@@ -265,7 +265,7 @@ export async function resumeConnection(
     return { ok: false, error: "Could not resume the connection." };
   }
 
-  revalidatePath("/settings/connections");
+  revalidatePath("/integrations/connections");
 
   return { ok: true };
 }
@@ -353,7 +353,7 @@ export async function renameConnection(
     return { ok: false, error: "Could not rename the connection." };
   }
 
-  revalidatePath("/settings/connections");
+  revalidatePath("/integrations/connections");
 
   return { ok: true };
 }
@@ -376,7 +376,7 @@ export async function pauseConnectorInstallation(
     return { ok: false, error: "Could not pause the connector." };
   }
 
-  revalidatePath("/settings/connections");
+  revalidatePath("/integrations/connections");
   return { ok: true };
 }
 
@@ -393,7 +393,7 @@ export async function resumeConnectorInstallation(
     return { ok: false, error: "Could not resume the connector." };
   }
 
-  revalidatePath("/settings/connections");
+  revalidatePath("/integrations/connections");
   return { ok: true };
 }
 
@@ -417,14 +417,14 @@ export async function renameConnectorInstallation(
     return { ok: false, error: "Could not rename the connector." };
   }
 
-  revalidatePath("/settings/connections");
+  revalidatePath("/integrations/connections");
   return { ok: true };
 }
 
 export async function rotateConnectorCredential(
   deviceCredentialId: string,
 ): Promise<CreateConnectionResult> {
-  await requireMfaForSensitiveAction("/settings/connections");
+  await requireMfaForSensitiveAction("/integrations/connections");
   const credential = await generateIngestionCredential();
   const supabase = await supabaseSession();
   const { error } = await supabase.rpc("rotate_device_credential", {
@@ -437,14 +437,14 @@ export async function rotateConnectorCredential(
     return { ok: false, error: "Could not rotate the credential." };
   }
 
-  revalidatePath("/settings/connections");
+  revalidatePath("/integrations/connections");
   return { ok: true, secret: credential.secret };
 }
 
 export async function revokeConnectorInstallation(
   connectorInstallationId: string,
 ): Promise<ConnectionActionResult> {
-  await requireMfaForSensitiveAction("/settings/connections");
+  await requireMfaForSensitiveAction("/integrations/connections");
   const supabase = await supabaseSession();
   const { error } = await supabase.rpc("revoke_connector_installation", {
     p_connector_installation_id: connectorInstallationId,
@@ -454,6 +454,6 @@ export async function revokeConnectorInstallation(
     return { ok: false, error: "Could not revoke the connector." };
   }
 
-  revalidatePath("/settings/connections");
+  revalidatePath("/integrations/connections");
   return { ok: true };
 }

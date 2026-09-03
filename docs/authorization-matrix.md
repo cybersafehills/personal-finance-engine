@@ -19,6 +19,17 @@ checks in `supabase/migrations/tests/run_migration_tests.sh`.
 | `transaction.create` | yes | yes | yes | no |
 | `transaction.categorize` | yes | yes | yes | no |
 | `audit.view` | yes | yes | no | no |
+| `integration.view` | yes | yes | yes | no |
+| `integration.import` | yes | yes | no | no |
+| `integration.import_approve` | yes | yes | no | no |
+| `integration.export` | yes | yes | no | no |
+| `integration.configure` | yes | yes | no | no |
+| `integration.connection_manage` | yes | yes | no | no |
+| `integration.sync_manage` | yes | yes | no | no |
+| `integration.logs_view` | yes | yes | no | no |
+| `integration.destination_manage` | yes | yes | no | no |
+| `integration.workbook_manage` | yes | yes | no | no |
+| `integration.conflict_resolve` | yes | yes | no | no |
 
 Unknown and null capability names fail closed for every role. A member may
 receive an additive, workspace-scoped capability grant. Grants cannot deny a

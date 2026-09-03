@@ -39,7 +39,13 @@ export const NAV_ITEM_META: Record<NavKey, { href: string; label: string }> = {
 export const MOBILE_BAR_KEYS: readonly NavKey[] = ["transactions", "budgets"];
 
 // Routes that mark the "More" bottom-nav item as the active destination.
-export const MORE_MENU_PREFIXES = ["/inbox", "/categories", "/reports", "/settings"] as const;
+export const MORE_MENU_PREFIXES = [
+  "/inbox",
+  "/integrations",
+  "/categories",
+  "/reports",
+  "/settings",
+] as const;
 
 function isNavKey(value: unknown): value is NavKey {
   return (

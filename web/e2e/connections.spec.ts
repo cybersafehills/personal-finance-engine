@@ -38,7 +38,7 @@ test("a new connection surfaces the full ingest contract, not just the key", asy
 
   const label = `E2E ingest ${Date.now()}`;
 
-  await page.goto("/settings/connections");
+  await page.goto("/integrations/connections");
   await page.getByRole("button", { name: "Connect a device" }).click();
   await page.getByLabel("Label").fill(label);
   await page.getByRole("button", { name: "Create connection" }).click();
@@ -76,13 +76,13 @@ test("a new connection surfaces the full ingest contract, not just the key", asy
 
   // PR2: the panel links to the full step-by-step guide.
   await row.getByRole("link", { name: /step-by-step Shortcut guide/i }).click();
-  await expect(page).toHaveURL(/\/settings\/connections\/setup$/);
+  await expect(page).toHaveURL(/\/integrations\/connections\/setup$/);
 });
 
 test("the Shortcut setup guide renders the steps and the resolved endpoint", async ({
   page,
 }) => {
-  await page.goto("/settings/connections/setup");
+  await page.goto("/integrations/connections/setup");
 
   await expect(
     page.getByRole("heading", { name: "Set up a device" }),

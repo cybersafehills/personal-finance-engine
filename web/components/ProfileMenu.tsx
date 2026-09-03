@@ -19,10 +19,12 @@ export function ProfileMenu({
   userEmail,
   workspaces,
   activeWorkspaceId,
+  integrationsEnabled,
 }: {
   userEmail: string;
   workspaces: WorkspaceSummary[];
   activeWorkspaceId: string | null;
+  integrationsEnabled: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -93,6 +95,15 @@ export function ProfileMenu({
               </div>
             )}
             <div className="mt-3 flex flex-col gap-1 border-t border-border-subtle pt-2">
+              {integrationsEnabled && (
+                <Link
+                  href="/integrations"
+                  onClick={() => setOpen(false)}
+                  className="rounded-control px-2 py-2 text-sm font-medium text-text-secondary hover:bg-background hover:text-text-primary"
+                >
+                  Integrations
+                </Link>
+              )}
               <Link
                 href="/settings"
                 onClick={() => setOpen(false)}

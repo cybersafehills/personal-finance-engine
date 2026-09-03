@@ -64,7 +64,7 @@ export function deriveOnboardingState(input: OnboardingInput): OnboardingState {
       description:
         "Create a connection and copy its one-time key.",
       done: input.activeConnectionCount > 0,
-      href: "/settings/connections",
+      href: "/integrations/connections",
       cta: "Connect a device",
     },
     {
@@ -73,7 +73,7 @@ export function deriveOnboardingState(input: OnboardingInput): OnboardingState {
       description:
         "Build the iPhone Shortcut and send a MoMo SMS. The connection turns “Ready” and transactions start flowing.",
       done: input.liveConnectionCount > 0,
-      href: "/settings/connections/setup",
+      href: "/integrations/connections/setup",
       cta: "Open the guide",
     },
   ];
