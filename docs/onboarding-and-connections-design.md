@@ -579,3 +579,42 @@ sweep for capture rows.
 supabase/functions/capture/tests` (provider + capture cases) pass;
 `ingest-momo/tests` untouched and green; `run_migration_tests.sh` 382 pass
 (4 new capture assertions); `deno fmt`/`lint`/`check` clean.
+
+---
+
+## PR15 — raw-events processor (capture → transaction)
+
+**Problem.** `op:"capture"` (PR14) queues real messages as `pending`
+`raw_financial_events` evidence, but nothing turns them into `transactions`.
+
+**Decisions.** Full contract in `docs/ingestion-pipeline.md`; rationale in
+ADR 0009 §2.
+
+1. **`_shared/ingestion-pipeline.ts`** — `normalizeInboundMessage(...)`, the
+   parse → `transactions` logic as a **pure dependency-injected module**, fully
+   fake-tested for the first time (parseable→txn, unparseable→review, dup,
+   account_unavailable, accounting-fail, dedupe, insert-error, best-effort
+   isolation). Mirrors `ingest-momo/index.ts`'s post-evidence steps exactly.
+2. **`ingest-momo/index.ts` is NOT touched.** It keeps its inline copy; the new
+   path gets the new tested code. Migrating `ingest-momo` onto the shared module
+   is a later PR once this is proven on the dark capture channel. This inverts
+   the risk relative to refactoring an untested 1285-line live-money function.
+3. **`supabase/functions/process-raw-events`** — a scheduled Edge Function,
+   gated by `DEVICE_PAIRING_V2=enabled` + `RAW_EVENTS_PROCESSOR_SECRET`
+   (`X-Processor-Secret`). Per tick: `release_stale_processing_capture_events`
+   → `claim_pending_capture_events` (`FOR UPDATE SKIP LOCKED`) → per row:
+   synthesize a `momo_messages` row (`source='iphone_capture_v2'`) → run the
+   pipeline → map the result onto `raw_financial_events.parse_status`.
+4. **Migration `20261106000000_raw_events_processor.sql`** — `parse_status` +=
+   `processing`/`failed`; `momo_messages.source` += `iphone_capture_v2`; the two
+   service-role claim/release RPCs. Additive; no RLS/table/grant-count change.
+5. Schedule: `supabase/scheduling/activate_raw_events_processor.sql` (pg_cron,
+   1-min). `config.toml` gains `[functions.process-raw-events]`.
+
+**Not in this PR.** Migrating `ingest-momo` onto the shared module;
+transaction-level analytics.
+
+**Verification.** `deno test supabase/functions/_shared/tests
+supabase/functions/process-raw-events/tests` — 15 new; `ingest-momo/tests`
+untouched and green (205 total). `run_migration_tests.sh` 388 pass (6 new).
+`deno fmt`/`lint`/`check` clean.

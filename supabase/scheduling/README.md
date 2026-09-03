@@ -69,6 +69,14 @@ curl -X POST https://www.oneledger.me/api/cron/deliver-reports \
 # is housekeeping. Idempotent; returns {"expired":<n>}.
 curl -X POST https://www.oneledger.me/api/cron/expire-pairing-sessions \
   -H "x-report-cron-secret: <the REPORT_CRON_SECRET value>"
+
+# Raw-events processor (ADR 0009 / docs/ingestion-pipeline.md): a Supabase
+# EDGE FUNCTION (not an /api/cron route). Normalizes captured evidence
+# into transactions. Idempotent; returns {"claimed":n,"processed":...}.
+# A no-op until DEVICE_PAIRING_V2=enabled AND RAW_EVENTS_PROCESSOR_SECRET
+# are set. Schedule via activate_raw_events_processor.sql (1-minute cron).
+curl -X POST https://zttxsaiywkfrbdxgzbjd.supabase.co/functions/v1/process-raw-events \
+  -H "x-processor-secret: <the RAW_EVENTS_PROCESSOR_SECRET value>"
 ```
 
 Both are safe to call at any time, any number of times - every candidate

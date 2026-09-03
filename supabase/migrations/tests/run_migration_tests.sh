@@ -5453,6 +5453,68 @@ else
 fi
 rm -f $ARTIFACT_DIR/pfe_cap_evt.log
 
+# ===========================================================================
+# Raw-events processor (20261106000000): claim / release RPCs + lifecycle.
+# ===========================================================================
+echo "=== Raw-events processor: claim / release / parse_status ==="
+
+PRC_OWNER="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('processor-owner@example.com') returning id;" | head -1)"
+PRC_WS="$(psql -d pfe_rls -t -A -c "select w.id from public.workspaces w join public.workspace_memberships m on m.workspace_id = w.id where m.user_id = '$PRC_OWNER' and w.kind = 'personal';" | head -1)"
+PRC_SRC="$(psql -d pfe_rls -t -A -c "set role service_role; insert into public.financial_sources (owner_user_id, provider, source_type, display_name, currency) values ('$PRC_OWNER', 'mtn_momo', 'mobile_money', 'Processor source', 'RWF') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+PRC_ACC="$(psql -d pfe_rls -t -A -c "set role service_role; insert into public.accounts (workspace_id, financial_source_id, name, provider, currency) values ('$PRC_WS', '$PRC_SRC', 'Processor account', 'mtn_momo', 'RWF') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+PRC_CONN="$(as_user "$PRC_OWNER" "select public.create_ingestion_connection_dual_write('$PRC_WS', '$PRC_ACC', 'Processor phone', 'mtn_momo', 'processor-hash', 'prc_pfx');")"
+
+PRC_HASH="$(printf 'f%.0s' $(seq 1 64))"
+PRC_EVT="$(psql -d pfe_rls -t -A -c "set role service_role; insert into public.raw_financial_events (channel, received_at, payload_hash, raw_payload, ingestion_connection_id, financial_source_id, provider_key, ingestion_origin, parse_status) values ('sms', now(), '$PRC_HASH', '{\"raw_message\":\"x\"}'::jsonb, '$PRC_CONN', '$PRC_SRC', 'mtn_momo', 'iphone_capture_v2', 'pending') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+
+PRC_CLAIM="$(psql -d pfe_rls -t -A -c "set role service_role; select id || '|' || ingestion_connection_id || '|' || payload_hash from public.claim_pending_capture_events(10);" | grep -Eo "$PRC_EVT\|[0-9a-f-]{36}\|$PRC_HASH" | head -1)"
+PRC_STATUS_AFTER="$(psql -d pfe_rls -t -A -c "select parse_status from public.raw_financial_events where id = '$PRC_EVT';")"
+if [ -n "$PRC_CLAIM" ] && [ "$PRC_STATUS_AFTER" = "processing" ]; then
+  pass "Raw-events processor: claim_pending_capture_events leases the row (pending → processing) and returns its provenance"
+else
+  fail "Raw-events processor: claim did not lease the row (claim='$PRC_CLAIM' status='$PRC_STATUS_AFTER')"
+fi
+
+PRC_RECLAIM="$(psql -d pfe_rls -t -A -c "set role service_role; select count(*) from (select id from public.claim_pending_capture_events(10)) c where c.id = '$PRC_EVT';" | tail -1)"
+if [ "$PRC_RECLAIM" = "0" ]; then
+  pass "Raw-events processor: a second claim skips a row already in 'processing'"
+else
+  fail "Raw-events processor: a processing row was claimed again (reclaim count=$PRC_RECLAIM)"
+fi
+
+PRC_RELEASED="$(psql -d pfe_rls -t -A -c "set role service_role; select public.release_stale_processing_capture_events(interval '0 seconds');" | grep -Eo '[0-9]+' | head -1)"
+PRC_STATUS_RELEASED="$(psql -d pfe_rls -t -A -c "select parse_status from public.raw_financial_events where id = '$PRC_EVT';")"
+if [ "$PRC_RELEASED" -ge 1 ] && [ "$PRC_STATUS_RELEASED" = "pending" ]; then
+  pass "Raw-events processor: release_stale_processing_capture_events returns stuck rows to 'pending'"
+else
+  fail "Raw-events processor: stale release did not reset the row (n=$PRC_RELEASED status=$PRC_STATUS_RELEASED)"
+fi
+
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; update public.raw_financial_events set parse_status = 'failed' where id = '$PRC_EVT';" >/dev/null
+PRC_FAILED_OK="$(psql -d pfe_rls -t -A -c "select parse_status from public.raw_financial_events where id = '$PRC_EVT';")"
+if [ "$PRC_FAILED_OK" = "failed" ]; then
+  pass "Raw-events processor: parse_status accepts the new 'failed' terminal value"
+else
+  fail "Raw-events processor: parse_status did not accept 'failed'"
+fi
+
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.momo_messages (source, ingestion_connection_id, raw_message, message_fingerprint, processing_status) values ('iphone_capture_v2', '$PRC_CONN', 'x', '$PRC_HASH', 'processing');" >/dev/null
+if psql -d pfe_rls -c "set role service_role; insert into public.momo_messages (source, raw_message, message_fingerprint, processing_status) values ('bogus_src', 'y', '$(printf 'a%.0s' $(seq 1 64))', 'processing');" >/dev/null 2>$ARTIFACT_DIR/pfe_prc_src.log; then
+  fail "Raw-events processor: momo_messages.source accepted a bogus value"
+else
+  grep -q "violates check constraint" $ARTIFACT_DIR/pfe_prc_src.log \
+    && pass "Raw-events processor: momo_messages.source accepts 'iphone_capture_v2', rejects an unknown value" \
+    || fail "Raw-events processor: momo_messages.source insert failed for an unexpected reason"
+fi
+rm -f $ARTIFACT_DIR/pfe_prc_src.log
+
+PRC_ACL="$(psql -d pfe_rls -t -A -c "select has_function_privilege('authenticated', 'public.claim_pending_capture_events(integer)', 'execute') || '|' || has_function_privilege('anon', 'public.claim_pending_capture_events(integer)', 'execute') || '|' || has_function_privilege('authenticated', 'public.release_stale_processing_capture_events(interval)', 'execute') || '|' || has_function_privilege('service_role', 'public.claim_pending_capture_events(integer)', 'execute');")"
+if [ "$PRC_ACL" = "false|false|false|true" ] || [ "$PRC_ACL" = "f|f|f|t" ]; then
+  pass "Raw-events processor: claim / release RPCs are service-role-only"
+else
+  fail "Raw-events processor: RPC privileges are wrong ($PRC_ACL)"
+fi
+
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="
 if [ "$FAIL_COUNT" -ne 0 ]; then
