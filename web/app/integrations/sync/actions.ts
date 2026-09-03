@@ -8,7 +8,15 @@ import { hashToken } from "../../../lib/credentials";
 import {
   isCloudStorageEnabled,
   isDestinationsEnabled,
+  isWorkbooksEnabled,
 } from "../../../lib/integrations/gate";
+import {
+  isRealWorkbookProvider,
+  normalizeSheetMap,
+  WORKBOOK_PROVIDERS,
+  type WorkbookProvider,
+} from "../../../lib/integrations/workbooks/contract";
+import { runWorkbookSync } from "../../../lib/integrations/workbooks/sync";
 import {
   buildWebhookHeaders,
   isSafeWebhookUrl,
@@ -400,4 +408,182 @@ export async function createCloudStorageDestination(input: {
       ? `/api/integrations/oauth/${input.provider}/start?destination_id=${destination.id}`
       : null,
   };
+}
+
+// --- connected workbooks (INTEGRATIONS_WORKBOOKS_ENABLED, integration.workbook_manage) ---
+
+async function requireWorkbookAccess(): Promise<AccessOk | AccessErr> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!workspaceId || !isWorkbooksEnabled(workspaceId)) {
+    return { ok: false, error: "Connected workbooks aren’t enabled for this Space." };
+  }
+  const supabase = await supabaseSession();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "You need to be signed in." };
+  const { data: allowed, error } = await supabase.rpc("has_space_capability", {
+    p_workspace_id: workspaceId,
+    p_capability: "integration.workbook_manage",
+  });
+  if (error || allowed !== true) {
+    return { ok: false, error: "You don’t have permission to manage workbooks." };
+  }
+  return { ok: true, workspaceId, userId: user.id };
+}
+
+export type ConnectWorkbookResult =
+  | { ok: true; workbookId: string; needsAuth: boolean }
+  | { ok: false; error: string };
+
+export async function connectWorkbook(input: {
+  name: string;
+  provider: string;
+  direction: "export" | "import" | "two_way";
+  sheetMap?: unknown;
+}): Promise<ConnectWorkbookResult> {
+  const access = await requireWorkbookAccess();
+  if (!access.ok) return access;
+  const { workspaceId, userId } = access;
+
+  const name = (input.name ?? "").trim();
+  if (!name || name.length > 80) {
+    return { ok: false, error: "Give the workbook a short name." };
+  }
+  if (!(WORKBOOK_PROVIDERS as readonly string[]).includes(input.provider)) {
+    return { ok: false, error: "Unknown workbook provider." };
+  }
+  const provider = input.provider as WorkbookProvider;
+  if (!["export", "import", "two_way"].includes(input.direction)) {
+    return { ok: false, error: "Choose a sync direction." };
+  }
+
+  const admin = supabaseServer();
+  const { data: destination, error: destError } = await admin
+    .from("integration_destinations")
+    .insert({
+      workspace_id: workspaceId,
+      created_by: userId,
+      name,
+      kind: "connected_workbook",
+      provider,
+      config: {},
+      status: isRealWorkbookProvider(provider) ? "active" : "needs_auth",
+    })
+    .select("id")
+    .single();
+  if (destError || !destination) {
+    console.error("connectWorkbook destination failed", destError?.message);
+    return { ok: false, error: "Could not create the workbook link." };
+  }
+
+  const { data: workbook, error: wbError } = await admin
+    .from("connected_workbooks")
+    .insert({
+      workspace_id: workspaceId,
+      destination_id: destination.id,
+      sheet_map: normalizeSheetMap(input.sheetMap),
+      direction: input.direction,
+      source_of_truth: "oneledger",
+      status: isRealWorkbookProvider(provider) ? "active" : "needs_auth",
+      created_by: userId,
+    })
+    .select("id")
+    .single();
+  if (wbError || !workbook) {
+    await admin.from("integration_destinations").delete().eq("id", destination.id);
+    console.error("connectWorkbook workbook failed", wbError?.message);
+    return { ok: false, error: "Could not create the workbook." };
+  }
+
+  await admin.from("integration_events").insert({
+    workspace_id: workspaceId,
+    kind: "workbook.connected",
+    severity: "info",
+    ref_type: "connected_workbook",
+    ref_id: workbook.id,
+    summary: `Workbook "${name}" (${provider}) connected`,
+    context: { actorUserId: userId, provider, direction: input.direction },
+  });
+
+  revalidatePath("/integrations/sync");
+  return {
+    ok: true,
+    workbookId: workbook.id,
+    needsAuth: !isRealWorkbookProvider(provider),
+  };
+}
+
+export async function syncWorkbookNow(
+  workbookId: string,
+): Promise<SimpleResult> {
+  const access = await requireWorkbookAccess();
+  if (!access.ok) return access;
+  const admin = supabaseServer();
+  const result = await runWorkbookSync(admin, {
+    workbookId,
+    workspaceId: access.workspaceId,
+    trigger: "manual",
+  });
+  revalidatePath("/integrations/sync");
+  return result.ok ? { ok: true } : { ok: false, error: result.error };
+}
+
+export async function setWorkbookStatus(
+  workbookId: string,
+  status: "active" | "paused",
+): Promise<SimpleResult> {
+  const access = await requireWorkbookAccess();
+  if (!access.ok) return access;
+  const admin = supabaseServer();
+  const { error } = await admin
+    .from("connected_workbooks")
+    .update({ status })
+    .eq("id", workbookId)
+    .eq("workspace_id", access.workspaceId)
+    .not("status", "in", "(disconnected)");
+  if (error) return { ok: false, error: "Could not update the workbook." };
+  revalidatePath("/integrations/sync");
+  return { ok: true };
+}
+
+export async function updateWorkbookSheetMap(
+  workbookId: string,
+  sheetMap: unknown,
+): Promise<SimpleResult> {
+  const access = await requireWorkbookAccess();
+  if (!access.ok) return access;
+  const admin = supabaseServer();
+  const { error } = await admin
+    .from("connected_workbooks")
+    .update({ sheet_map: normalizeSheetMap(sheetMap) })
+    .eq("id", workbookId)
+    .eq("workspace_id", access.workspaceId);
+  if (error) return { ok: false, error: "Could not save the sheet map." };
+  revalidatePath("/integrations/sync");
+  return { ok: true };
+}
+
+export async function disconnectWorkbook(
+  workbookId: string,
+): Promise<SimpleResult> {
+  const access = await requireWorkbookAccess();
+  if (!access.ok) return access;
+  const admin = supabaseServer();
+  const { data: workbook } = await admin
+    .from("connected_workbooks")
+    .select("destination_id")
+    .eq("id", workbookId)
+    .eq("workspace_id", access.workspaceId)
+    .maybeSingle();
+  if (!workbook) return { ok: false, error: "That workbook could not be found." };
+
+  await admin.from("connected_workbooks").delete().eq("id", workbookId);
+  await admin
+    .from("integration_destinations")
+    .delete()
+    .eq("id", workbook.destination_id)
+    .eq("workspace_id", access.workspaceId);
+  revalidatePath("/integrations/sync");
+  return { ok: true };
 }

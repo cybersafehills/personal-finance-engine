@@ -296,6 +296,34 @@ RLS-scoped reads in `web/lib/integrations/queries.ts`.
   `INTEGRATIONS_CLOUD_STORAGE_ENABLED` is on, labels unconfigured ones
   "(not configured yet)", and never shows a dark provider as connected.
 
+## Connected workbooks — export direction (P2-PR4, migration 20261102000000)
+
+- `workbooks/contract.ts` (**pure, tested**) — providers (`manual_file` real;
+  `google_sheets` / `excel_365` stubs), `WorkbookAdapter` interface
+  (`getRevision` / `writeAllSheets` / `readAllSheets`), `defaultSheetMap`,
+  `normalizeSheetMap`, `WorkbookProviderNotConfiguredError`.
+- `workbooks/registry.ts` (server-only) — `getWorkbookAdapter`. `manual_file`
+  is real: `writeAllSheets` builds an .xlsx (exceljs, formula-neutralised
+  cells) and upserts it to the private `integration-workbooks` bucket at
+  `{workspace_id}/{connected_workbook_id}.xlsx`; `readAllSheets` parses it
+  back. Stub providers throw `provider_not_configured`.
+- `workbooks/sync.ts` (server-only) — `runWorkbookSync`: for
+  `direction in (export, two_way)` builds the full-ledger `ExportDataset`
+  (`resolvePeriod('all')` + `buildExportDataset`), shapes it with
+  `datasetToSheetRows` (exported from `export/workbook.ts`), and calls
+  `writeAllSheets`. Every run is an `integration_sync_run`; `import` direction
+  and the dark providers record a `partial` run (`inbound_not_wired` /
+  `provider_not_configured`). Updates `connected_workbooks.last_sync_run_id` +
+  `status`, writes `workbook.synced` / `workbook.sync_failed`.
+- Actions (`integration.workbook_manage`, `INTEGRATIONS_WORKBOOKS_ENABLED`):
+  `connectWorkbook` (creates the `connected_workbook` + its
+  `connected_workbook`-kind destination), `syncWorkbookNow`,
+  `setWorkbookStatus`, `updateWorkbookSheetMap`, `disconnectWorkbook`.
+- UI: `/integrations/sync` "Connected workbooks" (`WorkbookManager`) + "Recent
+  sync runs" list; `/integrations/sync/runs/[id]` run detail;
+  `GET /api/integrations/workbooks/[id]` → 10-min signed download of the
+  `manual_file` xlsx.
+
 ## Feature flags
 
 `web/lib/integrations/gate.ts`, env-var convention shared with

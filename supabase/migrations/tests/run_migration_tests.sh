@@ -5220,6 +5220,13 @@ else
   fail "Integrations P2: integration_destination_secrets exposes $P2_SECRET_GRANTS anon/authenticated grant(s)"
 fi
 
+P2_WB_BUCKET="$(psql -d pfe_rls -t -A -c "select count(*) from storage.buckets where id = 'integration-workbooks' and public = false;")"
+if [ "$P2_WB_BUCKET" = "1" ]; then
+  pass "Integrations P2: the private integration-workbooks storage bucket is registered (public = false)"
+else
+  fail "Integrations P2: integration-workbooks bucket missing or public (got $P2_WB_BUCKET)"
+fi
+
 P2_DEST="$(psql -d pfe_rls -t -A -c "insert into public.integration_destinations (workspace_id, created_by, name, kind) values ('$INT_HH', '$USER_A', 'Accountant webhook', 'webhook') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
 psql -d pfe_rls -v ON_ERROR_STOP=1 -c "insert into public.integration_sync_runs (workspace_id, destination_id, trigger) values ('$INT_HH', '$P2_DEST', 'manual');" >/dev/null
 P2_DEST_MEMBER="$(as_user "$INT_MEMBER_USER" "select count(*) from public.integration_destinations where id = '$P2_DEST';")"

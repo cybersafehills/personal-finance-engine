@@ -14,12 +14,16 @@ import {
   isCloudStorageEnabled,
   isDestinationsEnabled,
   isSyncEnabled,
+  isWorkbooksEnabled,
 } from "../../../lib/integrations/gate";
 import { CLOUD_STORAGE_PROVIDER_META } from "../../../lib/integrations/destinations/cloud-storage/contract";
 import { configuredCloudProviders } from "../../../lib/integrations/destinations/cloud-storage/registry";
+import { WorkbookManager } from "../../../components/WorkbookManager";
 import {
+  listConnectedWorkbooks,
   listExportSchedules,
   listIntegrationDestinations,
+  listSyncRuns,
 } from "../../../lib/integrations/queries";
 
 export const dynamic = "force-dynamic";
@@ -54,13 +58,17 @@ export default async function SyncPage() {
       configured: configured.has(m.key),
     }))
     : [];
-  const [schedules, installations, destinations] = await Promise.all([
-    listExportSchedules(),
-    getCanonicalConnectorInstallations(),
-    destinationsEnabled
-      ? listIntegrationDestinations()
-      : Promise.resolve([]),
-  ]);
+  const workbooksEnabled = isWorkbooksEnabled(workspaceId);
+  const [schedules, installations, destinations, workbooks, syncRuns] =
+    await Promise.all([
+      listExportSchedules(),
+      getCanonicalConnectorInstallations(),
+      destinationsEnabled ? listIntegrationDestinations() : Promise.resolve([]),
+      workbooksEnabled ? listConnectedWorkbooks() : Promise.resolve([]),
+      destinationsEnabled || workbooksEnabled
+        ? listSyncRuns(15)
+        : Promise.resolve([]),
+    ]);
 
   return (
     <div>
@@ -144,6 +152,51 @@ export default async function SyncPage() {
           destinations={destinations.map((d) => ({ id: d.id, name: d.name }))}
         />
       </section>
+
+      {workbooksEnabled && (
+        <section aria-labelledby="workbooks" className="mt-8">
+          <h2 id="workbooks" className="mb-2 text-sm font-semibold text-text-primary">
+            Connected workbooks
+          </h2>
+          <p className="mb-3 text-sm text-text-muted">
+            Keep an external spreadsheet in step with your ledger. OneLedger stays
+            authoritative — inbound changes go to review, never straight to the
+            ledger.
+          </p>
+          <WorkbookManager workbooks={workbooks} />
+        </section>
+      )}
+
+      {syncRuns.length > 0 && (
+        <section aria-labelledby="runs" className="mt-8">
+          <h2 id="runs" className="mb-2 text-sm font-semibold text-text-primary">
+            Recent sync runs
+          </h2>
+          <ul className="flex flex-col gap-2">
+            {syncRuns.map((r) => (
+              <li key={r.id}>
+                <Link
+                  href={`/integrations/sync/runs/${r.id}`}
+                  className="flex items-center justify-between gap-3 rounded-card border border-border-subtle bg-surface p-3 text-sm transition-colors hover:bg-background"
+                >
+                  <span className="text-text-secondary">
+                    {r.trigger} · {r.direction} · {formatDateTime(r.createdAt)}
+                  </span>
+                  <Badge
+                    variant={r.status === "succeeded"
+                      ? "positive"
+                      : r.status === "failed"
+                      ? "attention"
+                      : "neutral"}
+                  >
+                    {r.status}
+                  </Badge>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </div>
   );
 }

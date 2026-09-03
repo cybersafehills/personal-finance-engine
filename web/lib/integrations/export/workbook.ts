@@ -102,6 +102,74 @@ function byAccount(dataset: ExportDataset) {
   return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
 }
 
+// --- sheet rows (for connected workbooks) -------------------------
+
+/**
+ * The dataset as `{ name, rows }` sheets keyed by a caller-supplied
+ * name map. Header row first. Used by the connected-workbook sync to
+ * push OneLedger data into an external spreadsheet.
+ */
+export function datasetToSheetRows(
+  dataset: ExportDataset,
+  sheetNames: Partial<Record<
+    "transactions" | "income" | "expenses" | "categories" | "accounts",
+    string
+  >>,
+): { name: string; rows: string[][] }[] {
+  const s = (v: string | number): string => String(v);
+  const out: { name: string; rows: string[][] }[] = [];
+
+  if (sheetNames.transactions) {
+    out.push({
+      name: sheetNames.transactions,
+      rows: [TXN_HEADER, ...dataset.transactions.map((r) => txnValues(r).map(s))],
+    });
+  }
+  if (sheetNames.income) {
+    out.push({
+      name: sheetNames.income,
+      rows: [
+        TXN_HEADER,
+        ...dataset.transactions.filter((t) => t.direction === "in").map((r) =>
+          txnValues(r).map(s)
+        ),
+      ],
+    });
+  }
+  if (sheetNames.expenses) {
+    out.push({
+      name: sheetNames.expenses,
+      rows: [
+        TXN_HEADER,
+        ...dataset.transactions.filter((t) => t.direction === "out").map((r) =>
+          txnValues(r).map(s)
+        ),
+      ],
+    });
+  }
+  if (sheetNames.categories) {
+    out.push({
+      name: sheetNames.categories,
+      rows: [
+        ["Category", "Transactions", "Net"],
+        ...byCategory(dataset).map(([name, c]) => [name, s(c.count), s(c.net)]),
+      ],
+    });
+  }
+  if (sheetNames.accounts) {
+    out.push({
+      name: sheetNames.accounts,
+      rows: [
+        ["Account", "Transactions", "Money in", "Money out"],
+        ...byAccount(dataset).map((
+          [name, c],
+        ) => [name, s(c.count), s(c.inflow), s(c.outflow)]),
+      ],
+    });
+  }
+  return out;
+}
+
 // --- XLSX ----------------------------------------------------------
 
 function addSheet(
