@@ -5663,7 +5663,7 @@ else
 fi
 
 # ===========================================================================
-# Bills & Expenses Phase 2 (20260923000000): the three extraction tables,
+# Bills & Expenses Phase 2 (20261111000000): the three extraction tables,
 # record_bill_extraction / system_transition_bill_document being
 # service_role-only, a full worker round-trip (queued -> ... -> extracting
 # -> record -> needs_review with doc_class + fields + line items),
@@ -5766,7 +5766,7 @@ else
 fi
 
 # ===========================================================================
-# Bills & Expenses Phase 3 (20260924000000): record_bill_validation being
+# Bills & Expenses Phase 3 (20261112000000): record_bill_validation being
 # service_role-only, a full validation run inserting findings + advancing
 # validating -> needs_review, is_current supersession, and cross-workspace
 # RLS on the two validation tables. Reuses pfe_rls + USER_A / USER_B /
@@ -5835,7 +5835,7 @@ else
 fi
 
 # ===========================================================================
-# Bills & Expenses Phase 4 (20260925000000): get_bill_document_fingerprints
+# Bills & Expenses Phase 4 (20261113000000): get_bill_document_fingerprints
 # + record_bill_duplicate_candidates being service_role-only, a two-document
 # content-duplicate round-trip, resolve_bill_duplicate_candidate being
 # member + bill.review gated, and cross-workspace RLS. Reuses pfe_rls +
@@ -5939,7 +5939,7 @@ else
 fi
 
 # ===========================================================================
-# Bills & Expenses Phase 5 (20260926000000): create_supplier being
+# Bills & Expenses Phase 5 (20261114000000): create_supplier being
 # bill.manage-gated + its TIN guard, search_suppliers ranking + member
 # gate, link_bill_supplier being bill.review-gated,
 # record_bill_supplier_candidates being service_role-only, and
@@ -6035,7 +6035,7 @@ else
 fi
 
 # ===========================================================================
-# Bills & Expenses Phase 6 (20260927000000): approve_bill guards
+# Bills & Expenses Phase 6 (20261115000000): approve_bill guards
 # (blocking finding / unresolved duplicate / self-approval in a
 # multi-member workspace), idempotent post_bill (repeat with the same key
 # is a no-op; a different key after posting is rejected), link -> matched
@@ -6200,7 +6200,7 @@ else
 fi
 
 # ===========================================================================
-# Bills & Expenses Phase 7 (20260928000000): correct_bill_field provenance
+# Bills & Expenses Phase 7 (20261116000000): correct_bill_field provenance
 # + review_revision bump, the stale_validation approve guard and its
 # clearance by a fresh validation run, add_bill_comment being
 # bill.review-gated, and cross-workspace RLS on bill_comments. Reuses

@@ -12,7 +12,7 @@ background job does anything.
 
 ## 1. Release order (master prompt §24)
 
-1. **Migrations bake.** `20260922000000` … `20260928000000` apply
+1. **Migrations bake.** `20261110000000` … `20261116000000` apply
    additively on top of Phase U. No data migration. Confirm with the
    pg17 harness (`supabase/migrations/tests/run_migration_tests.sh`) —
    the full chain + the seven "Bills Phase 1–7" blocks must be green
@@ -126,7 +126,7 @@ It creates two 5-minute `pg_cron` jobs → `bill-processing-tick` and
   `BILLS_WORKSPACE_ALLOWLIST`), and `cron.unschedule` both Bills jobs.
   All rows stay; `/bills` becomes `notFound()`.
 - **Full rollback:** the migrations are additive with no data migration,
-  so a point-in-time restore to before `20260922000000` is clean. There
+  so a point-in-time restore to before `20261110000000` is clean. There
   is no destructive down-migration (this repo does not write them).
 
 ---

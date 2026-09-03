@@ -729,21 +729,25 @@ grant select, insert, update, delete on public.bill_processing_events to service
 grant select, insert, update, delete on public.bill_processing_policies to service_role;
 
 -- ===========================================================================
--- Spaces capability layer - widen the allowlist for the eight new bill.*
--- capabilities. CREATE OR REPLACE preserves existing grants. Only the
--- capability lists change; every other line is byte-identical to
--- 20260912000000_phase_r_spaces_authz_and_audit.sql.
+-- Spaces capability layer - extend the CLOSED catalog (last defined by
+-- 20261101000000_integration_destinations.sql, 23 capabilities) with the
+-- eight new bill.* capabilities. Forward-only: this migration runs after
+-- the whole closed-catalog / integrations chain, so it must reproduce
+-- their closed form (unknown/null capabilities fail closed for every
+-- role) and only widen the allowlist + the member branch.
 --
--- Default role mapping:
---   owner  -> all bill.* (owner already returns true for everything)
---   admin  -> all bill.* (admin returns true for everything except
---             space.delete / space.transfer_ownership)
---   member -> bill.upload, bill.review  (added to the member branch below)
---   viewer -> none
--- bill.approve / bill.post / bill.audit.view / bill.configure /
--- bill.manage / bill.download_original stay owner+admin by default; a
--- member can be granted any of them per-workspace via
--- grant_space_capability (now that they are in its allowlist).
+-- Default role mapping (closed-catalog philosophy unchanged):
+--   personal owner : all
+--   owner          : all
+--   admin          : all except space.delete / space.transfer_ownership
+--   member         : transaction.create, transaction.categorize,
+--                    integration.view, bill.upload, bill.review
+--   viewer         : none
+-- bill.approve / bill.post / bill.manage / bill.download_original /
+-- bill.audit.view / bill.configure stay owner+admin by default; a member
+-- can be granted any of them per-workspace via grant_space_capability
+-- (its inline allowlist + the space_member_capability_grants CHECK are
+-- both widened below).
 -- ===========================================================================
 
 create or replace function public.space_role_has_capability(
@@ -755,22 +759,40 @@ returns boolean
 language sql
 immutable
 as $$
-  select case
-    when p_kind = 'personal' then p_role = 'owner'
-    when p_role = 'owner' then true
-    when p_role = 'admin'
-      then p_capability not in ('space.delete', 'space.transfer_ownership')
-    when p_role = 'member'
-      then p_capability in (
-        'transaction.create', 'transaction.categorize',
-        'bill.upload', 'bill.review'
-      )
-    else false
-  end;
+  select coalesce(
+    p_capability in (
+      'space.manage_settings', 'space.delete', 'space.transfer_ownership',
+      'members.manage', 'budget.manage', 'goal.manage', 'rule.manage',
+      'report.config', 'category.manage', 'transaction.create',
+      'transaction.categorize', 'audit.view',
+      'integration.view', 'integration.import', 'integration.import_approve',
+      'integration.export', 'integration.configure',
+      'integration.connection_manage', 'integration.sync_manage',
+      'integration.logs_view',
+      'integration.destination_manage', 'integration.workbook_manage',
+      'integration.conflict_resolve',
+      'bill.upload', 'bill.review', 'bill.approve', 'bill.post',
+      'bill.manage', 'bill.download_original', 'bill.audit.view',
+      'bill.configure'
+    )
+    and case
+      when p_kind = 'personal' then p_role = 'owner'
+      when p_role = 'owner' then true
+      when p_role = 'admin'
+        then p_capability not in ('space.delete', 'space.transfer_ownership')
+      when p_role = 'member'
+        then p_capability in (
+          'transaction.create', 'transaction.categorize', 'integration.view',
+          'bill.upload', 'bill.review'
+        )
+      else false
+    end,
+    false
+  );
 $$;
 
 comment on function public.space_role_has_capability is
-  'The Spaces capability matrix. Pure/IMMUTABLE. Known capabilities: space.manage_settings, space.delete, space.transfer_ownership, members.manage, budget.manage, goal.manage, rule.manage, report.config, category.manage, transaction.create, transaction.categorize, audit.view, and bill.upload / bill.review / bill.approve / bill.post / bill.manage / bill.download_original / bill.audit.view / bill.configure. Owner: all. Admin: all except space.delete / space.transfer_ownership. Member: transaction.create / transaction.categorize / bill.upload / bill.review. Viewer: none. Per-member exceptions are additive via space_member_capability_grants.';
+  'Closed Spaces capability matrix. Unknown and null capabilities always fail closed. Owner: all 31 known capabilities. Admin: all except space.delete / space.transfer_ownership. Member: transaction.create / transaction.categorize / integration.view / bill.upload / bill.review. Viewer: none.';
 
 create or replace function public.grant_space_capability(
   p_workspace_id uuid,
@@ -787,11 +809,20 @@ begin
     raise exception 'You do not have permission to manage members of this Space.';
   end if;
 
+  -- Kept in lockstep with the space_member_capability_grants_known_
+  -- capability CHECK (widened below): the closed integration.* set from
+  -- 20261101000000_integration_destinations.sql plus the eight bill.*.
   if p_capability not in (
     'space.manage_settings', 'space.delete', 'space.transfer_ownership',
     'members.manage', 'budget.manage', 'goal.manage', 'rule.manage',
     'report.config', 'category.manage', 'transaction.create',
     'transaction.categorize', 'audit.view',
+    'integration.view', 'integration.import', 'integration.import_approve',
+    'integration.export', 'integration.configure',
+    'integration.connection_manage', 'integration.sync_manage',
+    'integration.logs_view',
+    'integration.destination_manage', 'integration.workbook_manage',
+    'integration.conflict_resolve',
     'bill.upload', 'bill.review', 'bill.approve', 'bill.post',
     'bill.manage', 'bill.download_original', 'bill.audit.view',
     'bill.configure'
@@ -850,6 +881,36 @@ $$;
 
 revoke all on function public.revoke_space_capability(uuid, uuid, text) from public;
 grant execute on function public.revoke_space_capability(uuid, uuid, text) to authenticated;
+
+-- Additive companion to space_member_capability_grants_known_capability
+-- (last set by 20261101000000_integration_destinations.sql). The CHECK is
+-- what actually stops grant_space_capability from inserting a misspelled
+-- or unknown capability row; widen it to accept bill.* so the per-member
+-- grant path works. Same drop/re-add/validate shape as the integrations
+-- migrations.
+alter table public.space_member_capability_grants
+  drop constraint if exists space_member_capability_grants_known_capability;
+
+alter table public.space_member_capability_grants
+  add constraint space_member_capability_grants_known_capability
+  check (capability in (
+    'space.manage_settings', 'space.delete', 'space.transfer_ownership',
+    'members.manage', 'budget.manage', 'goal.manage', 'rule.manage',
+    'report.config', 'category.manage', 'transaction.create',
+    'transaction.categorize', 'audit.view',
+    'integration.view', 'integration.import', 'integration.import_approve',
+    'integration.export', 'integration.configure',
+    'integration.connection_manage', 'integration.sync_manage',
+    'integration.logs_view',
+    'integration.destination_manage', 'integration.workbook_manage',
+    'integration.conflict_resolve',
+    'bill.upload', 'bill.review', 'bill.approve', 'bill.post',
+    'bill.manage', 'bill.download_original', 'bill.audit.view',
+    'bill.configure'
+  )) not valid;
+
+alter table public.space_member_capability_grants
+  validate constraint space_member_capability_grants_known_capability;
 
 -- ===========================================================================
 -- Private Storage buckets (master prompt §5/§6/§27). public = false is

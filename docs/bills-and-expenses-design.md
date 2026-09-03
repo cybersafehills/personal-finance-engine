@@ -6,22 +6,22 @@ existing architecture, proposed architecture, the phased delivery, the
 security model, the testing strategy, and the deferred set.
 
 Status: **Phases 1–8 built** — the whole program (on `main` after Phases S–U).
-Phase 1 — `20260922000000_bills_phase_1_intake_and_lifecycle.sql` +
+Phase 1 — `20261110000000_bills_phase_1_intake_and_lifecycle.sql` +
 `web/lib/bills/**`, `web/app/bills/**`, `web/app/api/bills/**`.
-Phase 2 — `20260923000000_bills_phase_2_extraction.sql` +
+Phase 2 — `20261111000000_bills_phase_2_extraction.sql` +
 `web/lib/bills/normalize.ts`, `web/lib/bills/extraction/**`,
 `web/lib/bills/worker.ts`, `web/app/api/cron/process-bill-documents/`.
-Phase 3 — `20260924000000_bills_phase_3_validation.sql` +
+Phase 3 — `20261112000000_bills_phase_3_validation.sql` +
 `web/lib/bills/validation/**` (pure rule engine), wired into the worker.
-Phase 4 — `20260925000000_bills_phase_4_duplicates.sql` +
+Phase 4 — `20261113000000_bills_phase_4_duplicates.sql` +
 `web/lib/bills/duplicates/detect.ts` (pure scorer), wired into the worker.
-Phase 5 — `20260926000000_bills_phase_5_suppliers.sql` + `search_suppliers`
+Phase 5 — `20261114000000_bills_phase_5_suppliers.sql` + `search_suppliers`
 ranking in SQL, `web/components/bills/BillSupplierPanel.tsx`, wired into
 the worker.
-Phase 6 — `20260927000000_bills_phase_6_matching_posting.sql` +
+Phase 6 — `20261115000000_bills_phase_6_matching_posting.sql` +
 `web/lib/bills/matching/score.ts` (pure scorer),
 `web/components/bills/BillLedgerPanel.tsx`, wired into the worker.
-Phase 7 — `20260928000000_bills_phase_7_review.sql` +
+Phase 7 — `20261116000000_bills_phase_7_review.sql` +
 `web/lib/bills/revalidate.ts` (shared with the worker) +
 `web/components/bills/BillFieldsEditor.tsx` / `BillDocumentPreview.tsx` /
 `BillComments.tsx` / `BillListFilters.tsx`, and the two-column review

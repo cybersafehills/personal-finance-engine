@@ -156,40 +156,40 @@ disposable, version-matched (PostgreSQL 17) local cluster and asserts:
   on-functions quirk described below).
 
 Per-phase functional blocks follow (Phase B ... Phase U, then **Bills &
-Expenses Phase 1** - `20260922000000`: the document lifecycle CHECK, the
+Expenses Phase 1** - `20261110000000`: the document lifecycle CHECK, the
 per-workspace `checksum_sha256` uniqueness guard, `transition_bill_
 document`'s matrix + capability gating, the `record_bill_event` /
 `enforce_bill_original_immutable` lockdowns, and cross-workspace RLS
 isolation on `bill_documents`; then **Bills & Expenses Phase 2** -
-`20260923000000`: `record_bill_extraction` / `system_transition_bill_
+`20261111000000`: `record_bill_extraction` / `system_transition_bill_
 document` being `service_role`-only, a full worker round-trip
 (`queued -> ... -> extracting -> record -> needs_review` with `doc_class`,
 fields and line items), `is_current` supersession, `retry_bill_extraction`,
 and cross-workspace RLS on the three extraction tables; then **Bills &
-Expenses Phase 3** - `20260924000000`: `record_bill_validation` being
+Expenses Phase 3** - `20261112000000`: `record_bill_validation` being
 `service_role`-only, a validation run inserting findings + tallying
 severities + advancing `validating -> needs_review`, `is_current`
 supersession, and cross-workspace RLS on `bill_validations` /
 `bill_validation_findings`; then **Bills & Expenses Phase 4** -
-`20260925000000`: `get_bill_document_fingerprints` /
+`20261113000000`: `get_bill_document_fingerprints` /
 `record_bill_duplicate_candidates` being `service_role`-only, a
 two-document content-duplicate round-trip,
 `resolve_bill_duplicate_candidate` being member + `bill.review` gated,
 and cross-workspace RLS on `bill_duplicate_candidates`; then **Bills &
-Expenses Phase 5** - `20260926000000`: `create_supplier` being
+Expenses Phase 5** - `20261114000000`: `create_supplier` being
 `bill.manage`-gated with a per-workspace TIN guard (never merges),
 `search_suppliers` ranking + member gate, `link_bill_supplier` being
 `bill.review`-gated, `record_bill_supplier_candidates` being
 `service_role`-only, and cross-workspace RLS on `suppliers` /
 `bill_supplier_candidates`; then **Bills & Expenses Phase 6** -
-`20260927000000`: `approve_bill`'s blocking-finding / unresolved-duplicate
+`20261115000000`: `approve_bill`'s blocking-finding / unresolved-duplicate
 / no-self-approval-in-a-multi-member-workspace guards, idempotent
 `post_bill` (a repeat with the same key is a no-op; a different key after
 posting is rejected; link → matched, no link → posted),
 `get_bill_transaction_search_set` /
 `record_bill_transaction_match_candidates` being `service_role`-only, and
 cross-workspace RLS on `bills`; then **Bills & Expenses Phase 7** -
-`20260928000000`: `correct_bill_field` provenance (raw/normalised
+`20261116000000`: `correct_bill_field` provenance (raw/normalised
 preserved) + `review_revision` bump, the `approve_bill` `stale_validation`
 guard and its clearance by a fresh validation run, `add_bill_comment`
 being `bill.review`-gated, and cross-workspace RLS on `bill_comments`).
