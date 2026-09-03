@@ -2,7 +2,7 @@
 
 The reference for the one-time pairing handshake and the `capture` Edge
 Function. ADR 0008 has the rationale; the migration
-`supabase/migrations/20261102000000_device_pairing_v2.sql`, the function
+`supabase/migrations/20261104000000_device_pairing_v2.sql`, the function
 `supabase/functions/capture/`, and the shared module
 `supabase/functions/_shared/pairing.ts` are the source of truth for behaviour.
 

@@ -631,7 +631,7 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # integration_destination_secrets, connected_workbooks, integration_sync_runs
 # and integration_conflicts - all RLS enabled; the secrets table has zero
 # authenticated/anon grants - 91 tables, 90 with RLS.
-# Device pairing v2 (20261102000000) adds pairing_sessions (RLS enabled,
+# Device pairing v2 (20261104000000) adds pairing_sessions (RLS enabled,
 # SELECT-own for authenticated) and connector_pairing_events (RLS enabled,
 # service-role-only, no authenticated policy) - 93 tables, 92 with RLS.
 if [ "$TABLE_COUNT" = "93" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
@@ -888,7 +888,7 @@ fi
 # DEFINER RPCs). = 91.
 # Integrations Phase 2 P2-PR5 (20261103000000) adds apply_integration_conflict
 # (integration.conflict_resolve-gated SECURITY DEFINER RPC). = 92.
-# Device pairing v2 (20261102000000) adds one authenticated RPC,
+# Device pairing v2 (20261104000000) adds one authenticated RPC,
 # create_device_pairing_session. _enroll_ingestion_connection,
 # consume_device_pairing_session, and expire_stale_pairing_sessions are
 # service-role-only. = 93.
@@ -4991,7 +4991,7 @@ else
 fi
 
 # ===========================================================================
-# Device pairing v2 (20261102000000): one-time pairing handshake.
+# Device pairing v2 (20261104000000): one-time pairing handshake.
 # ===========================================================================
 echo "=== Device pairing v2: session lifecycle ==="
 

@@ -415,7 +415,7 @@ Shortcuts (`ConnectionDetails.tsx`). `ONELEDGER_AUDIT.md` F7 /
 **Decisions.** Full rationale in `docs/adr/0008-consumer-device-pairing.md`;
 protocol and contract in `docs/device-pairing.md`.
 
-1. **`pairing_sessions`** (migration `20261102000000_device_pairing_v2.sql`) —
+1. **`pairing_sessions`** (migration `20261104000000_device_pairing_v2.sql`) —
    a short-lived (10-minute), single-use pairing *intent*. Only
    `sha256(token)` is stored; the plaintext pairing token is shown once by the
    web app and never persisted. Redeemed exactly once for a scoped

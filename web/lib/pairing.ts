@@ -9,7 +9,7 @@
 // Contract mirrors:
 //   - DB:   pairing_sessions.token_hash `^[0-9a-f]{64}$`,
 //           pairing_sessions.token_prefix `^olp_[A-Za-z0-9]{4}$`
-//           (supabase/migrations/20261102000000_device_pairing_v2.sql)
+//           (supabase/migrations/20261104000000_device_pairing_v2.sql)
 //   - Edge: PAIRING_TOKEN_PATTERN, mapPairingReasonToHttp
 //           (supabase/functions/_shared/pairing.ts)
 
