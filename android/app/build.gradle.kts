@@ -22,11 +22,16 @@ android {
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
-            // Staging Supabase Functions URL; overridden per-environment in CI.
+            // OneLedger's single Supabase project (ref `zttxsaiywkfrbdxgzbjd` —
+            // a public identifier, see .github/workflows/deploy-supabase.yml).
+            // Used ONLY for the first `op:"pair"` call; every request after that
+            // uses the `capture_url` the server returns at pair time (ADR 0008
+            // §3). Point a debug build at a branch/preview backend by editing
+            // this line locally.
             buildConfigField(
                 "String",
                 "DEFAULT_CAPTURE_BASE_URL",
-                "\"https://staging-project-ref.functions.supabase.co\"",
+                "\"https://zttxsaiywkfrbdxgzbjd.functions.supabase.co\"",
             )
         }
         release {
@@ -36,10 +41,12 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            // Same project as debug — OneLedger runs one Supabase project,
+            // gated by feature flags + workspace allowlists, not by environment.
             buildConfigField(
                 "String",
                 "DEFAULT_CAPTURE_BASE_URL",
-                "\"https://project-ref.functions.supabase.co\"",
+                "\"https://zttxsaiywkfrbdxgzbjd.functions.supabase.co\"",
             )
         }
     }
