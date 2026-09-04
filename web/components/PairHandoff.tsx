@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   androidCompanionPairUrl,
-  deviceCaptureShortcutRunUrl,
+  devicePairShortcutRunUrl,
   type PairPlatform,
 } from "../lib/pairing";
 
@@ -31,7 +31,7 @@ export function PairHandoff({
   const isAndroid = platform === "android";
   const runUrl = isAndroid
     ? androidCompanionPairUrl(token)
-    : deviceCaptureShortcutRunUrl(token);
+    : devicePairShortcutRunUrl(token);
 
   useEffect(() => {
     // One shot — don't fight the user if they come back to this tab.
@@ -54,15 +54,19 @@ export function PairHandoff({
           type="button"
           onClick={async () => {
             try {
-              await navigator.clipboard?.writeText(token);
+              if (!navigator.clipboard) throw new Error("no clipboard");
+              await navigator.clipboard.writeText(token);
               setCopied(true);
+              setTimeout(() => setCopied(false), 2000);
             } catch {
               /* clipboard unavailable — the code is on screen */
+              setCopied(false);
             }
           }}
+          aria-live="polite"
           className="min-h-9 w-fit rounded-control bg-accent px-3 text-xs font-medium text-accent-foreground"
         >
-          {copied ? "Copied" : "Copy code"}
+          {copied ? "Copied ✓" : "Copy code"}
         </button>
       </div>
 
@@ -70,7 +74,9 @@ export function PairHandoff({
         href={runUrl}
         className="inline-flex min-h-11 items-center justify-center rounded-control bg-accent px-4 text-sm font-medium text-accent-foreground"
       >
-        {isAndroid ? "Open in OneLedger Companion" : "Run OneLedger Capture"}
+        {isAndroid
+          ? "Open in OneLedger Companion"
+          : "Run “Connect to OneLedger”"}
       </a>
 
       <div className="flex flex-col gap-2 text-sm text-text-secondary">
@@ -118,8 +124,9 @@ export function PairHandoff({
                 <ol className="flex flex-col gap-1">
                   <li>1. Open the Shortcuts app.</li>
                   <li>
-                    2. Add the OneLedger Capture Shortcut, then come back and tap
-                    &ldquo;Run OneLedger Capture&rdquo; above.
+                    2. Add the OneLedger Capture Shortcuts, then come back and
+                    tap &ldquo;Run &lsquo;Connect to OneLedger&rsquo;&rdquo;
+                    above.
                   </li>
                 </ol>
               )
