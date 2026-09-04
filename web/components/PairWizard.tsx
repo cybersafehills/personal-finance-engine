@@ -71,6 +71,12 @@ export function PairWizard({
   const [pairError, setPairError] = useState<string | null>(null);
   const [expired, setExpired] = useState(false);
   const [copied, setCopied] = useState(false);
+  // Purely local "I tapped this" memory for the Install step's two Shortcut
+  // links - not persisted, not proof either Shortcut was actually added
+  // (iOS never tells us that). Just enough to turn a clicked link into a
+  // visibly settled state instead of looking identically untouched forever.
+  const [connectAdded, setConnectAdded] = useState(false);
+  const [captureAdded, setCaptureAdded] = useState(false);
   const [isStarting, startTransition] = useTransition();
 
   // Only offer the QR on a device with a fine pointer (a computer) — a phone
@@ -260,22 +266,44 @@ export function PairWizard({
                       <p className="text-sm text-text-secondary">
                         Two small Shortcuts — add both:
                       </p>
-                      <a
-                        href={shortcutUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex min-h-11 w-fit items-center rounded-control bg-accent px-4 text-sm font-medium text-accent-foreground"
-                      >
-                        1. Add “Connect to OneLedger”
-                      </a>
-                      <a
-                        href={captureShortcutUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex min-h-11 w-fit items-center rounded-control bg-accent px-4 text-sm font-medium text-accent-foreground"
-                      >
-                        2. Add “OneLedger Capture”
-                      </a>
+                      <div className="flex items-center gap-2">
+                        <a
+                          href={shortcutUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={() => setConnectAdded(true)}
+                          className={`inline-flex min-h-11 w-fit items-center rounded-control px-4 text-sm font-medium text-accent-foreground ${
+                            connectAdded ? "bg-accent-pressed" : "bg-accent"
+                          }`}
+                        >
+                          1. Add “Connect to OneLedger”
+                        </a>
+                        {connectAdded && (
+                          <span className="inline-flex min-h-6 items-center rounded-full bg-accent-pressed/10 px-2 text-xs font-medium text-accent-pressed">
+                            ✓ Added
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <a
+                          href={captureShortcutUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={() => setCaptureAdded(true)}
+                          className={`inline-flex min-h-11 w-fit items-center rounded-control px-4 text-sm font-medium text-accent-foreground ${
+                            captureAdded
+                              ? "bg-money-positive-pressed"
+                              : "bg-money-positive"
+                          }`}
+                        >
+                          2. Add “OneLedger Capture”
+                        </a>
+                        {captureAdded && (
+                          <span className="inline-flex min-h-6 items-center rounded-full bg-money-positive-bg px-2 text-xs font-medium text-money-positive-pressed">
+                            ✓ Added
+                          </span>
+                        )}
+                      </div>
                       <p className="text-sm text-text-secondary">
                         Each opens the Shortcuts app with a preview — scroll to
                         the bottom and tap{" "}
@@ -558,11 +586,18 @@ export function PairWizard({
               ✓ {isAndroid ? "Phone" : "iPhone"} paired
             </li>
             <li className="text-money-positive">✓ Secure connection established</li>
-            <li className="flex flex-col gap-1 text-text-secondary">
-              <span>○ Waiting for the first transaction message</span>
-              {deviceCredentialId && (
-                <ConnectionReadinessProbe credentialId={deviceCredentialId} />
-              )}
+            {/* No static "waiting" line here on top of the probe - the probe
+                itself is the live status (waiting / ready / gave-up) and was
+                previously getting drowned out by a static bullet above it
+                that never changed even once the connection went live. */}
+            <li>
+              {deviceCredentialId
+                ? <ConnectionReadinessProbe credentialId={deviceCredentialId} />
+                : (
+                  <span className="text-text-secondary">
+                    ○ Waiting for the first transaction message
+                  </span>
+                )}
             </li>
           </ul>
           <p className="text-xs text-text-muted">
@@ -574,17 +609,19 @@ export function PairWizard({
       {step === "done" && (
         <div className="flex flex-col gap-3 rounded-card border border-border-subtle bg-surface p-6">
           <h2 className="text-base font-semibold text-text-primary">
-            Your {isAndroid ? "phone" : "iPhone"} is connected
+            You’re all set
           </h2>
           <p className="text-sm text-text-secondary">
-            Supported transaction messages from this phone are now recorded in
-            OneLedger automatically.
+            Your {isAndroid ? "phone" : "iPhone"} is paired and sending
+            supported transaction messages to OneLedger. There’s nothing else
+            to configure — new transactions will appear here automatically
+            from now on.
           </p>
           <Link
-            href="/integrations/connections"
+            href="/"
             className="inline-flex min-h-11 w-fit items-center rounded-control bg-accent px-4 text-sm font-medium text-accent-foreground"
           >
-            Done
+            Go to OneLedger
           </Link>
         </div>
       )}

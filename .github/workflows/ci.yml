@@ -65,6 +65,16 @@ jobs:
       - name: deno check (reconcile-balances entry point)
         run: deno check supabase/functions/reconcile-balances/index.ts
 
+      # capture and process-raw-events (device pairing v2, ADR 0008/0009)
+      # both had test suites but were missing from this workflow entirely -
+      # a change to either could ship broken with CI green. Closing that gap
+      # alongside the last_used_at fix that motivated noticing it.
+      - name: deno check (capture entry point)
+        run: deno check supabase/functions/capture/index.ts
+
+      - name: deno check (process-raw-events entry point)
+        run: deno check supabase/functions/process-raw-events/index.ts
+
       - name: deno check (_shared entry points)
         run: |
           set -euo pipefail
@@ -83,6 +93,12 @@ jobs:
 
       - name: deno test (reconcile-balances)
         run: deno test supabase/functions/reconcile-balances/tests
+
+      - name: deno test (capture)
+        run: deno test supabase/functions/capture/tests
+
+      - name: deno test (process-raw-events)
+        run: deno test supabase/functions/process-raw-events/tests
 
       - name: deno test (_shared)
         run: deno test supabase/functions/_shared/tests

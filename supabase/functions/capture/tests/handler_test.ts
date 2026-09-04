@@ -213,6 +213,7 @@ const ROUTE: CaptureRoute = {
 function captureDeps(overrides: Partial<CaptureDeps> = {}) {
   const rec = recorder();
   const inserts: Array<Record<string, unknown>> = [];
+  const touched: string[] = [];
   const deps: CaptureDeps = {
     recordEvent: rec.recordEvent,
     authenticateDevice: () => Promise.resolve({ ok: true, route: ROUTE }),
@@ -220,13 +221,17 @@ function captureDeps(overrides: Partial<CaptureDeps> = {}) {
       inserts.push(args as unknown as Record<string, unknown>);
       return Promise.resolve({ outcome: "queued", eventId: "evt-1" });
     },
+    touchCredential: (deviceCredentialId) => {
+      touched.push(deviceCredentialId);
+      return Promise.resolve();
+    },
     ...overrides,
   };
-  return { deps, events: rec.events, inserts };
+  return { deps, events: rec.events, inserts, touched };
 }
 
 Deno.test("handleCapture: valid MTN message → 202 queued + capture_accepted, canonical route passed through", async () => {
-  const { deps, events, inserts } = captureDeps();
+  const { deps, events, inserts, touched } = captureDeps();
   const res: HandlerResult = await handleCapture(
     SECRET,
     {
@@ -249,6 +254,9 @@ Deno.test("handleCapture: valid MTN message → 202 queued + capture_accepted, c
     "leg-7",
   );
   assert(/^[0-9a-f]{64}$/.test(inserts[0].payloadHash as string));
+  // The pairing wizard's Verify step polls last_used_at to know the
+  // connection is live - a successful capture must stamp it.
+  assertEquals(touched, ["dc-7"]);
 });
 
 Deno.test("handleCapture: redelivery → 200 duplicate, no capture_accepted", async () => {
@@ -271,9 +279,9 @@ Deno.test("handleCapture: redelivery → 200 duplicate, no capture_accepted", as
   assert(!events.some((e) => e.event === "capture_accepted"));
 });
 
-Deno.test("handleCapture: unknown provider → 422, no evidence write, capture_rejected", async () => {
+Deno.test("handleCapture: unknown provider → 422, no evidence write, capture_rejected, credential still touched", async () => {
   let recorded = false;
-  const { deps, events } = captureDeps({
+  const { deps, events, touched } = captureDeps({
     recordRawEvent: () => {
       recorded = true;
       return Promise.resolve({ outcome: "queued", eventId: "x" });
@@ -293,11 +301,15 @@ Deno.test("handleCapture: unknown provider → 422, no evidence write, capture_r
   assertEquals(res.body.error, "UNKNOWN_PROVIDER");
   assertEquals(recorded, false);
   assertEquals(events.at(-1)?.reasonCode, "UNKNOWN_PROVIDER");
+  // Readiness only asks "did this device successfully reach us", not "did
+  // this specific message parse" - an unrecognised message still proves
+  // the pairing pipeline itself works end to end.
+  assertEquals(touched, ["dc-7"]);
 });
 
-Deno.test("handleCapture: bad envelope → 400 + capture_rejected, nothing written", async () => {
+Deno.test("handleCapture: bad envelope → 400 + capture_rejected, nothing written, credential NOT touched", async () => {
   let recorded = false;
-  const { deps, events } = captureDeps({
+  const { deps, events, touched } = captureDeps({
     recordRawEvent: () => {
       recorded = true;
       return Promise.resolve({ outcome: "queued", eventId: "x" });
@@ -316,6 +328,9 @@ Deno.test("handleCapture: bad envelope → 400 + capture_rejected, nothing writt
   assertEquals(res.body.error, "INVALID_CAPTURE_PAYLOAD");
   assertEquals(recorded, false);
   assertEquals(events.at(-1)?.event, "capture_rejected");
+  // A malformed request from an authenticated device is not evidence the
+  // pipeline works - only a well-formed one should mark the connection live.
+  assertEquals(touched, []);
 });
 
 Deno.test("handleCapture: missing / bad / unknown credential → uniform 401, no oracle", async () => {
