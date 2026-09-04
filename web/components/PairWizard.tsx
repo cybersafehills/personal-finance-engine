@@ -11,7 +11,7 @@ import Link from "next/link";
 import type { AccountRow } from "../lib/queries";
 import {
   androidCompanionPairUrl,
-  deviceCaptureShortcutRunUrl,
+  devicePairShortcutRunUrl,
   type PairPlatform,
   pairHandoffUrl,
 } from "../lib/pairing";
@@ -64,6 +64,7 @@ export function PairWizard({
   );
   const [pairError, setPairError] = useState<string | null>(null);
   const [expired, setExpired] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [isStarting, startTransition] = useTransition();
 
   // Only offer the QR on a device with a fine pointer (a computer) — a phone
@@ -273,22 +274,33 @@ export function PairWizard({
               </div>
             )
             : (
-              <div className="flex flex-col gap-3 rounded-card border border-border-subtle bg-surface p-4">
-                <p className="text-sm text-text-secondary">
-                  One-tap setup isn’t available on this OneLedger yet — the
-                  ready-made Shortcut hasn’t been published.
-                </p>
-                <Link
-                  href="/integrations/connections"
-                  className="inline-flex min-h-11 w-fit items-center rounded-control bg-accent px-4 text-sm font-medium text-accent-foreground"
-                >
-                  Set up with Advanced connection
-                </Link>
+              <div className="flex flex-col gap-4">
+                <div className="flex flex-col gap-2 rounded-card border border-border-subtle bg-surface p-4">
+                  <p className="text-sm text-text-secondary">
+                    The one-tap <span className="font-medium">OneLedger Capture</span>
+                    {" "}
+                    Shortcut for this iPhone hasn’t been published yet — guided
+                    setup will be a single tap once it is.
+                  </p>
+                  <p className="text-sm text-text-secondary">
+                    Already built the{" "}
+                    <span className="font-medium">Connect to OneLedger</span> and
+                    {" "}
+                    <span className="font-medium">OneLedger Capture</span>{" "}
+                    Shortcuts yourself? Tap{" "}
+                    <span className="font-medium">“I’ve added it”</span> below to
+                    pair this iPhone.
+                  </p>
+                </div>
                 <p className="text-xs text-text-muted">
-                  Already built the “OneLedger Capture” Shortcut yourself? Tap
-                  {" "}
-                  <span className="font-medium">“I’ve added it”</span> below to
-                  carry on.
+                  Rather set it up the long way?{" "}
+                  <Link
+                    href="/integrations/connections"
+                    className="font-medium text-accent hover:underline"
+                  >
+                    Use an Advanced connection
+                  </Link>
+                  {" "}— a manual endpoint + key, no Shortcut.
                 </p>
               </div>
             )}
@@ -325,27 +337,42 @@ export function PairWizard({
                 <span className="text-xs font-medium uppercase tracking-wide text-text-muted">
                   Pairing code · expires in ~10 min
                 </span>
-                <code className="block break-all text-lg font-semibold text-text-primary">
+                <code
+                  className="block break-all text-lg font-semibold text-text-primary"
+                  data-testid="pairing-code"
+                >
                   {session.token}
                 </code>
                 <button
                   type="button"
-                  onClick={() => navigator.clipboard?.writeText(session.token)}
+                  onClick={async () => {
+                    try {
+                      if (!navigator.clipboard) throw new Error("no clipboard");
+                      await navigator.clipboard.writeText(session.token);
+                      setCopied(true);
+                      setTimeout(() => setCopied(false), 2000);
+                    } catch {
+                      // Clipboard blocked (older WebView / permissions) — the
+                      // code is on screen to type by hand.
+                      setCopied(false);
+                    }
+                  }}
+                  aria-live="polite"
                   className="min-h-9 w-fit rounded-control bg-accent px-3 text-xs font-medium text-accent-foreground"
                 >
-                  Copy code
+                  {copied ? "Copied ✓" : "Copy code"}
                 </button>
               </div>
 
               <a
                 href={isAndroid
                   ? androidCompanionPairUrl(session.token)
-                  : deviceCaptureShortcutRunUrl(session.token)}
+                  : devicePairShortcutRunUrl(session.token)}
                 className="inline-flex min-h-11 w-fit items-center rounded-control bg-accent px-4 text-sm font-medium text-accent-foreground"
               >
                 {isAndroid
                   ? "Open in OneLedger Companion"
-                  : "Open OneLedger Capture"}
+                  : "Open “Connect to OneLedger”"}
               </a>
 
               <p className="flex items-center gap-2 text-xs text-text-secondary">

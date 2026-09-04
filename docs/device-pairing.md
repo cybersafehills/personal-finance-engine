@@ -75,8 +75,12 @@ platform-neutral (ADR 0008 §Consequences).
    `requireMfaForSensitiveAction` → `generatePairingToken()` /
    `hashPairingToken()` → `create_device_pairing_session`. Shows the `olp_` code
    big + copyable, plus a deep link:
-   - iOS: **Open OneLedger Capture** —
-     `deviceCaptureShortcutRunUrl(token)` (`shortcuts://run-shortcut?name=OneLedger%20Capture&input=text&text=<token>`).
+   - iOS: **Open "Connect to OneLedger"** —
+     `devicePairShortcutRunUrl(token)` (`shortcuts://run-shortcut?name=Connect%20to%20OneLedger&input=text&text=<token>`).
+     Runs the one-time pairing Shortcut, **not** "OneLedger Capture" (the
+     automation forwarder). The name is `%20`-encoded, never `+` — the
+     Shortcuts URL scheme treats `+` literally and reports "the file doesn't
+     exist".
    - Android: **Open in OneLedger Companion** —
      `androidCompanionPairUrl(token)` (`oneledger://pair?c=<token>`, the
      Companion's manifest intent filter).
@@ -109,7 +113,7 @@ means iOS).
   an OneLedger session; the OneLedger Capture Shortcut (iOS) or the OneLedger
   Companion app (Android) is what redeems the code.
 - **Calls no RPC.** It renders the code big + copyable, a deep link
-  auto-attempted once on mount — **Run OneLedger Capture**
+  auto-attempted once on mount — **Run "Connect to OneLedger"**
   (`shortcuts://…`) or **Open in OneLedger Companion** (`oneledger://pair?c=…`) —
   and inline install steps (`web/components/PairHandoff.tsx`).
 - Gated by `devicePairingV2Enabled(DEVICE_PAIRING_V2)` → `notFound()` (404) when

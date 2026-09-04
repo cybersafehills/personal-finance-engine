@@ -181,29 +181,40 @@ export const ANDROID_COMPANION_PACKAGE = "me.oneledger.companion";
  * AndroidManifest intent filter (scheme `oneledger`, host `pair`). Opens the
  * app straight onto the pairing screen with the code prefilled. A harmless
  * no-op when the app isn't installed (same tradeoff as
- * `deviceCaptureShortcutRunUrl` on iOS); the wizard's poll is what actually
+ * `devicePairShortcutRunUrl` on iOS); the wizard's poll is what actually
  * advances the flow, however the token reaches the device.
  */
 export function androidCompanionPairUrl(token: string): string {
   return `oneledger://pair?${PAIR_HANDOFF_QUERY}=${encodeURIComponent(token)}`;
 }
 
+/** The Messages-automation forwarder (Shortcut B). Not the pairing Shortcut. */
 export const CAPTURE_SHORTCUT_NAME = "OneLedger Capture";
+/** The one-time pairing Shortcut (Shortcut A) — runs op:"pair" with the code. */
+export const CONNECT_SHORTCUT_NAME = "Connect to OneLedger";
 
 /**
- * `shortcuts://run-shortcut?...` deep link that runs the installed Capture
- * Shortcut on this iPhone, passing the pairing token as its text input. A
- * harmless no-op on a desktop browser (the wizard's poll is what actually
- * advances the flow, however the token reaches the device).
+ * `shortcuts://run-shortcut?...` deep link that runs the one-time
+ * "Connect to OneLedger" Shortcut on this iPhone, passing the pairing token as
+ * its text input. Two things the Shortcuts URL scheme is strict about:
+ *
+ *  - It opens the *pairing* Shortcut, not "OneLedger Capture" — that one is the
+ *    Messages-automation forwarder and has no pairing step.
+ *  - Spaces in the name must be percent-encoded as %20. The scheme does NOT
+ *    treat "+" as a space, so a `URLSearchParams`-built query
+ *    ("Connect+to+OneLedger") makes iOS report "the file doesn't exist".
+ *
+ * A harmless no-op on a desktop browser — the wizard's poll is what actually
+ * advances the flow, however the token reaches the device.
  */
-export function deviceCaptureShortcutRunUrl(
+export function devicePairShortcutRunUrl(
   token: string,
-  name: string = CAPTURE_SHORTCUT_NAME,
+  name: string = CONNECT_SHORTCUT_NAME,
 ): string {
-  const params = new URLSearchParams({
-    name,
-    input: "text",
-    text: token,
-  });
-  return `shortcuts://run-shortcut?${params.toString()}`;
+  const query = [
+    `name=${encodeURIComponent(name)}`,
+    "input=text",
+    `text=${encodeURIComponent(token)}`,
+  ].join("&");
+  return `shortcuts://run-shortcut?${query}`;
 }

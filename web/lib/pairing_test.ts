@@ -2,8 +2,8 @@ import { assert, assertEquals, assertMatch } from "jsr:@std/assert@1";
 import {
   androidCompanionPairUrl,
   connectorKeyForProvider,
-  deviceCaptureShortcutRunUrl,
   devicePairingV2Enabled,
+  devicePairShortcutRunUrl,
   generatePairingToken,
   hashPairingToken,
   isPairPlatform,
@@ -91,12 +91,16 @@ Deno.test("connectorKeyForProvider: mirrors the DB backfill CASE", () => {
   }
 });
 
-Deno.test("deviceCaptureShortcutRunUrl: runs the Capture Shortcut with the token as input", () => {
+Deno.test("devicePairShortcutRunUrl: runs the Connect Shortcut, spaces as %20 (never +)", () => {
   const { token } = generatePairingToken();
-  const url = deviceCaptureShortcutRunUrl(token);
+  const url = devicePairShortcutRunUrl(token);
   assert(url.startsWith("shortcuts://run-shortcut?"));
+  // iOS Shortcuts does not treat "+" as a space - a "+"-encoded name makes it
+  // report "the file doesn't exist".
+  assert(url.includes("name=Connect%20to%20OneLedger"));
+  assert(!url.includes("+"));
   const q = new URLSearchParams(url.slice(url.indexOf("?") + 1));
-  assertEquals(q.get("name"), "OneLedger Capture");
+  assertEquals(q.get("name"), "Connect to OneLedger");
   assertEquals(q.get("input"), "text");
   assertEquals(q.get("text"), token);
 });
