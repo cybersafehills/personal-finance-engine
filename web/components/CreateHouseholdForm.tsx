@@ -32,7 +32,7 @@ export function CreateHouseholdForm() {
           type="text"
           value={name}
           onChange={(event) => setName(event.target.value)}
-          placeholder="e.g. Niyoyo Household"
+          placeholder="e.g. Dolton Household"
           required
           className="min-h-11 rounded-control border border-border-strong bg-background px-3 py-2 text-sm text-text-primary"
         />
