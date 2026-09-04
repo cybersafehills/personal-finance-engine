@@ -941,6 +941,9 @@ AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_p
 # add_bill_comment. Internal helpers (record_bill_event, record_bill_*,
 # system_transition_bill_document, get_bill_*_search_set, ...) stay
 # service_role-only. 93 + 15 = 108.
+# Pairing auto-enroll (20261117000000) adds _ensure_account_financial_source,
+# a security-definer helper with NO role grant (called only from
+# create_device_pairing_session) - count stays 108.
 if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "108" ]; then
   pass "authenticated holds EXECUTE on exactly the 108 functions expected, no more"
 else
@@ -5093,6 +5096,33 @@ else
   fail "Device pairing: redemption state is wrong ($PAIR_STATE / consume=$PAIR_CONSUME)"
 fi
 
+# Auto-enroll (20261117000000): a legacy account with financial_source_id = NULL
+# is pairable without a prior "Advanced connection" - create_device_pairing_session
+# creates + links a canonical financial source owned by the caller.
+PAIR_LEGACY_ACCOUNT="$(psql -d pfe_rls -t -A -c "set role service_role; insert into public.accounts (workspace_id, financial_source_id, name, provider, currency) values ('$PAIR_WS', null, 'Legacy pairing account', 'mtn_momo', 'RWF') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+PAIR_LEGACY_HASH="$(printf 'd%.0s' $(seq 1 64))"
+if as_user "$PAIR_OWNER" "select public.create_device_pairing_session('mtn_momo_sms_v1', 'mtn_momo', '$PAIR_WS', 'Legacy iPhone', '$PAIR_LEGACY_HASH', 'olp_dddd', '$PAIR_LEGACY_ACCOUNT', null);" >/dev/null 2>$ARTIFACT_DIR/pfe_pair_autoenroll.log; then
+  PAIR_AUTOENROLL_STATE="$(psql -d pfe_rls -t -A -c "select (a.financial_source_id is not null) || '|' || (fs.owner_user_id = '$PAIR_OWNER') || '|' || (select count(*) from public.ingestion_connections ic where ic.account_id = a.id) from public.accounts a join public.financial_sources fs on fs.id = a.financial_source_id where a.id = '$PAIR_LEGACY_ACCOUNT';")"
+  if [ "$PAIR_AUTOENROLL_STATE" = "true|true|0" ] || [ "$PAIR_AUTOENROLL_STATE" = "t|t|0" ]; then
+    pass "Device pairing: a NULL-source account auto-enrolls a caller-owned financial source (no legacy ingestion_connections row)"
+  else
+    fail "Device pairing: auto-enroll linkage is wrong ($PAIR_AUTOENROLL_STATE)"
+  fi
+else
+  fail "Device pairing: create_device_pairing_session rejected a legacy NULL-source account ($(tail -1 $ARTIFACT_DIR/pfe_pair_autoenroll.log))"
+fi
+# Idempotent: a second pairing for the same account reuses the source it just made.
+PAIR_LEGACY_HASH2="$(printf 'e%.0s' $(seq 1 64))"
+PAIR_FS_BEFORE="$(psql -d pfe_rls -t -A -c "select financial_source_id from public.accounts where id = '$PAIR_LEGACY_ACCOUNT';")"
+as_user "$PAIR_OWNER" "select public.create_device_pairing_session('mtn_momo_sms_v1', 'mtn_momo', '$PAIR_WS', 'Legacy iPhone 2', '$PAIR_LEGACY_HASH2', 'olp_eeee', '$PAIR_LEGACY_ACCOUNT', null);" >/dev/null 2>&1
+PAIR_FS_AFTER="$(psql -d pfe_rls -t -A -c "select financial_source_id from public.accounts where id = '$PAIR_LEGACY_ACCOUNT';")"
+if [ -n "$PAIR_FS_BEFORE" ] && [ "$PAIR_FS_BEFORE" = "$PAIR_FS_AFTER" ]; then
+  pass "Device pairing: auto-enroll is idempotent - a re-pair keeps the same financial source"
+else
+  fail "Device pairing: auto-enroll re-ran (before=$PAIR_FS_BEFORE after=$PAIR_FS_AFTER)"
+fi
+rm -f $ARTIFACT_DIR/pfe_pair_autoenroll.log
+
 # The plaintext token never reaches the database - only its hash is stored.
 PAIR_PLAINTEXT="$(psql -d pfe_rls -t -A -c "select count(*) from information_schema.columns where table_schema='public' and table_name='pairing_sessions' and column_name in ('token','token_plaintext','pairing_token');")"
 if [ "$PAIR_PLAINTEXT" = "0" ]; then
@@ -5163,9 +5193,9 @@ fi
 rm -f $ARTIFACT_DIR/pfe_pair_hash.log
 
 # Privilege boundary.
-PAIR_ACL="$(psql -d pfe_rls -t -A -c "select has_function_privilege('authenticated', 'public.create_device_pairing_session(text,text,uuid,text,text,text,uuid,uuid)', 'execute') || '|' || has_function_privilege('anon', 'public.create_device_pairing_session(text,text,uuid,text,text,text,uuid,uuid)', 'execute') || '|' || has_function_privilege('authenticated', 'public.consume_device_pairing_session(text,text,text,text,text,text)', 'execute') || '|' || has_function_privilege('authenticated', 'public.expire_stale_pairing_sessions()', 'execute') || '|' || has_function_privilege('authenticated', 'public._enroll_ingestion_connection(uuid,uuid,uuid,text,text,text,text)', 'execute') || '|' || has_table_privilege('authenticated', 'public.connector_pairing_events', 'select');")"
-if [ "$PAIR_ACL" = "true|false|false|false|false|false" ] || [ "$PAIR_ACL" = "t|f|f|f|f|f" ]; then
-  pass "Device pairing: only create_device_pairing_session is authenticated-callable; redemption/cleanup/enrollment stay service-role-only"
+PAIR_ACL="$(psql -d pfe_rls -t -A -c "select has_function_privilege('authenticated', 'public.create_device_pairing_session(text,text,uuid,text,text,text,uuid,uuid)', 'execute') || '|' || has_function_privilege('anon', 'public.create_device_pairing_session(text,text,uuid,text,text,text,uuid,uuid)', 'execute') || '|' || has_function_privilege('authenticated', 'public.consume_device_pairing_session(text,text,text,text,text,text)', 'execute') || '|' || has_function_privilege('authenticated', 'public.expire_stale_pairing_sessions()', 'execute') || '|' || has_function_privilege('authenticated', 'public._enroll_ingestion_connection(uuid,uuid,uuid,text,text,text,text)', 'execute') || '|' || has_function_privilege('authenticated', 'public._ensure_account_financial_source(uuid,uuid,uuid)', 'execute') || '|' || has_function_privilege('anon', 'public._ensure_account_financial_source(uuid,uuid,uuid)', 'execute') || '|' || has_table_privilege('authenticated', 'public.connector_pairing_events', 'select');")"
+if [ "$PAIR_ACL" = "true|false|false|false|false|false|false|false" ] || [ "$PAIR_ACL" = "t|f|f|f|f|f|f|f" ]; then
+  pass "Device pairing: only create_device_pairing_session is authenticated-callable; redemption/cleanup/enrollment/source-ensure stay service-role-only"
 else
   fail "Device pairing: privilege boundary is wrong ($PAIR_ACL)"
 fi
