@@ -493,7 +493,9 @@ user to actually pair a phone.
 5. **`web/lib` additions** (pure, Deno-tested): `connectorKeyForProvider`,
    `deviceCaptureShortcutRunUrl`, `devicePairingV2Enabled` in `pairing.ts`;
    `capture-shortcut-guide.ts` (the thin-Shortcut steps, mirrors
-   `docs/oneledger-capture-shortcut.md`).
+   `docs/oneledger-capture-shortcut.md`) — later removed when the wizard's
+   Install step was collapsed to a single card; the Shortcut spec now lives
+   only in `docs/oneledger-capture-shortcut.md`.
 
 **Not in this PR.** QR image + a cross-device session bridge (desktop users get
 the copyable code + a "open on your phone" line); the `op:"capture"` real

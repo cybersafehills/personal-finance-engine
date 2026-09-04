@@ -10,17 +10,12 @@ import {
 import Link from "next/link";
 import type { AccountRow } from "../lib/queries";
 import {
-  captureShortcutGuideSteps,
-  CAPTURE_SHORTCUT_TROUBLESHOOTING,
-} from "../lib/capture-shortcut-guide";
-import {
   androidCompanionPairUrl,
   deviceCaptureShortcutRunUrl,
   type PairPlatform,
   pairHandoffUrl,
 } from "../lib/pairing";
 import { QrCode } from "./QrCode";
-import { ShortcutGuide } from "./ShortcutGuide";
 import { AndroidCompanionGuide } from "./AndroidCompanionGuide";
 import { ConnectionReadinessProbe } from "./ConnectionReadinessProbe";
 import {
@@ -249,12 +244,53 @@ export function PairWizard({
         >
           {isAndroid
             ? <AndroidCompanionGuide companionUrl={androidCompanionUrl} />
+            : shortcutUrl
+            ? (
+              <div className="flex flex-col gap-3 rounded-card border border-border-subtle bg-surface p-4">
+                <a
+                  href={shortcutUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex min-h-11 w-fit items-center rounded-control bg-accent px-4 text-sm font-medium text-accent-foreground"
+                >
+                  Add the OneLedger Capture Shortcut
+                </a>
+                <p className="text-sm text-text-secondary">
+                  Your iPhone opens the Shortcuts app and shows a preview — scroll
+                  to the bottom and tap{" "}
+                  <span className="font-medium">Add Shortcut</span>. You’ll get
+                  two:{" "}
+                  <span className="font-medium">Connect to OneLedger</span> and
+                  {" "}
+                  <span className="font-medium">OneLedger Capture</span>. You
+                  don’t need to open or edit either one.
+                </p>
+                <p className="text-xs text-text-muted">
+                  Then tap <span className="font-medium">“I’ve added it”</span>
+                  {" "}
+                  below to pair this iPhone.
+                </p>
+              </div>
+            )
             : (
-              <ShortcutGuide
-                steps={captureShortcutGuideSteps({ shortcutUrl, mtnSender })}
-                troubleshooting={CAPTURE_SHORTCUT_TROUBLESHOOTING}
-                shortcutUrl={shortcutUrl}
-              />
+              <div className="flex flex-col gap-3 rounded-card border border-border-subtle bg-surface p-4">
+                <p className="text-sm text-text-secondary">
+                  One-tap setup isn’t available on this OneLedger yet — the
+                  ready-made Shortcut hasn’t been published.
+                </p>
+                <Link
+                  href="/integrations/connections"
+                  className="inline-flex min-h-11 w-fit items-center rounded-control bg-accent px-4 text-sm font-medium text-accent-foreground"
+                >
+                  Set up with Advanced connection
+                </Link>
+                <p className="text-xs text-text-muted">
+                  Already built the “OneLedger Capture” Shortcut yourself? Tap
+                  {" "}
+                  <span className="font-medium">“I’ve added it”</span> below to
+                  carry on.
+                </p>
+              </div>
             )}
         </StepShell>
       )}

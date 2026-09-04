@@ -63,9 +63,11 @@ platform-neutral (ADR 0008 §Consequences).
 
 1. **Account** — phone type + which `accounts` row this phone feeds.
 2. **Install** —
-   - iOS: the OneLedger Capture Shortcut (`web/lib/capture-shortcut-guide.ts`,
-     `ShortcutGuide`; "Get the ready-made Shortcut" when
-     `NEXT_PUBLIC_MOMO_SHORTCUT_URL` is set).
+   - iOS: one card in `PairWizard` — an "Add the OneLedger Capture Shortcut"
+     button when `NEXT_PUBLIC_MOMO_SHORTCUT_URL` is set, otherwise an honest
+     "one-tap setup isn't available yet" note pointing at Advanced connection.
+     (The Pair / Automate / Verify walkthroughs are the wizard's own later
+     steps, not repeated here.)
    - Android: `AndroidCompanionGuide` — install the OneLedger Companion
      (`android/`, ADR 0010); "Get the OneLedger Companion app" when
      `NEXT_PUBLIC_ANDROID_COMPANION_URL` is set.
