@@ -45,11 +45,17 @@ const POLL_MS = 3_000;
 export function PairWizard({
   accounts,
   shortcutUrl,
+  captureShortcutUrl = null,
   mtnSender,
   androidCompanionUrl = null,
 }: {
   accounts: AccountRow[];
+  /** The one-time pairing Shortcut ("Connect to OneLedger") iCloud link. */
   shortcutUrl: string | null;
+  /** The Messages-automation forwarder ("OneLedger Capture") iCloud link -
+   *  a separate share, since sharing two Shortcuts as one link isn't
+   *  supported on every iOS version. */
+  captureShortcutUrl?: string | null;
   mtnSender: string | null;
   androidCompanionUrl?: string | null;
 }) {
@@ -248,24 +254,58 @@ export function PairWizard({
             : shortcutUrl
             ? (
               <div className="flex flex-col gap-3 rounded-card border border-border-subtle bg-surface p-4">
-                <a
-                  href={shortcutUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex min-h-11 w-fit items-center rounded-control bg-accent px-4 text-sm font-medium text-accent-foreground"
-                >
-                  Add the OneLedger Capture Shortcut
-                </a>
-                <p className="text-sm text-text-secondary">
-                  Your iPhone opens the Shortcuts app and shows a preview — scroll
-                  to the bottom and tap{" "}
-                  <span className="font-medium">Add Shortcut</span>. You’ll get
-                  two:{" "}
-                  <span className="font-medium">Connect to OneLedger</span> and
-                  {" "}
-                  <span className="font-medium">OneLedger Capture</span>. You
-                  don’t need to open or edit either one.
-                </p>
+                {captureShortcutUrl
+                  ? (
+                    <>
+                      <p className="text-sm text-text-secondary">
+                        Two small Shortcuts — add both:
+                      </p>
+                      <a
+                        href={shortcutUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex min-h-11 w-fit items-center rounded-control bg-accent px-4 text-sm font-medium text-accent-foreground"
+                      >
+                        1. Add “Connect to OneLedger”
+                      </a>
+                      <a
+                        href={captureShortcutUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex min-h-11 w-fit items-center rounded-control bg-accent px-4 text-sm font-medium text-accent-foreground"
+                      >
+                        2. Add “OneLedger Capture”
+                      </a>
+                      <p className="text-sm text-text-secondary">
+                        Each opens the Shortcuts app with a preview — scroll to
+                        the bottom and tap{" "}
+                        <span className="font-medium">Add Shortcut</span>. You
+                        don’t need to open or edit either one.
+                      </p>
+                    </>
+                  )
+                  : (
+                    <>
+                      <a
+                        href={shortcutUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex min-h-11 w-fit items-center rounded-control bg-accent px-4 text-sm font-medium text-accent-foreground"
+                      >
+                        Add the OneLedger Capture Shortcut
+                      </a>
+                      <p className="text-sm text-text-secondary">
+                        Your iPhone opens the Shortcuts app and shows a
+                        preview — scroll to the bottom and tap{" "}
+                        <span className="font-medium">Add Shortcut</span>.
+                        You’ll get two:{" "}
+                        <span className="font-medium">Connect to OneLedger</span>
+                        {" "}and{" "}
+                        <span className="font-medium">OneLedger Capture</span>.
+                        You don’t need to open or edit either one.
+                      </p>
+                    </>
+                  )}
                 <p className="text-xs text-text-muted">
                   Then tap <span className="font-medium">“I’ve added it”</span>
                   {" "}
