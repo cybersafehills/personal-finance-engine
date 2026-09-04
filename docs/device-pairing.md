@@ -90,8 +90,12 @@ platform-neutral (ADR 0008 §Consequences).
    code". On a **fine-pointer** device (a computer) it also renders a QR of
    `pairHandoffUrl(origin, token, platform)` — the Android variant carries
    `&p=android` so the `/pair` handoff offers the Companion, not the Shortcut.
-4. **Automate** (iOS) — the Apple-required Messages automation (`MOMO_SMS_SENDER`
-   fills the sender when set). **Allow access** (Android) — turn on the
+4. **Automate** (iOS) — the Apple-required Messages automation. Sender is left
+   blank (MoMo SMS shows a generic network label, not a matchable name);
+   **Message Contains: RWF** is the reliable trigger - it's in every real
+   MoMo/bank message, and anything else that matches is just ignored
+   downstream. `MOMO_SMS_SENDER`, when set, adds an *additional* Sender
+   filter on top. **Allow access** (Android) — turn on the
    OS notification-listener permission for the Companion; the app has its own
    CTA button for this, so the step is expectation-setting.
 5. **Verify** — reuses `<ConnectionReadinessProbe credentialId={…} />`, which

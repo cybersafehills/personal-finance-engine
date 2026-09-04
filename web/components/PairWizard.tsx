@@ -469,12 +469,18 @@ export function PairWizard({
               <span className="font-medium">+</span>.
             </li>
             <li>
-              2. Choose <span className="font-medium">Message</span>. Under
-              Sender, add{" "}
+              2. Choose <span className="font-medium">Message</span>. Leave
+              {" "}
+              <span className="font-medium">Sender</span> blank — MoMo texts
+              show a generic network label, not a name you can reliably
+              match. Instead, under{" "}
+              <span className="font-medium">Message Contains</span>, type
+              {" "}
               <code className="rounded bg-background px-1 py-0.5 text-xs">
-                {mtnSender ?? "<the sender your MoMo messages come from>"}
+                RWF
               </code>
-              . Set <span className="font-medium">Run Immediately</span> and turn
+              {" "}— it appears in every real MoMo or bank message. Set{" "}
+              <span className="font-medium">Run Immediately</span> and turn
               notifications off.
             </li>
             <li>
@@ -484,11 +490,19 @@ export function PairWizard({
               and pass the message as its input. Save.
             </li>
           </ol>
-          {!mtnSender && (
-            <p className="rounded-control border border-border-subtle bg-surface p-3 text-xs text-text-muted">
-              Use whatever name MoMo messages actually arrive from on your phone.
-            </p>
-          )}
+          <p className="rounded-control border border-border-subtle bg-surface p-3 text-xs text-text-muted">
+            A message containing “RWF” that isn’t a real transaction is
+            simply ignored — OneLedger only records ones it can actually
+            parse.
+            {mtnSender && (
+              <>
+                {" "}If your MoMo texts do show a stable sender, you can add
+                {" "}
+                <span className="font-medium">{mtnSender}</span> too for
+                extra filtering.
+              </>
+            )}
+          </p>
         </StepShell>
       )}
 
