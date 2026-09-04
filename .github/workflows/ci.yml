@@ -72,6 +72,9 @@ jobs:
             deno check "supabase/functions/_shared/$f.ts"
           done
 
+      - name: deno check (example-csv reference connector)
+        run: deno check supabase/functions/_shared/connectors/example-csv/adapter.ts
+
       - name: deno test (ingest-momo)
         run: deno test supabase/functions/ingest-momo/tests
 
@@ -83,6 +86,9 @@ jobs:
 
       - name: deno test (_shared)
         run: deno test supabase/functions/_shared/tests
+
+      - name: deno test (example-csv reference connector)
+        run: deno test supabase/functions/_shared/connectors/example-csv/tests
 
       # web/lib's pure/deno-testable modules (budget-math.ts, money.ts,
       # report-math.ts, report-period.ts, report-alert-messages.ts,

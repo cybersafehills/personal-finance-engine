@@ -4,6 +4,10 @@ Phase 1 ships one real ingestion connector (MTN MoMo SMS, ADR 0007) and
 the file-import path. This note is the checklist for the next one, so a
 new provider is an addition, not a redesign.
 
+For the code-level `ConnectorAdapter` contract and a complete, deno-tested
+reference implementation to copy, see
+[`integrations-connector-sdk.md`](integrations-connector-sdk.md).
+
 ## What a connector is not
 
 - Not a new transaction model. Everything normalises into the canonical
