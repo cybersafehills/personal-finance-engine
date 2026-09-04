@@ -35,6 +35,31 @@ export type WebhookEnvelope = {
   data: Record<string, unknown>;
 };
 
+/** Client-safe summary of a webhook_subscriptions row (no secret). */
+export type WebhookSubscriptionSummary = {
+  id: string;
+  url: string;
+  secretPrefix: string | null;
+  eventTypes: string[];
+  status: "active" | "paused" | "failing";
+  description: string | null;
+  lastErrorCode: string | null;
+  createdAt: string;
+};
+
+/** Client-safe summary of a recent delivery attempt. */
+export type WebhookDeliverySummary = {
+  id: string;
+  subscriptionId: string;
+  eventType: string;
+  status: "pending" | "delivered" | "failed";
+  attempt: number;
+  responseStatus: number | null;
+  errorCode: string | null;
+  createdAt: string;
+  deliveredAt: string | null;
+};
+
 /**
  * Build the exact JSON envelope that gets signed and POSTed. `data` is a
  * caller-supplied, ALREADY-REDACTED object: ids and safe scalar fields

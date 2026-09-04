@@ -1,9 +1,18 @@
 import { PageHeader } from "../../../components/PageHeader";
 import { EmptyState } from "../../../components/EmptyState";
 import { ApiKeyManager } from "../../../components/ApiKeyManager";
+import { WebhookManager } from "../../../components/WebhookManager";
 import { getActiveWorkspaceId } from "../../../lib/queries";
-import { isDeveloperApiEnabled } from "../../../lib/integrations/gate";
+import { supabaseServer } from "../../../lib/supabase-server";
+import {
+  isDeveloperApiEnabled,
+  isDeveloperWebhooksEnabled,
+} from "../../../lib/integrations/gate";
 import { listApiKeys } from "../../../lib/integrations/queries";
+import {
+  getRecentWebhookDeliveries,
+  listWebhookSubscriptions,
+} from "../../../lib/integrations/webhooks/queries";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +32,14 @@ export default async function DeveloperPage() {
     );
   }
 
-  const keys = await listApiKeys();
+  const webhooksEnabled = isDeveloperWebhooksEnabled(workspaceId);
+  const [keys, subscriptions, deliveries] = await Promise.all([
+    listApiKeys(),
+    webhooksEnabled ? listWebhookSubscriptions() : Promise.resolve([]),
+    webhooksEnabled && workspaceId
+      ? getRecentWebhookDeliveries(supabaseServer(), workspaceId, 20)
+      : Promise.resolve([]),
+  ]);
 
   return (
     <div>
@@ -43,6 +59,21 @@ export default async function DeveloperPage() {
 
       <h2 className="mb-2 text-sm font-semibold text-text-primary">API keys</h2>
       <ApiKeyManager keys={keys} />
+
+      {webhooksEnabled && (
+        <section className="mt-8">
+          <h2 className="mb-1 text-sm font-semibold text-text-primary">Webhooks</h2>
+          <p className="mb-3 text-sm text-text-muted">
+            OneLedger POSTs a signed JSON envelope to your endpoint when an event
+            happens. Signature verification and the event catalog are in{" "}
+            <code className="text-text-secondary">docs/integrations-webhooks.md</code>.
+          </p>
+          <WebhookManager
+            subscriptions={subscriptions}
+            deliveries={deliveries}
+          />
+        </section>
+      )}
     </div>
   );
 }

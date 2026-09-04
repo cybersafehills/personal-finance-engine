@@ -74,6 +74,40 @@ export async function enqueueWebhookEvent(
 }
 
 /**
+ * Enqueue a `webhook.ping` delivery to ONE specific subscription (the
+ * "send a test event" button). Bypasses the event-type filter.
+ */
+export async function enqueuePing(
+  admin: SupabaseClient,
+  sub: { id: string; workspaceId: string },
+): Promise<{ ok: boolean }> {
+  const deliveryId = crypto.randomUUID();
+  const now = new Date();
+  const envelope = buildWebhookEnvelope({
+    deliveryId,
+    type: "webhook.ping",
+    workspaceId: sub.workspaceId,
+    data: { message: "This is a test event from OneLedger." },
+    now,
+  });
+  const body = JSON.stringify(envelope);
+  const { error } = await admin.from("webhook_deliveries").insert({
+    id: deliveryId,
+    subscription_id: sub.id,
+    workspace_id: sub.workspaceId,
+    event_type: "webhook.ping",
+    event_ref: null,
+    payload: envelope.data,
+    payload_digest: await hashToken(body),
+    status: "pending",
+    attempt: 0,
+    next_attempt_at: now.toISOString(),
+    created_at: now.toISOString(),
+  });
+  return { ok: !error };
+}
+
+/**
  * Best-effort wrapper: never let a webhook fan-out failure break the
  * caller's own transaction. Fire-and-forget from an emit site.
  */

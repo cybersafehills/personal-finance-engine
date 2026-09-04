@@ -67,3 +67,11 @@ export function generateInviteToken(): Promise<GeneratedToken> {
 export function generateApiKey(): Promise<GeneratedToken> {
   return generateToken("olk_");
 }
+
+// Developer webhook HMAC signing secret (Integrations Phase 4). The
+// `whsec_` plaintext lives in webhook_subscription_secrets (service-role
+// only) and is shown to the creator once; the receiver verifies
+// signatures with it directly.
+export function generateWebhookSecret(): Promise<GeneratedToken> {
+  return generateToken("whsec_");
+}
