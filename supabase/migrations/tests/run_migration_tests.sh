@@ -5096,17 +5096,17 @@ else
   fail "Device pairing: redemption state is wrong ($PAIR_STATE / consume=$PAIR_CONSUME)"
 fi
 
-# Re-pair (20261126000000): pairing the SAME account again - it already has a
-# canonical connector_installation from the redemption above - mints an
-# additional device credential on that installation instead of re-running
-# first-time enrollment. Before this fix, consume_device_pairing_session
-# branched only on the (always-NULL, wizard-created) session field, so a
-# re-pair re-ran _enroll_ingestion_connection -> backfill_legacy_ingestion_
-# connection, which correctly refused via connector_stage_b_preflight to
-# double-map an already-linked financial source - surfacing as a generic
-# Postgres exception the Edge Function flattens to PAIRING_INVALID even
-# though the token itself was valid and unexpired.
+# Re-pair (20261127000000): pairing the SAME account again - it already has a
+# canonical connector_installation from the redemption above - rotates the
+# account's canonical credential (like rotate_device_credential) instead of
+# either (a) re-running first-time enrollment [20261126000000 and earlier:
+# collided with connector_stage_b_preflight, surfaced as a generic
+# PAIRING_INVALID] or (b) minting a second, legacy-unlinked credential
+# [20261126000000's own fix: resolve_canonical_ingestion_credential requires
+# legacy_ingestion_connection_id IS NOT NULL, so that credential could never
+# authenticate op:"capture" - confirmed live on a real account].
 PAIR_INSTALLATION_1="$(printf '%s' "$PAIR_CONSUME" | cut -d'|' -f2)"
+PAIR_LEGACY_ID_1="$(psql -d pfe_rls -t -A -c "select legacy_ingestion_connection_id from public.device_credentials where id = '$PAIR_CRED_ID';")"
 PAIR_REPAIR_TOKEN_HASH="$(printf '9%.0s' $(seq 1 64))"
 PAIR_REPAIR_CRED_HASH="$(printf '8%.0s' $(seq 1 64))"
 as_user "$PAIR_OWNER" "select public.create_device_pairing_session('mtn_momo_sms_v1', 'mtn_momo', '$PAIR_WS', 'Second iPhone', '$PAIR_REPAIR_TOKEN_HASH', 'olp_9999', '$PAIR_ACCOUNT', null);" >/dev/null
@@ -5115,11 +5115,27 @@ PAIR_REPAIR_STATUS=$?
 if [ "$PAIR_REPAIR_STATUS" -eq 0 ]; then
   PAIR_REPAIR_CONSUME="$(printf '%s' "$PAIR_REPAIR_RAW" | grep -Eo '[0-9a-f-]{36}\|[0-9a-f-]{36}' | head -1)"
   PAIR_REPAIR_INSTALLATION="$(printf '%s' "$PAIR_REPAIR_CONSUME" | cut -d'|' -f2)"
+  PAIR_REPAIR_CRED_ID="$(printf '%s' "$PAIR_REPAIR_CONSUME" | cut -d'|' -f1)"
+  # Exactly one active credential on the installation (rotation, not
+  # accumulation), inheriting the original legacy link.
   PAIR_REPAIR_ACTIVE_CREDS="$(psql -d pfe_rls -t -A -c "select count(*) from public.device_credentials where connector_installation_id = '$PAIR_INSTALLATION_1' and status = 'active';")"
-  if [ "$PAIR_REPAIR_INSTALLATION" = "$PAIR_INSTALLATION_1" ] && [ "$PAIR_REPAIR_ACTIVE_CREDS" = "2" ]; then
-    pass "Device pairing: re-pairing an already-enrolled account mints an additional credential on the same installation"
+  PAIR_REPAIR_NEW_LEGACY="$(psql -d pfe_rls -t -A -c "select legacy_ingestion_connection_id from public.device_credentials where id = '$PAIR_REPAIR_CRED_ID';")"
+  PAIR_REPAIR_OLD_STATE="$(psql -d pfe_rls -t -A -c "select status || '|' || (legacy_ingestion_connection_id is null) from public.device_credentials where id = '$PAIR_CRED_ID';")"
+  # The legacy row and the installation both come back active/healthy.
+  PAIR_REPAIR_LEGACY_STATE="$(psql -d pfe_rls -t -A -c "select status || '|' || device_credential_id from public.ingestion_connections where id = '$PAIR_LEGACY_ID_1';")"
+  PAIR_REPAIR_INSTALL_STATUS="$(psql -d pfe_rls -t -A -c "select status from public.connector_installations where id = '$PAIR_INSTALLATION_1';")"
+  # And the new credential's hash actually authenticates - the whole point.
+  PAIR_REPAIR_RESOLVES="$(psql -d pfe_rls -t -A -c "set role service_role; select device_credential_id is not null from public.resolve_canonical_ingestion_credential('$PAIR_REPAIR_CRED_HASH');" | grep -E '^(t|f|true|false)$' | head -1)"
+  if [ "$PAIR_REPAIR_INSTALLATION" = "$PAIR_INSTALLATION_1" ] \
+    && [ "$PAIR_REPAIR_ACTIVE_CREDS" = "1" ] \
+    && [ "$PAIR_REPAIR_NEW_LEGACY" = "$PAIR_LEGACY_ID_1" ] \
+    && { [ "$PAIR_REPAIR_OLD_STATE" = "revoked|t" ] || [ "$PAIR_REPAIR_OLD_STATE" = "revoked|true" ]; } \
+    && [ "$PAIR_REPAIR_LEGACY_STATE" = "active|$PAIR_REPAIR_CRED_ID" ] \
+    && [ "$PAIR_REPAIR_INSTALL_STATUS" = "healthy" ] \
+    && { [ "$PAIR_REPAIR_RESOLVES" = "t" ] || [ "$PAIR_REPAIR_RESOLVES" = "true" ]; }; then
+    pass "Device pairing: re-pairing an already-enrolled account rotates the canonical credential (old revoked, new inherits the legacy link, connection + installation reactivated, new hash resolves for capture)"
   else
-    fail "Device pairing: re-pair installation/credential count is wrong (installation=$PAIR_REPAIR_INSTALLATION expected=$PAIR_INSTALLATION_1 active_creds=$PAIR_REPAIR_ACTIVE_CREDS)"
+    fail "Device pairing: re-pair rotation state is wrong (installation=$PAIR_REPAIR_INSTALLATION active_creds=$PAIR_REPAIR_ACTIVE_CREDS new_legacy=$PAIR_REPAIR_NEW_LEGACY/$PAIR_LEGACY_ID_1 old=$PAIR_REPAIR_OLD_STATE legacy_row=$PAIR_REPAIR_LEGACY_STATE install=$PAIR_REPAIR_INSTALL_STATUS resolves=$PAIR_REPAIR_RESOLVES)"
   fi
 else
   fail "Device pairing: re-pairing an already-enrolled account was rejected ($(cat $ARTIFACT_DIR/pfe_pair_repair.log))"
