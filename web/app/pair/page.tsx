@@ -25,6 +25,8 @@ export default async function PairPage({
   const platform = params.p === "android" ? "android" : "ios";
 
   const shortcutUrl = process.env.NEXT_PUBLIC_MOMO_SHORTCUT_URL?.trim() || null;
+  const captureShortcutUrl =
+    process.env.NEXT_PUBLIC_MOMO_CAPTURE_SHORTCUT_URL?.trim() || null;
   const androidCompanionUrl =
     process.env.NEXT_PUBLIC_ANDROID_COMPANION_URL?.trim() || null;
 
@@ -46,6 +48,7 @@ export default async function PairPage({
             token={code}
             platform={platform}
             shortcutUrl={shortcutUrl}
+            captureShortcutUrl={captureShortcutUrl}
             companionUrl={androidCompanionUrl}
           />
         )

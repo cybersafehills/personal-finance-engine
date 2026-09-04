@@ -18,12 +18,16 @@ export function PairHandoff({
   token,
   platform = "ios",
   shortcutUrl,
+  captureShortcutUrl = null,
   companionUrl = null,
 }: {
   token: string;
   platform?: PairPlatform;
-  /** A signed .shortcut / iCloud link, when one is published (iOS). */
+  /** The "Connect to OneLedger" iCloud link, when published (iOS). */
   shortcutUrl: string | null;
+  /** The "OneLedger Capture" iCloud link, when published separately (iOS) -
+   *  sharing two Shortcuts as one link isn't supported on every iOS version. */
+  captureShortcutUrl?: string | null;
   /** A Play listing / signed APK link, when one is published (Android). */
   companionUrl?: string | null;
 }) {
@@ -111,14 +115,26 @@ export function PairHandoff({
           : (
             shortcutUrl
               ? (
-                <a
-                  href={shortcutUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="font-medium text-accent hover:underline"
-                >
-                  Add OneLedger Capture
-                </a>
+                <div className="flex flex-col gap-1">
+                  <a
+                    href={shortcutUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-medium text-accent hover:underline"
+                  >
+                    Add “Connect to OneLedger”
+                  </a>
+                  {captureShortcutUrl && (
+                    <a
+                      href={captureShortcutUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-medium text-accent hover:underline"
+                    >
+                      Add “OneLedger Capture”
+                    </a>
+                  )}
+                </div>
               )
               : (
                 <ol className="flex flex-col gap-1">

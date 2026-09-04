@@ -153,14 +153,21 @@ do not include spaces or `+ / =`.
    reference them by name.
 2. Pair that device once end-to-end and confirm a real captured SMS becomes a
    transaction (`202 queued` → row within ~60 s).
-3. For each Shortcut: **Share → Copy iCloud Link** (Settings → Shortcuts →
-   _Allow Sharing Large Shortcuts_ if the link is refused). A single link that
-   installs A + B + C together (a Shortcut that adds the others) is ideal; a
-   link to A alone is acceptable if A adds B/C on first run.
-4. Set `NEXT_PUBLIC_MOMO_SHORTCUT_URL` to that link in the web app's environment
-   (Vercel → Project → Settings → Environment Variables, Production) and
-   redeploy. The pairing wizard's Install step then renders the one-tap **"Get
-   the ready-made Shortcut"** button instead of the manual fallback.
+3. Share A and B (C is optional, no env var for it - it's reached from
+   within A's success path, not linked from the wizard). Try multi-select
+   first: in the Shortcuts Library, **Select** both A and B → **Share** →
+   **Copy iCloud Link** - some iOS versions bundle them into one "Add 2
+   Shortcuts" link. If multi-select sharing isn't offered (only
+   Duplicate/Move/Delete show up), share each individually instead:
+   **"..." → Share → Copy iCloud Link** on A, then the same on B. (Settings →
+   Shortcuts → Advanced → _Allow Sharing Large Shortcuts_ if a link is
+   refused.)
+4. Set the link(s) in the web app's environment (Vercel → Project → Settings
+   → Environment Variables, Production) and redeploy:
+   - One combined link → `NEXT_PUBLIC_MOMO_SHORTCUT_URL` only.
+   - Two separate links → `NEXT_PUBLIC_MOMO_SHORTCUT_URL` = A's link,
+     `NEXT_PUBLIC_MOMO_CAPTURE_SHORTCUT_URL` = B's link. The pairing wizard's
+     Install step then renders **two** "Add" buttons instead of one.
 5. Bump `client_version` and re-publish whenever A or B changes shape.
 
 ---

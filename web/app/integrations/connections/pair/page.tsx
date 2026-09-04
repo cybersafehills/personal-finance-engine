@@ -18,6 +18,8 @@ export default async function PairDevicePage() {
   const activeAccounts = accounts.filter((a) => a.is_active);
 
   const shortcutUrl = process.env.NEXT_PUBLIC_MOMO_SHORTCUT_URL?.trim() || null;
+  const captureShortcutUrl =
+    process.env.NEXT_PUBLIC_MOMO_CAPTURE_SHORTCUT_URL?.trim() || null;
   const mtnSender = process.env.MOMO_SMS_SENDER?.trim() || null;
   // A Play listing / signed APK link for the OneLedger Companion, once published.
   const androidCompanionUrl =
@@ -34,6 +36,7 @@ export default async function PairDevicePage() {
       <PairWizard
         accounts={activeAccounts}
         shortcutUrl={shortcutUrl}
+        captureShortcutUrl={captureShortcutUrl}
         mtnSender={mtnSender}
         androidCompanionUrl={androidCompanionUrl}
       />
