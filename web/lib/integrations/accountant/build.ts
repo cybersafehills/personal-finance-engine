@@ -7,6 +7,7 @@ import {
   type ExportFilters,
 } from "../export/query.ts";
 import { buildCsv, buildXlsx, EXPORT_SHEETS } from "../export/workbook.ts";
+import { fireWebhookEvent } from "../webhooks/dispatch.ts";
 import {
   type AccountantCoverData,
   renderAccountantCoverPdf,
@@ -193,6 +194,19 @@ export async function runAccountantPackageBuild(
       context: {
         rowCount: dataset.transactions.length,
         byteSize: zipBytes.byteLength,
+      },
+    });
+
+    fireWebhookEvent(admin, {
+      workspaceId: pkg.workspace_id,
+      type: "accountant_package.completed",
+      eventRef: packageId,
+      data: {
+        package_id: packageId,
+        period_start: pkg.period_start,
+        period_end: pkg.period_end,
+        row_count: dataset.transactions.length,
+        byte_size: zipBytes.byteLength,
       },
     });
 

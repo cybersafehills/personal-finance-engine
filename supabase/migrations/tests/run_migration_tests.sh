@@ -650,7 +650,11 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # 113 with RLS.
 # Integrations Phase 4 P4-PR2 (20261122000000) adds api_rate_buckets (RLS,
 # service-role only) - 115 tables, 114 with RLS.
-if [ "$TABLE_COUNT" = "115" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Integrations Phase 4 P4-PR4 (20261123000000) adds webhook_subscriptions
+# (RLS, SELECT on integration.view), webhook_subscription_secrets (RLS,
+# service-role only) and webhook_deliveries (RLS, service-role only) -
+# 118 tables, 117 with RLS.
+if [ "$TABLE_COUNT" = "118" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -762,11 +766,14 @@ fi
 # Integrations Phase 4 P4-PR1 (20261121000000) adds api_keys with a SELECT-only
 # grant for authenticated; api_request_log gets zero authenticated grants
 # (service-role only). 147 + 1 = 148.
+# Integrations Phase 4 P4-PR4 (20261123000000) adds webhook_subscriptions with
+# a SELECT-only grant for authenticated; webhook_subscription_secrets and
+# webhook_deliveries get zero authenticated grants. 148 + 1 = 149.
 AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and grantee = 'authenticated';")"
-if [ "$AUTHENTICATED_GRANT_COUNT" = "148" ]; then
-  pass "authenticated holds exactly the 148 table grants expected, no more"
+if [ "$AUTHENTICATED_GRANT_COUNT" = "149" ]; then
+  pass "authenticated holds exactly the 149 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 148 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 149 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -6543,6 +6550,37 @@ if [ "$P4_RATE1" = "true" ] && [ "$P4_RATE2" = "true" ] && [ "$P4_RATE3" = "fals
 else
   fail "Integrations P4: api_rate_take wrong (r1=$P4_RATE1 r2=$P4_RATE2 r3=$P4_RATE3 acl=$P4_RATE_ACL)"
 fi
+
+# 20261123000000: webhook subscriptions + deliveries.
+P4_WH_SECRET_GRANTS="$(psql -d pfe_rls -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and table_name in ('webhook_subscription_secrets','webhook_deliveries') and grantee in ('anon','authenticated');")"
+if [ "$P4_WH_SECRET_GRANTS" = "0" ]; then
+  pass "Integrations P4: webhook_subscription_secrets + webhook_deliveries have zero anon/authenticated grants"
+else
+  fail "Integrations P4: webhook secret/delivery tables expose $P4_WH_SECRET_GRANTS anon/authenticated grant(s)"
+fi
+
+P4_WH_SUB="$(psql -d pfe_rls -t -A -c "insert into public.webhook_subscriptions (workspace_id, created_by, url, event_types) values ('$INT_HH', '$USER_A', 'https://hooks.example.com/x', array['export.completed','ledger.synced']) returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+P4_WH_MEMBER="$(as_user "$INT_MEMBER_USER" "select count(*) from public.webhook_subscriptions where id = '$P4_WH_SUB';")"
+P4_WH_OUTSIDER="$(as_user "$USER_B" "select count(*) from public.webhook_subscriptions where id = '$P4_WH_SUB';")"
+if [ "$P4_WH_MEMBER" = "1" ] && [ "$P4_WH_OUTSIDER" = "0" ]; then
+  pass "Integrations P4: webhook_subscriptions is readable by a workspace member, hidden from another tenant"
+else
+  fail "Integrations P4: webhook_subscriptions RLS wrong (member=$P4_WH_MEMBER outsider=$P4_WH_OUTSIDER)"
+fi
+
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.webhook_subscriptions (workspace_id, url, event_types) values ('$INT_HH', 'https://x.example.com', array['not.an.event']);" >/dev/null 2>$ARTIFACT_DIR/pfe_p4_whevt.log; then
+  fail "Integrations P4: webhook_subscriptions accepted an unknown event type"
+else
+  pass "Integrations P4: webhook_subscriptions rejects an unknown event type"
+fi
+rm -f $ARTIFACT_DIR/pfe_p4_whevt.log
+
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.webhook_subscriptions (workspace_id, url, event_types) values ('$INT_HH', 'http://x.example.com', array['export.completed']);" >/dev/null 2>$ARTIFACT_DIR/pfe_p4_whurl.log; then
+  fail "Integrations P4: webhook_subscriptions accepted a non-https url"
+else
+  pass "Integrations P4: webhook_subscriptions requires an https url"
+fi
+rm -f $ARTIFACT_DIR/pfe_p4_whurl.log
 
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="

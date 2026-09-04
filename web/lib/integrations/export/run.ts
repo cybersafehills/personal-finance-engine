@@ -12,6 +12,7 @@ import {
 } from "./query.ts";
 import { buildCsv, buildXlsx, EXPORT_SHEETS } from "./workbook.ts";
 import { deliverExportToDestination } from "../destinations/deliver.ts";
+import { fireWebhookEvent } from "../webhooks/dispatch.ts";
 
 const EXPORT_BUCKET = "integration-exports";
 
@@ -121,6 +122,18 @@ export async function runExportJob(
       ref_id: jobId,
       summary: `Export ready — ${dataset.transactions.length} transactions (${period.label})`,
       context: { format, rowCount: dataset.transactions.length },
+    });
+
+    fireWebhookEvent(admin, {
+      workspaceId: job.workspace_id,
+      type: "export.completed",
+      eventRef: jobId,
+      data: {
+        export_id: jobId,
+        format,
+        row_count: dataset.transactions.length,
+        period: period.label,
+      },
     });
 
     if (job.destination_id) {
