@@ -645,7 +645,10 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # (RLS enabled, SELECT gated on integration.view) - 111 tables, 110 with RLS.
 # Integrations Phase 3 P3-PR5 (20261119000000) adds connected_ledgers
 # (RLS enabled, SELECT gated on integration.view) - 112 tables, 111 with RLS.
-if [ "$TABLE_COUNT" = "112" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Integrations Phase 4 P4-PR1 (20261121000000) adds api_keys (RLS, SELECT on
+# integration.view) and api_request_log (RLS, service-role only) - 114 tables,
+# 113 with RLS.
+if [ "$TABLE_COUNT" = "114" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -754,11 +757,14 @@ fi
 # SELECT-only grant for authenticated (writes service-role only). 145 + 1 = 146.
 # Integrations Phase 3 P3-PR5 (20261119000000) adds connected_ledgers with a
 # SELECT-only grant for authenticated (writes service-role only). 146 + 1 = 147.
+# Integrations Phase 4 P4-PR1 (20261121000000) adds api_keys with a SELECT-only
+# grant for authenticated; api_request_log gets zero authenticated grants
+# (service-role only). 147 + 1 = 148.
 AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and grantee = 'authenticated';")"
-if [ "$AUTHENTICATED_GRANT_COUNT" = "147" ]; then
-  pass "authenticated holds exactly the 147 table grants expected, no more"
+if [ "$AUTHENTICATED_GRANT_COUNT" = "148" ]; then
+  pass "authenticated holds exactly the 148 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 147 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 148 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -6459,6 +6465,70 @@ if [ "$BILL7_B_SEES" = "0" ]; then
   pass "Bills Phase 7: a non-member cannot read another workspace's comments"
 else
   fail "Bills Phase 7: RLS isolation breach on bill_comments"
+fi
+
+# ===========================================================================
+# Integrations Phase 4 (20261121000000): developer API keys.
+# integration.developer_manage capability + api_keys (RLS on integration.view)
+# + api_request_log (service-role only). Reuses the INT_HH household fixtures.
+# ===========================================================================
+echo "=== Integrations P4: developer API keys ==="
+
+P4_DEV_MATRIX="$(psql -d pfe_rls -t -A -c "
+  with cells(kind, role) as (values
+    ('household','owner'), ('household','admin'),
+    ('household','member'), ('household','viewer'),
+    ('personal','owner'), ('personal','member')
+  ),
+  expected as (
+    select c.kind, c.role,
+      case
+        when c.kind = 'personal' then c.role = 'owner'
+        when c.role in ('owner', 'admin') then true
+        else false
+      end as allowed
+    from cells c
+  )
+  select count(*) from expected
+  where public.space_role_has_capability(kind, role, 'integration.developer_manage')
+    is distinct from allowed;")"
+P4_DEV_UNKNOWN="$(psql -d pfe_rls -t -A -c "select public.space_role_has_capability('household', 'owner', 'integration.dev_bogus');")"
+P4_BILL_KEPT="$(psql -d pfe_rls -t -A -c "select public.space_role_has_capability('household', 'member', 'bill.upload');")"
+if [ "$P4_DEV_MATRIX" = "0" ] && [ "$P4_DEV_UNKNOWN" = "f" ] && [ "$P4_BILL_KEPT" = "t" ]; then
+  pass "Integrations P4: integration.developer_manage is owner/admin-only, unknown fails closed, bill.* still present"
+else
+  fail "Integrations P4: developer capability matrix wrong (cells=$P4_DEV_MATRIX unknown=$P4_DEV_UNKNOWN bill=$P4_BILL_KEPT)"
+fi
+
+P4_KEY="$(psql -d pfe_rls -t -A -c "insert into public.api_keys (workspace_id, created_by, name, key_prefix, key_hash, scopes) values ('$INT_HH', '$USER_A', 'CI key', 'olk_ci01', 'ci-hash-$(date +%s%N)', array['transactions:read','accounts:read']) returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+P4_KEY_MEMBER="$(as_user "$INT_MEMBER_USER" "select count(*) from public.api_keys where id = '$P4_KEY';")"
+P4_KEY_VIEWER="$(as_user "$INT_VIEWER_USER" "select count(*) from public.api_keys where id = '$P4_KEY';")"
+P4_KEY_OUTSIDER="$(as_user "$USER_B" "select count(*) from public.api_keys where id = '$P4_KEY';")"
+if [ "$P4_KEY_MEMBER" = "1" ] && [ "$P4_KEY_VIEWER" = "0" ] && [ "$P4_KEY_OUTSIDER" = "0" ]; then
+  pass "Integrations P4: api_keys is readable by a member with integration.view, hidden from a Space viewer and another tenant"
+else
+  fail "Integrations P4: api_keys RLS wrong (member=$P4_KEY_MEMBER viewer=$P4_KEY_VIEWER outsider=$P4_KEY_OUTSIDER)"
+fi
+
+if as_user "$INT_MEMBER_USER" "insert into public.api_keys (workspace_id, created_by, name, key_prefix, key_hash) values ('$INT_HH', '$INT_MEMBER_USER', 'x', 'olk_x', 'x-hash');" >/dev/null 2>$ARTIFACT_DIR/pfe_p4_key.log; then
+  fail "Integrations P4: an authenticated user wrote to api_keys"
+else
+  pass "Integrations P4: api_keys INSERT is denied to authenticated (service-role only)"
+fi
+rm -f $ARTIFACT_DIR/pfe_p4_key.log
+
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.api_keys (workspace_id, name, key_prefix, key_hash, scopes) values ('$INT_HH', 'bad scope', 'olk_bs', 'bs-hash', array['transactions:write']);" >/dev/null 2>$ARTIFACT_DIR/pfe_p4_scope.log; then
+  fail "Integrations P4: api_keys accepted an unknown scope"
+else
+  pass "Integrations P4: api_keys rejects a scope outside the known read-only set"
+fi
+rm -f $ARTIFACT_DIR/pfe_p4_scope.log
+
+P4_LOG_GRANTS="$(psql -d pfe_rls -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and table_name='api_request_log' and grantee in ('anon','authenticated');")"
+if [ "$P4_LOG_GRANTS" = "0" ]; then
+  pass "Integrations P4: api_request_log has zero anon/authenticated grants (service-role only)"
+else
+  fail "Integrations P4: api_request_log exposes $P4_LOG_GRANTS anon/authenticated grant(s)"
 fi
 
 echo ""
