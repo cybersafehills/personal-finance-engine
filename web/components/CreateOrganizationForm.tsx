@@ -23,7 +23,7 @@ export function CreateOrganizationForm() {
           type="text"
           value={name}
           onChange={(event) => setName(event.target.value)}
-          placeholder="e.g. The Dolton Household"
+          placeholder="e.g. Dolton & Co"
           required
           className="min-h-11 rounded-control border border-border-strong bg-background px-3 py-2 text-sm text-text-primary"
         />
