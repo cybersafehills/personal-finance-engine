@@ -654,6 +654,9 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # (RLS, SELECT on integration.view), webhook_subscription_secrets (RLS,
 # service-role only) and webhook_deliveries (RLS, service-role only) -
 # 118 tables, 117 with RLS.
+# Integrations Phase 4 P4-PR7 (20261124000000) is a wrapper-only
+# create-or-replace of get_operational_health_snapshot - no table, no
+# grant, no RLS change. Count stays 118 / 117.
 if [ "$TABLE_COUNT" = "118" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
@@ -4987,6 +4990,22 @@ if [ "$OPS_HEALTH_P3" = "true|true|true|true" ] || [ "$OPS_HEALTH_P3" = "t|t|t|t
   pass "Integrations P3: operational health exposes accountant-package + ledger aggregates as numbers"
 else
   fail "Integrations P3: operational health P3 keys drifted ($OPS_HEALTH_P3)"
+fi
+
+# Integrations Phase 4 P4-PR7 (20261124000000): the integrations block gains
+# developer-platform aggregates (API request volume, active keys, webhook
+# delivery failures, failing subscriptions), still identifier-free and
+# service-role only. No new table/grant - wrapper-only create-or-replace.
+OPS_HEALTH_P4="$(psql -d pfe_rls -t -A -c "set role service_role; select
+  (jsonb_typeof(s->'integrations'->'api_requests_last_hour') = 'number') || '|' ||
+  (jsonb_typeof(s->'integrations'->'api_keys_active') = 'number') || '|' ||
+  (jsonb_typeof(s->'integrations'->'webhook_deliveries_failed') = 'number') || '|' ||
+  (jsonb_typeof(s->'integrations'->'webhook_subscriptions_failing') = 'number')
+  from (select public.get_operational_health_snapshot(60) as s) q;" | tail -1)"
+if [ "$OPS_HEALTH_P4" = "true|true|true|true" ] || [ "$OPS_HEALTH_P4" = "t|t|t|t" ]; then
+  pass "Integrations P4: operational health exposes developer-platform aggregates as numbers"
+else
+  fail "Integrations P4: operational health P4 keys drifted ($OPS_HEALTH_P4)"
 fi
 
 OPS_HEALTH_CLAMP="$(psql -d pfe_rls -t -A -c "set role service_role; select (public.get_operational_health_snapshot(1)->>'window_minutes') || '|' || (public.get_operational_health_snapshot(999999)->>'window_minutes');" | tail -1)"
