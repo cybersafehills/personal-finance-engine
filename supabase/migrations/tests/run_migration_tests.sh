@@ -941,7 +941,7 @@ AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_p
 # add_bill_comment. Internal helpers (record_bill_event, record_bill_*,
 # system_transition_bill_document, get_bill_*_search_set, ...) stay
 # service_role-only. 93 + 15 = 108.
-# Pairing auto-enroll (20261117000000) adds _ensure_account_financial_source,
+# Pairing auto-enroll (20261125000000) adds _ensure_account_financial_source,
 # a security-definer helper with NO role grant (called only from
 # create_device_pairing_session) - count stays 108.
 if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "108" ]; then
@@ -5096,7 +5096,7 @@ else
   fail "Device pairing: redemption state is wrong ($PAIR_STATE / consume=$PAIR_CONSUME)"
 fi
 
-# Auto-enroll (20261117000000): a legacy account with financial_source_id = NULL
+# Auto-enroll (20261125000000): a legacy account with financial_source_id = NULL
 # is pairable without a prior "Advanced connection" - create_device_pairing_session
 # creates + links a canonical financial source owned by the caller.
 PAIR_LEGACY_ACCOUNT="$(psql -d pfe_rls -t -A -c "set role service_role; insert into public.accounts (workspace_id, financial_source_id, name, provider, currency) values ('$PAIR_WS', null, 'Legacy pairing account', 'mtn_momo', 'RWF') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
