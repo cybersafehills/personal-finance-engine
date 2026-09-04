@@ -645,7 +645,19 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # (RLS enabled, SELECT gated on integration.view) - 111 tables, 110 with RLS.
 # Integrations Phase 3 P3-PR5 (20261119000000) adds connected_ledgers
 # (RLS enabled, SELECT gated on integration.view) - 112 tables, 111 with RLS.
-if [ "$TABLE_COUNT" = "112" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Integrations Phase 4 P4-PR1 (20261121000000) adds api_keys (RLS, SELECT on
+# integration.view) and api_request_log (RLS, service-role only) - 114 tables,
+# 113 with RLS.
+# Integrations Phase 4 P4-PR2 (20261122000000) adds api_rate_buckets (RLS,
+# service-role only) - 115 tables, 114 with RLS.
+# Integrations Phase 4 P4-PR4 (20261123000000) adds webhook_subscriptions
+# (RLS, SELECT on integration.view), webhook_subscription_secrets (RLS,
+# service-role only) and webhook_deliveries (RLS, service-role only) -
+# 118 tables, 117 with RLS.
+# Integrations Phase 4 P4-PR7 (20261124000000) is a wrapper-only
+# create-or-replace of get_operational_health_snapshot - no table, no
+# grant, no RLS change. Count stays 118 / 117.
+if [ "$TABLE_COUNT" = "118" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -754,11 +766,17 @@ fi
 # SELECT-only grant for authenticated (writes service-role only). 145 + 1 = 146.
 # Integrations Phase 3 P3-PR5 (20261119000000) adds connected_ledgers with a
 # SELECT-only grant for authenticated (writes service-role only). 146 + 1 = 147.
+# Integrations Phase 4 P4-PR1 (20261121000000) adds api_keys with a SELECT-only
+# grant for authenticated; api_request_log gets zero authenticated grants
+# (service-role only). 147 + 1 = 148.
+# Integrations Phase 4 P4-PR4 (20261123000000) adds webhook_subscriptions with
+# a SELECT-only grant for authenticated; webhook_subscription_secrets and
+# webhook_deliveries get zero authenticated grants. 148 + 1 = 149.
 AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and grantee = 'authenticated';")"
-if [ "$AUTHENTICATED_GRANT_COUNT" = "147" ]; then
-  pass "authenticated holds exactly the 147 table grants expected, no more"
+if [ "$AUTHENTICATED_GRANT_COUNT" = "149" ]; then
+  pass "authenticated holds exactly the 149 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 147 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 149 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -4974,6 +4992,22 @@ else
   fail "Integrations P3: operational health P3 keys drifted ($OPS_HEALTH_P3)"
 fi
 
+# Integrations Phase 4 P4-PR7 (20261124000000): the integrations block gains
+# developer-platform aggregates (API request volume, active keys, webhook
+# delivery failures, failing subscriptions), still identifier-free and
+# service-role only. No new table/grant - wrapper-only create-or-replace.
+OPS_HEALTH_P4="$(psql -d pfe_rls -t -A -c "set role service_role; select
+  (jsonb_typeof(s->'integrations'->'api_requests_last_hour') = 'number') || '|' ||
+  (jsonb_typeof(s->'integrations'->'api_keys_active') = 'number') || '|' ||
+  (jsonb_typeof(s->'integrations'->'webhook_deliveries_failed') = 'number') || '|' ||
+  (jsonb_typeof(s->'integrations'->'webhook_subscriptions_failing') = 'number')
+  from (select public.get_operational_health_snapshot(60) as s) q;" | tail -1)"
+if [ "$OPS_HEALTH_P4" = "true|true|true|true" ] || [ "$OPS_HEALTH_P4" = "t|t|t|t" ]; then
+  pass "Integrations P4: operational health exposes developer-platform aggregates as numbers"
+else
+  fail "Integrations P4: operational health P4 keys drifted ($OPS_HEALTH_P4)"
+fi
+
 OPS_HEALTH_CLAMP="$(psql -d pfe_rls -t -A -c "set role service_role; select (public.get_operational_health_snapshot(1)->>'window_minutes') || '|' || (public.get_operational_health_snapshot(999999)->>'window_minutes');" | tail -1)"
 if [ "$OPS_HEALTH_CLAMP" = "5|10080" ]; then
   pass "operational health clamps observation windows to 5 minutes through 7 days"
@@ -6460,6 +6494,112 @@ if [ "$BILL7_B_SEES" = "0" ]; then
 else
   fail "Bills Phase 7: RLS isolation breach on bill_comments"
 fi
+
+# ===========================================================================
+# Integrations Phase 4 (20261121000000): developer API keys.
+# integration.developer_manage capability + api_keys (RLS on integration.view)
+# + api_request_log (service-role only). Reuses the INT_HH household fixtures.
+# ===========================================================================
+echo "=== Integrations P4: developer API keys ==="
+
+P4_DEV_MATRIX="$(psql -d pfe_rls -t -A -c "
+  with cells(kind, role) as (values
+    ('household','owner'), ('household','admin'),
+    ('household','member'), ('household','viewer'),
+    ('personal','owner'), ('personal','member')
+  ),
+  expected as (
+    select c.kind, c.role,
+      case
+        when c.kind = 'personal' then c.role = 'owner'
+        when c.role in ('owner', 'admin') then true
+        else false
+      end as allowed
+    from cells c
+  )
+  select count(*) from expected
+  where public.space_role_has_capability(kind, role, 'integration.developer_manage')
+    is distinct from allowed;")"
+P4_DEV_UNKNOWN="$(psql -d pfe_rls -t -A -c "select public.space_role_has_capability('household', 'owner', 'integration.dev_bogus');")"
+P4_BILL_KEPT="$(psql -d pfe_rls -t -A -c "select public.space_role_has_capability('household', 'member', 'bill.upload');")"
+if [ "$P4_DEV_MATRIX" = "0" ] && [ "$P4_DEV_UNKNOWN" = "f" ] && [ "$P4_BILL_KEPT" = "t" ]; then
+  pass "Integrations P4: integration.developer_manage is owner/admin-only, unknown fails closed, bill.* still present"
+else
+  fail "Integrations P4: developer capability matrix wrong (cells=$P4_DEV_MATRIX unknown=$P4_DEV_UNKNOWN bill=$P4_BILL_KEPT)"
+fi
+
+P4_KEY="$(psql -d pfe_rls -t -A -c "insert into public.api_keys (workspace_id, created_by, name, key_prefix, key_hash, scopes) values ('$INT_HH', '$USER_A', 'CI key', 'olk_ci01', 'ci-hash-$(date +%s%N)', array['transactions:read','accounts:read']) returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+P4_KEY_MEMBER="$(as_user "$INT_MEMBER_USER" "select count(*) from public.api_keys where id = '$P4_KEY';")"
+P4_KEY_VIEWER="$(as_user "$INT_VIEWER_USER" "select count(*) from public.api_keys where id = '$P4_KEY';")"
+P4_KEY_OUTSIDER="$(as_user "$USER_B" "select count(*) from public.api_keys where id = '$P4_KEY';")"
+if [ "$P4_KEY_MEMBER" = "1" ] && [ "$P4_KEY_VIEWER" = "0" ] && [ "$P4_KEY_OUTSIDER" = "0" ]; then
+  pass "Integrations P4: api_keys is readable by a member with integration.view, hidden from a Space viewer and another tenant"
+else
+  fail "Integrations P4: api_keys RLS wrong (member=$P4_KEY_MEMBER viewer=$P4_KEY_VIEWER outsider=$P4_KEY_OUTSIDER)"
+fi
+
+if as_user "$INT_MEMBER_USER" "insert into public.api_keys (workspace_id, created_by, name, key_prefix, key_hash) values ('$INT_HH', '$INT_MEMBER_USER', 'x', 'olk_x', 'x-hash');" >/dev/null 2>$ARTIFACT_DIR/pfe_p4_key.log; then
+  fail "Integrations P4: an authenticated user wrote to api_keys"
+else
+  pass "Integrations P4: api_keys INSERT is denied to authenticated (service-role only)"
+fi
+rm -f $ARTIFACT_DIR/pfe_p4_key.log
+
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.api_keys (workspace_id, name, key_prefix, key_hash, scopes) values ('$INT_HH', 'bad scope', 'olk_bs', 'bs-hash', array['transactions:write']);" >/dev/null 2>$ARTIFACT_DIR/pfe_p4_scope.log; then
+  fail "Integrations P4: api_keys accepted an unknown scope"
+else
+  pass "Integrations P4: api_keys rejects a scope outside the known read-only set"
+fi
+rm -f $ARTIFACT_DIR/pfe_p4_scope.log
+
+P4_LOG_GRANTS="$(psql -d pfe_rls -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and table_name in ('api_request_log','api_rate_buckets') and grantee in ('anon','authenticated');")"
+if [ "$P4_LOG_GRANTS" = "0" ]; then
+  pass "Integrations P4: api_request_log + api_rate_buckets have zero anon/authenticated grants (service-role only)"
+else
+  fail "Integrations P4: api log/rate tables expose $P4_LOG_GRANTS anon/authenticated grant(s)"
+fi
+
+# 20261122000000: api_rate_take fixed-window limiter.
+P4_RATE1="$(psql -d pfe_rls -t -A -c "select (public.api_rate_take('$P4_KEY', 2, 60)->>'allowed');")"
+P4_RATE2="$(psql -d pfe_rls -t -A -c "select (public.api_rate_take('$P4_KEY', 2, 60)->>'allowed');")"
+P4_RATE3="$(psql -d pfe_rls -t -A -c "select (public.api_rate_take('$P4_KEY', 2, 60)->>'allowed') || '|' || (public.api_rate_take('$P4_KEY', 2, 60)->>'remaining');")"
+P4_RATE_ACL="$(psql -d pfe_rls -t -A -c "select has_function_privilege('service_role','public.api_rate_take(uuid,integer,integer)','execute') || '|' || has_function_privilege('authenticated','public.api_rate_take(uuid,integer,integer)','execute');")"
+if [ "$P4_RATE1" = "true" ] && [ "$P4_RATE2" = "true" ] && [ "$P4_RATE3" = "false|0" ] && { [ "$P4_RATE_ACL" = "true|false" ] || [ "$P4_RATE_ACL" = "t|f" ]; }; then
+  pass "Integrations P4: api_rate_take allows up to the limit then denies, and is service-role-only"
+else
+  fail "Integrations P4: api_rate_take wrong (r1=$P4_RATE1 r2=$P4_RATE2 r3=$P4_RATE3 acl=$P4_RATE_ACL)"
+fi
+
+# 20261123000000: webhook subscriptions + deliveries.
+P4_WH_SECRET_GRANTS="$(psql -d pfe_rls -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and table_name in ('webhook_subscription_secrets','webhook_deliveries') and grantee in ('anon','authenticated');")"
+if [ "$P4_WH_SECRET_GRANTS" = "0" ]; then
+  pass "Integrations P4: webhook_subscription_secrets + webhook_deliveries have zero anon/authenticated grants"
+else
+  fail "Integrations P4: webhook secret/delivery tables expose $P4_WH_SECRET_GRANTS anon/authenticated grant(s)"
+fi
+
+P4_WH_SUB="$(psql -d pfe_rls -t -A -c "insert into public.webhook_subscriptions (workspace_id, created_by, url, event_types) values ('$INT_HH', '$USER_A', 'https://hooks.example.com/x', array['export.completed','ledger.synced']) returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+P4_WH_MEMBER="$(as_user "$INT_MEMBER_USER" "select count(*) from public.webhook_subscriptions where id = '$P4_WH_SUB';")"
+P4_WH_OUTSIDER="$(as_user "$USER_B" "select count(*) from public.webhook_subscriptions where id = '$P4_WH_SUB';")"
+if [ "$P4_WH_MEMBER" = "1" ] && [ "$P4_WH_OUTSIDER" = "0" ]; then
+  pass "Integrations P4: webhook_subscriptions is readable by a workspace member, hidden from another tenant"
+else
+  fail "Integrations P4: webhook_subscriptions RLS wrong (member=$P4_WH_MEMBER outsider=$P4_WH_OUTSIDER)"
+fi
+
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.webhook_subscriptions (workspace_id, url, event_types) values ('$INT_HH', 'https://x.example.com', array['not.an.event']);" >/dev/null 2>$ARTIFACT_DIR/pfe_p4_whevt.log; then
+  fail "Integrations P4: webhook_subscriptions accepted an unknown event type"
+else
+  pass "Integrations P4: webhook_subscriptions rejects an unknown event type"
+fi
+rm -f $ARTIFACT_DIR/pfe_p4_whevt.log
+
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.webhook_subscriptions (workspace_id, url, event_types) values ('$INT_HH', 'http://x.example.com', array['export.completed']);" >/dev/null 2>$ARTIFACT_DIR/pfe_p4_whurl.log; then
+  fail "Integrations P4: webhook_subscriptions accepted a non-https url"
+else
+  pass "Integrations P4: webhook_subscriptions requires an https url"
+fi
+rm -f $ARTIFACT_DIR/pfe_p4_whurl.log
 
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="

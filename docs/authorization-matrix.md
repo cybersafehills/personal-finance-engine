@@ -33,6 +33,7 @@ checks in `supabase/migrations/tests/run_migration_tests.sh`.
 | `integration.accountant_package` | yes | yes | no | no |
 | `integration.ledger_manage` | yes | yes | no | no |
 | `integration.ledger_sync` | yes | yes | no | no |
+| `integration.developer_manage` | yes | yes | no | no |
 
 Unknown and null capability names fail closed for every role. A member may
 receive an additive, workspace-scoped capability grant. Grants cannot deny a

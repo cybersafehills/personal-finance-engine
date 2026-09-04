@@ -443,6 +443,92 @@ account id; RLS SELECT on `integration.view`); `integration_sync_runs` gains
 - Activity: `integration_events` gains `accountant_package.created` /
   `.completed` / `.failed`, `ledger.connected` / `.synced` / `.sync_failed`.
 
+# Phase 4 — Developer Platform
+
+Phase 4 opens the platform to third parties: a **read-only** public REST
+API, outbound webhook subscriptions, a documented inbound connector SDK,
+and a marketplace surface. It is the first non-session attack surface in
+the codebase, so every part is key-authenticated, scoped, rate-limited,
+request-logged, and **dark behind a flag by default**.
+
+## Read-only REST API (P4-PR1/P4-PR2, migrations 20261121000000, 20261122000000)
+
+| Table / fn | Purpose |
+| --- | --- |
+| `api_keys` | `olk_`-prefixed key, SHA-256 `key_hash` (unique), `scopes text[]` ⊆ the six `*:read` scopes, `status` `active`/`revoked`, `expires_at?`. RLS SELECT on `integration.view`; writes service-role only. |
+| `api_request_log` | One redacted row per `/api/v1` request (method, path, status, `ip_hash`, `response_ms`). **Zero authenticated/anon grants.** 30-day `purge-api-logs` cron. |
+| `api_rate_buckets` + `api_rate_take(key, limit, window_s)` | Fixed-window limiter. `SECURITY DEFINER`, service-role execute only. Fails **open** on error. |
+
+- **Auth model.** An API key has no Supabase session, so `auth.uid()` /
+  `has_space_capability` are unusable. `/api/v1` handlers run a
+  **service-role client pinned to the key's `workspace_id`**; the key's
+  `scopes[]` is the authorization primitive.
+- `web/proxy.ts` matcher excludes `api/v1/` so key-authed requests reach
+  the handler instead of a 307 to `/login`.
+- `web/lib/api/handler.ts:withApiV1(scope, fn)` is the one wrapper every
+  route uses: deployment-dark check → bearer auth → per-workspace enable →
+  scope check (403 `insufficient_scope`) → rate limit (429 `rate_limited`)
+  → handler → always writes one `api_request_log` row (never blocks the
+  response).
+- Endpoints (all `GET`, cursor-paginated, redacted):
+  `/api/v1/ping`, `/transactions`, `/transactions/[id]`, `/accounts`,
+  `/categories`, `/exports`, `/exports/[id]` (+ 300 s signed download URL),
+  `/sync-runs`, `/events`.
+- Management UI: `/integrations/developer` (`ApiKeyManager` — create with
+  scope checkboxes, reveal-once secret, rename, revoke). Capability
+  `integration.developer_manage`.
+
+## Outbound webhooks (P4-PR4/P4-PR5, migration 20261123000000)
+
+| Table | Purpose |
+| --- | --- |
+| `webhook_subscriptions` | `url` (https CHECK), `event_types text[]` ⊆ the known set, `status` `active`/`paused`/`failing`. RLS SELECT on `integration.view`. |
+| `webhook_subscription_secrets` | Plaintext `whsec_` signing secret in a **separate service-role-only table** (zero authenticated grants) so the RLS-readable subscription row never carries a signing-usable value. |
+| `webhook_deliveries` | One row per (event × active subscription); `payload jsonb` + `payload_digest` fixed at enqueue so every retry signs the identical body. Service-role only. |
+
+- `dispatch.ts:fireWebhookEvent` fans out from the existing emit sites
+  (`export/run.ts`, `accountant/build.ts`, `accounting/sync.ts`).
+  `deliver.ts` POSTs with `buildWebhookHeaders` (HMAC-SHA256 over
+  `timestamp + "." + body`), `isSafeWebhookUrl` SSRF re-check, no
+  redirects, 15 s timeout; `nextAttemptState` retry (≤ 5, `min(60·2ⁿ,
+  3600)` s). After 3 terminal failures/hour the subscription flips to
+  `failing`, its owner gets an in-app notification, and an
+  `integration_events` `webhook.delivery_failed` is written.
+- `deliver-webhooks` cron: cron-secret + claim/lease + 30-day purge of
+  delivered rows. Not scheduler-wired.
+- UI: `WebhookManager` on `/integrations/developer` (create with
+  event-type checkboxes, Send test → `webhook.ping`, pause/resume, rotate
+  secret, delete, recent deliveries).
+
+## Inbound connector SDK (P4-PR6, no migration)
+
+- `_shared/connector-adapter.ts` += `CONNECTOR_ADAPTER_VERSION`,
+  `defineConnectorAdapter<C,R,N>()` identity helper, lifecycle JSDoc.
+- `_shared/connectors/example-csv/` — a complete, deno-tested **reference**
+  adapter over a public CSV URL, **inert** (no Edge Function, migration,
+  or `connector_installations` row references it). Network is behind an
+  injectable `fetchImpl`; `csv.ts` + `toRawEvents` are the pure seam.
+- `docs/integrations-connector-sdk.md` is the contract + "turn a copy into
+  a real connector" checklist.
+
+## Marketplace + developer-platform health (P4-PR7, migration 20261124000000)
+
+- `web/lib/integrations/marketplace/catalog.ts` — pure, deno-tested static
+  catalogue of every integration (real + dark), each `{ key, name,
+  category, status: available|beta|coming_soon, docHref, configHref? }`. A
+  `coming_soon` entry always has `configHref: null` (asserted) so a
+  non-functional integration is never made to look reachable.
+- `/integrations/marketplace` — browse by category; gated
+  `INTEGRATIONS_MARKETPLACE_ENABLED` (on unless `"false"`). Replaces the
+  old inline "Available later" array on `/integrations`.
+- `get_operational_health_snapshot`'s `integrations` block gains
+  `api_requests_last_hour`, `api_keys_active`, `webhook_deliveries_failed`,
+  `webhook_subscriptions_failing` — wrapper-only `create or replace`,
+  still identifier-free / service-role only.
+- Activity: `integration_events` gains `api_key.created` / `.revoked`
+  (P4-PR3), `webhook.created` (P4-PR5) / `webhook.delivery_failed`
+  (P4-PR4).
+
 ## Feature flags
 
 `web/lib/integrations/gate.ts`, env-var convention shared with
@@ -466,6 +552,10 @@ gate server-side.
 | `INTEGRATIONS_ACCOUNTANT_PACKAGE_ENABLED` | on | Ready-for-Accountant package + cron |
 | `INTEGRATIONS_ACCOUNTING_CONNECTORS_ENABLED` | **off** | `accounting` destination type + connected ledgers |
 | `QUICKBOOKS_*` / `XERO_*` / `ZOHO_BOOKS_*` / `ODOO_*` | absent = provider dark | enables one accounting OAuth provider |
+| `INTEGRATIONS_DEVELOPER_API_ENABLED` | **off** | `/api/v1/*` + `/integrations/developer` |
+| `INTEGRATIONS_WEBHOOKS_DEV_ENABLED` | **off** | webhook subscriptions + delivery cron (also needs the developer API on) |
+| `INTEGRATIONS_MARKETPLACE_ENABLED` | on | `/integrations/marketplace` |
+| `API_RATE_LIMIT_PER_MINUTE` | 120 | per-key read rate cap |
 
 ## Authorization
 
@@ -475,12 +565,13 @@ migration `20261010000000`). Phase 1 adds `integration.*` capabilities:
 `view`, `import`, `import_approve`, `export`, `configure`, `connection_manage`,
 `sync_manage`, `logs_view`; Phase 2 adds `destination_manage`,
 `workbook_manage`, `conflict_resolve`; Phase 3 adds `accountant_package`,
-`ledger_manage`, `ledger_sync`. All owner+admin only except `integration.view`
+`ledger_manage`, `ledger_sync`; Phase 4 adds `developer_manage` (API keys +
+webhook subscriptions). All owner+admin only except `integration.view`
 (also member). Unknown capability names still fail closed for every role
-including owner/admin. Because Phase 3 and the Bills & Expenses work landed
-concurrently, each `create or replace` of `space_role_has_capability` must
-carry the **union** of every phase's capability set — re-declaring the
-function must never silently drop one.
+including owner/admin. Because Phase 3, Phase 4 and the Bills & Expenses
+work landed concurrently, each `create or replace` of
+`space_role_has_capability` must carry the **union** of every phase's
+capability set — re-declaring the function must never silently drop one.
 
 ## Reuse map
 
@@ -505,8 +596,11 @@ installation != source != account != device credential.
 ## Deferred to later phases
 
 Real accounting-provider push implementations (adapters ship dark);
-import-direction accounting sync (pull from QuickBooks/Xero/…); developer
-public API + inbound webhooks + connector SDK; integration marketplace;
-unrestricted two-way sync without conflict review; per-member
-`grant_space_capability` support for the `integration.*` capability family
-(the RPC's allowlist currently stops at Phase 2 + `bill.*`).
+import-direction accounting sync (pull from QuickBooks/Xero/…); **write**
+endpoints (POST/PATCH/DELETE) on the developer API; OAuth2
+client-credentials / third-party app authorization; a hosted developer
+portal; billing / quotas beyond the flat per-key rate limit; accepting
+real third-party connector submissions; unrestricted two-way sync without
+conflict review; per-member `grant_space_capability` support for the
+`integration.*` capability family (the RPC's allowlist currently stops at
+Phase 2 + `bill.*`).

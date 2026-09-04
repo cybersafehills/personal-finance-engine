@@ -10,9 +10,11 @@ import {
 } from "../../lib/queries";
 import {
   isAccountantPackageEnabled,
+  isDeveloperApiEnabled,
   isExportCenterEnabled,
   isImportStudioEnabled,
   isIntegrationsEnabled,
+  isMarketplaceEnabled,
   isReconciliationCenterEnabled,
   isSyncEnabled,
 } from "../../lib/integrations/gate";
@@ -20,33 +22,6 @@ import { getIntegrationActivity } from "../../lib/integrations/activity";
 import { formatDateTime } from "../../lib/format";
 
 export const dynamic = "force-dynamic";
-
-// The categories OneLedger's connector abstraction is being built toward.
-// Nothing here is presented as connected or usable - each is explicitly
-// "coming later" until a real adapter, its tests, and its onboarding
-// exist (master prompt: never make a non-functional integration look
-// connected).
-const AVAILABLE_CATEGORIES = [
-  {
-    name: "Spreadsheets",
-    description:
-      "Connected Google Sheets and Excel workbooks that stay in sync with your ledger.",
-  },
-  {
-    name: "Accounting",
-    description:
-      "Hand off to QuickBooks, Xero, Zoho Books, or Odoo without re-keying.",
-  },
-  {
-    name: "Cloud storage",
-    description:
-      "Deliver scheduled exports to Google Drive, OneDrive, or Dropbox folders.",
-  },
-  {
-    name: "Developer",
-    description: "API access and webhooks for building your own integrations.",
-  },
-] as const;
 
 type ConnectedSummary = {
   total: number;
@@ -118,6 +93,8 @@ export default async function IntegrationsPage() {
   const syncEnabled = isSyncEnabled(workspaceId);
   const reconciliationEnabled = isReconciliationCenterEnabled(workspaceId);
   const accountantEnabled = isAccountantPackageEnabled(workspaceId);
+  const developerApiEnabled = isDeveloperApiEnabled(workspaceId);
+  const marketplaceEnabled = isMarketplaceEnabled(workspaceId);
 
   return (
     <div>
@@ -286,32 +263,21 @@ export default async function IntegrationsPage() {
               body="Connector sync health and recurring scheduled exports."
             />
           )}
+          {developerApiEnabled && (
+            <DataCard
+              href="/integrations/developer"
+              title="Developer API"
+              body="Scoped, rate-limited read-only REST keys for /api/v1."
+            />
+          )}
+          {marketplaceEnabled && (
+            <DataCard
+              href="/integrations/marketplace"
+              title="Marketplace"
+              body="Everything OneLedger connects to — what’s live today and what’s on the way."
+            />
+          )}
         </div>
-      </section>
-
-      <section aria-labelledby="integrations-available">
-        <h2
-          id="integrations-available"
-          className="mb-2 text-sm font-semibold text-text-primary"
-        >
-          Available later
-        </h2>
-        <ul className="flex flex-col gap-2">
-          {AVAILABLE_CATEGORIES.map((category) => (
-            <li
-              key={category.name}
-              className="rounded-card border border-border-subtle bg-surface p-4"
-            >
-              <div className="mb-0.5 flex items-center gap-2">
-                <span className="text-sm font-medium text-text-primary">
-                  {category.name}
-                </span>
-                <Badge>Coming later</Badge>
-              </div>
-              <p className="text-sm text-text-muted">{category.description}</p>
-            </li>
-          ))}
-        </ul>
       </section>
     </div>
   );

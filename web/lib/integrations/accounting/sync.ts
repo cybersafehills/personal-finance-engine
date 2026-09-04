@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { resolvePeriod } from "../export/period.ts";
 import { buildExportDataset } from "../export/query.ts";
 import { nextAttemptState } from "../sync-engine.ts";
+import { fireWebhookEvent } from "../webhooks/dispatch.ts";
 import {
   type AccountingEntry,
   type AccountingProviderKey,
@@ -121,6 +122,19 @@ export async function runLedgerSync(
         : `Ledger sync ${status}`,
       context: { provider, trigger: input.trigger },
     });
+    if (status === "succeeded") {
+      fireWebhookEvent(admin, {
+        workspaceId: input.workspaceId,
+        type: "ledger.synced",
+        eventRef: ledger.id,
+        data: {
+          ledger_id: ledger.id,
+          provider,
+          pushed: counts.pushed ?? 0,
+          skipped: counts.skipped ?? 0,
+        },
+      });
+    }
   };
 
   const accountMap = normalizeAccountMap(ledger.account_map);

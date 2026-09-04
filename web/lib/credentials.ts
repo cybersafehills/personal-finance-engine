@@ -59,3 +59,19 @@ export function generateIngestionCredential(): Promise<GeneratedCredential> {
 export function generateInviteToken(): Promise<GeneratedToken> {
   return generateToken("inv_");
 }
+
+// Developer API bearer key (Integrations Phase 4). Stored only as
+// api_keys.key_hash; the `olk_` plaintext is revealed to the creator
+// exactly once. `prefix` here is the first 8 chars, kept on the row to
+// identify a key in the UI without revealing it.
+export function generateApiKey(): Promise<GeneratedToken> {
+  return generateToken("olk_");
+}
+
+// Developer webhook HMAC signing secret (Integrations Phase 4). The
+// `whsec_` plaintext lives in webhook_subscription_secrets (service-role
+// only) and is shown to the creator once; the receiver verifies
+// signatures with it directly.
+export function generateWebhookSecret(): Promise<GeneratedToken> {
+  return generateToken("whsec_");
+}

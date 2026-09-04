@@ -3,6 +3,39 @@ export type ConnectorInstallationContext = {
   connectorKey: string;
 };
 
+/**
+ * The envelope `adapter_version` an adapter stamps onto every event it emits.
+ * Bump this only when {@link ConnectorEventEnvelope} itself changes shape. An
+ * adapter that needs a version independent of the envelope contract keeps its
+ * own local constant instead (see
+ * `ingest-momo/adapter.ts:MTN_MOMO_SMS_ADAPTER_VERSION`).
+ */
+export const CONNECTOR_ADAPTER_VERSION = "1";
+
+/**
+ * The inbound connector contract. Every ingestion connector implements this
+ * against `_shared/connector-adapter.ts` and nothing else — provider logic
+ * never leaks into an Edge Function body or a web service.
+ *
+ * Lifecycle, in order:
+ * 1. `validateConfiguration(input)` — parse the installer-supplied config.
+ *    Fail closed on unknown keys; never forward tokens or secrets into the
+ *    returned object.
+ * 2. `testConnection(installation, config)` — cheap readiness probe.
+ * 3. `discoverSources(installation, config)` — the source/account tree, in the
+ *    shape {@link buildConnectorDiscoveryPayload} accepts. Raw references are
+ *    hashed away before they reach the database.
+ * 4. `pull(installation, config, cursor?)` — optional. Fetch a page of raw
+ *    provider events plus the cursor to resume from. Push-only connectors
+ *    (e.g. SMS forwarding) omit this.
+ * 5. `normalize(raw)` — pure. Turn one raw event into zero or more
+ *    canonical {@link ConnectorEventEnvelope}s. No I/O, no clock.
+ *
+ * @typeParam Configuration - the validated config object.
+ * @typeParam RawEvent - one unit of provider evidence, as returned by `pull`.
+ * @typeParam NormalizedEvent - the canonical event `normalize` produces
+ *   (typically `ConnectorEventEnvelope<...>`).
+ */
 export type ConnectorAdapter<Configuration, RawEvent, NormalizedEvent> = {
   validateConfiguration(input: unknown): Configuration;
   testConnection(
@@ -20,6 +53,23 @@ export type ConnectorAdapter<Configuration, RawEvent, NormalizedEvent> = {
   ): Promise<{ events: RawEvent[]; cursor?: string }>;
   normalize(raw: RawEvent): NormalizedEvent[];
 };
+
+/**
+ * Identity helper. Returns its argument unchanged, but pins the three type
+ * parameters so an adapter written as an object literal is checked against
+ * {@link ConnectorAdapter} at the definition site — clearer errors than a
+ * trailing `satisfies`, and callers still see the concrete
+ * Configuration/RawEvent/NormalizedEvent types.
+ */
+export function defineConnectorAdapter<
+  Configuration,
+  RawEvent,
+  NormalizedEvent,
+>(
+  adapter: ConnectorAdapter<Configuration, RawEvent, NormalizedEvent>,
+): ConnectorAdapter<Configuration, RawEvent, NormalizedEvent> {
+  return adapter;
+}
 
 export type ConnectorDiscoveryPayload = Array<{
   source_ref_hash: string;

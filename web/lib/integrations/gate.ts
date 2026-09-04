@@ -154,3 +154,48 @@ export function isAccountingConnectorsEnabled(
     envOptIn("INTEGRATIONS_ACCOUNTING_CONNECTORS_ENABLED")
   );
 }
+
+// --- Phase 4 (Developer Platform) ------------------------------------------
+//
+//   INTEGRATIONS_DEVELOPER_API_ENABLED  - the read-only /api/v1 REST surface
+//     + the /integrations/developer key-management screen. OFF unless the
+//     exact string "true" - it is the first non-session public surface.
+//   INTEGRATIONS_WEBHOOKS_DEV_ENABLED   - outbound webhook subscriptions +
+//     the delivery cron. OFF unless exactly "true".
+//   INTEGRATIONS_MARKETPLACE_ENABLED    - the /integrations/marketplace
+//     catalog. On unless exactly "false".
+
+/** Developer REST API + API-key management. Opt-in with exactly "true". */
+export function isDeveloperApiEnabled(workspaceId: string | null): boolean {
+  return (
+    isIntegrationsEnabled(workspaceId) &&
+    envOptIn("INTEGRATIONS_DEVELOPER_API_ENABLED")
+  );
+}
+
+/** Deployment-level dark switch for /api/v1, checked before a key is even
+ *  parsed so a disabled deployment 404s rather than 401s. Per-workspace
+ *  allowlisting is still applied by isDeveloperApiEnabled after auth. */
+export function isDeveloperApiConfigured(): boolean {
+  return envEnabled("INTEGRATIONS_ENABLED") &&
+    envOptIn("INTEGRATIONS_DEVELOPER_API_ENABLED");
+}
+
+/** Outbound webhook subscriptions. Opt-in with exactly "true"; requires the
+ *  developer API surface. */
+export function isDeveloperWebhooksEnabled(
+  workspaceId: string | null,
+): boolean {
+  return (
+    isDeveloperApiEnabled(workspaceId) &&
+    envOptIn("INTEGRATIONS_WEBHOOKS_DEV_ENABLED")
+  );
+}
+
+/** Integration marketplace catalog. On unless exactly "false". */
+export function isMarketplaceEnabled(workspaceId: string | null): boolean {
+  return (
+    isIntegrationsEnabled(workspaceId) &&
+    envEnabled("INTEGRATIONS_MARKETPLACE_ENABLED")
+  );
+}

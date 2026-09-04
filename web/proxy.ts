@@ -120,6 +120,14 @@ export const config = {
   // without the exclusion every device POST to https://api.oneledger.me/v1/*
   // was 307'd to /login before the rewrite could fire. The main domains
   // serve no /v1/* route, so excluding it there is a harmless 404.
+  //
+  // /api/v1/* is excluded: the developer REST API (Integrations Phase 4)
+  // authenticates with an `Authorization: Bearer olk_...` key, never a
+  // Supabase session cookie - web/lib/api/authenticate.ts. Leaving it
+  // behind this session gate 307'd every key-authed request to /login
+  // before the route's own bearer check could run. Each /api/v1 handler is
+  // dark unless INTEGRATIONS_DEVELOPER_API_ENABLED === "true" and does its
+  // own auth + scope + rate-limit checks.
   matcher:
-    "/((?!_next/static|_next/image|favicon.ico|icon.png|apple-icon.png|api/cron|api/health/email|api/admin/operational-health|brand/|v1/).*)",
+    "/((?!_next/static|_next/image|favicon.ico|icon.png|apple-icon.png|api/cron|api/v1/|api/health/email|api/admin/operational-health|brand/|v1/).*)",
 };
