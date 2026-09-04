@@ -29,6 +29,11 @@
   /* One restrained accent for navigation/focus/primary actions. */
   --accent: #33509e;
   --accent-foreground: #ffffff;
+  /* Darker variants of --accent / --money-positive for a button's "done"
+     state (e.g. a Shortcut the user has already tapped to add) - same hue,
+     visibly pressed/settled rather than a different color scheme. */
+  --accent-pressed: #263c76;
+  --money-positive-pressed: #045b39;
 
   --radius-card: 1rem;
   --radius-control: 0.625rem;
@@ -58,6 +63,8 @@
 
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
+  --color-accent-pressed: var(--accent-pressed);
+  --color-money-positive-pressed: var(--money-positive-pressed);
 
   --color-brand-navy: var(--brand-navy);
   --color-brand-blue: var(--brand-blue);

@@ -270,6 +270,15 @@ Deno.serve(async (req: Request) => {
             `raw_event_insert_failed:${error?.code ?? "unknown"}`,
           );
         },
+        touchCredential: async (deviceCredentialId) => {
+          const { error } = await supabase
+            .from("device_credentials")
+            .update({ last_used_at: new Date().toISOString() })
+            .eq("id", deviceCredentialId);
+          if (error) {
+            console.error(JSON.stringify({ event: "device_touch_failed" }));
+          }
+        },
       }, new Date());
       return jsonResponse(result.body, result.status, result.headers);
     }

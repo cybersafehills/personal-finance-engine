@@ -284,6 +284,18 @@ export type CaptureDeps = {
     clientVersion: string;
   }) => Promise<CaptureRecordResult>;
   recordEvent: (event: PairingEvent) => Promise<void>;
+  /**
+   * Stamps device_credentials.last_used_at - the only signal
+   * ConnectionReadinessProbe (web/components) polls to flip the pairing
+   * wizard's Verify step from "waiting" to "this connection is live". Called
+   * for every well-formed, authenticated capture request, including an
+   * unrecognised message (UNKNOWN_PROVIDER) - "is this device successfully
+   * talking to us" is true the moment the envelope validates, independent of
+   * whether this particular SMS happened to match a known provider format.
+   * Previously only op:"test" touched this column, so a real captured
+   * transaction never marked the connection ready.
+   */
+  touchCredential: (deviceCredentialId: string) => Promise<void>;
 };
 
 export async function handleCapture(
@@ -321,6 +333,8 @@ export async function handleCapture(
     return { status: 400, body: { ok: false, error: envelope.code } };
   }
   const message = envelope.value.message as string; // requireMessage → non-null
+
+  await deps.touchCredential(route.deviceCredentialId);
 
   const provider = detectProvider(message);
   if (!provider) {
