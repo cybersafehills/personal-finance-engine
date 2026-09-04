@@ -86,11 +86,20 @@ text) and needs no interaction.
 
 In **Shortcuts → Automation → New → Message**:
 
-- **Message contains** — the provider sender the app tells the user to use (e.g.
-  the MTN MoMo sender). The app's guide carries the country/carrier value; it is
-  not hard-coded here.
+- **Leave Sender blank.** MoMo SMS arrives under the carrier's generic network
+  label (e.g. "Mobile Money"), not a name a user can save or reliably match -
+  Sender-based matching silently never fires.
+- **Message Contains** → `RWF`. It appears in every real MTN MoMo and bank
+  message, so this is the reliable trigger. A message that contains "RWF" but
+  isn't a real transaction is simply forwarded and ignored - `detectProvider`
+  / the parser only ever create a `raw_financial_events` row for one they can
+  actually recognise, so a broad trigger costs nothing.
 - **Run Immediately**, notifications off.
 - Action: **Run Shortcut → OneLedger Capture**, passing the message as input.
+
+`MOMO_SMS_SENDER` (optional) is a supplementary narrowing, not the primary
+match - some networks do show a stable sender name, and the app's guide adds
+that as an *additional* Sender filter when it's set, on top of the RWF match.
 
 OneLedger cannot create this automation for the user; the app guides it
 step-by-step with screenshots and a confirmation check.
