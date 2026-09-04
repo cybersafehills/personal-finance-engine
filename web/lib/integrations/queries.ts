@@ -3,6 +3,7 @@ import "server-only";
 import { supabaseSession } from "../supabase-session-server.ts";
 import { getActiveWorkspaceId } from "../queries.ts";
 import { headerSignature, signatureSimilarity } from "./mapping.ts";
+import type { ApiKeySummary } from "../api/keys.ts";
 import type {
   ConnectedWorkbook,
   IntegrationConflict,
@@ -688,6 +689,36 @@ export async function listConnectedLedgers(): Promise<ConnectedLedger[]> {
     return [];
   }
   return (data ?? []).map(toConnectedLedger);
+}
+
+export async function listApiKeys(): Promise<ApiKeySummary[]> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!workspaceId) return [];
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("api_keys")
+    .select(
+      "id, name, key_prefix, scopes, status, last_used_at, expires_at, created_at, revoked_at",
+    )
+    .eq("workspace_id", workspaceId)
+    .order("created_at", { ascending: false });
+  if (error) {
+    console.error("listApiKeys failed:", error.message);
+    return [];
+  }
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  return (data ?? []).map((r: any) => ({
+    id: r.id,
+    name: r.name,
+    keyPrefix: r.key_prefix,
+    scopes: (r.scopes ?? []) as string[],
+    status: r.status as "active" | "revoked",
+    lastUsedAt: r.last_used_at ?? null,
+    expiresAt: r.expires_at ?? null,
+    createdAt: r.created_at,
+    revokedAt: r.revoked_at ?? null,
+  }));
+  /* eslint-enable @typescript-eslint/no-explicit-any */
 }
 
 export async function getConnectedLedger(

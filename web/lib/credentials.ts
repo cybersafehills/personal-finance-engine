@@ -59,3 +59,11 @@ export function generateIngestionCredential(): Promise<GeneratedCredential> {
 export function generateInviteToken(): Promise<GeneratedToken> {
   return generateToken("inv_");
 }
+
+// Developer API bearer key (Integrations Phase 4). Stored only as
+// api_keys.key_hash; the `olk_` plaintext is revealed to the creator
+// exactly once. `prefix` here is the first 8 chars, kept on the row to
+// identify a key in the UI without revealing it.
+export function generateApiKey(): Promise<GeneratedToken> {
+  return generateToken("olk_");
+}

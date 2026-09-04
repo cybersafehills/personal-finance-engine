@@ -10,6 +10,7 @@ import {
 } from "../../lib/queries";
 import {
   isAccountantPackageEnabled,
+  isDeveloperApiEnabled,
   isExportCenterEnabled,
   isImportStudioEnabled,
   isIntegrationsEnabled,
@@ -118,6 +119,7 @@ export default async function IntegrationsPage() {
   const syncEnabled = isSyncEnabled(workspaceId);
   const reconciliationEnabled = isReconciliationCenterEnabled(workspaceId);
   const accountantEnabled = isAccountantPackageEnabled(workspaceId);
+  const developerApiEnabled = isDeveloperApiEnabled(workspaceId);
 
   return (
     <div>
@@ -284,6 +286,13 @@ export default async function IntegrationsPage() {
               href="/integrations/sync"
               title="Sync & Automation"
               body="Connector sync health and recurring scheduled exports."
+            />
+          )}
+          {developerApiEnabled && (
+            <DataCard
+              href="/integrations/developer"
+              title="Developer API"
+              body="Scoped, rate-limited read-only REST keys for /api/v1."
             />
           )}
         </div>

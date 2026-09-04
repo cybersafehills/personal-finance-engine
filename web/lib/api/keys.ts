@@ -37,6 +37,19 @@ export function hasScope(
 
 export const API_KEY_PREFIX = "olk_";
 
+/** Client-safe summary of an api_keys row (no hash, no secret). */
+export type ApiKeySummary = {
+  id: string;
+  name: string;
+  keyPrefix: string;
+  scopes: string[];
+  status: "active" | "revoked";
+  lastUsedAt: string | null;
+  expiresAt: string | null;
+  createdAt: string;
+  revokedAt: string | null;
+};
+
 /** True for a syntactically plausible bearer token. */
 export function looksLikeApiKey(token: string): boolean {
   return token.startsWith(API_KEY_PREFIX) && token.length >= 20 &&
