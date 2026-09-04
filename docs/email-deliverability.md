@@ -25,9 +25,23 @@ address (which only delivers to your own Resend account email).
    deployment URL, never `localhost`. Every emailed link is built from it.
 5. Confirm `supabase/config.toml` `[auth.email.smtp] enabled = true` and
    that `site_url` / `additional_redirect_urls` list the real domain's
-   `/auth/callback`.
+   `/auth/callback` **and** `/auth/confirm`.
 6. Note the Supabase Auth rate limit: `[auth.rate_limit] email_sent = 30`
    per hour once custom SMTP is on.
+7. **Manual, one-time, dashboard-only step** (this repo's CI only runs
+   `supabase db push` — `config.toml`'s `[auth]` section, including email
+   templates, is never synced to the hosted project automatically): in
+   Authentication → Email Templates → "Confirm signup", replace the body
+   with `supabase/templates/confirmation.html`'s content (link built from
+   `{{ .TokenHash }}`, pointing at `/auth/confirm?token_hash=...&type=email`,
+   not the default `{{ .ConfirmationURL }}`). See the comment on
+   `[auth.email.template.confirmation]` in `supabase/config.toml` for why:
+   the default link is a bare GET that some corporate mail-security
+   scanners prefetch and spend before the recipient ever clicks it, which
+   is what a "that link is no longer available" report on an otherwise
+   fresh signup usually means. Also add `https://www.oneledger.me/auth/confirm`
+   (and the apex/Vercel-fallback equivalents) to the redirect allow-list
+   there, matching `additional_redirect_urls` above.
 
 ## Verifying it
 

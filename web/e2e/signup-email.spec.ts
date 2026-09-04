@@ -108,6 +108,15 @@ test("signup confirmation email authenticates and starts profile onboarding", as
   const confirmationUrl = await findConfirmationUrl(NEW_USER.email);
   await page.goto(confirmationUrl);
 
+  // The link lands on a page requiring a click, not one that verifies
+  // itself on load - see app/auth/confirm/actions.ts: an automated fetch
+  // of this same GET (a mail-security link scanner, e.g.) must not be
+  // able to spend the one-time token before the person ever arrives.
+  await expect(
+    page.getByRole("heading", { name: "Confirm your email" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Confirm my email" }).click();
+
   // A newly verified user resumes at the first persisted onboarding stage.
   await expect(page).toHaveURL(/\/onboarding\/profile$/);
   await expect(

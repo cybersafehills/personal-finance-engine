@@ -1,11 +1,9 @@
 "use server";
 
 import { cookies } from "next/headers";
-import { internalRedirectPath } from "../../lib/internal-redirect";
 import {
   decodePendingValue,
   PENDING_VERIFICATION_EMAIL_COOKIE,
-  PENDING_VERIFICATION_NEXT_COOKIE,
   pendingVerificationCookieOptions,
   VERIFICATION_RESEND_AT_COOKIE,
   VERIFICATION_RESEND_COOLDOWN_SECONDS,
@@ -45,19 +43,16 @@ export async function resendVerificationEmail(): Promise<
     };
   }
 
-  const next = internalRedirectPath(
-    decodePendingValue(
-      cookieStore.get(PENDING_VERIFICATION_NEXT_COOKIE)?.value,
-    ),
-  );
-  const callbackUrl = new URL("/auth/callback", siteUrl());
-  callbackUrl.searchParams.set("next", next);
+  // Fixed path - PENDING_VERIFICATION_NEXT_COOKIE (untouched here, still
+  // set from the original signup) is what actually determines where
+  // /auth/confirm sends the visitor once the token is spent.
+  const emailRedirectTo = new URL("/auth/confirm", siteUrl());
 
   const supabase = await supabaseSession();
   const { error } = await supabase.auth.resend({
     type: "signup",
     email,
-    options: { emailRedirectTo: callbackUrl.toString() },
+    options: { emailRedirectTo: emailRedirectTo.toString() },
   });
 
   if (error) {

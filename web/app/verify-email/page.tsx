@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { AuthBackdrop } from "../../components/auth/AuthBackdrop";
 import { OneLedgerLogo } from "../../components/brand/OneLedgerLogo";
 import { VerifyEmailPanel } from "../../components/VerifyEmailPanel";
 import {
@@ -29,7 +30,8 @@ export default async function VerifyEmailPage({
   );
 
   return (
-    <div className="mx-auto flex max-w-sm flex-col gap-6 py-10">
+    <div className="relative mx-auto flex max-w-sm flex-col gap-6 py-10">
+      <AuthBackdrop />
       <OneLedgerLogo height={40} className="mx-auto" />
       <VerifyEmailPanel
         email={email}

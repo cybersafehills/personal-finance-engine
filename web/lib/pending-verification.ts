@@ -28,3 +28,15 @@ export function decodePendingValue(value: string | undefined): string | null {
     return null;
   }
 }
+
+// A signup confirmation carries no meaningful destination beyond "the page
+// the visitor happened to be on" (almost always just "/", the
+// internalRedirectPath default) - so a first-run, newly-confirmed user
+// belongs in resumable profile setup, not wherever the signup form's own
+// `next` param defaulted to. A caller-supplied deep link (an invite, e.g.)
+// is followed as-is. Applied in app/auth/confirm/actions.ts once a token
+// is actually verified, against whatever `next` was stashed in
+// PENDING_VERIFICATION_NEXT_COOKIE at signup time.
+export function signupConfirmationNext(nextPath: string): string {
+  return nextPath && nextPath !== "/" ? nextPath : "/onboarding/profile";
+}

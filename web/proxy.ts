@@ -24,6 +24,10 @@ const PUBLIC_PATHS = [
   "/signup",
   "/verify-email",
   "/auth/callback",
+  // Where a signup-confirmation email link actually lands (see
+  // app/auth/confirm/actions.ts) - a not-yet-authenticated visitor must be
+  // able to reach it to click "Confirm my email".
+  "/auth/confirm",
   "/auth/reset-password",
   // Must be reachable pre-auth: an invite recipient may not have an
   // account yet. The page itself bounces an unauthenticated visitor to
