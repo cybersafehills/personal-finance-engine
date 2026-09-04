@@ -5096,6 +5096,36 @@ else
   fail "Device pairing: redemption state is wrong ($PAIR_STATE / consume=$PAIR_CONSUME)"
 fi
 
+# Re-pair (20261126000000): pairing the SAME account again - it already has a
+# canonical connector_installation from the redemption above - mints an
+# additional device credential on that installation instead of re-running
+# first-time enrollment. Before this fix, consume_device_pairing_session
+# branched only on the (always-NULL, wizard-created) session field, so a
+# re-pair re-ran _enroll_ingestion_connection -> backfill_legacy_ingestion_
+# connection, which correctly refused via connector_stage_b_preflight to
+# double-map an already-linked financial source - surfacing as a generic
+# Postgres exception the Edge Function flattens to PAIRING_INVALID even
+# though the token itself was valid and unexpired.
+PAIR_INSTALLATION_1="$(printf '%s' "$PAIR_CONSUME" | cut -d'|' -f2)"
+PAIR_REPAIR_TOKEN_HASH="$(printf '9%.0s' $(seq 1 64))"
+PAIR_REPAIR_CRED_HASH="$(printf '8%.0s' $(seq 1 64))"
+as_user "$PAIR_OWNER" "select public.create_device_pairing_session('mtn_momo_sms_v1', 'mtn_momo', '$PAIR_WS', 'Second iPhone', '$PAIR_REPAIR_TOKEN_HASH', 'olp_9999', '$PAIR_ACCOUNT', null);" >/dev/null
+PAIR_REPAIR_RAW="$(psql -d pfe_rls -t -A -c "set role service_role; select device_credential_id || '|' || connector_installation_id from public.consume_device_pairing_session('$PAIR_REPAIR_TOKEN_HASH', '$PAIR_REPAIR_CRED_HASH', 'pfe_9999', '1.0.0', 'ios', 'Second iPhone');" 2>$ARTIFACT_DIR/pfe_pair_repair.log)"
+PAIR_REPAIR_STATUS=$?
+if [ "$PAIR_REPAIR_STATUS" -eq 0 ]; then
+  PAIR_REPAIR_CONSUME="$(printf '%s' "$PAIR_REPAIR_RAW" | grep -Eo '[0-9a-f-]{36}\|[0-9a-f-]{36}' | head -1)"
+  PAIR_REPAIR_INSTALLATION="$(printf '%s' "$PAIR_REPAIR_CONSUME" | cut -d'|' -f2)"
+  PAIR_REPAIR_ACTIVE_CREDS="$(psql -d pfe_rls -t -A -c "select count(*) from public.device_credentials where connector_installation_id = '$PAIR_INSTALLATION_1' and status = 'active';")"
+  if [ "$PAIR_REPAIR_INSTALLATION" = "$PAIR_INSTALLATION_1" ] && [ "$PAIR_REPAIR_ACTIVE_CREDS" = "2" ]; then
+    pass "Device pairing: re-pairing an already-enrolled account mints an additional credential on the same installation"
+  else
+    fail "Device pairing: re-pair installation/credential count is wrong (installation=$PAIR_REPAIR_INSTALLATION expected=$PAIR_INSTALLATION_1 active_creds=$PAIR_REPAIR_ACTIVE_CREDS)"
+  fi
+else
+  fail "Device pairing: re-pairing an already-enrolled account was rejected ($(cat $ARTIFACT_DIR/pfe_pair_repair.log))"
+fi
+rm -f $ARTIFACT_DIR/pfe_pair_repair.log
+
 # Auto-enroll (20261125000000): a legacy account with financial_source_id = NULL
 # is pairable without a prior "Advanced connection" - create_device_pairing_session
 # creates + links a canonical financial source owned by the caller.
