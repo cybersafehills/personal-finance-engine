@@ -21,6 +21,11 @@ function normalizeTimeInput(value: string): string | null {
   return `${value}:00`;
 }
 
+/** A positive integer amount (RWF), rejecting NaN/decimals/negatives/absurd values. */
+function isValidAmount(value: number, max = 1_000_000_000): boolean {
+  return Number.isInteger(value) && value > 0 && value <= max;
+}
+
 export async function saveReportPreferences(input: {
   dailyReportEnabled: boolean;
   timezone: string;
@@ -29,6 +34,15 @@ export async function saveReportPreferences(input: {
   emailEnabled: boolean;
   deliveryEmail: string;
   includeAiAnalysis: boolean;
+  alertThresholds: {
+    largeTransactionRwf: number;
+    highDailySpendRwf: number;
+    elevatedFeesRwf: number;
+    /** null = disable the low-balance alert. */
+    lowBalanceRwf: number | null;
+    sustainedNegativeCashflowDays: number;
+    uncategorizedPercentThreshold: number;
+  };
 }): Promise<ReportPreferencesActionResult> {
   if (!isValidReportTimezone(input.timezone)) {
     return { ok: false, error: "Unrecognized timezone." };
@@ -50,6 +64,22 @@ export async function saveReportPreferences(input: {
     if (!EMAIL_PATTERN.test(trimmedEmail)) {
       return { ok: false, error: "Enter a valid email address to receive reports." };
     }
+  }
+
+  const t = input.alertThresholds;
+  if (
+    !isValidAmount(t.largeTransactionRwf) ||
+    !isValidAmount(t.highDailySpendRwf) ||
+    !isValidAmount(t.elevatedFeesRwf) ||
+    (t.lowBalanceRwf !== null && (!Number.isInteger(t.lowBalanceRwf) || t.lowBalanceRwf < 0 || t.lowBalanceRwf > 1_000_000_000))
+  ) {
+    return { ok: false, error: "Alert amounts must be whole numbers of RWF." };
+  }
+  if (!Number.isInteger(t.sustainedNegativeCashflowDays) || t.sustainedNegativeCashflowDays < 1 || t.sustainedNegativeCashflowDays > 30) {
+    return { ok: false, error: "Sustained-negative-cashflow days must be between 1 and 30." };
+  }
+  if (!Number.isInteger(t.uncategorizedPercentThreshold) || t.uncategorizedPercentThreshold < 1 || t.uncategorizedPercentThreshold > 100) {
+    return { ok: false, error: "Uncategorized-spending percentage must be between 1 and 100." };
   }
 
   const workspaceId = await getActiveWorkspaceId();
@@ -78,6 +108,12 @@ export async function saveReportPreferences(input: {
         email_enabled: input.emailEnabled,
         delivery_email: input.emailEnabled ? trimmedEmail : null,
         include_ai_analysis: input.includeAiAnalysis,
+        alert_large_transaction_rwf: t.largeTransactionRwf,
+        alert_high_daily_spend_rwf: t.highDailySpendRwf,
+        alert_elevated_fees_rwf: t.elevatedFeesRwf,
+        alert_low_balance_rwf: t.lowBalanceRwf,
+        alert_sustained_negative_cashflow_days: t.sustainedNegativeCashflowDays,
+        alert_uncategorized_percent: t.uncategorizedPercentThreshold,
       },
       { onConflict: "workspace_id,user_id" },
     );

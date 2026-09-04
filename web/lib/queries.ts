@@ -2927,10 +2927,20 @@ export type ReportPreferencesRow = {
   email_enabled: boolean;
   delivery_email: string | null;
   include_ai_analysis: boolean;
+  // Per-user alert thresholds (migration 20261125000000). alert_low_balance_rwf
+  // null = low-balance check disabled; the rest are NOT NULL in the DB.
+  alert_large_transaction_rwf: number;
+  alert_high_daily_spend_rwf: number;
+  alert_elevated_fees_rwf: number;
+  alert_low_balance_rwf: number | null;
+  alert_sustained_negative_cashflow_days: number;
+  alert_uncategorized_percent: number;
 };
 
+// Must stay a single string literal (not a concatenation) so supabase-js
+// can infer the row shape from it.
 const REPORT_PREFERENCES_COLUMNS =
-  "id, timezone, daily_report_enabled, generation_time, delivery_time, email_enabled, delivery_email, include_ai_analysis";
+  "id, timezone, daily_report_enabled, generation_time, delivery_time, email_enabled, delivery_email, include_ai_analysis, alert_large_transaction_rwf, alert_high_daily_spend_rwf, alert_elevated_fees_rwf, alert_low_balance_rwf, alert_sustained_negative_cashflow_days, alert_uncategorized_percent";
 
 /** The caller's own report preferences in their active workspace, or null if they've never set any (defaults are then whatever the settings form itself shows, never silently assumed enabled - see report_preferences' own migration comment on opt-in defaults). */
 export async function getReportPreferences(): Promise<ReportPreferencesRow | null> {

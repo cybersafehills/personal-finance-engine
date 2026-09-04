@@ -325,6 +325,71 @@ export type ReportAlertThresholds = {
   uncategorizedPercentThreshold: number;
 };
 
+/**
+ * The system defaults every daily report falls back to. Historically
+ * these lived as a private const in report-generation.ts; they moved here
+ * (next to the type they satisfy, in the zero-import pure module) once
+ * per-user overrides were added, so both the resolver below and the
+ * settings UI can share one definition (master prompt §64 - no duplicated
+ * financial constants).
+ */
+export const DEFAULT_ALERT_THRESHOLDS: ReportAlertThresholds = {
+  largeTransactionRwf: 100_000,
+  highDailySpendRwf: 200_000,
+  elevatedFeesRwf: 5_000,
+  lowBalanceRwf: 10_000,
+  sustainedNegativeCashflowDays: 3,
+  uncategorizedPercentThreshold: 50,
+};
+
+/**
+ * A report_preferences row's alert-threshold columns as stored (snake_case,
+ * each independently nullable). See migration
+ * 20261125000000_report_alert_thresholds.sql.
+ */
+export type StoredAlertThresholds = {
+  alert_large_transaction_rwf: number | null;
+  alert_high_daily_spend_rwf: number | null;
+  alert_elevated_fees_rwf: number | null;
+  alert_low_balance_rwf: number | null;
+  alert_sustained_negative_cashflow_days: number | null;
+  alert_uncategorized_percent: number | null;
+};
+
+/**
+ * Map a stored preferences row to the runtime ReportAlertThresholds the
+ * calculation engine consumes. Any missing column (an older row read
+ * before the migration, or a partial select) falls back to
+ * DEFAULT_ALERT_THRESHOLDS.
+ *
+ * `alert_low_balance_rwf` is special: a stored `null` is a deliberate
+ * "disable the low-balance check" (lowBalanceRwf = null), NOT "use the
+ * default" - only `undefined` (column absent) falls back.
+ */
+export function resolveAlertThresholds(
+  stored: Partial<StoredAlertThresholds> | null | undefined,
+): ReportAlertThresholds {
+  const s = stored ?? {};
+  return {
+    largeTransactionRwf:
+      s.alert_large_transaction_rwf ?? DEFAULT_ALERT_THRESHOLDS.largeTransactionRwf,
+    highDailySpendRwf:
+      s.alert_high_daily_spend_rwf ?? DEFAULT_ALERT_THRESHOLDS.highDailySpendRwf,
+    elevatedFeesRwf:
+      s.alert_elevated_fees_rwf ?? DEFAULT_ALERT_THRESHOLDS.elevatedFeesRwf,
+    lowBalanceRwf:
+      s.alert_low_balance_rwf === undefined
+        ? DEFAULT_ALERT_THRESHOLDS.lowBalanceRwf
+        : s.alert_low_balance_rwf,
+    sustainedNegativeCashflowDays:
+      s.alert_sustained_negative_cashflow_days ??
+      DEFAULT_ALERT_THRESHOLDS.sustainedNegativeCashflowDays,
+    uncategorizedPercentThreshold:
+      s.alert_uncategorized_percent ??
+      DEFAULT_ALERT_THRESHOLDS.uncategorizedPercentThreshold,
+  };
+}
+
 export type ReportAlertInput = {
   transactions: ReportTransactionFact[];
   snapshot: FinancialSnapshot;

@@ -21,7 +21,7 @@ import {
   computeMonthEndForecast,
   computeReportAlerts,
   computeTrends,
-  ReportAlertThresholds,
+  resolveAlertThresholds,
   ReportTransactionFact,
 } from "./report-math";
 import type {
@@ -47,19 +47,10 @@ import { generateReportCommentary } from "./ai/report-commentary";
 // rows, explicitly scoped, and hands them to report-math.ts/budget-math.ts
 // for calculation (master prompt §64).
 //
-// V1 alert thresholds are fixed module-level defaults, not yet a stored
-// per-user preference - report_preferences (Phase B/J's migration) has no
-// threshold columns today. Documented here as a deliberate, narrow scope
-// cut: adding configurable thresholds is a additive follow-up migration,
-// not a blocker for a correct V1 report.
-const DEFAULT_ALERT_THRESHOLDS: ReportAlertThresholds = {
-  largeTransactionRwf: 100_000,
-  highDailySpendRwf: 200_000,
-  elevatedFeesRwf: 5_000,
-  lowBalanceRwf: 10_000,
-  sustainedNegativeCashflowDays: 3,
-  uncategorizedPercentThreshold: 50,
-};
+// Alert thresholds are per-user, stored on report_preferences (migration
+// 20261125000000_report_alert_thresholds.sql) and resolved per candidate
+// via resolveAlertThresholds(). DEFAULT_ALERT_THRESHOLDS (from
+// report-math.ts) is the fallback for any column a row doesn't set.
 
 const ROLLING_AVERAGE_WINDOW_DAYS = 7;
 const NEGATIVE_CASHFLOW_LOOKBACK_DAYS = 14;
@@ -74,6 +65,16 @@ export type ReportPreferenceCandidate = {
   generation_time: string;
   delivery_email: string | null;
   include_ai_analysis: boolean;
+  // Per-user alert thresholds (migration 20261125000000). Each may be
+  // null: for alert_low_balance_rwf null means "disable the check", for
+  // the rest it only occurs on a pre-migration row and resolveAlertThresholds
+  // falls back to DEFAULT_ALERT_THRESHOLDS.
+  alert_large_transaction_rwf: number | null;
+  alert_high_daily_spend_rwf: number | null;
+  alert_elevated_fees_rwf: number | null;
+  alert_low_balance_rwf: number | null;
+  alert_sustained_negative_cashflow_days: number | null;
+  alert_uncategorized_percent: number | null;
 };
 
 /**
@@ -88,8 +89,9 @@ export async function getDailyReportCandidates(
 ): Promise<ReportPreferenceCandidate[]> {
   const { data, error } = await supabase
     .from("report_preferences")
+    // Single string literal (not concatenated) so supabase-js infers the row type.
     .select(
-      "id, workspace_id, user_id, timezone, generation_time, delivery_email, include_ai_analysis",
+      "id, workspace_id, user_id, timezone, generation_time, delivery_email, include_ai_analysis, alert_large_transaction_rwf, alert_high_daily_spend_rwf, alert_elevated_fees_rwf, alert_low_balance_rwf, alert_sustained_negative_cashflow_days, alert_uncategorized_percent",
     )
     .eq("daily_report_enabled", true);
 
@@ -711,7 +713,7 @@ export async function generateDailyReportForCandidate(
       transactions,
       snapshot,
       consecutiveNegativeDays,
-      thresholds: DEFAULT_ALERT_THRESHOLDS,
+      thresholds: resolveAlertThresholds(candidate),
     });
 
     const budgetSection = await computeBudgetSection(
