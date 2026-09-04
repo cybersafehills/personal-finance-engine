@@ -90,6 +90,20 @@ export async function startDevicePairing(
           "You have a few pairing codes on the go already. Finish or wait for one to expire, then try again.",
       };
     }
+    if (message.includes("owned by another user")) {
+      return {
+        ok: false,
+        error:
+          "This account is linked to another person's data and can't be paired from here.",
+      };
+    }
+    if (message.includes("selected account is unavailable")) {
+      return {
+        ok: false,
+        error:
+          "That account can't be connected — check that it's active and belongs to this workspace.",
+      };
+    }
     return { ok: false, error: "Could not start pairing. Please try again." };
   }
 
