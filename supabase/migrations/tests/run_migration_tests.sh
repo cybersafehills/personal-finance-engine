@@ -648,7 +648,9 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # Integrations Phase 4 P4-PR1 (20261121000000) adds api_keys (RLS, SELECT on
 # integration.view) and api_request_log (RLS, service-role only) - 114 tables,
 # 113 with RLS.
-if [ "$TABLE_COUNT" = "114" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Integrations Phase 4 P4-PR2 (20261122000000) adds api_rate_buckets (RLS,
+# service-role only) - 115 tables, 114 with RLS.
+if [ "$TABLE_COUNT" = "115" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -6524,11 +6526,22 @@ else
 fi
 rm -f $ARTIFACT_DIR/pfe_p4_scope.log
 
-P4_LOG_GRANTS="$(psql -d pfe_rls -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and table_name='api_request_log' and grantee in ('anon','authenticated');")"
+P4_LOG_GRANTS="$(psql -d pfe_rls -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and table_name in ('api_request_log','api_rate_buckets') and grantee in ('anon','authenticated');")"
 if [ "$P4_LOG_GRANTS" = "0" ]; then
-  pass "Integrations P4: api_request_log has zero anon/authenticated grants (service-role only)"
+  pass "Integrations P4: api_request_log + api_rate_buckets have zero anon/authenticated grants (service-role only)"
 else
-  fail "Integrations P4: api_request_log exposes $P4_LOG_GRANTS anon/authenticated grant(s)"
+  fail "Integrations P4: api log/rate tables expose $P4_LOG_GRANTS anon/authenticated grant(s)"
+fi
+
+# 20261122000000: api_rate_take fixed-window limiter.
+P4_RATE1="$(psql -d pfe_rls -t -A -c "select (public.api_rate_take('$P4_KEY', 2, 60)->>'allowed');")"
+P4_RATE2="$(psql -d pfe_rls -t -A -c "select (public.api_rate_take('$P4_KEY', 2, 60)->>'allowed');")"
+P4_RATE3="$(psql -d pfe_rls -t -A -c "select (public.api_rate_take('$P4_KEY', 2, 60)->>'allowed') || '|' || (public.api_rate_take('$P4_KEY', 2, 60)->>'remaining');")"
+P4_RATE_ACL="$(psql -d pfe_rls -t -A -c "select has_function_privilege('service_role','public.api_rate_take(uuid,integer,integer)','execute') || '|' || has_function_privilege('authenticated','public.api_rate_take(uuid,integer,integer)','execute');")"
+if [ "$P4_RATE1" = "true" ] && [ "$P4_RATE2" = "true" ] && [ "$P4_RATE3" = "false|0" ] && { [ "$P4_RATE_ACL" = "true|false" ] || [ "$P4_RATE_ACL" = "t|f" ]; }; then
+  pass "Integrations P4: api_rate_take allows up to the limit then denies, and is service-role-only"
+else
+  fail "Integrations P4: api_rate_take wrong (r1=$P4_RATE1 r2=$P4_RATE2 r3=$P4_RATE3 acl=$P4_RATE_ACL)"
 fi
 
 echo ""
