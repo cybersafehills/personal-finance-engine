@@ -12,8 +12,6 @@ import {
   computeElapsedFraction,
   daysBetweenDateKeys,
 } from "./budget-math";
-import { findTransferCandidates, TransferCandidateTransaction } from "./transfer-detection";
-import { lastNCompleteMonthKeys } from "./budget-math";
 import {
   buildCanonicalConnectorReadModel,
   type ConnectorAdapterCanaryStatus,
@@ -1755,127 +1753,15 @@ export async function getGoalCollaboration(
 }
 
 // ===========================================================================
-// Self-transfer detection
+// Self-transfer detection -> web/lib/queries/transfers.ts
 // ===========================================================================
 
-const TRANSFER_LOOKBACK_DAYS = 60;
-
-export type TransferCandidateDisplay = {
-  outTransactionId: string;
-  outAccountName: string;
-  outOccurredAt: string;
-  inTransactionId: string;
-  inAccountName: string;
-  inOccurredAt: string;
-  amountMinor: number;
-  currency: string;
-  amountDiffPercent: number;
-  hoursApart: number;
-};
-
-/**
- * Heuristic self-transfer suggestions - see web/lib/transfer-detection.ts
- * for the matching algorithm itself. Bounded to the last 60 days (not the
- * whole transaction history) and excludes any transaction already present
- * in transfer_links (linked OR dismissed) so a reviewed transaction is
- * never re-suggested.
- */
-export async function getTransferCandidates(): Promise<TransferCandidateDisplay[]> {
-  const supabase = await supabaseSession();
-  const sinceIso = new Date(Date.now() - TRANSFER_LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString();
-
-  const [txnsResult, reviewedResult] = await Promise.all([
-    supabase
-      .from("transactions")
-      .select(
-        "id, account_id, direction, currency, principal_effect_rwf, occurred_at, accounts!transactions_account_id_fkey(name)",
-      )
-      .in("direction", ["in", "out"])
-      .eq("settlement_state", "settled")
-      .gte("occurred_at", sinceIso),
-    supabase.from("transfer_links").select("out_transaction_id, in_transaction_id"),
-  ]);
-
-  if (txnsResult.error) {
-    console.error("getTransferCandidates failed:", txnsResult.error.message);
-    return [];
-  }
-  if (reviewedResult.error) {
-    console.error("getTransferCandidates (reviewed) failed:", reviewedResult.error.message);
-  }
-
-  const reviewedIds = new Set<string>();
-  for (const row of reviewedResult.data ?? []) {
-    reviewedIds.add(row.out_transaction_id);
-    reviewedIds.add(row.in_transaction_id);
-  }
-
-  type Row = {
-    id: string;
-    account_id: string;
-    direction: "in" | "out";
-    currency: string;
-    principal_effect_rwf: number | null;
-    occurred_at: string;
-    accounts: { name: string } | null;
-  };
-
-  const eligible = (txnsResult.data as unknown as Row[]).filter(
-    (row) => !reviewedIds.has(row.id) && row.principal_effect_rwf !== null,
-  );
-
-  const forMatching: TransferCandidateTransaction[] = eligible.map((row) => ({
-    id: row.id,
-    accountId: row.account_id,
-    direction: row.direction,
-    amountMinor: BigInt(Math.abs(row.principal_effect_rwf!)),
-    occurredAt: row.occurred_at,
-    currency: row.currency,
-  }));
-
-  const byId = new Map(eligible.map((row) => [row.id, row]));
-  const candidates = findTransferCandidates(forMatching);
-
-  return candidates.map((c) => {
-    const out = byId.get(c.outTransactionId)!;
-    const incoming = byId.get(c.inTransactionId)!;
-    return {
-      outTransactionId: c.outTransactionId,
-      outAccountName: out.accounts?.name ?? "Unknown account",
-      outOccurredAt: out.occurred_at,
-      inTransactionId: c.inTransactionId,
-      inAccountName: incoming.accounts?.name ?? "Unknown account",
-      inOccurredAt: incoming.occurred_at,
-      amountMinor: Math.abs(out.principal_effect_rwf!),
-      currency: out.currency,
-      amountDiffPercent: c.amountDiffPercent,
-      hoursApart: c.hoursApart,
-    };
-  });
-}
-
-export type LinkedTransferRow = {
-  id: string;
-  out_transaction_id: string;
-  in_transaction_id: string;
-  status: "linked" | "dismissed";
-  created_at: string;
-};
-
-export async function getTransferLinks(): Promise<LinkedTransferRow[]> {
-  const supabase = await supabaseSession();
-  const { data, error } = await supabase
-    .from("transfer_links")
-    .select("id, out_transaction_id, in_transaction_id, status, created_at")
-    .order("created_at", { ascending: false });
-
-  if (error) {
-    console.error("getTransferLinks failed:", error.message);
-    return [];
-  }
-
-  return data ?? [];
-}
+export {
+  getTransferCandidates,
+  getTransferLinks,
+  type LinkedTransferRow,
+  type TransferCandidateDisplay,
+} from "./queries/transfers";
 
 // ===========================================================================
 // Transaction splits
@@ -2223,85 +2109,14 @@ export async function getTransactionSplits(
 }
 
 // ===========================================================================
-// Variable income: candidate transactions for the previous 3 complete
-// months, for a workspace-owner to inspect/exclude before accepting a
-// recommended baseline (see web/lib/budget-math.ts for the actual
-// averaging/minimum logic).
+// Variable income -> web/lib/queries/variable-income.ts
 // ===========================================================================
 
-export type VariableIncomeTransaction = {
-  id: string;
-  occurredAt: string;
-  counterpartyName: string | null;
-  amountMinor: number;
-};
-
-export type VariableIncomeMonth = {
-  monthKey: string;
-  transactions: VariableIncomeTransaction[];
-};
-
-function lastDayOfMonth(monthKey: string): number {
-  const [year, month] = monthKey.split("-").map(Number);
-  return new Date(Date.UTC(year, month, 0)).getUTCDate();
-}
-
-/**
- * Complete calendar months are Kigali-calendar months entirely before
- * the current one - the current, still-in-progress month is never
- * included (matching the product spec's own "previous 3 complete
- * months" wording). Months with zero qualifying transactions are simply
- * absent from the result, not included as an empty/zero entry - callers
- * feed only the months with actual data into
- * computeVariableIncomeRecommendation().
- */
-export async function getVariableIncomeMonths(
-  currency: string,
-  monthsBack = 3,
-): Promise<VariableIncomeMonth[]> {
-  const supabase = await supabaseSession();
-  const todayMonthKey = kigaliDateKey(new Date().toISOString()).slice(0, 7);
-  const monthKeys = lastNCompleteMonthKeys(todayMonthKey, monthsBack);
-  if (monthKeys.length === 0) return [];
-
-  const firstMonthKey = monthKeys[0];
-  const lastMonthKey = monthKeys[monthKeys.length - 1];
-  const { startUtc } = kigaliDayBoundsUtc(`${firstMonthKey}-01`);
-  const { endUtc } = kigaliDayBoundsUtc(
-    `${lastMonthKey}-${String(lastDayOfMonth(lastMonthKey)).padStart(2, "0")}`,
-  );
-
-  const { data, error } = await supabase
-    .from("transactions")
-    .select("id, occurred_at, counterparty_name, principal_effect_rwf, fee_effect_rwf")
-    .eq("currency", currency)
-    .eq("direction", "in")
-    .eq("settlement_state", "settled")
-    // Phase U: exclude rows merged into a canonical duplicate.
-    .neq("dedupe_state", "merged")
-    .gte("occurred_at", startUtc.toISOString())
-    .lte("occurred_at", endUtc.toISOString())
-    .order("occurred_at", { ascending: true });
-
-  if (error) {
-    console.error("getVariableIncomeMonths failed:", error.message);
-    return [];
-  }
-
-  const byMonth = new Map<string, VariableIncomeTransaction[]>();
-  for (const row of data ?? []) {
-    const monthKey = kigaliDateKey(row.occurred_at).slice(0, 7);
-    if (!monthKeys.includes(monthKey)) continue; // defensive: excludes any boundary row outside the intended months
-    const amountMinor = Math.abs(Number(row.principal_effect_rwf) + Number(row.fee_effect_rwf));
-    const existing = byMonth.get(monthKey) ?? [];
-    existing.push({ id: row.id, occurredAt: row.occurred_at, counterpartyName: row.counterparty_name, amountMinor });
-    byMonth.set(monthKey, existing);
-  }
-
-  return monthKeys
-    .filter((key) => byMonth.has(key))
-    .map((monthKey) => ({ monthKey, transactions: byMonth.get(monthKey)! }));
-}
+export {
+  getVariableIncomeMonths,
+  type VariableIncomeMonth,
+  type VariableIncomeTransaction,
+} from "./queries/variable-income";
 
 // ===========================================================================
 // Organization workspaces: creation, membership, invites. See
@@ -2993,17 +2808,17 @@ export async function getReportPreferences(): Promise<ReportPreferencesRow | nul
 // supabase/migrations/20260904000000_phase_l_ui_preferences.sql.
 // ===========================================================================
 
-import { normalizeNavOrder, type NavKey } from "./navigation";
-
 export type UiPreferencesRow = {
-  navOrder: NavKey[];
   hideBalance: boolean;
   privacyMode: boolean;
   reportsRelocationNoticeDismissed: boolean;
 };
 
+// nav_order is no longer read - the primary nav is a fixed journey now
+// (lib/navigation.ts). The column stays in the table until a deliberate
+// drop migration.
 const UI_PREFERENCES_COLUMNS =
-  "nav_order, hide_balance, privacy_mode, reports_relocation_notice_dismissed";
+  "hide_balance, privacy_mode, reports_relocation_notice_dismissed";
 
 /**
  * The caller's own shell/navigation/privacy preferences in their active
@@ -3016,7 +2831,6 @@ const UI_PREFERENCES_COLUMNS =
  */
 export async function getUiPreferences(): Promise<UiPreferencesRow> {
   const fallback: UiPreferencesRow = {
-    navOrder: normalizeNavOrder(undefined),
     hideBalance: false,
     privacyMode: false,
     reportsRelocationNoticeDismissed: false,
@@ -3045,7 +2859,6 @@ export async function getUiPreferences(): Promise<UiPreferencesRow> {
   if (!data) return fallback;
 
   return {
-    navOrder: normalizeNavOrder(data.nav_order),
     hideBalance: data.hide_balance,
     privacyMode: data.privacy_mode,
     reportsRelocationNoticeDismissed: data.reports_relocation_notice_dismissed,

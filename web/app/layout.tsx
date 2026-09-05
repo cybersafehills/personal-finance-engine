@@ -10,13 +10,16 @@ import {
   getUnreadNotificationCount,
   getUserWorkspaces,
 } from "../lib/queries";
-import { DEFAULT_NAV_ORDER } from "../lib/navigation";
 import {
   isAssistedPayEnabled,
   isPayServicesEnabled,
   isScanToPayEnabled,
 } from "../lib/pay/gate";
 import { isIntegrationsEnabled } from "../lib/integrations/gate";
+import {
+  isBusinessSurfacesEnabled,
+  resolveExperienceMode,
+} from "../lib/experience-mode/gate";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -112,7 +115,6 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
         [],
         null,
         {
-          navOrder: DEFAULT_NAV_ORDER,
           hideBalance: false,
           privacyMode: false,
           reportsRelocationNoticeDismissed: true,
@@ -129,6 +131,14 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   const scanToPayEnabled = payEnabled && isScanToPayEnabled(activeWorkspaceId);
   const integrationsEnabled =
     Boolean(user) && isIntegrationsEnabled(activeWorkspaceId);
+
+  // Experience mode (assessment section 6.2): derived from the active
+  // Space's kind, decides which surfaces are visible - never an
+  // authorization check. Business-only surfaces stay dark until their
+  // rollout flag is on.
+  const experienceMode = resolveExperienceMode(activeWorkspaceId, workspaces);
+  const businessSurfacesEnabled = Boolean(user) &&
+    isBusinessSurfacesEnabled(activeWorkspaceId);
 
   return (
     <html lang="en" className={`${geistSans.variable} h-full antialiased`}>
@@ -150,7 +160,6 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           userEmail={user?.email ?? null}
           workspaces={workspaces}
           activeWorkspaceId={activeWorkspaceId}
-          navOrder={uiPreferences.navOrder}
           hideBalance={uiPreferences.hideBalance}
           privacyMode={uiPreferences.privacyMode}
           reportsRelocationNoticeDismissed={uiPreferences.reportsRelocationNoticeDismissed}
@@ -158,6 +167,8 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           assistedPayEnabled={assistedPayEnabled}
           scanToPayEnabled={scanToPayEnabled}
           integrationsEnabled={integrationsEnabled}
+          experienceMode={experienceMode}
+          businessSurfacesEnabled={businessSurfacesEnabled}
           unreadNotificationCount={unreadNotificationCount}
         >
           {children}

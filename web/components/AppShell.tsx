@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { OneLedgerLogo } from "./brand/OneLedgerLogo";
-import { GearIcon, HomeIcon, ListIcon, MoreIcon, PieIcon, TargetIcon } from "./icons";
+import { HomeIcon, InboxIcon, ListIcon, MoreIcon, TargetIcon } from "./icons";
 import { LiveDataSync } from "./LiveDataSync";
 import { InboxButton } from "./InboxButton";
 import { MoreSheet } from "./MoreSheet";
@@ -15,40 +15,30 @@ import { PayTrigger } from "./pay/PayTrigger";
 import { ReportsButton } from "./ReportsButton";
 import { ReportsRelocationNotice } from "./ReportsRelocationNotice";
 import {
+  type ExperienceMode,
+  isSurfaceVisible,
+} from "../lib/experience-mode";
+import {
   MORE_MENU_PREFIXES,
-  NAV_ITEM_META,
-  type NavKey,
+  PHONE_BAR_KEYS,
+  PRIMARY_NAV,
+  type PrimaryNavKey,
 } from "../lib/navigation";
 import type { WorkspaceSummary } from "../lib/queries";
 
-const NAV_ICONS: Record<NavKey, (props: { className?: string }) => React.JSX.Element> = {
-  transactions: ListIcon,
-  categories: PieIcon,
-  budgets: TargetIcon,
-  settings: GearIcon,
+const NAV_ICONS: Record<
+  PrimaryNavKey,
+  (props: { className?: string }) => React.JSX.Element
+> = {
+  home: HomeIcon,
+  activity: ListIcon,
+  inbox: InboxIcon,
+  plan: TargetIcon,
 };
 
 function isActive(pathname: string, href: string): boolean {
   if (href === "/") return pathname === "/";
   return pathname === href || pathname.startsWith(`${href}/`);
-}
-
-/**
- * The five primary destinations in the caller's chosen order: Home is
- * always first and never movable (master prompt §5), the remaining four
- * follow navOrder (already validated/normalized server-side by
- * getUiPreferences - see lib/navigation.ts). Reports is never a member of
- * this list; it lives only behind ReportsButton and the Settings link.
- */
-function useOrderedNavItems(navOrder: NavKey[]) {
-  return [
-    { href: "/", label: "Home", Icon: HomeIcon },
-    ...navOrder.map((key) => ({
-      href: NAV_ITEM_META[key].href,
-      label: NAV_ITEM_META[key].label,
-      Icon: NAV_ICONS[key],
-    })),
-  ];
 }
 
 /** One icon+label item in the phone bottom bar. */
@@ -81,7 +71,6 @@ export function AppShell({
   userEmail,
   workspaces,
   activeWorkspaceId,
-  navOrder,
   hideBalance,
   privacyMode,
   reportsRelocationNoticeDismissed,
@@ -89,13 +78,14 @@ export function AppShell({
   assistedPayEnabled,
   scanToPayEnabled,
   integrationsEnabled,
+  experienceMode,
+  businessSurfacesEnabled,
   unreadNotificationCount,
 }: {
   children: React.ReactNode;
   userEmail: string | null;
   workspaces: WorkspaceSummary[];
   activeWorkspaceId: string | null;
-  navOrder: NavKey[];
   hideBalance: boolean;
   privacyMode: boolean;
   reportsRelocationNoticeDismissed: boolean;
@@ -103,12 +93,35 @@ export function AppShell({
   assistedPayEnabled: boolean;
   scanToPayEnabled: boolean;
   integrationsEnabled: boolean;
+  /** The active Space's experience mode - decides surface visibility only. */
+  experienceMode: ExperienceMode;
+  /** Whether the dark-by-default Business-only surfaces are switched on. */
+  businessSurfacesEnabled: boolean;
   unreadNotificationCount: number;
 }) {
   const pathname = usePathname();
-  const navItems = useOrderedNavItems(navOrder);
   const [moreOpen, setMoreOpen] = useState(false);
   const moreActive = MORE_MENU_PREFIXES.some((p) => isActive(pathname, p));
+
+  // The fixed financial-journey nav, filtered by the active experience
+  // mode (personal/household/business all keep the four core destinations;
+  // the filter is future-proofing + keeps navigation.ts the one source of
+  // truth). Home/Activity/Inbox/Plan; Reports/Categories/Settings live in
+  // the grouped More sheet.
+  const primaryNav = PRIMARY_NAV.filter((item) =>
+    item.surface === null ||
+    isSurfaceVisible(experienceMode, item.surface, {
+      businessEnabled: businessSurfacesEnabled,
+    })
+  ).map((item) => ({
+    href: item.href,
+    label: item.label,
+    Icon: NAV_ICONS[item.key],
+  }));
+  const phoneBar = PHONE_BAR_KEYS.map((key) => {
+    const item = PRIMARY_NAV.find((i) => i.key === key)!;
+    return { href: item.href, label: item.label, Icon: NAV_ICONS[key] };
+  });
 
   const shell = (
     <div className="flex min-h-full flex-col">
@@ -142,7 +155,7 @@ export function AppShell({
               aria-label="Primary"
               className="hidden flex-1 items-center justify-center gap-1 lg:flex"
             >
-              {navItems.map(({ href, label }) => {
+              {primaryNav.map(({ href, label }) => {
                 const active = isActive(pathname, href);
                 return (
                   <Link
@@ -159,6 +172,20 @@ export function AppShell({
                   </Link>
                 );
               })}
+              <button
+                type="button"
+                onClick={() => setMoreOpen(true)}
+                aria-haspopup="dialog"
+                aria-expanded={moreOpen}
+                aria-current={moreActive ? "page" : undefined}
+                className={`rounded-full px-4 py-1.5 text-sm font-medium transition-colors ${
+                  moreActive
+                    ? "bg-accent text-accent-foreground"
+                    : "text-text-secondary hover:bg-background hover:text-text-primary"
+                }`}
+              >
+                More
+              </button>
             </nav>
 
             <div className="flex shrink-0 items-center gap-1.5">
@@ -187,14 +214,13 @@ export function AppShell({
         {children}
       </main>
 
-      {/* Phone/tablet: a FIXED five-slot bottom bar - Home, Transactions,
-          the elevated Pay action dead-centre, Budgets, and More - matching
-          the master prompt's "Home / Accounts / Pay / Activity / More"
-          responsive pattern. This is deliberately NOT the same list as the
-          desktop header nav (which shows all four nav_order destinations
-          inline): the phone bar's slots have fixed roles, and Categories /
-          Reports / Settings live in the More sheet here. Visible below lg:
-          (1024px). Absent on auth pages. */}
+      {/* Phone/tablet: a FIXED five-slot bottom bar - Home, Activity, the
+          elevated Pay action dead-centre, Plan, and More (master prompt
+          section 19). Deliberately NOT the same list as the desktop header
+          nav: the phone bar's slots have fixed roles, Inbox is reached
+          from the header icon at this width, and Categories / Reports /
+          Settings live in the More sheet. Visible below lg: (1024px).
+          Absent on auth pages. */}
       {userEmail && (
         <>
           <nav
@@ -204,16 +230,16 @@ export function AppShell({
             <div className="mx-auto flex max-w-3xl items-stretch justify-around">
               <BottomNavLink href="/" label="Home" Icon={HomeIcon} pathname={pathname} />
               <BottomNavLink
-                href="/transactions"
-                label="Transactions"
-                Icon={ListIcon}
+                href={phoneBar[0].href}
+                label={phoneBar[0].label}
+                Icon={phoneBar[0].Icon}
                 pathname={pathname}
               />
               {payEnabled && <PayTrigger variant="mobile" />}
               <BottomNavLink
-                href="/budgets"
-                label="Budgets"
-                Icon={TargetIcon}
+                href={phoneBar[1].href}
+                label={phoneBar[1].label}
+                Icon={phoneBar[1].Icon}
                 pathname={pathname}
               />
               <button
@@ -237,6 +263,8 @@ export function AppShell({
             payEnabled={payEnabled}
             assistedPayEnabled={assistedPayEnabled}
             integrationsEnabled={integrationsEnabled}
+            experienceMode={experienceMode}
+            businessSurfacesEnabled={businessSurfacesEnabled}
           />
         </>
       )}
