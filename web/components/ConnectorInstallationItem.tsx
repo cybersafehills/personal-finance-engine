@@ -1,4 +1,8 @@
 import { Badge } from "./Badge";
+import {
+  ConnectionStatusBadge,
+  connectionStatusHint,
+} from "./ds/StatusBadge";
 import { formatDateTime } from "../lib/format";
 import type {
   CanonicalConnectorInstallation,
@@ -17,27 +21,6 @@ const CONNECTOR_LABELS: Record<string, string> = {
   bank_open_api_v1: "Bank connection",
   statement_csv_v1: "Statement import",
 };
-
-function installationStatus(
-  status: CanonicalConnectorInstallation["status"],
-): { label: string; variant: "positive" | "neutral" | "attention" } {
-  switch (status) {
-    case "healthy":
-      return { label: "Healthy", variant: "positive" };
-    case "setup":
-      return { label: "Setup needed", variant: "neutral" };
-    case "testing":
-      return { label: "Testing", variant: "neutral" };
-    case "stale":
-      return { label: "Stale", variant: "attention" };
-    case "paused":
-      return { label: "Paused", variant: "neutral" };
-    case "error":
-      return { label: "Needs attention", variant: "attention" };
-    case "revoked":
-      return { label: "Revoked", variant: "attention" };
-  }
-}
 
 function credentialScopeLabel(scope: CanonicalCredentialScope): string {
   switch (scope.kind) {
@@ -65,7 +48,6 @@ export function ConnectorInstallationItem({
   canManageAdapterCanary: boolean;
   ingestEndpointUrl: string | null;
 }) {
-  const status = installationStatus(installation.status);
   const errorCode = safeConnectorErrorCode(installation.lastErrorCode);
 
   return (
@@ -76,18 +58,20 @@ export function ConnectorInstallationItem({
             <h2 className="text-sm font-medium text-text-primary">
               {installation.displayName}
             </h2>
-            <Badge variant={status.variant}>{status.label}</Badge>
+            <ConnectionStatusBadge status={installation.status} />
           </div>
           <p className="mt-1 text-xs text-text-muted">
             {CONNECTOR_LABELS[installation.connectorKey] ??
               installation.connectorKey.replaceAll("_", " ")}
+            {" · "}
+            {connectionStatusHint(installation.status)}
           </p>
         </div>
 
         <div className="text-right text-xs text-text-muted">
           {installation.lastSuccessAt
-            ? `Last successful sync ${formatDateTime(installation.lastSuccessAt)}`
-            : "No successful sync yet"}
+            ? `Last active ${formatDateTime(installation.lastSuccessAt)}`
+            : "No activity yet"}
         </div>
       </div>
 

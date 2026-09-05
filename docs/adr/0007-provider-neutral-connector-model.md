@@ -276,6 +276,11 @@ production window and verified pause/rotate/revoke behavior.
 
 ### Stage E — retire the legacy aggregate
 
+> The executable Stage D → E sequence — preconditions, flag-flip order,
+> per-step verification and rollback, ingestion convergence, and Stage E as
+> a separate deliberate migration — is
+> [`docs/connector-model-cutover-runbook.md`](../connector-model-cutover-runbook.md).
+
 - Stop creating `ingestion_connections` rows.
 - Make canonical provenance columns non-null for automated channels.
 - Retain a compatibility view for one release if needed.

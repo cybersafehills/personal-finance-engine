@@ -527,6 +527,25 @@ wizard screens (today: value promise on `/onboarding/intent`, source-add
 routes to `/settings/sources`); device pairing embedded in an onboarding
 route vs. the checklist linking to `/pair`.
 
+### 2026-09-05 — Release 5 (Connections / ADR 0007 cutover)
+
+Per the locked decision (§10): the cutover depends on a production
+observation window this program cannot fast-forward, so it is **not**
+executed here. Delivered the parts that do not need the window:
+
+| Piece | Detail |
+| --- | --- |
+| **ADR 0013** `docs/adr/0013-native-ios-capture-direction.md` | Native iOS App Intents / App Shortcuts companion as the long-term iOS capture path — same thin-client `/capture` + pairing-v2 contract as Android, zero-config setup, no forced migration off the Shortcut. Direction only, no timeline. |
+| **Cutover runbook** `docs/connector-model-cutover-runbook.md` | The executable Stage D → E sequence: preconditions (shadow-mismatch = 0, adapter route health clean, `get_connector_canonical_read_cutover_status().ready`), flag-flip order (`ONELEDGER_MTN_MOMO_ADAPTER` → canonical credential resolver → `ONELEDGER_CANONICAL_CONNECTIONS_UI`), per-step verification + instant rollback, ingestion convergence parity gate before deleting the legacy `ingest-momo` pipeline, and Stage E as a separate deliberate migration (§73). Linked from ADR 0007. |
+| **Status vocabulary unified** | `ConnectorInstallationItem` now uses the shared `ds/ConnectionStatusBadge` + `connectionStatusHint` (the canonical 7 states with fixed customer labels), so the connector UI, the Financial Inbox and future source cards all say the same words (§38). Preview-flag UI, no e2e. |
+
+Verification: web lint 0 errors; web build ✓.
+
+**Release 5 remaining:** the cutover itself (needs the prod window — follow
+the runbook); Connected Sources / Devices "Send test" handshake + MFA
+step-up on rotate/revoke (needs connector-RPC AAL2 work); Android
+companion hardening review (§40); ingestion convergence parity fixtures.
+
 ### Files touched in Phase 0
 
 ```
