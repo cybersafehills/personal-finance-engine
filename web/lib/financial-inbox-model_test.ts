@@ -48,6 +48,31 @@ Deno.test("summarizes workflow items by severity and kind", () => {
   assertEquals(inbox.countsByKind.bill_review, 0);
 });
 
+Deno.test("financial impact is a tie-break only, after severity and age", () => {
+  const base = (
+    id: string,
+    since: string | null,
+    impact: number | undefined,
+  ): FinancialInboxItem => ({
+    ...item(id, "high", since),
+    financialImpactMinor: impact,
+  });
+  const inbox = buildFinancialInbox([
+    base("small-older", "2026-01-01T00:00:00Z", 1_000),
+    base("big-newer", "2026-02-01T00:00:00Z", 9_999_999),
+    base("big-sameday", "2026-01-01T00:00:00Z", 500_000),
+    base("nil-sameday", "2026-01-01T00:00:00Z", undefined),
+  ]);
+  // Age wins first: both 2026-01-01 items come before the 2026-02-01 one.
+  // Among the same-day items, larger impact first, then the nil-impact one.
+  assertEquals(inbox.items.map((i) => i.id), [
+    "big-sameday",
+    "small-older",
+    "nil-sameday",
+    "big-newer",
+  ]);
+});
+
 Deno.test("carries an item's inline actions through unchanged", () => {
   const withAction: FinancialInboxItem = {
     ...item("cat-1", "normal", null, "category_review"),

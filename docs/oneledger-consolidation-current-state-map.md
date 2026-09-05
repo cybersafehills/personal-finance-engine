@@ -566,6 +566,21 @@ detection; reconciliation insights; feeding `BILLS_ENABLED` bill due dates
 into the forecast's scheduled list; wiring the forecast into `ai/facts.ts`
 report commentary.
 
+### 2026-09-05 — Release 4 (Inbox) remainder
+
+The Inbox front door + first inline actions shipped in Phase 1 (`4bdbd74`).
+This closes the rest:
+
+| Piece | Detail |
+| --- | --- |
+| Duplicate inline actions | **Merge / Not duplicates** on a *clean 2-row cluster only* (exactly one open `possible_duplicate` + one keeper) → `merge_duplicate_transaction` / `dismiss_possible_duplicate` RPC. Ambiguous/larger clusters stay drill-in. |
+| Reconciliation inline actions | **Confirm match / Not a match** on a *proposed* (non-conflict) candidate → `apply_payment_reconciliation` / `reject_payment_reconciliation`. Conflicts stay drill-in. Reconciliation is a first-class lane via its `critical`/`high` severity. |
+| Prioritization refinement | Added `financialImpactMinor` to items; `buildFinancialInbox` factor order is now severity → age → money-at-stake (tie-break) → kind → id. Documented; no model ranking. |
+| Wiring | `InboxList.tsx` gains the 4 new dispatchers (all call the authoritative domain RPC; optimistic drop + `aria-busy` + inline error unchanged). `financial-inbox-model_test.ts` +1 tie-break test. |
+
+Verification: `deno test` (inbox model) 4/0; web lint 0 errors; web build ✓.
+Bill approve stays drill-in (one-shot approve would skip the review step).
+
 ### Files touched in Phase 0
 
 ```

@@ -30,12 +30,20 @@ never appears twice.
 
 ## Priority and ordering
 
-Three explicit priorities: `critical`, `high`, `normal`. Reconciliation
-conflicts and connector failures are critical; duplicates, attribution, stale
-connectors, categorization conflicts, imports needing review and bill review
-are high; routine confirmations and suggestions are normal. Within a priority
-the oldest action is shown first; kind and stable source id are deterministic
-tie-breakers (`buildFinancialInbox`).
+Deterministic, fixed factor order (`buildFinancialInbox`, assessment section
+35):
+
+1. **severity** — `critical` before `high` before `normal`. Reconciliation
+   conflicts and connector failures are critical; duplicates, attribution,
+   stale connectors, categorization conflicts, imports needing review, bill
+   review and *proposed* payment matches are high; routine confirmations and
+   suggestions are normal.
+2. **age** — older work first, so a stream of new arrivals never starves it.
+3. **money at stake** — larger `financialImpactMinor` first, tie-break only.
+4. **kind, then id** — stable final tie-breaks.
+
+No arbitrary or model-ranked ordering. Reconciliation is a first-class lane
+by virtue of its `critical` / `high` severity plus inline confirm/reject.
 
 ## Inline actions
 
@@ -48,10 +56,12 @@ place with an inline error and the drill-in link intact.
 
 | Inbox kind | Inline action(s) | Dispatches |
 | --- | --- | --- |
-| category review (non-conflict) | Confirm `<category>` / Dismiss | `confirm_transaction_category` / `dismiss_suggested_category` RPC (`/transactions/review/actions.ts`) |
-| attribution | "This was mine" | `set_transaction_attribution` RPC as `member` = current user (`/transactions/[id]/actions.ts`) |
-| rule suggestion | Always `<category>` / Dismiss | `acceptLearnedSuggestion` / `dismissLearnedSuggestion` (`/categories/rules/suggestions/actions.ts`) |
-| category conflict, duplicates, reconciliation, connector health, imports, sync conflicts, budget, bill review | — (drill-in only) | multi-step decisions stay on their own surface |
+| category review (non-conflict) | Confirm `<category>` / Dismiss | `confirm_transaction_category` / `dismiss_suggested_category` RPC |
+| attribution | "This was mine" | `set_transaction_attribution` as `member` = current user |
+| rule suggestion | Always `<category>` / Dismiss | `acceptLearnedSuggestion` / `dismissLearnedSuggestion` |
+| duplicate — **clean 2-row cluster only** (1 open `possible_duplicate` + 1 keeper) | Merge / Not duplicates | `merge_duplicate_transaction` / `dismiss_possible_duplicate` RPC |
+| reconciliation — **proposed match** (`status != conflict`) | Confirm match / Not a match | `apply_payment_reconciliation` / `reject_payment_reconciliation` RPC (`/pay/assisted-actions.ts`) |
+| category conflict, ambiguous/large duplicate cluster, reconciliation conflict, connector health, imports, sync conflicts, budget, bill review | — (drill-in only) | multi-step decisions stay on their own surface |
 
 Success and resolution counts are announced through an `aria-live` region;
 every button carries `aria-busy` while its transition is pending.

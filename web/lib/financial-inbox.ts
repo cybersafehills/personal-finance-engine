@@ -89,9 +89,21 @@ export async function getFinancialInbox(): Promise<FinancialInbox> {
     for (const transaction of cluster.transactions) {
       transactionIdsWithHigherPriorityWork.add(transaction.transactionId);
     }
-    const first = [...cluster.transactions].sort((a, b) =>
+    const ordered = [...cluster.transactions].sort((a, b) =>
       a.occurredAt.localeCompare(b.occurredAt)
-    )[0];
+    );
+    const first = ordered[0];
+
+    // A clean 2-row cluster - exactly one still-open possible_duplicate
+    // plus one older keeper - can be resolved in one tap. Anything larger
+    // or more ambiguous stays drill-in only (human review, never a guess).
+    const possibleDup = cluster.transactions.filter(
+      (t) => t.dedupeState === "possible_duplicate",
+    );
+    const keeper = ordered.find((t) => t.dedupeState !== "possible_duplicate");
+    const cleanPair = cluster.transactions.length === 2 &&
+      possibleDup.length === 1 && keeper != null;
+
     items.push({
       id: `duplicate:${cluster.fingerprint}`,
       kind: "duplicate_candidate",
@@ -103,6 +115,22 @@ export async function getFinancialInbox(): Promise<FinancialInbox> {
       href: "/transactions/review",
       actionableSince: first?.createdAt ?? first?.occurredAt ?? null,
       affectedCount: cluster.transactions.length,
+      financialImpactMinor: first?.amountMinor,
+      actions: cleanPair
+        ? [
+          {
+            type: "merge_duplicate",
+            label: "Merge",
+            duplicateId: possibleDup[0].transactionId,
+            canonicalId: keeper.transactionId,
+          },
+          {
+            type: "dismiss_duplicate",
+            label: "Not duplicates",
+            transactionId: possibleDup[0].transactionId,
+          },
+        ]
+        : undefined,
     });
   }
 
@@ -116,6 +144,7 @@ export async function getFinancialInbox(): Promise<FinancialInbox> {
       href: `/transactions/${row.id}`,
       actionableSince: row.occurredAt,
       affectedCount: 1,
+      financialImpactMinor: Math.abs(row.amountRwf),
       actions: [
         { type: "assign_to_me", label: "This was mine", transactionId: row.id },
       ],
@@ -162,6 +191,21 @@ export async function getFinancialInbox(): Promise<FinancialInbox> {
       href: "/pay/reconciliation",
       actionableSince: candidate.created_at,
       affectedCount: 1,
+      financialImpactMinor: candidate.intent.amount_minor,
+      // A proposed (non-conflict) match is a yes/no decision; a conflict
+      // needs the full drill-in.
+      actions: conflict ? undefined : [
+        {
+          type: "apply_reconciliation",
+          label: "Confirm match",
+          reconciliationId: candidate.id,
+        },
+        {
+          type: "reject_reconciliation",
+          label: "Not a match",
+          reconciliationId: candidate.id,
+        },
+      ],
     });
   }
 

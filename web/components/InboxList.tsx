@@ -12,13 +12,19 @@ import type {
 } from "../lib/financial-inbox-model";
 import {
   confirmTransactionCategory,
+  dismissPossibleDuplicate,
   dismissSuggestedCategory,
+  mergeDuplicateTransaction,
 } from "../app/transactions/review/actions";
 import { setTransactionAttribution } from "../app/transactions/[id]/actions";
 import {
   acceptLearnedSuggestion,
   dismissLearnedSuggestion,
 } from "../app/categories/rules/suggestions/actions";
+import {
+  applyReconciliation,
+  rejectReconciliation,
+} from "../app/pay/assisted-actions";
 
 // The Financial Inbox's interactive layer. The Inbox stays a
 // read/projection model (lib/financial-inbox.ts); this component only
@@ -76,6 +82,17 @@ async function runInlineAction(
         action.counterpartyName,
         action.category,
         action.subcategory,
+      );
+    case "merge_duplicate":
+      return mergeDuplicateTransaction(action.duplicateId, action.canonicalId);
+    case "dismiss_duplicate":
+      return dismissPossibleDuplicate(action.transactionId);
+    case "apply_reconciliation":
+      return applyReconciliation(action.reconciliationId);
+    case "reject_reconciliation":
+      return rejectReconciliation(
+        action.reconciliationId,
+        "reviewed in inbox - not a match",
       );
   }
 }
