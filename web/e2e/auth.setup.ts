@@ -85,7 +85,10 @@ setup("create and sign in the e2e test user", async ({ page }) => {
 
   await page.goto("/login");
   await page.getByLabel("Email").fill(E2E_USER.email);
-  await page.getByLabel("Password").fill(E2E_USER.password);
+  // exact: true - the login form's show/hide toggle button carries its own
+  // aria-label ("Show password"), which also matches a substring search for
+  // "Password" and would otherwise resolve to two elements.
+  await page.getByLabel("Password", { exact: true }).fill(E2E_USER.password);
   await page.getByRole("button", { name: "Sign in" }).click();
 
   // A real sign-in through the actual UI, not a fabricated cookie - the
