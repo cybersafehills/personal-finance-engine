@@ -27,6 +27,16 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      # Robolectric fetches its ~100 MB android-all framework jar at test time
+      # via its own MavenArtifactFetcher (not Gradle), which flakes on CI
+      # network hiccups. Cache it across runs so a transient failure can't
+      # recur once it's warm.
+      - name: Cache Robolectric framework jars
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: robolectric-android-all-${{ runner.os }}-v1
+
       - name: Generate wrapper
         run: gradle wrapper --gradle-version 8.9
 
