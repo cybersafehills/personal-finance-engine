@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
+import { NotificationList } from "../../components/NotificationList";
 import { formatDateTime } from "../../lib/format";
 import { getFinancialInbox } from "../../lib/financial-inbox";
+import { getNotifications } from "../../lib/queries";
 import type {
   FinancialInboxItem,
   FinancialInboxKind,
@@ -10,6 +12,16 @@ import type {
 } from "../../lib/financial-inbox-model";
 
 export const dynamic = "force-dynamic";
+
+// The header's Inbox and Notifications icons were merged into one
+// (InboxButton now carries the unread-notifications badge that used to
+// live on the removed NotificationBell) - this page is where that badge
+// points, so it shows a "Notifications" section first (the thing the
+// badge is actually counting), then the existing financial-inbox
+// workflow below. /notifications itself is untouched and still holds
+// the full history ("View all" below links there), since this page only
+// surfaces the most recent few.
+const RECENT_NOTIFICATIONS_LIMIT = 8;
 
 const KIND_LABELS: Record<FinancialInboxKind, string> = {
   connector_health: "Connection",
@@ -70,7 +82,10 @@ function InboxItemRow({ item }: { item: FinancialInboxItem }) {
 }
 
 export default async function FinancialInboxPage() {
-  const inbox = await getFinancialInbox();
+  const [inbox, notifications] = await Promise.all([
+    getFinancialInbox(),
+    getNotifications(RECENT_NOTIFICATIONS_LIMIT),
+  ]);
 
   return (
     <div>
@@ -80,6 +95,20 @@ export default async function FinancialInboxPage() {
         backHref="/"
         backLabel="Home"
       />
+
+      {notifications.length > 0 && (
+        <section className="mb-6" aria-labelledby="inbox-notifications">
+          <div className="mb-2 flex items-center justify-between">
+            <h2 id="inbox-notifications" className="text-sm font-semibold text-text-primary">
+              Notifications
+            </h2>
+            <Link href="/notifications" className="text-sm font-medium text-accent hover:underline">
+              View all
+            </Link>
+          </div>
+          <NotificationList notifications={notifications} />
+        </section>
+      )}
 
       {inbox.total === 0 ? (
         <EmptyState
