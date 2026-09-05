@@ -124,6 +124,12 @@ jobs:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-sa.json
         run: |
           printf '%s\n' "$COMMIT_MSG" > "$RUNNER_TEMP/release-notes.txt"
+          # Pass appId + credentials as explicit task flags — the Firebase App
+          # Distribution plugin does not reliably read the FIREBASE_APP_ID /
+          # GOOGLE_APPLICATION_CREDENTIALS env vars when there is no
+          # google-services.json ("> Missing app id").
           ./gradlew :app:assembleRelease :app:appDistributionUploadRelease \
+            --appId="$FIREBASE_APP_ID" \
+            --serviceCredentialsFile="$GOOGLE_APPLICATION_CREDENTIALS" \
             --artifactPath=app/build/outputs/apk/release/app-release.apk \
             --releaseNotesFile="$RUNNER_TEMP/release-notes.txt"
