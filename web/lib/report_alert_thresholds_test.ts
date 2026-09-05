@@ -59,7 +59,7 @@ Deno.test("resolveAlertThresholds: each field falls back independently when its 
 });
 
 Deno.test("DEFAULT_ALERT_THRESHOLDS matches the values the DB migration defaults each column to", () => {
-  // If these drift, migration 20261125000000_report_alert_thresholds.sql
+  // If these drift, migration 20261128000000_report_alert_thresholds.sql
   // and this constant disagree and existing rows behave differently from
   // a fresh unset one. Keep them in lockstep.
   assertEquals(DEFAULT_ALERT_THRESHOLDS, {

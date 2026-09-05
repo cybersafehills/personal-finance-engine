@@ -48,7 +48,7 @@ import { generateReportCommentary } from "./ai/report-commentary";
 // for calculation (master prompt §64).
 //
 // Alert thresholds are per-user, stored on report_preferences (migration
-// 20261125000000_report_alert_thresholds.sql) and resolved per candidate
+// 20261128000000_report_alert_thresholds.sql) and resolved per candidate
 // via resolveAlertThresholds(). DEFAULT_ALERT_THRESHOLDS (from
 // report-math.ts) is the fallback for any column a row doesn't set.
 
@@ -65,7 +65,7 @@ export type ReportPreferenceCandidate = {
   generation_time: string;
   delivery_email: string | null;
   include_ai_analysis: boolean;
-  // Per-user alert thresholds (migration 20261125000000). Each may be
+  // Per-user alert thresholds (migration 20261128000000). Each may be
   // null: for alert_low_balance_rwf null means "disable the check", for
   // the rest it only occurs on a pre-migration row and resolveAlertThresholds
   // falls back to DEFAULT_ALERT_THRESHOLDS.
