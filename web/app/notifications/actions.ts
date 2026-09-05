@@ -9,7 +9,11 @@ export type NotificationActionResult =
 
 function revalidateNotificationRoutes() {
   revalidatePath("/notifications");
-  // The header bell's unread count is fetched in the root layout.
+  // /inbox now also renders a "Notifications" section (the Inbox header
+  // icon carries the badge that used to be the separate Notification
+  // bell's - see components/InboxButton.tsx).
+  revalidatePath("/inbox");
+  // The header Inbox icon's unread-count badge is fetched in the root layout.
   revalidatePath("/", "layout");
 }
 
