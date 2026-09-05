@@ -61,7 +61,9 @@ concerns, and the app is small enough that a JS bridge is pure overhead.
   provider matcher** in `detection/ProviderMatchers.kt` — a direct port of
   `supabase/functions/_shared/providers.ts`. Non-financial notifications are
   never parsed, never stored, never transmitted, never logged. Only the matched
-  message text, its post time, and the source package name leave the device.
+  message **body** (MessagingStyle's last message, else `EXTRA_BIG_TEXT`/
+  `EXTRA_TEXT` — never the notification title, i.e. never the sender id), its
+  post time, and the source package name leave the device.
   The package is **not** an allowlist gate: `IGNORED_NOTIFICATION_PACKAGES` is a
   short denylist (own app, `android`, `systemui`, GMS) and everything else is
   decided by the text matcher — a real provider SMS surfaces in whatever app
