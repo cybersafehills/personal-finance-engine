@@ -1,7 +1,8 @@
 # ADR 0014: Financial intelligence calculation boundaries
 
 - **Status:** Accepted, implemented behind `INTELLIGENCE_ENABLED` (PR1:
-  cash-flow forecast, spending baseline, recurring detection surfaced)
+  cash-flow forecast, spending baseline, recurring detection; PR2:
+  high-confidence amount anomalies, bill due dates in the forecast)
 - **Date:** 2026-09-05
 - **Builds on:** the reporting engine (`report-math.ts`), the pure
   recurring detector (`recurring-payments.ts`), the AI-facts sanitiser
@@ -73,12 +74,20 @@ charts).
 - `report-math.ts`'s simpler month-end spend forecast stays as-is for
   report commentary; the cash-flow forecast is the richer Home surface.
 
+## PR2 additions
+
+- **`intelligence/anomaly.ts`** — `detectAmountAnomalies`: a single
+  outflow that is >= 3x the median of the *same counterparty's* prior
+  payments, given >= 4 priors and a meaningful absolute gap. Narrow by
+  design — never a first payment, a volatile counterparty, or a trivial
+  amount. Surfaced with a high-confidence "Why am I seeing this?".
+- **Bill due dates in the forecast** — when `BILLS_ENABLED`, open unpaid
+  `bills` rows with a `due_date` inside the horizon are added to the KNOWN
+  path as `bill_due` scheduled movements.
+
 ## Not yet done
 
-- High-confidence anomaly detection (unusually large single transaction
-  vs the counterparty's own history) as its own insight.
-- Reconciliation insights.
-- Feeding known bill due dates into the forecast's `scheduled` list when
-  `BILLS_ENABLED` (today: recurring outflows only).
-- Wiring the forecast's `projectedProjectedSpend` into `ai/facts.ts`
-  commentary.
+- Reconciliation insights (e.g. average days-to-reconcile) — needs a
+  reconciliation-history query the app does not yet expose.
+- Wiring the cash-flow forecast into `ai/facts.ts` report commentary
+  (`ai/facts.ts` already has a `forecastProjectedSpendRwf` slot).

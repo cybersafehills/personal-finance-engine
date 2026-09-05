@@ -1,6 +1,12 @@
 import "server-only";
 
-import { getCurrentBalance, getTransactions } from "../queries";
+import {
+  getActiveWorkspaceId,
+  getCurrentBalance,
+  getTransactions,
+} from "../queries";
+import { supabaseSession } from "../supabase-session-server";
+import { isBillsEnabled } from "../bills/gate";
 import { kigaliDateKey } from "../kigali-time";
 import { lastNCompleteMonthKeys } from "../budget-math";
 import {
@@ -13,6 +19,11 @@ import {
   computeCashFlowForecast,
   type ScheduledMovement,
 } from "./cash-flow-forecast";
+import {
+  type AmountAnomaly,
+  DEFAULT_ANOMALY_OPTIONS,
+  detectAmountAnomalies,
+} from "./anomaly";
 
 // Release 6 (Intelligence) - the deterministic-first insight assembler
 // (ADR 0014). Gated by INTELLIGENCE_ENABLED. Everything here is computed
@@ -41,7 +52,10 @@ export type IntelligenceInsights = {
   forecast: CashFlowForecast | null;
   recurring: RecurringPattern[];
   baseline: SpendingBaseline | null;
+  anomalies: AmountAnomaly[];
 };
+
+const ANOMALY_RECENCY_DAYS = 30;
 
 function outflowMinor(t: {
   principal_effect_rwf: number | null;
@@ -57,14 +71,47 @@ function daysInMonth(monthKey: string): number {
   return new Date(Date.UTC(y, m, 0)).getUTCDate();
 }
 
+type DueBill = { id: string; totalMinor: number; dueDate: string };
+
+/** Open, unpaid bill obligations with a due date - dated commitments for
+ *  the forecast's KNOWN path (ADR 0014). RLS-scoped. */
+async function fetchDueBills(): Promise<DueBill[]> {
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("bills")
+    .select("id, total_minor, due_date")
+    .eq("status", "open")
+    .eq("paid_state", "unpaid")
+    .not("due_date", "is", null);
+  if (error) {
+    console.error("fetchDueBills failed:", error.message);
+    return [];
+  }
+  return (data ?? []).map((r) => ({
+    id: r.id as string,
+    totalMinor: Number(r.total_minor),
+    dueDate: r.due_date as string,
+  }));
+}
+
 export async function getIntelligenceInsights(): Promise<IntelligenceInsights> {
   if (!isIntelligenceEnabled()) {
-    return { enabled: false, forecast: null, recurring: [], baseline: null };
+    return {
+      enabled: false,
+      forecast: null,
+      recurring: [],
+      baseline: null,
+      anomalies: [],
+    };
   }
 
-  const [balance, transactions] = await Promise.all([
+  const workspaceId = await getActiveWorkspaceId();
+  const billsEnabled = isBillsEnabled(workspaceId);
+
+  const [balance, transactions, dueBills] = await Promise.all([
     getCurrentBalance(),
     getTransactions({ limit: 500 }),
+    billsEnabled ? fetchDueBills() : Promise.resolve([]),
   ]);
 
   const nowIso = new Date().toISOString();
@@ -129,6 +176,23 @@ export async function getIntelligenceInsights(): Promise<IntelligenceInsights> {
     };
   });
 
+  // Bill obligations are dated commitments - add them to the KNOWN path.
+  for (const bill of dueBills) {
+    const dueKey = kigaliDateKey(`${bill.dueDate}T12:00:00Z`);
+    const dayOffset = Math.round(
+      (Date.parse(`${dueKey}T00:00:00Z`) -
+        Date.parse(`${todayKey}T00:00:00Z`)) / 86_400_000,
+    );
+    if (dayOffset < 0 || dayOffset > HORIZON_DAYS) continue;
+    scheduled.push({
+      label: "Bill due",
+      dayOffset,
+      amountMinor: -Math.abs(bill.totalMinor),
+      kind: "bill_due",
+      confidence: "high",
+    });
+  }
+
   const forecast = balance
     ? computeCashFlowForecast({
       currentBalanceMinor: balance.amountRwf,
@@ -183,5 +247,21 @@ export async function getIntelligenceInsights(): Promise<IntelligenceInsights> {
     };
   }
 
-  return { enabled: true, forecast, recurring, baseline };
+  // --- high-confidence amount anomalies -------------------------------
+  const anomalies = detectAmountAnomalies(
+    settledOut.map((t) => ({
+      counterpartyKey: t.counterparty_name!.trim().toLowerCase(),
+      category: t.category,
+      amountMinor: outflowMinor(t),
+      occurredAt: t.occurred_at,
+    })),
+    {
+      ...DEFAULT_ANOMALY_OPTIONS,
+      since: new Date(
+        Date.now() - ANOMALY_RECENCY_DAYS * 24 * 60 * 60 * 1000,
+      ).toISOString(),
+    },
+  );
+
+  return { enabled: true, forecast, recurring, baseline, anomalies };
 }

@@ -17,9 +17,13 @@ export function IntelligenceCard({
 }: {
   insights: IntelligenceInsights;
 }) {
-  const { forecast, baseline, recurring } = insights;
+  const { forecast, baseline, recurring, anomalies } = insights;
   if (!insights.enabled) return null;
-  if (!forecast && !baseline && recurring.length === 0) return null;
+  if (
+    !forecast && !baseline && recurring.length === 0 && anomalies.length === 0
+  ) {
+    return null;
+  }
 
   return (
     <section
@@ -83,6 +87,35 @@ export function IntelligenceCard({
             basis={baseline.basis}
             period={`This month vs your last ${baseline.monthsCompared} complete months`}
             method="Same first-N-days spend, this month vs the average of prior months."
+          />
+        </div>
+      )}
+
+      {anomalies.length > 0 && (
+        <div className="flex flex-col gap-1 border-t border-border-subtle pt-3">
+          <p className="text-sm font-medium text-text-primary">
+            {anomalies.length === 1
+              ? "An unusually large payment"
+              : `${anomalies.length} unusually large payments`}
+          </p>
+          <ul className="flex flex-col gap-0.5 text-xs text-text-muted">
+            {anomalies.slice(0, 4).map((a) => (
+              <li key={`${a.counterpartyKey}:${a.occurredAt}`}>
+                {a.counterpartyKey.replace(/\b\w/g, (c) => c.toUpperCase())}
+                {" "}&middot; {rwf(-a.amountMinor)} &middot; about{" "}
+                {a.timesTypical}&times; your usual {rwf(-a.typicalMinor)}
+              </li>
+            ))}
+          </ul>
+          <WhyThisInsight
+            basis={[
+              "A single payment far above what this counterparty has cost you before.",
+              "Only counterparties with a stable payment history are checked.",
+              "Flagged when it is at least 3x the usual amount and the gap is meaningful.",
+            ]}
+            period={`Last ${30} days`}
+            method="Compared against the median of that counterparty's prior payments."
+            confidence="high"
           />
         </div>
       )}
