@@ -40,7 +40,7 @@ fun CompanionScreen(state: CompanionUiState, vm: CompanionViewModel) {
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text("OneLedger Companion", style = MaterialTheme.typography.headlineSmall)
+        Text("OL Shortcuts", style = MaterialTheme.typography.headlineSmall)
 
         when {
             state.loading && state.health == null ->
