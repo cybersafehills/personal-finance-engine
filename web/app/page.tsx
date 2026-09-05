@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import {
   getAttentionItems,
+  getCategoryTotals,
   getCurrentBalance,
   getDashboardBudgetSummary,
   getHouseholdSpendingBreakdown,
@@ -10,8 +11,22 @@ import {
   getRecentTransactions,
   getTodayTotals,
 } from "../lib/queries";
+import {
+  getOnboardingJourney,
+  isOnboardingJourneyEnabled,
+} from "../lib/onboarding/journey";
+import {
+  getIntelligenceInsights,
+  isIntelligenceEnabled,
+} from "../lib/intelligence/insights";
 import { BalanceCard } from "../components/BalanceCard";
+import { IntelligenceCard } from "../components/IntelligenceCard";
 import { OnboardingCard } from "../components/OnboardingCard";
+import { OnboardingJourneyCard } from "../components/OnboardingJourneyCard";
+import {
+  FirstInsightCard,
+  FirstTransactionReviewCard,
+} from "../components/FirstRunCards";
 import { SummaryMetric } from "../components/SummaryMetric";
 import { BudgetStatusCard } from "../components/BudgetStatusCard";
 import { AttentionItemsCard } from "../components/AttentionItemsCard";
@@ -30,6 +45,9 @@ export default async function HomePage() {
   if (profileOnboarding?.step === "profile") redirect("/onboarding/profile");
   if (profileOnboarding?.step === "preferences") redirect("/onboarding/preferences");
 
+  const journeyEnabled = isOnboardingJourneyEnabled();
+  const intelligenceEnabled = isIntelligenceEnabled();
+
   const [
     balance,
     today,
@@ -38,6 +56,9 @@ export default async function HomePage() {
     attentionItems,
     householdSpending,
     onboarding,
+    journey,
+    categoryTotals,
+    insights,
   ] = await Promise.all([
     getCurrentBalance(),
     getTodayTotals(),
@@ -46,7 +67,32 @@ export default async function HomePage() {
     getAttentionItems(),
     getHouseholdSpendingBreakdown(),
     getOnboardingState(),
+    journeyEnabled ? getOnboardingJourney() : Promise.resolve(null),
+    journeyEnabled ? getCategoryTotals() : Promise.resolve([]),
+    intelligenceEnabled ? getIntelligenceInsights() : Promise.resolve(null),
   ]);
+
+  // Release 3 first-run surfaces (ADR 0012), dark unless
+  // ONBOARDING_JOURNEY_ENABLED. Exactly one shows at a time, in journey
+  // order: the first-transaction review card, then the first insight,
+  // then the plain checklist - and none once the journey is complete or
+  // the checklist is dismissed.
+  const milestone = (key: string) =>
+    journey?.steps.find((s) => s.key === key)?.done ?? false;
+  const topSpendCategory = categoryTotals.find(
+    (c) => c.category !== "Uncategorized" && c.totalRwf > 0,
+  );
+  const firstRun = !journeyEnabled || !journey
+    ? { kind: "none" as const }
+    : milestone("first_real_transaction") &&
+        !milestone("first_review_completed") && recentTransactions.length > 0
+    ? { kind: "review" as const }
+    : milestone("first_review_completed") && !milestone("first_insight_seen") &&
+        topSpendCategory
+    ? { kind: "insight" as const }
+    : !journey.complete && !onboarding.dismissed
+    ? { kind: "checklist" as const }
+    : { kind: "none" as const };
 
   // Whether the secondary (right) column has anything to show at all -
   // when neither exists (a new/quiet account), the main column expands
@@ -77,9 +123,32 @@ export default async function HomePage() {
           column, so document/reading order stays identical across
           breakpoints and only the visual position changes. */}
       <div className="flex flex-col gap-5 lg:grid lg:grid-cols-3 lg:items-start lg:gap-5">
-      {onboarding.showNudge && (
+      {firstRun.kind === "none" && onboarding.showNudge && (
         <div className={`lg:col-start-1 ${mainColumnSpan}`}>
           <OnboardingCard snapshot={onboarding} />
+        </div>
+      )}
+
+      {firstRun.kind !== "none" && journey && (
+        <div className={`lg:col-start-1 ${mainColumnSpan}`}>
+          {firstRun.kind === "checklist" && (
+            <OnboardingJourneyCard journey={journey} />
+          )}
+          {firstRun.kind === "review" && recentTransactions[0] && (
+            <FirstTransactionReviewCard
+              transactionId={recentTransactions[0].id}
+              counterparty={recentTransactions[0].counterparty_name}
+              amountRwf={recentTransactions[0].net_effect_rwf}
+              category={recentTransactions[0].category ??
+                recentTransactions[0].suggested_category}
+            />
+          )}
+          {firstRun.kind === "insight" && topSpendCategory && (
+            <FirstInsightCard
+              topCategory={topSpendCategory.category}
+              topCategoryTotalRwf={topSpendCategory.totalRwf}
+            />
+          )}
         </div>
       )}
 
@@ -115,6 +184,12 @@ export default async function HomePage() {
       {attentionItems.length > 0 && (
         <div className="lg:col-start-3 lg:row-start-2">
           <AttentionItemsCard items={attentionItems} />
+        </div>
+      )}
+
+      {insights && (
+        <div className={`lg:col-start-1 ${mainColumnSpan}`}>
+          <IntelligenceCard insights={insights} />
         </div>
       )}
 

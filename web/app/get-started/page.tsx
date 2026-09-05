@@ -1,6 +1,10 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getOnboardingState, getProfileOnboarding } from "../../lib/queries";
+import {
+  getOnboardingJourney,
+  isOnboardingJourneyEnabled,
+} from "../../lib/onboarding/journey";
 import { PageHeader } from "../../components/PageHeader";
 import { DismissOnboardingButton } from "../../components/DismissOnboardingButton";
 import { OnboardingChoiceLink } from "../../components/OnboardingChoiceLink";
@@ -11,6 +15,88 @@ export default async function GetStartedPage() {
   const profile = await getProfileOnboarding();
   if (profile?.step === "profile") redirect("/onboarding/profile");
   if (profile?.step === "preferences") redirect("/onboarding/preferences");
+
+  // Release 3 (ADR 0012): when the milestone journey is on, this page is
+  // the ordered journey - customer language, one step at a time, no raw
+  // "create a connection" choices.
+  if (isOnboardingJourneyEnabled()) {
+    const journey = await getOnboardingJourney();
+    return (
+      <div>
+        <PageHeader
+          title="Get started"
+          subtitle="A few steps to a ledger you can trust. Pick up wherever you left off."
+        />
+        <p className="mb-4 text-sm text-text-muted">
+          {journey.doneCount} of {journey.totalCount} done
+        </p>
+        {journey.complete
+          ? (
+            <div className="flex flex-col gap-3 rounded-card border border-border-subtle bg-surface p-5">
+              <p className="text-sm font-medium text-text-primary">
+                You&apos;re all set. Your activity flows into OneLedger and
+                is organized automatically.
+              </p>
+              <Link
+                href="/"
+                className="min-h-9 w-fit rounded-control bg-accent px-3 text-xs font-medium leading-9 text-accent-foreground"
+              >
+                Go to Home
+              </Link>
+            </div>
+          )
+          : (
+            <ol className="flex flex-col gap-3">
+              {journey.steps.map((step, i) => (
+                <li
+                  key={step.key}
+                  className="flex gap-3 rounded-card border border-border-subtle bg-surface p-4"
+                >
+                  <span
+                    aria-hidden="true"
+                    className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${
+                      step.done
+                        ? "bg-money-positive-bg text-money-positive"
+                        : "bg-background text-text-muted"
+                    }`}
+                  >
+                    {step.done ? "✓" : i + 1}
+                  </span>
+                  <div className="flex flex-1 flex-col gap-1">
+                    <span className="text-sm font-medium text-text-primary">
+                      {step.title}
+                      {step.done && (
+                        <span className="ml-2 text-xs font-normal text-money-positive">
+                          Done
+                        </span>
+                      )}
+                    </span>
+                    <span className="text-xs text-text-muted">
+                      {step.description}
+                    </span>
+                    {!step.done && (
+                      <Link
+                        href={step.href}
+                        className="mt-1 min-h-8 w-fit rounded-control bg-accent px-3 text-xs font-medium leading-8 text-accent-foreground"
+                      >
+                        {step.cta}
+                      </Link>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ol>
+          )}
+        {!journey.complete && (
+          <DismissOnboardingButton
+            label="Dismiss setup reminder"
+            className="mt-6 w-fit min-h-8 text-xs font-medium text-text-muted hover:text-text-primary"
+          />
+        )}
+      </div>
+    );
+  }
+
   const snapshot = await getOnboardingState();
 
   // Flag off (or workspace not on the allowlist): no checklist here -
