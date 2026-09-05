@@ -210,7 +210,18 @@ enable_manual_linking = false
 minimum_password_length = 8
 # Passwords that do not meet the following requirements will be rejected as weak. Supported values
 # are: `letters_digits`, `lower_upper_letters_digits`, `lower_upper_letters_digits_symbols`
-password_requirements = ""
+# Audit F3: the backend floor now matches the product UI. `letters_digits`
+# is the mildest tier - it only blocks trivially weak passwords ("password",
+# "12345678") without imposing symbol/case rules that add friction for the
+# Mobile-Money-first audience. web/lib/registration.ts `passwordError()`
+# enforces the identical rule client-side and in both server actions
+# (signup + reset-password confirm) so a rejection is always a specific,
+# local message, never a generic provider round-trip error.
+# NOTE: like the confirmation-template settings above, this file is not
+# synced to the hosted project by `supabase db push` - set Authentication >
+# Policies "Password Requirements" to "Letters and digits" in the dashboard
+# to match.
+password_requirements = "letters_digits"
 
 # Configure passkey sign-ins.
 # [auth.passkey]
@@ -260,7 +271,11 @@ double_confirm_changes = true
 # 20260821000000_phase_b_identity_and_tenancy.sql.
 enable_confirmations = true
 # If enabled, users will need to reauthenticate or have logged in recently to change their password.
-secure_password_change = false
+# Audit F3/F4: on for step-up protection of an account-takeover-relevant
+# change. Only affects the authenticated "change password" path; the
+# reset-password-by-email flow is unaffected. NOTE: not synced by
+# `supabase db push` - enable it in the hosted project's Auth settings too.
+secure_password_change = true
 # Controls the minimum amount of time that must pass before sending another signup confirmation or password reset email.
 # Matches the value already live on the linked production project - this
 # repository's config.toml had drifted from it (CLI scaffold default is

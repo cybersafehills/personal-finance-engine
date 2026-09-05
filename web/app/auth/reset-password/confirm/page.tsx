@@ -3,6 +3,10 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { updatePassword } from "../actions";
+import {
+  MIN_PASSWORD_LENGTH,
+  PASSWORD_REQUIREMENT_HINT,
+} from "../../../../lib/registration";
 
 export default function ResetPasswordConfirmPage() {
   const [password, setPassword] = useState("");
@@ -58,10 +62,17 @@ export default function ResetPasswordConfirmPage() {
             value={password}
             onChange={(event) => setPassword(event.target.value)}
             required
-            minLength={8}
+            minLength={MIN_PASSWORD_LENGTH}
+            aria-describedby="reset-password-requirement"
             className="min-h-11 rounded-control border border-border-strong bg-surface px-3 py-2 text-sm text-text-primary"
           />
         </label>
+        <span
+          id="reset-password-requirement"
+          className="text-xs text-text-muted"
+        >
+          {PASSWORD_REQUIREMENT_HINT}
+        </span>
         <button
           type="submit"
           disabled={isPending}

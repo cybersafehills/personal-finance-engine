@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAuthorizedCronRequest } from "../../../../lib/cron-auth";
 import { runDailyReportGenerationTick } from "../../../../lib/report-generation";
+import { logEvent, withLoggedRun } from "../../../../lib/log";
 
 // The scheduled-report generation tick's HTTP entry point (master prompt
 // §26 architecture decision: generation runs as a Vercel Route Handler,
@@ -20,14 +21,28 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
+  // Reference adoption of the shared structured-logging convention
+  // (web/lib/log.ts): one `cron.generate-reports` start line, then an ok
+  // line with duration, or an error line - all under one correlation id.
+  // An operator builds a scheduler heartbeat from the `stage:"cron.*"`
+  // start/ok stream; a missing pair for a window means the tick never ran.
   try {
-    const summary = await runDailyReportGenerationTick();
+    const summary = await withLoggedRun(
+      "cron.generate-reports",
+      {},
+      () => runDailyReportGenerationTick(),
+    );
     if (summary.errors.length > 0) {
-      console.error("generate-reports: partial failure", summary.errors);
+      logEvent("cron.generate-reports", "error", {
+        reason: "partial_failure",
+        failed: summary.errors.length,
+      });
     }
     return NextResponse.json(summary);
-  } catch (err) {
-    console.error("generate-reports: tick failed", err);
-    return NextResponse.json({ error: "generation tick failed" }, { status: 500 });
+  } catch {
+    // withLoggedRun already emitted the structured error line.
+    return NextResponse.json({ error: "generation tick failed" }, {
+      status: 500,
+    });
   }
 }

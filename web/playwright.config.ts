@@ -123,13 +123,21 @@ export default defineConfig({
       dependencies: ["setup"],
     },
 
-    // Chrome on Android (Pixel device profile - real touch/UA emulation,
-    // not just a narrow viewport). pay-scan.spec.ts is chromium-desktop
-    // only (see its header) - the mobile launcher layout and the fake-
-    // camera flags are exercised there; real mobile scanning is manual QA.
+    // Cross-browser / cross-device projects run the FUNCTIONAL + a11y +
+    // responsive-layout specs only. `visual.spec.ts` is deliberately
+    // excluded here: pixel-level visual regression is a single-browser
+    // (chromium-desktop) concern in this repo - its snapshots are only
+    // captured for that project - and `brand-splash` / `unauthenticated`
+    // have their own dedicated project. `pay-scan` needs Chromium's
+    // fake-media flags WebKit ignores. So these three projects exist to
+    // catch real WebKit/iPhone/Android behavior differences in the core
+    // journeys (login, signup, onboarding, shell nav, connections,
+    // pairing, amount fields, keyboard/zoom) - audit CI gap + master
+    // prompt sections 10 and 60.
     {
       name: "chrome-android",
-      testIgnore: /(unauthenticated|brand-splash|pay-scan)\.spec\.ts/,
+      testIgnore:
+        /(unauthenticated|brand-splash|pay-scan|visual)\.spec\.ts/,
       use: { ...devices["Pixel 7"], storageState: AUTH_STORAGE_STATE_PATH },
       dependencies: ["setup"],
     },
@@ -138,7 +146,8 @@ export default defineConfig({
     // Chromium fake-media flags, so getUserMedia can't resolve headlessly.
     {
       name: "webkit-desktop",
-      testIgnore: /(unauthenticated|brand-splash|pay-scan)\.spec\.ts/,
+      testIgnore:
+        /(unauthenticated|brand-splash|pay-scan|visual)\.spec\.ts/,
       use: {
         ...devices["Desktop Safari"],
         viewport: { width: 1280, height: 900 },
@@ -147,11 +156,13 @@ export default defineConfig({
       dependencies: ["setup"],
     },
 
-    // Mobile Safari (iPhone) - safe-area insets, dynamic toolbar quirks.
-    // Excludes pay-scan.spec.ts for the same reason as webkit-desktop.
+    // Mobile Safari (iPhone) - safe-area insets, dynamic toolbar quirks,
+    // and iOS Safari focus-zoom on sub-16px inputs (master prompt section
+    // 10). Excludes pay-scan.spec.ts for the same reason as webkit-desktop.
     {
       name: "mobile-safari",
-      testIgnore: /(unauthenticated|brand-splash|pay-scan)\.spec\.ts/,
+      testIgnore:
+        /(unauthenticated|brand-splash|pay-scan|visual)\.spec\.ts/,
       use: { ...devices["iPhone 14"], storageState: AUTH_STORAGE_STATE_PATH },
       dependencies: ["setup"],
     },

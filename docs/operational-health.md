@@ -37,3 +37,56 @@ curl --fail --silent --show-error \
   "https://www.oneledger.me/api/admin/operational-health?window_minutes=60"
 ```
 
+## Structured logging convention (audit F10)
+
+The snapshot above is the aggregate, PII-free signal. Line-level logs are for
+after-the-fact debugging and for building a scheduler heartbeat. Both sides of
+the codebase now share one shape:
+
+- `web/lib/log.ts` — route handlers (`app/api/cron/*`), server actions,
+  server-only services.
+- `supabase/functions/_shared/log.ts` — Edge Functions.
+
+Each `logEvent(stage, outcome, fields)` call emits **exactly one JSON object
+per line**:
+
+```json
+{ "ts": "2026-09-05T00:00:00.000Z", "stage": "cron.generate-reports",
+  "outcome": "ok", "correlation_id": "…", "duration_ms": 812, "considered": 4 }
+```
+
+| Field | Meaning |
+| --- | --- |
+| `ts` | ISO-8601, always present, set by the logger |
+| `stage` | dotted namespace: `cron.<name>`, `ingest.momo`, `capture.pair`, `webhook.deliver`, … |
+| `outcome` | `start` \| `ok` \| `skipped` \| `error` \| `retry` |
+| `correlation_id` | one id per request / per scheduled tick (`newCorrelationId()`), threaded through every line of that unit of work |
+| `request_id` | inbound request id when there is one |
+| `duration_ms`, `retry_count` | when meaningful |
+| `workspace`, `source`, `adapter` | **opaque surrogates the caller passes** — the logger never resolves tenant data |
+| extra fields | any safe scalars (counts, statuses, codes) |
+
+`error` outcomes go to stderr; everything else to stdout, so existing
+error-only drains keep working.
+
+### Redaction
+
+Every field passes through `redact()` before it is written. It blanks a value
+when **the key name** looks sensitive (`secret`, `token`, `password`,
+`credential`, `authorization`, `api_key`, `pin`, `otp`, `raw_message`,
+`raw_payload`, …) **or the value itself** is secret-shaped (`olp_…` pairing
+tokens, `pfe_…` device secrets, JWTs, long hex blobs). Never pass a raw
+provider SMS, a credential, a PIN/OTP, or an auth header to the logger even
+under an innocent key — but the redactor is the backstop if someone does.
+
+### Scheduler heartbeat
+
+`withLoggedRun("cron.<name>", …, run)` wraps a tick so it always emits a
+`start` then an `ok`/`error` line under one correlation id.
+`app/api/cron/generate-reports/route.ts` is the reference adoption. An
+operator (or a follow-up `cron_heartbeats` view) reconstructs "did this job
+run in the last window?" from the `stage:"cron.*"` stream: a `start` with no
+matching `ok`/`error` is a stuck tick; **no `start` at all** for a job's
+expected interval is a dead scheduler. Remaining `app/api/cron/*` routes
+adopt `withLoggedRun` as they are next touched.
+
