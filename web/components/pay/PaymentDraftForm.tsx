@@ -4,7 +4,11 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createDraftIntent } from "../../app/pay/assisted-actions";
 import { messages } from "../../lib/ussd/messages";
-import { guessProvider, normalizeRwandaMsisdn } from "../../lib/pay/phone";
+import {
+  guessProvider,
+  normalizeRwandaMsisdn,
+  providerNetworkForAccount,
+} from "../../lib/pay/phone";
 
 const t = messages().pay.assisted;
 
@@ -77,10 +81,15 @@ export function PaymentDraftForm({
   const selectedRecipient = trustedRecipients.find((r) => r.id === recipientId);
   const effectiveMsisdn = selectedRecipient?.normalized_msisdn ?? msisdn;
   const norm = normalizeRwandaMsisdn(effectiveMsisdn);
-  const providerGuess = guessProvider(norm.normalized);
 
   const account = accounts.find((a) => a.id === accountId);
   const currency = account?.currency ?? "RWF";
+
+  // Recipient's network drives a send-money code; for a merchant / bill /
+  // meter payment there's no recipient number, so fall back to the
+  // paying account's own network (that's the SIM the USSD is dialled on).
+  const providerGuess =
+    guessProvider(norm.normalized) ?? providerNetworkForAccount(account?.provider);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();

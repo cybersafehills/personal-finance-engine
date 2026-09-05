@@ -161,12 +161,38 @@ export function PaymentIntentPanel({
     const localMsisdn = intent.recipient_msisdn_normalized
       ? "0" + intent.recipient_msisdn_normalized.slice(3)
       : "";
-    return fillUssdTemplate(
-      serviceCode.ussd_template,
-      { phone: localMsisdn, amount: String(Math.round(amountMajor)) },
-      specs,
-    );
-  }, [serviceCode, intent.recipient_msisdn_normalized, amountMajor]);
+    // Supply a value for every parameter kind a code might ask for -
+    // keyed by the code's own parameter key, chosen by its kind - so a
+    // merchant / meter / bill template (`*182*8*1*{merchant}*{amount}#`)
+    // fills the same way a send-money one does. Previously only
+    // phone + amount were passed, so any merchant code failed with
+    // "Enter a merchant code" and the screen fell back to "no route".
+    const valueForKind: Partial<Record<ParamSpec["kind"], string>> = {
+      phone: localMsisdn,
+      amount: String(Math.round(amountMajor)),
+      merchant_code: intent.merchant_code ?? "",
+      meter_number: intent.meter_number ?? "",
+      billing_id: intent.billing_reference ?? "",
+      account_reference: intent.billing_reference ?? "",
+      national_id: intent.government_reference ?? "",
+      reference: intent.government_reference ?? "",
+      text: intent.government_reference ?? "",
+    };
+    const params: Record<string, string> = {};
+    for (const spec of specs) {
+      const v = valueForKind[spec.kind];
+      if (v) params[spec.key] = v;
+    }
+    return fillUssdTemplate(serviceCode.ussd_template, params, specs);
+  }, [
+    serviceCode,
+    intent.recipient_msisdn_normalized,
+    intent.merchant_code,
+    intent.meter_number,
+    intent.billing_reference,
+    intent.government_reference,
+    amountMajor,
+  ]);
 
   const dialString = filled && filled.ok ? filled.dial : null;
 

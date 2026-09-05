@@ -55,6 +55,23 @@ export function guessProvider(
   return null;
 }
 
+/**
+ * Network key for a source account's `provider` string
+ * (`mtn_momo` / `airtel_money` / `bank` / …). Used when the payment has
+ * no recipient phone number to guess from - a merchant / bill / meter
+ * payment is dialled on the SIM that owns the paying MoMo account, so
+ * that account's network is the one whose USSD code applies. Null for a
+ * bank or anything without a mobile-money USSD path.
+ */
+export function providerNetworkForAccount(
+  provider: string | null | undefined,
+): "mtn" | "airtel" | null {
+  const s = (provider ?? "").toLowerCase();
+  if (s.includes("mtn") || s.includes("momo")) return "mtn";
+  if (s.includes("airtel")) return "airtel";
+  return null;
+}
+
 /** `078 123 4567` from a normalized `2507XXXXXXXX` - for display only. */
 export function formatLocalMsisdn(normalized: string | null | undefined): string {
   if (!normalized || !RW_MOBILE_RE.test(normalized)) return normalized ?? "";
