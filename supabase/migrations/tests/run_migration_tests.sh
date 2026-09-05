@@ -659,7 +659,9 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # grant, no RLS change. Count stays 118 / 117.
 # Account deletion request (20261201000000) adds account_deletion_requests
 # (RLS enabled, SELECT-own for authenticated) - 119 tables, 118 with RLS.
-if [ "$TABLE_COUNT" = "119" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Entitlements (20261130000000) adds workspace_plans (RLS enabled, SELECT
+# gated on is_workspace_member) - 120 tables, 119 with RLS.
+if [ "$TABLE_COUNT" = "120" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -778,10 +780,10 @@ AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from inform
 # Account deletion request (20261201000000) adds account_deletion_requests
 # with a SELECT-only grant for authenticated (writes service-role only).
 # 149 + 1 = 150.
-if [ "$AUTHENTICATED_GRANT_COUNT" = "150" ]; then
-  pass "authenticated holds exactly the 150 table grants expected, no more"
+if [ "$AUTHENTICATED_GRANT_COUNT" = "151" ]; then
+  pass "authenticated holds exactly the 151 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 150 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 151 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -7045,6 +7047,80 @@ if [ "$ADR_GRANTS" = "SELECT" ] && [ "$ADR_ANON" = "0" ]; then
   pass "Account deletion: authenticated holds SELECT-only on account_deletion_requests, anon nothing"
 else
   fail "Account deletion: grants wrong (authenticated='$ADR_GRANTS' anon=$ADR_ANON)"
+fi
+
+# ===========================================================================
+# Entitlements & plan tiers (20261130000000): workspace_plans.
+# ===========================================================================
+echo "=== Entitlements: workspace_plans ==="
+
+# Backfill: every workspace got exactly one row, all 'free'.
+ENT_COVER="$(psql -d pfe_rls -t -A -c "select (select count(*) from public.workspaces) = (select count(*) from public.workspace_plans) and not exists (select 1 from public.workspace_plans where plan <> 'free');")"
+if [ "$ENT_COVER" = "t" ] || [ "$ENT_COVER" = "true" ]; then
+  pass "Entitlements: backfill gave every workspace exactly one 'free' plan row"
+else
+  fail "Entitlements: workspace_plans backfill coverage/default wrong ($ENT_COVER)"
+fi
+
+ENT_A_PLAN="$(psql -d pfe_rls -t -A -c "select plan from public.workspace_plans where workspace_id = '$WORKSPACE_A';")"
+if [ "$ENT_A_PLAN" = "free" ]; then
+  pass "Entitlements: a workspace's plan defaults to free"
+else
+  fail "Entitlements: WORKSPACE_A plan was '$ENT_A_PLAN'"
+fi
+
+# The AFTER INSERT trigger provisions a row for a brand-new workspace.
+ENT_NEW_WS="$(as_user "$USER_A" "select public.create_household_workspace('Entitlements HH');")"
+ENT_NEW_WS_ID="$(printf '%s' "$ENT_NEW_WS" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+ENT_TRIG="$(psql -d pfe_rls -t -A -c "select plan from public.workspace_plans where workspace_id = '$ENT_NEW_WS_ID';")"
+if [ "$ENT_TRIG" = "free" ]; then
+  pass "Entitlements: a newly created workspace is auto-provisioned a free plan row"
+else
+  fail "Entitlements: new workspace had no plan row (got '$ENT_TRIG')"
+fi
+
+# The plan check constraint rejects an unknown tier.
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; update public.workspace_plans set plan = 'enterprise' where workspace_id = '$WORKSPACE_A';" >/dev/null 2>$ARTIFACT_DIR/pfe_ent_ck.log; then
+  fail "Entitlements: workspace_plans accepted plan='enterprise'"
+else
+  pass "Entitlements: workspace_plans.plan check rejects an unknown tier"
+fi
+rm -f $ARTIFACT_DIR/pfe_ent_ck.log
+
+# RLS: an active member reads their own workspace's plan; a non-member cannot.
+psql -d pfe_rls -c "set role service_role; update public.workspace_plans set plan = 'household' where workspace_id = '$WORKSPACE_A';" >/dev/null
+ENT_MEMBER_SEES="$(as_user "$USER_A" "select plan from public.workspace_plans where workspace_id = '$WORKSPACE_A';")"
+ENT_OUTSIDER_SEES="$(as_user "$USER_B" "select count(*) from public.workspace_plans where workspace_id = '$WORKSPACE_A';")"
+if [ "$ENT_MEMBER_SEES" = "household" ] && [ "$ENT_OUTSIDER_SEES" = "0" ]; then
+  pass "Entitlements: workspace_plans is readable by a workspace member, hidden from another tenant"
+else
+  fail "Entitlements: workspace_plans RLS wrong (member='$ENT_MEMBER_SEES' outsider=$ENT_OUTSIDER_SEES)"
+fi
+
+# authenticated holds no write grant on workspace_plans, so a member's
+# UPDATE is denied outright (before RLS even applies) and the plan is
+# unchanged.
+if as_user "$USER_A" "update public.workspace_plans set plan = 'business' where workspace_id = '$WORKSPACE_A';" >/dev/null 2>$ARTIFACT_DIR/pfe_ent_w.log; then
+  fail "Entitlements: an authenticated member was able to UPDATE workspace_plans"
+else
+  pass "Entitlements: an authenticated member cannot write workspace_plans (SELECT-only grant, no write policy)"
+fi
+rm -f $ARTIFACT_DIR/pfe_ent_w.log
+ENT_AFTER_SELF_WRITE="$(psql -d pfe_rls -t -A -c "select plan from public.workspace_plans where workspace_id = '$WORKSPACE_A';")"
+if [ "$ENT_AFTER_SELF_WRITE" = "household" ]; then
+  pass "Entitlements: the plan is unchanged after a denied member write"
+else
+  fail "Entitlements: plan changed to '$ENT_AFTER_SELF_WRITE' after a member write attempt"
+fi
+psql -d pfe_rls -c "set role service_role; update public.workspace_plans set plan = 'free' where workspace_id = '$WORKSPACE_A';" >/dev/null
+
+# Grants: authenticated SELECT-only, anon nothing.
+ENT_GRANTS="$(psql -d pfe_rls -t -A -c "select string_agg(privilege_type, ',' order by privilege_type) from information_schema.role_table_grants where table_schema='public' and table_name='workspace_plans' and grantee='authenticated';")"
+ENT_ANON_GRANTS="$(psql -d pfe_rls -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and table_name='workspace_plans' and grantee='anon';")"
+if [ "$ENT_GRANTS" = "SELECT" ] && [ "$ENT_ANON_GRANTS" = "0" ]; then
+  pass "Entitlements: authenticated holds SELECT-only on workspace_plans, anon holds nothing"
+else
+  fail "Entitlements: workspace_plans grants wrong (authenticated='$ENT_GRANTS' anon=$ENT_ANON_GRANTS)"
 fi
 
 echo ""

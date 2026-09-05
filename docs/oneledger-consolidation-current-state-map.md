@@ -729,3 +729,30 @@ collision with G2 (#131): both bump the same literals — whichever merges
 second needs a rebase + bump to 120/151.
 
 Still open: G6 erasure follow-up; G7-G12.
+
+---
+
+## 14. Follow-on — Entitlements domain (gap G2, branch `feat/entitlements-domain`)
+
+Stacked on `feat/settings-ia-7group` (G1). ADR 0015. Closes G2 from
+`docs/oneledger-onboarding-architecture-audit.md` §2 to the "schema + engine
++ gate, dark" depth — no enforcement call sites changed, no payments.
+
+| Change | File |
+| --- | --- |
+| Per-workspace plan table + default-free backfill + `ensure_workspace_plan` AFTER INSERT trigger; member-SELECT RLS, no authenticated write | `supabase/migrations/20261130000000_entitlements.sql` |
+| Migration-suite: 8 assertions (backfill coverage, default, trigger, plan check, member/outsider RLS, denied member write, grants); guard counts 118→119 tables / 149→150 authenticated grants | `supabase/migrations/tests/run_migration_tests.sh` — **501/0** |
+| Tier→capability map (single source, TS) + `planHasEntitlement`/`lowestPlanFor`/`planLabel`; 8 deno tests incl. the "no data/export/security entitlement" guardrail | `web/lib/entitlements/plans.ts` (+ `plans_test.ts`) |
+| Server gate mirroring `experience-mode/gate.ts`: `ENTITLEMENTS_ENABLED` (+ `_ALLOWLIST`), `getWorkspacePlanState`, `workspaceHasEntitlement` (permissive when dark) | `web/lib/entitlements/gate.ts` |
+| `/settings/billing` reads the real stored plan (was hard-coded "Free") | `web/app/settings/billing/page.tsx` |
+| Flags documented | `web/.env.local.example` |
+
+Verification: migration suite 501/0, deno `web/lib` 640/0, `next lint` 0
+errors, `next build` ✓. Migration is additive + backfilled + trigger-covered;
+deploys on merge when main CI is green (commit-only, user deploys). Generated
+Supabase types not regenerated here (no project access) — regen on deploy;
+`.from("workspace_plans")` compiles today.
+
+Enforcement is the deliberate next step, per capability, behind
+`ENTITLEMENTS_ENABLED`. Still open: G3 (account-detail tabs), G6 (F12
+deletion/export), G7-G12.
