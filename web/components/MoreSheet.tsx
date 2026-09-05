@@ -95,12 +95,22 @@ function MorePanel({
     };
   }, []);
 
-  function onKeyDown(e: React.KeyboardEvent) {
-    if (e.key === "Escape") {
-      e.stopPropagation();
-      onClose();
-      return;
+  // Escape closes the sheet from anywhere - a document listener rather
+  // than the panel's onKeyDown so it does not depend on focus having
+  // already moved into the panel (the focus rAF above may not have run
+  // yet when a fast keypress arrives).
+  useEffect(() => {
+    function onDocKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onClose();
+      }
     }
+    document.addEventListener("keydown", onDocKeyDown);
+    return () => document.removeEventListener("keydown", onDocKeyDown);
+  }, [onClose]);
+
+  function onKeyDown(e: React.KeyboardEvent) {
     if (e.key !== "Tab" || !panelRef.current) return;
     const nodes = focusable(panelRef.current);
     if (nodes.length === 0) return;
