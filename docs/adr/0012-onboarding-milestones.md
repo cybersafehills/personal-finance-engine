@@ -1,7 +1,8 @@
 # ADR 0012: Onboarding as a persisted milestone journey
 
-- **Status:** Accepted for staged implementation (PR1: durable spine +
-  intent step; dark behind `ONBOARDING_JOURNEY_ENABLED`)
+- **Status:** Accepted, implemented behind `ONBOARDING_JOURNEY_ENABLED`
+  (PR1: durable spine + intent step; PR2: dashboard checklist,
+  first-transaction review card, first insight, `/get-started` journey view)
 - **Date:** 2026-09-05
 - **Builds on:** ADR 0011 (experience modes), the profile/preferences
   onboarding (`20261022000000`), device pairing v2 (ADR 0008), async
@@ -86,10 +87,25 @@ moves a "first happened" time. `mark_onboarding_milestone` accepts only
   idempotency, derived-milestone rejection, cross-user isolation, and
   authenticated-only grants.
 
-## Not yet done (later PRs)
+## Implemented in PR2
 
-Value-promise + source-first wizard screens, device pairing wired inline
-(not a `/pair` detour), the first-real-transaction review card that
-calls `mark_onboarding_milestone('first_review')`, the first insight that
-calls `mark_onboarding_milestone('first_insight')`, and the unobtrusive
-post-onboarding dashboard checklist reading `getOnboardingJourney()`.
+- `OnboardingJourneyCard` on Home + `/get-started` rendered as the ordered
+  journey (customer language, no raw "create a connection" choices) when
+  the flag is on.
+- `FirstTransactionReviewCard` (assessment section 30): one review
+  question on the most recent transaction; either answer calls
+  `mark_onboarding_milestone('first_review')` (and "Looks right" also
+  `confirm_transaction_category`).
+- `FirstInsightCard` (section 31): one deterministic fact - the biggest
+  spending category so far, from `getCategoryTotals()` - no invented
+  "score". "Got it" calls `mark_onboarding_milestone('first_insight')`.
+- Home shows exactly one first-run surface at a time, in journey order
+  (review -> insight -> checklist), and none once complete or dismissed.
+
+## Not yet done (polish, later)
+
+- The value-promise / source-add steps as their own wizard screens inside
+  onboarding chrome (today: value promise is on `/onboarding/intent`;
+  source-add routes to `/settings/sources` from the checklist).
+- Device pairing embedded in an onboarding route rather than the checklist
+  linking to `/pair` with a return path.

@@ -510,12 +510,22 @@ queries.ts split 🔄 (pattern + 2 leaf domains; rest peels off per-area).
 
 Verification: `deno test web/lib` 608/0; migration suite 493/0; web lint 0 errors; web build ✓.
 
-**Release 3 next PRs:** value-promise + source-first wizard screens; device
-pairing wired inline (not a `/pair` detour); first-transaction review card
-calling `mark_onboarding_milestone('first_review')`; first insight calling
-`('first_insight')`; the unobtrusive dashboard checklist reading
-`getOnboardingJourney()` (replacing the derived-only `getOnboardingState`
-nudge).
+**PR2 — the first-run surfaces (still dark behind `ONBOARDING_JOURNEY_ENABLED`).**
+
+| Piece | Detail |
+| --- | --- |
+| `OnboardingJourneyCard` | dashboard checklist: progress, next step + CTA, remaining steps, dismiss (reuses `ui_preferences.onboarding_dismissed`). |
+| `/get-started` journey view | when the flag is on, renders `getOnboardingJourney()` as the ordered step list — customer language, no raw "create a connection" choices. Old page unchanged when off. |
+| `FirstTransactionReviewCard` | one review question on the most recent transaction; "Looks right" → `confirm_transaction_category` + `mark_onboarding_milestone('first_review')`; "Change category" → mark + drill in. |
+| `FirstInsightCard` | one deterministic fact — biggest spending category so far from `getCategoryTotals()`; "Got it" → `mark_onboarding_milestone('first_insight')`. No invented score. |
+| Home wiring | shows exactly one first-run surface at a time in journey order (review → insight → checklist), none once complete/dismissed; all gated by the flag. |
+
+Verification: web lint 0 errors; web build ✓. No e2e/visual change (flag off in the e2e env).
+
+**Release 3 remaining (polish):** value-promise / source-add as dedicated
+wizard screens (today: value promise on `/onboarding/intent`, source-add
+routes to `/settings/sources`); device pairing embedded in an onboarding
+route vs. the checklist linking to `/pair`.
 
 ### Files touched in Phase 0
 
