@@ -6,6 +6,7 @@ import android.content.Context
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
+import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -85,19 +86,30 @@ class CaptureNotificationListenerService : NotificationListenerService() {
         }
     }
 
-    /** Prefer BigText, then Text, then Title+Text. Returns null if there is no
-     *  usable body — nothing to match, nothing to keep. */
+    /**
+     * The message body: MessagingStyle's last message (the modern default for
+     * SMS apps), then `EXTRA_BIG_TEXT`, then `EXTRA_TEXT`. Returns null when
+     * there is no usable body — nothing to match, nothing to keep.
+     *
+     * Deliberately **never the title**: for an SMS notification the title is the
+     * sender id, which is not part of the message, would leak into what we match
+     * and forward, and — because a launcher re-posts the same notification with
+     * the title sometimes present, sometimes not — made this non-deterministic
+     * and produced two queue rows for one SMS (defeating the dedupe key).
+     * Provider SMS bodies (MTN MoMo, banks) are self-contained.
+     */
     private fun extractText(sbn: StatusBarNotification): String? {
-        val extras = sbn.notification.extras ?: return null
+        val notification = sbn.notification
+        NotificationCompat.MessagingStyle
+            .extractMessagingStyleFromNotification(notification)
+            ?.messages?.lastOrNull()?.text?.toString()?.trim()
+            ?.let { if (it.isNotEmpty()) return it }
+
+        val extras = notification.extras ?: return null
         val big = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()?.trim()
         if (!big.isNullOrEmpty()) return big
-        val body = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim()
-        val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim()
-        return when {
-            !body.isNullOrEmpty() && !title.isNullOrEmpty() -> "$title\n$body"
-            !body.isNullOrEmpty() -> body
-            else -> null
-        }
+        return extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim()
+            ?.ifEmpty { null }
     }
 
     companion object {
