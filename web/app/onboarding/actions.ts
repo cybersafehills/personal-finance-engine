@@ -107,3 +107,53 @@ export async function completeProfileOnboarding(): Promise<ProfileOnboardingActi
   return { ok: true };
 }
 
+const INTENTS = ["personal", "household", "business"] as const;
+
+/**
+ * Records the user's first-run intent (Release 3 / ADR 0012). Idempotent -
+ * the RPC preserves the first-decided timestamp - and choosing
+ * household/business here does NOT create a Space; collaborative setup is
+ * its own later milestone.
+ */
+export async function setOnboardingIntent(
+  intent: string,
+): Promise<ProfileOnboardingActionResult> {
+  if (!(INTENTS as readonly string[]).includes(intent)) {
+    return { ok: false, error: "Choose Personal, Household, or Business." };
+  }
+  const supabase = await authenticatedClient();
+  if (!supabase) return { ok: false, error: "Not signed in." };
+
+  const { error } = await supabase.rpc("set_onboarding_intent", {
+    p_intent: intent,
+  });
+  if (error) {
+    console.error("setOnboardingIntent failed:", error.message);
+    return { ok: false, error: "Could not save your choice. Try again." };
+  }
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
+/**
+ * Stamps a UI-observed onboarding milestone the first time it happens
+ * ('first_review' | 'first_insight'). Idempotent; every other milestone is
+ * derived, never marked.
+ */
+export async function markOnboardingMilestone(
+  milestone: "first_review" | "first_insight",
+): Promise<ProfileOnboardingActionResult> {
+  const supabase = await authenticatedClient();
+  if (!supabase) return { ok: false, error: "Not signed in." };
+
+  const { error } = await supabase.rpc("mark_onboarding_milestone", {
+    p_milestone: milestone,
+  });
+  if (error) {
+    console.error("markOnboardingMilestone failed:", error.message);
+    return { ok: false, error: "Could not record that. Try again." };
+  }
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+

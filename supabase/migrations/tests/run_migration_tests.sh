@@ -944,10 +944,12 @@ AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_p
 # Pairing auto-enroll (20261125000000) adds _ensure_account_financial_source,
 # a security-definer helper with NO role grant (called only from
 # create_device_pairing_session) - count stays 108.
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "108" ]; then
-  pass "authenticated holds EXECUTE on exactly the 108 functions expected, no more"
+# Release 3 onboarding milestones (20261129000000) adds set_onboarding_intent
+# and mark_onboarding_milestone, both authenticated-callable. 108 + 2 = 110.
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "110" ]; then
+  pass "authenticated holds EXECUTE on exactly the 110 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 108 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 110 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -5269,6 +5271,96 @@ if [ "$ONBOARDING_ACL" = "true|false|true|false" ] || [ "$ONBOARDING_ACL" = "t|f
   pass "onboarding RPCs are authenticated-only"
 else
   fail "onboarding RPC privileges are incorrect ($ONBOARDING_ACL)"
+fi
+
+# ===========================================================================
+# Release 3: onboarding milestone journey (20261129000000). intent +
+# first_review + first_insight persist per user on profiles; every RPC is
+# idempotent, auth.uid()-scoped (no cross-user write), and authenticated-
+# only. (The one-time backfill of established users only touches profiles
+# that existed at migration time - none in a fresh test chain - so its
+# clean application is covered by test H, not re-asserted here.)
+# ===========================================================================
+echo "=== Release 3: onboarding milestone journey ==="
+
+# The migration's new columns + constraint exist and default to NULL.
+MS_COLS="$(psql -d pfe_rls -t -A -c "select count(*) from information_schema.columns where table_schema='public' and table_name='profiles' and column_name in ('onboarding_intent','onboarding_intent_at','onboarding_first_review_at','onboarding_first_insight_at');")"
+if [ "$MS_COLS" = "4" ]; then
+  pass "Release 3: the four onboarding-milestone columns exist on profiles"
+else
+  fail "Release 3: expected 4 milestone columns on profiles, found $MS_COLS"
+fi
+
+# The intent/intent_at consistency constraint holds (can't set one without the other).
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "insert into auth.users (email) values ('ms-constraint@example.com');" >/dev/null 2>&1 && \
+   psql -d pfe_rls -v ON_ERROR_STOP=1 -c "update public.profiles set onboarding_intent = 'personal' where id = (select id from auth.users where email = 'ms-constraint@example.com');" >/dev/null 2>$ARTIFACT_DIR/pfe_ms_constraint.log; then
+  fail "Release 3: profiles accepted onboarding_intent with a NULL onboarding_intent_at"
+else
+  pass "Release 3: onboarding_intent requires onboarding_intent_at (consistency constraint)"
+fi
+rm -f $ARTIFACT_DIR/pfe_ms_constraint.log
+
+# A brand-new user has no intent yet.
+MS_USER="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('milestones@example.com') returning id;" | head -1)"
+MS_FRESH="$(psql -d pfe_rls -t -A -c "select coalesce(onboarding_intent, 'null') || '|' || coalesce(onboarding_first_review_at::text, 'null') from public.profiles where id = '$MS_USER';")"
+if [ "$MS_FRESH" = "null|null" ]; then
+  pass "Release 3: a brand-new user has a null intent and no milestones"
+else
+  fail "Release 3: new user milestone state was '$MS_FRESH'"
+fi
+
+# set_onboarding_intent records the choice + stamps the time once.
+as_user "$MS_USER" "select public.set_onboarding_intent('household');" >/dev/null
+MS_T1="$(psql -d pfe_rls -t -A -c "select onboarding_intent_at from public.profiles where id = '$MS_USER';")"
+as_user "$MS_USER" "select public.set_onboarding_intent('business');" >/dev/null
+MS_AFTER="$(psql -d pfe_rls -t -A -c "select onboarding_intent || '|' || (onboarding_intent_at = '$MS_T1') from public.profiles where id = '$MS_USER';")"
+if [ "$MS_AFTER" = "business|true" ] || [ "$MS_AFTER" = "business|t" ]; then
+  pass "Release 3: intent can change but the first-decided timestamp is preserved"
+else
+  fail "Release 3: intent update drifted ('$MS_AFTER')"
+fi
+
+# Invalid intent is rejected.
+if as_user "$MS_USER" "select public.set_onboarding_intent('enterprise');" >/dev/null 2>$ARTIFACT_DIR/pfe_ms_bad_intent.log; then
+  fail "Release 3: an invalid onboarding intent was accepted"
+else
+  pass "Release 3: an invalid onboarding intent is rejected"
+fi
+rm -f $ARTIFACT_DIR/pfe_ms_bad_intent.log
+
+# mark_onboarding_milestone is idempotent.
+as_user "$MS_USER" "select public.mark_onboarding_milestone('first_review');" >/dev/null
+MS_R1="$(psql -d pfe_rls -t -A -c "select onboarding_first_review_at from public.profiles where id = '$MS_USER';")"
+as_user "$MS_USER" "select public.mark_onboarding_milestone('first_review');" >/dev/null
+MS_R2="$(psql -d pfe_rls -t -A -c "select onboarding_first_review_at from public.profiles where id = '$MS_USER';")"
+if [ -n "$MS_R1" ] && [ "$MS_R1" = "$MS_R2" ]; then
+  pass "Release 3: mark_onboarding_milestone stamps once and is idempotent"
+else
+  fail "Release 3: first_review milestone drifted ('$MS_R1' -> '$MS_R2')"
+fi
+if as_user "$MS_USER" "select public.mark_onboarding_milestone('first_transaction');" >/dev/null 2>$ARTIFACT_DIR/pfe_ms_bad_ms.log; then
+  fail "Release 3: a derived-only milestone was accepted by mark_onboarding_milestone"
+else
+  pass "Release 3: mark_onboarding_milestone rejects a derived-only milestone"
+fi
+rm -f $ARTIFACT_DIR/pfe_ms_bad_ms.log
+
+# Cross-user isolation: MS_USER's RPC only ever writes MS_USER's row - the
+# backfilled ONBOARDING_USER is untouched no matter what MS_USER calls.
+OTHER_INTENT_BEFORE="$(psql -d pfe_rls -t -A -c "select onboarding_intent from public.profiles where id = '$ONBOARDING_USER';")"
+as_user "$MS_USER" "select public.set_onboarding_intent('personal');" >/dev/null
+OTHER_INTENT_AFTER="$(psql -d pfe_rls -t -A -c "select onboarding_intent from public.profiles where id = '$ONBOARDING_USER';")"
+if [ "$OTHER_INTENT_BEFORE" = "$OTHER_INTENT_AFTER" ]; then
+  pass "Release 3: an onboarding RPC only ever writes the caller's own profile row"
+else
+  fail "Release 3: another user's intent changed ('$OTHER_INTENT_BEFORE' -> '$OTHER_INTENT_AFTER') - isolation breach"
+fi
+
+MS_ACL="$(psql -d pfe_rls -t -A -c "select has_function_privilege('authenticated', 'public.set_onboarding_intent(text)', 'execute') || '|' || has_function_privilege('anon', 'public.set_onboarding_intent(text)', 'execute') || '|' || has_function_privilege('anon', 'public.mark_onboarding_milestone(text)', 'execute');")"
+if [ "$MS_ACL" = "true|false|false" ] || [ "$MS_ACL" = "t|f|f" ]; then
+  pass "Release 3: onboarding milestone RPCs are authenticated-only"
+else
+  fail "Release 3: onboarding milestone RPC privileges are incorrect ('$MS_ACL')"
 fi
 
 # ===========================================================================

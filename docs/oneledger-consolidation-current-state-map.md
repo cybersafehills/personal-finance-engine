@@ -465,15 +465,16 @@ Phase 0 committed as `e9546af`.
 | **queries.ts split (item 10)** | `web/lib/queries/` established with barrel re-export: `queries/transfers.ts` + `queries/variable-income.ts` (leaf domains, zero cross-deps). 3187→3002 lines. | 🔄 started, committed `3486ca0`; lint + build green, deno 604/0 |
 | **Nav re-cut (Home/Activity/Inbox/Plan/grouped More)** | `navigation.ts` rewritten: `PRIMARY_NAV` (fixed journey, no reordering) + `PHONE_BAR_KEYS` + `MORE_GROUPS` (Manage money / This Space / Account / Advanced / Pay & Services, each item surface- + flag-gated). `AppShell` + `MoreSheet` rewritten; desktop gets a header "More" button opening the same grouped sheet. `nav_order` preference retired — `NavOrderForm` deleted, `/settings/appearance` now explains the fixed journey, `saveNavOrder`/`restoreDefaultNavOrder` removed, column left vestigial (no migration). 6 new `navigation_test.ts` tests. e2e `shell-navigation` + `nav-reorder` + `accessibility` + `visual` specs updated. | ✅ committed; deno 601/0, lint + build green. **Visual baselines need `--update-snapshots` (user running).** |
 | **Admin / developer shell separation** | `app/admin/layout.tsx` — an "Operator tools" band on every `/admin/*` page so it never reads as a customer surface. `/integrations/developer` is already buried under More → Advanced (business mode + integrations flag). | ✅ committed |
-| **Financial Inbox as single front door + inline actions** | — | ⏳ **deferred**: needs inline actions calling each domain's authoritative RPC + `/inbox` e2e. `ActionRequiredItem` primitive is ready to build on. Own PR. |
+| **Financial Inbox as single front door + inline actions** | `financial-inbox-model.ts`: `InboxInlineAction` union + `bill_review` kind. `financial-inbox.ts`: populates inline actions for category-review (confirm/dismiss), attribution ("This was mine"), rule-suggestion (accept/dismiss); adds `bill_review` items gated by `BILLS_ENABLED` + `bill.review`. New `components/InboxList.tsx` (client) dispatches each item's **authoritative domain server action** (the same RPC the drill-in uses), optimistically drops resolved items, `aria-live` + `aria-busy`, inline error keeps the item + drill-in link. `/inbox/page.tsx` rewritten on `ds/ActionRequiredItem`; heading now "Inbox" (matches nav). `e2e/inbox.spec.ts` smoke + `docs/financial-inbox.md` rewritten. | ✅ committed; deno 3/3 (model), lint + build green |
 
-### Phase 1 verification summary
+### Phase 1 verification summary (latest)
 
 | Check | Result |
 | --- | --- |
-| `deno test --config web/lib/deno.json web/lib` | 604 / 0 (incl. 7 experience-mode, 6 log) |
+| `deno test --config web/lib/deno.json web/lib` | 601 / 0 |
 | `npm run lint` (web) | 0 errors (2 pre-existing warnings) |
 | `npm run build` (web, placeholder env) | ✓ compiled |
+| Playwright visual baselines | **need `--update-snapshots`** after the nav re-cut (user running) |
 
 ### Commits on `claude/oneledger-consolidation-08bed7`
 
@@ -482,7 +483,103 @@ e9546af  Phase 0: close verified trust gaps (F2/F3/F6/F10 + CI)
 f728df4  Phase 1: formalize design-system primitives
 21bf885  Phase 1: experience-mode primitive (Personal / Household / Business)
 3486ca0  Phase 1: begin splitting web/lib/queries.ts by domain
+7ec517b  Phase 1: re-cut the primary navigation to the financial journey
+<next>   Phase 1: Financial Inbox as the single front door + inline actions
 ```
+
+### Phase 1 status: all five items delivered
+
+Design system ✓ · 16px controls (pre-existing) ✓ · experience modes ✓ ·
+nav re-cut + admin shell ✓ · Inbox front door + inline actions ✓ ·
+queries.ts split 🔄 (pattern + 2 leaf domains; rest peels off per-area).
+
+### 2026-09-05 — Release 3 (First Run) started
+
+**PR1 — the persisted milestone spine (ADR 0012), dark behind
+`ONBOARDING_JOURNEY_ENABLED`.**
+
+| Piece | Detail |
+| --- | --- |
+| Migration `20261129000000_onboarding_milestones.sql` | 4 additive nullable columns on `profiles` (`onboarding_intent`, `_intent_at`, `_first_review_at`, `_first_insight_at`) + consistency constraint; `set_onboarding_intent` / `mark_onboarding_milestone` SECURITY DEFINER RPCs (idempotent, `auth.uid()`-scoped, authenticated-only); one-time backfill of established users' intent from their personal workspace `kind`. |
+| Migration suite | 8 new "Release 3" assertions (columns, constraint, idempotency, derived-milestone rejection, cross-user isolation, ACL) + the function-count guard bumped 108→110. **493 passed / 0 failed** (PG17). |
+| Pure model `web/lib/onboarding-milestones.ts` | 7-milestone ordered journey `intent_selected → source_added → device_paired → connection_verified → first_real_transaction → first_review_completed → first_insight_seen`; most **derived** (device-independent, idempotent), only 3 persisted. `deriveOnboardingJourney(signals)` → steps + next-step pointer + complete. 6 Deno tests. |
+| Server reader `web/lib/onboarding/journey.ts` | collects derived signals (`financial_sources`, `ingestion_connections`, `transactions` counts) + persisted milestones; **deploy-drift safe** — a missing column is treated as "not yet". `ONBOARDING_JOURNEY_ENABLED` gate. |
+| Intent step | `/onboarding/intent` (redirects to `/get-started` while dark) + `IntentChoiceForm` + `setOnboardingIntent` / `markOnboardingMilestone` actions. Uses `ds/StepWizard`. Value promise inline. |
+| Synthetic connection test | **already exists** — `capture` `op:"test"` (ADR 0009) proves connectivity without a transaction; `connection_verified` reads `last_used_at`. |
+| Docs | ADR 0012; `.env.local.example`. |
+
+Verification: `deno test web/lib` 608/0; migration suite 493/0; web lint 0 errors; web build ✓.
+
+**PR2 — the first-run surfaces (still dark behind `ONBOARDING_JOURNEY_ENABLED`).**
+
+| Piece | Detail |
+| --- | --- |
+| `OnboardingJourneyCard` | dashboard checklist: progress, next step + CTA, remaining steps, dismiss (reuses `ui_preferences.onboarding_dismissed`). |
+| `/get-started` journey view | when the flag is on, renders `getOnboardingJourney()` as the ordered step list — customer language, no raw "create a connection" choices. Old page unchanged when off. |
+| `FirstTransactionReviewCard` | one review question on the most recent transaction; "Looks right" → `confirm_transaction_category` + `mark_onboarding_milestone('first_review')`; "Change category" → mark + drill in. |
+| `FirstInsightCard` | one deterministic fact — biggest spending category so far from `getCategoryTotals()`; "Got it" → `mark_onboarding_milestone('first_insight')`. No invented score. |
+| Home wiring | shows exactly one first-run surface at a time in journey order (review → insight → checklist), none once complete/dismissed; all gated by the flag. |
+
+Verification: web lint 0 errors; web build ✓. No e2e/visual change (flag off in the e2e env).
+
+**Release 3 remaining (polish):** value-promise / source-add as dedicated
+wizard screens (today: value promise on `/onboarding/intent`, source-add
+routes to `/settings/sources`); device pairing embedded in an onboarding
+route vs. the checklist linking to `/pair`.
+
+### 2026-09-05 — Release 5 (Connections / ADR 0007 cutover)
+
+Per the locked decision (§10): the cutover depends on a production
+observation window this program cannot fast-forward, so it is **not**
+executed here. Delivered the parts that do not need the window:
+
+| Piece | Detail |
+| --- | --- |
+| **ADR 0013** `docs/adr/0013-native-ios-capture-direction.md` | Native iOS App Intents / App Shortcuts companion as the long-term iOS capture path — same thin-client `/capture` + pairing-v2 contract as Android, zero-config setup, no forced migration off the Shortcut. Direction only, no timeline. |
+| **Cutover runbook** `docs/connector-model-cutover-runbook.md` | The executable Stage D → E sequence: preconditions (shadow-mismatch = 0, adapter route health clean, `get_connector_canonical_read_cutover_status().ready`), flag-flip order (`ONELEDGER_MTN_MOMO_ADAPTER` → canonical credential resolver → `ONELEDGER_CANONICAL_CONNECTIONS_UI`), per-step verification + instant rollback, ingestion convergence parity gate before deleting the legacy `ingest-momo` pipeline, and Stage E as a separate deliberate migration (§73). Linked from ADR 0007. |
+| **Status vocabulary unified** | `ConnectorInstallationItem` now uses the shared `ds/ConnectionStatusBadge` + `connectionStatusHint` (the canonical 7 states with fixed customer labels), so the connector UI, the Financial Inbox and future source cards all say the same words (§38). Preview-flag UI, no e2e. |
+
+Verification: web lint 0 errors; web build ✓.
+
+**Release 5 remaining:** the cutover itself (needs the prod window — follow
+the runbook); Connected Sources / Devices "Send test" handshake + MFA
+step-up on rotate/revoke (needs connector-RPC AAL2 work); Android
+companion hardening review (§40); ingestion convergence parity fixtures.
+
+### 2026-09-05 — Release 6 (Intelligence)
+
+**PR1 — deterministic-first insights (ADR 0014), dark behind
+`INTELLIGENCE_ENABLED`.**
+
+| Piece | Detail |
+| --- | --- |
+| `web/lib/intelligence/cash-flow-forecast.ts` (pure) | `computeCashFlowForecast` — projects the balance over a horizon keeping **known/scheduled** (verified balance + dated recurring items + bill due dates) and **estimated** (minus a flat daily discretionary rate from 90-day history) separate at every checkpoint; reports projected low, projected end, `mayGoNegative`, a `basis` list, and a disclaimer. 6 Deno tests. |
+| `web/lib/intelligence/insights.ts` (server) | `getIntelligenceInsights()` — gated; wires the previously-unwired `detectRecurringPatterns` over the last 4 complete months, derives the discretionary daily rate, builds the forecast, and computes a **spending-baseline comparison** (this-month-to-date vs same-first-N-days average of prior months; ±10% = above/below). |
+| `ds/WhyThisInsight.tsx` | the "Why am I seeing this?" `<details>` disclosure — supporting facts, period, method, confidence. Required on every insight. |
+| `IntelligenceCard.tsx` + Home wiring | text + one soft warning band, no charts; each block has its disclosure. Gated so no extra queries when off. |
+| ADR 0014 | deterministic-first, no invented scores, known-vs-estimated never merged, recurring stays a heuristic, AI explains never computes, gated + no decorative charts. |
+
+Verification: `deno test web/lib/intelligence` 6/0; web lint 0 errors; web build ✓. No e2e/visual change (flag off in e2e env).
+
+**Release 6 remaining:** high-confidence single-transaction anomaly
+detection; reconciliation insights; feeding `BILLS_ENABLED` bill due dates
+into the forecast's scheduled list; wiring the forecast into `ai/facts.ts`
+report commentary.
+
+### 2026-09-05 — Release 4 (Inbox) remainder
+
+The Inbox front door + first inline actions shipped in Phase 1 (`4bdbd74`).
+This closes the rest:
+
+| Piece | Detail |
+| --- | --- |
+| Duplicate inline actions | **Merge / Not duplicates** on a *clean 2-row cluster only* (exactly one open `possible_duplicate` + one keeper) → `merge_duplicate_transaction` / `dismiss_possible_duplicate` RPC. Ambiguous/larger clusters stay drill-in. |
+| Reconciliation inline actions | **Confirm match / Not a match** on a *proposed* (non-conflict) candidate → `apply_payment_reconciliation` / `reject_payment_reconciliation`. Conflicts stay drill-in. Reconciliation is a first-class lane via its `critical`/`high` severity. |
+| Prioritization refinement | Added `financialImpactMinor` to items; `buildFinancialInbox` factor order is now severity → age → money-at-stake (tie-break) → kind → id. Documented; no model ranking. |
+| Wiring | `InboxList.tsx` gains the 4 new dispatchers (all call the authoritative domain RPC; optimistic drop + `aria-busy` + inline error unchanged). `financial-inbox-model_test.ts` +1 tie-break test. |
+
+Verification: `deno test` (inbox model) 4/0; web lint 0 errors; web build ✓.
+Bill approve stays drill-in (one-shot approve would skip the review step).
 
 ### Files touched in Phase 0
 
