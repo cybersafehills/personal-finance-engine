@@ -12,6 +12,8 @@ import {
 import { isPaymentIntentSurfaceEnabled } from "./pay/gate";
 import { getReconciliationQueue } from "./pay/intents";
 import { isIntegrationsEnabled, isWorkbooksEnabled } from "./integrations/gate";
+import { isBillsEnabled } from "./bills/gate";
+import { getBillDocuments, getBillPermissions } from "./bills/queries";
 import {
   listImportBatchesNeedingReview,
   listOpenConflicts,
@@ -38,6 +40,7 @@ export async function getFinancialInbox(): Promise<FinancialInbox> {
   const paymentEnabled = isPaymentIntentSurfaceEnabled(workspaceId);
   const integrationsEnabled = isIntegrationsEnabled(workspaceId);
   const workbooksEnabled = isWorkbooksEnabled(workspaceId);
+  const billsEnabled = isBillsEnabled(workspaceId);
 
   const [
     categoryReview,
@@ -49,6 +52,8 @@ export async function getFinancialInbox(): Promise<FinancialInbox> {
     reconciliation,
     importReviewBatches,
     openConflicts,
+    billDocs,
+    billPermissions,
   ] = await Promise.all([
     getReviewQueueTransactions(),
     getNeedsAttributionTransactions(),
@@ -63,6 +68,18 @@ export async function getFinancialInbox(): Promise<FinancialInbox> {
       ? listImportBatchesNeedingReview()
       : Promise.resolve([]),
     workbooksEnabled ? listOpenConflicts() : Promise.resolve([]),
+    billsEnabled ? getBillDocuments({ status: "needs_review" }) : Promise.resolve([]),
+    billsEnabled
+      ? getBillPermissions(workspaceId)
+      : Promise.resolve({
+        canUpload: false,
+        canReview: false,
+        canApprove: false,
+        canPost: false,
+        canDownloadOriginal: false,
+        canViewAudit: false,
+        canManage: false,
+      }),
   ]);
 
   const items: FinancialInboxItem[] = [];
@@ -99,12 +116,16 @@ export async function getFinancialInbox(): Promise<FinancialInbox> {
       href: `/transactions/${row.id}`,
       actionableSince: row.occurredAt,
       affectedCount: 1,
+      actions: [
+        { type: "assign_to_me", label: "This was mine", transactionId: row.id },
+      ],
     });
   }
 
   for (const row of categoryReview) {
     if (transactionIdsWithHigherPriorityWork.has(row.id)) continue;
     const conflict = row.category_decision_status === "conflict";
+    const suggested = row.suggested_category ?? row.category ?? null;
     items.push({
       id: `category:${row.id}`,
       kind: "category_review",
@@ -112,10 +133,21 @@ export async function getFinancialInbox(): Promise<FinancialInbox> {
       title: row.counterparty_name ?? "Review transaction category",
       description: conflict
         ? "Conflicting category signals need a decision."
-        : `${row.suggested_category ?? row.category ?? "A category"} is waiting for confirmation.`,
+        : `${suggested ?? "A category"} is waiting for confirmation.`,
       href: `/transactions/${row.id}`,
       actionableSince: row.occurred_at,
       affectedCount: 1,
+      // A conflict needs a real choice (drill in); a plain suggestion can
+      // be confirmed or waved off right here. Both call the same
+      // review-queue RPCs the drill-in surface uses.
+      actions: conflict ? undefined : [
+        {
+          type: "confirm_category",
+          label: suggested ? `Confirm ${suggested}` : "Confirm category",
+          transactionId: row.id,
+        },
+        { type: "dismiss_category", label: "Dismiss", transactionId: row.id },
+      ],
     });
   }
 
@@ -187,6 +219,21 @@ export async function getFinancialInbox(): Promise<FinancialInbox> {
       href: "/categories/rules/suggestions",
       actionableSince: suggestion.lastOccurredAt,
       affectedCount: suggestion.occurrenceCount,
+      actions: [
+        {
+          type: "accept_rule",
+          label: `Always ${suggestion.category}`,
+          suggestionKey: suggestion.suggestionKey,
+          counterpartyName: suggestion.counterpartyName,
+          category: suggestion.category,
+          subcategory: suggestion.subcategory,
+        },
+        {
+          type: "dismiss_rule",
+          label: "Dismiss",
+          suggestionKey: suggestion.suggestionKey,
+        },
+      ],
     });
   }
 
@@ -233,6 +280,24 @@ export async function getFinancialInbox(): Promise<FinancialInbox> {
       actionableSince: null,
       affectedCount: budgetSummary.actionableAlertCount,
     });
+  }
+
+  // Bills (dark until BILLS_ENABLED). Only surfaced to a member who can
+  // actually review one - the correction/approval flow is multi-step, so
+  // this is a drill-in item, no inline action.
+  if (billsEnabled && billPermissions.canReview) {
+    for (const bill of billDocs) {
+      items.push({
+        id: `bill:${bill.id}`,
+        kind: "bill_review",
+        priority: "high",
+        title: `Review ${bill.original_filename}`,
+        description: "Extracted fields need a human check before this bill can be approved.",
+        href: `/bills/${bill.id}`,
+        actionableSince: bill.uploaded_at,
+        affectedCount: 1,
+      });
+    }
   }
 
   return buildFinancialInbox(items);

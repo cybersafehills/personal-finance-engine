@@ -8,10 +8,32 @@ export const FINANCIAL_INBOX_KINDS = [
   "sync_conflict",
   "rule_suggestion",
   "budget_alert",
+  "bill_review",
 ] as const;
 
 export type FinancialInboxKind = (typeof FINANCIAL_INBOX_KINDS)[number];
 export type FinancialInboxPriority = "critical" | "high" | "normal";
+
+/**
+ * A lightweight inline action the Inbox may offer on an item. The Inbox
+ * stays a read/projection layer: every one of these dispatches the
+ * *authoritative* domain server action / RPC (which re-checks capability,
+ * scope and idempotency) - it never writes workflow state itself. The
+ * client component (components/InboxList.tsx) knows how to run each.
+ */
+export type InboxInlineAction =
+  | { type: "confirm_category"; label: string; transactionId: string }
+  | { type: "dismiss_category"; label: string; transactionId: string }
+  | { type: "assign_to_me"; label: string; transactionId: string }
+  | { type: "dismiss_rule"; label: string; suggestionKey: string }
+  | {
+    type: "accept_rule";
+    label: string;
+    suggestionKey: string;
+    counterpartyName: string;
+    category: string;
+    subcategory: string | null;
+  };
 
 export type FinancialInboxItem = {
   id: string;
@@ -24,6 +46,8 @@ export type FinancialInboxItem = {
   actionableSince: string | null;
   /** Number of underlying records represented by this workflow item. */
   affectedCount: number;
+  /** Optional inline actions - primary first. Empty/absent = drill-in only. */
+  actions?: InboxInlineAction[];
 };
 
 export type FinancialInbox = {

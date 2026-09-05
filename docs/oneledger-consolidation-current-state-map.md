@@ -465,15 +465,16 @@ Phase 0 committed as `e9546af`.
 | **queries.ts split (item 10)** | `web/lib/queries/` established with barrel re-export: `queries/transfers.ts` + `queries/variable-income.ts` (leaf domains, zero cross-deps). 3187→3002 lines. | 🔄 started, committed `3486ca0`; lint + build green, deno 604/0 |
 | **Nav re-cut (Home/Activity/Inbox/Plan/grouped More)** | `navigation.ts` rewritten: `PRIMARY_NAV` (fixed journey, no reordering) + `PHONE_BAR_KEYS` + `MORE_GROUPS` (Manage money / This Space / Account / Advanced / Pay & Services, each item surface- + flag-gated). `AppShell` + `MoreSheet` rewritten; desktop gets a header "More" button opening the same grouped sheet. `nav_order` preference retired — `NavOrderForm` deleted, `/settings/appearance` now explains the fixed journey, `saveNavOrder`/`restoreDefaultNavOrder` removed, column left vestigial (no migration). 6 new `navigation_test.ts` tests. e2e `shell-navigation` + `nav-reorder` + `accessibility` + `visual` specs updated. | ✅ committed; deno 601/0, lint + build green. **Visual baselines need `--update-snapshots` (user running).** |
 | **Admin / developer shell separation** | `app/admin/layout.tsx` — an "Operator tools" band on every `/admin/*` page so it never reads as a customer surface. `/integrations/developer` is already buried under More → Advanced (business mode + integrations flag). | ✅ committed |
-| **Financial Inbox as single front door + inline actions** | — | ⏳ **deferred**: needs inline actions calling each domain's authoritative RPC + `/inbox` e2e. `ActionRequiredItem` primitive is ready to build on. Own PR. |
+| **Financial Inbox as single front door + inline actions** | `financial-inbox-model.ts`: `InboxInlineAction` union + `bill_review` kind. `financial-inbox.ts`: populates inline actions for category-review (confirm/dismiss), attribution ("This was mine"), rule-suggestion (accept/dismiss); adds `bill_review` items gated by `BILLS_ENABLED` + `bill.review`. New `components/InboxList.tsx` (client) dispatches each item's **authoritative domain server action** (the same RPC the drill-in uses), optimistically drops resolved items, `aria-live` + `aria-busy`, inline error keeps the item + drill-in link. `/inbox/page.tsx` rewritten on `ds/ActionRequiredItem`; heading now "Inbox" (matches nav). `e2e/inbox.spec.ts` smoke + `docs/financial-inbox.md` rewritten. | ✅ committed; deno 3/3 (model), lint + build green |
 
-### Phase 1 verification summary
+### Phase 1 verification summary (latest)
 
 | Check | Result |
 | --- | --- |
-| `deno test --config web/lib/deno.json web/lib` | 604 / 0 (incl. 7 experience-mode, 6 log) |
+| `deno test --config web/lib/deno.json web/lib` | 601 / 0 |
 | `npm run lint` (web) | 0 errors (2 pre-existing warnings) |
 | `npm run build` (web, placeholder env) | ✓ compiled |
+| Playwright visual baselines | **need `--update-snapshots`** after the nav re-cut (user running) |
 
 ### Commits on `claude/oneledger-consolidation-08bed7`
 
@@ -482,7 +483,19 @@ e9546af  Phase 0: close verified trust gaps (F2/F3/F6/F10 + CI)
 f728df4  Phase 1: formalize design-system primitives
 21bf885  Phase 1: experience-mode primitive (Personal / Household / Business)
 3486ca0  Phase 1: begin splitting web/lib/queries.ts by domain
+7ec517b  Phase 1: re-cut the primary navigation to the financial journey
+<next>   Phase 1: Financial Inbox as the single front door + inline actions
 ```
+
+### Phase 1 status: all five items delivered
+
+Design system ✓ · 16px controls (pre-existing) ✓ · experience modes ✓ ·
+nav re-cut + admin shell ✓ · Inbox front door + inline actions ✓ ·
+queries.ts split 🔄 (pattern + 2 leaf domains; rest peels off per-area).
+
+Release 3 (First Run) is next: onboarding milestone state machine, intent
+selection, source-first onboarding, synthetic connection test, first-real-
+transaction review card, first insight, dashboard checklist.
 
 ### Files touched in Phase 0
 

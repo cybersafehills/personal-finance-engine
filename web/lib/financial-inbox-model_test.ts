@@ -44,4 +44,19 @@ Deno.test("summarizes workflow items by severity and kind", () => {
   assertEquals(inbox.countsByKind.connector_health, 1);
   assertEquals(inbox.countsByKind.duplicate_candidate, 1);
   assertEquals(inbox.countsByKind.budget_alert, 0);
+  // The kind added for bill review is part of the summary shape.
+  assertEquals(inbox.countsByKind.bill_review, 0);
+});
+
+Deno.test("carries an item's inline actions through unchanged", () => {
+  const withAction: FinancialInboxItem = {
+    ...item("cat-1", "normal", null, "category_review"),
+    actions: [
+      { type: "confirm_category", label: "Confirm Groceries", transactionId: "t1" },
+      { type: "dismiss_category", label: "Not now", transactionId: "t1" },
+    ],
+  };
+  const inbox = buildFinancialInbox([withAction]);
+  assertEquals(inbox.items[0].actions?.length, 2);
+  assertEquals(inbox.items[0].actions?.[0].type, "confirm_category");
 });
