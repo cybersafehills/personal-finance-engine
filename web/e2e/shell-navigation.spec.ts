@@ -98,20 +98,23 @@ test("Reports opens from the header icon", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Reports" })).toBeVisible();
 });
 
-test("Reports is reachable from Settings, distinct from the Daily reports scheduling page", async ({ page }) => {
+test("Settings has a single Daily reports destination covering both viewing and configuring", async ({ page }) => {
   await page.goto("/settings");
 
-  // The Settings list row's accessible name is its title AND description
-  // text concatenated (both live inside the one <a>), so an exact-name
-  // match on just the title never matches - select by href instead.
-  // Scoped to <main> since the header's ReportsButton also links to
-  // /reports and would otherwise make this locator ambiguous.
-  await page.locator('main a[href="/reports"]').click();
-  await expect(page).toHaveURL(/\/reports$/);
-
-  await page.goto("/settings");
-  await page.locator('a[href="/settings/reports"]').click();
+  // Reports and Daily reports used to be two separate Settings rows;
+  // they're merged into one now - only /settings/reports should be
+  // linked from the Settings index's <main> (the header's own
+  // ReportsButton still links to /reports separately and is out of
+  // scope for this locator).
+  await expect(page.locator('main a[href="/reports"]')).toHaveCount(0);
+  await page.locator('main a[href="/settings/reports"]').click();
   await expect(page).toHaveURL(/\/settings\/reports$/);
+  await expect(page.getByRole("heading", { name: "Daily reports" })).toBeVisible();
+
+  // The merged page shows which workspace it's configuring - this is
+  // the fix for the bug that motivated the merge (a preferences row
+  // silently attaching to the wrong workspace with no visual cue).
+  await expect(page.getByText(/^Reporting for /)).toBeVisible();
 });
 
 test("profile menu: opens, is keyboard-dismissible with Escape, and returns focus", async ({ page }) => {
