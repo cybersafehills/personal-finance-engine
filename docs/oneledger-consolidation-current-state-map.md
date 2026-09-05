@@ -453,8 +453,36 @@ items 11–14. Phase 3 → items 15–17. Phase 4 → item 18.
 | `npm run lint` (web) | 0 errors (2 pre-existing warnings) |
 | `npm run build` (web, placeholder env) | ✓ compiled |
 
-**Nothing committed** — the entire Phase 0 diff is in the working tree of
-`claude/oneledger-consolidation-08bed7` for review.
+Phase 0 committed as `e9546af`.
+
+### 2026-09-05 — Phase 1 (Release 2) started
+
+| Item | Change | Status |
+| --- | --- | --- |
+| **Design-system primitives** | `web/components/ds/` — `Field` (label/help/error/a11y via render-prop), `CurrencyInput` (integer-minor via `money.ts`, no float on a ledger value), `ConnectionStatusBadge`/`SourceStatusBadge` (canonical 7 states), `ActionRequiredItem` (Inbox row), `DestructiveConfirm` (type-to-confirm + MFA notice), `PermissionGate` (hide / show-disabled), `StepWizard`. `EmptyState` extended (optional `action`/`icon`/`variant="setup"`, backward-compatible). `docs/design-system.md`. | ✅ `e9546af`… committed `f728df4`; lint + build green |
+| **16px mobile controls (F15)** | Already solved: `globals.css` `@media (max-width:767px)` forces `input/select/textarea` to 16px in one place. Documented in `design-system.md`; no code needed. | ✅ verified pre-existing |
+| **Experience-mode primitive** | ADR 0011. `web/lib/experience-mode.ts` (pure: `ExperienceMode`, `experienceModeForWorkspaceKind`, `SurfaceKey`, `isSurfaceVisible`) — derived from `workspaces.kind` (personal/household/organization→business), **no migration**. `experience-mode/gate.ts` server resolver + `EXPERIENCE_MODE_BUSINESS_ENABLED`/`_ALLOWLIST` (dark). Wired `layout.tsx → AppShell → MoreSheet`: Integrations entry now also mode-gated (hidden for Personal regardless of `INTEGRATIONS_ENABLED`). 7 Deno tests. `.env.local.example` updated. | ✅ committed `21bf885`; deno 7/7, lint + build green |
+| **queries.ts split (item 10)** | `web/lib/queries/` established with barrel re-export: `queries/transfers.ts` + `queries/variable-income.ts` (leaf domains, zero cross-deps). 3187→3002 lines. | 🔄 started, committed `3486ca0`; lint + build green, deno 604/0 |
+| **Nav re-cut (Home/Activity/Inbox/Plan/grouped More)** | — | ⏳ **deferred**: `visual.spec.ts` + `shell-navigation.spec.ts` assert the exact current nav structure; changing it needs regenerated Playwright baselines, which needs a running local Supabase stack. Own PR. |
+| **Admin / developer shell separation** | — | ⏳ **deferred** with the nav re-cut (shared shell/layout work). |
+| **Financial Inbox as single front door + inline actions** | — | ⏳ **deferred**: needs inline actions calling each domain's authoritative RPC + `/inbox` e2e. `ActionRequiredItem` primitive is ready to build on. Own PR. |
+
+### Phase 1 verification summary
+
+| Check | Result |
+| --- | --- |
+| `deno test --config web/lib/deno.json web/lib` | 604 / 0 (incl. 7 experience-mode, 6 log) |
+| `npm run lint` (web) | 0 errors (2 pre-existing warnings) |
+| `npm run build` (web, placeholder env) | ✓ compiled |
+
+### Commits on `claude/oneledger-consolidation-08bed7`
+
+```
+e9546af  Phase 0: close verified trust gaps (F2/F3/F6/F10 + CI)
+f728df4  Phase 1: formalize design-system primitives
+21bf885  Phase 1: experience-mode primitive (Personal / Household / Business)
+3486ca0  Phase 1: begin splitting web/lib/queries.ts by domain
+```
 
 ### Files touched in Phase 0
 
