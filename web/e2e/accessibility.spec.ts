@@ -10,7 +10,9 @@ const PAGES_TO_SCAN = [
   { path: "/", name: "Home dashboard" },
   { path: "/settings", name: "Settings index" },
   { path: "/settings/appearance", name: "Appearance and navigation" },
-  { path: "/settings/privacy", name: "Privacy and security" },
+  { path: "/settings/privacy", name: "Privacy" },
+  { path: "/settings/profile", name: "Profile & region" },
+  { path: "/settings/billing", name: "Billing & Plan" },
 ];
 
 for (const { path, name } of PAGES_TO_SCAN) {

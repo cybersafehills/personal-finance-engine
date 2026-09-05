@@ -11,8 +11,8 @@ export default async function PrivacySettingsPage() {
     <div>
       <PageHeader
         backHref="/settings"
-        title="Privacy and security"
-        subtitle="Control what's visible on screen, independent of sign-in and permissions"
+        title="Privacy"
+        subtitle="What's visible on screen, independent of sign-in and permissions. Sign-in protection lives in Security."
       />
 
       <PrivacyPreferencesForm

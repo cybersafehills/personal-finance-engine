@@ -1,101 +1,69 @@
 import Link from "next/link";
 import { PageHeader } from "../../components/PageHeader";
+import { getActiveWorkspaceId, getUserWorkspaces } from "../../lib/queries";
+import { isSpacesEnabled } from "../../lib/spaces/gate";
+import { isSurfaceVisible } from "../../lib/experience-mode";
 import {
-  DocumentIcon,
-  EyeIcon,
-  GearIcon,
-  LockIcon,
-  PhoneIcon,
-  UsersIcon,
-  WalletIcon,
-} from "../../components/icons";
+  isBusinessSurfacesEnabled,
+  resolveExperienceMode,
+} from "../../lib/experience-mode/gate";
+import { visibleSettingsGroups } from "../../lib/settings-navigation";
 
 export const dynamic = "force-dynamic";
 
-const SETTINGS_LINKS = [
-  {
-    href: "/settings/appearance",
-    title: "Appearance and navigation",
-    description: "Arrange your primary navigation order.",
-    Icon: GearIcon,
-  },
-  {
-    href: "/settings/privacy",
-    title: "Privacy and security",
-    description: "Balance visibility, full privacy mode, and sign-in security.",
-    Icon: EyeIcon,
-  },
-  {
-    href: "/settings/accounts",
-    title: "Accounts",
-    description: "Manage the financial accounts your transactions belong to.",
-    Icon: WalletIcon,
-  },
-  {
-    href: "/integrations/connections",
-    title: "Connections",
-    description: "Manage the devices and Shortcuts that send transactions in.",
-    Icon: PhoneIcon,
-  },
-  {
-    href: "/settings/sources",
-    title: "Shared accounts",
-    description:
-      "Choose what each household can see of your accounts — nothing, transactions, or the balance.",
-    Icon: UsersIcon,
-  },
-  {
-    href: "/settings/notifications",
-    title: "Notifications",
-    description:
-      "Choose what a shared Space tells you about — budgets, goals, members, and reports.",
-    Icon: DocumentIcon,
-  },
-  {
-    href: "/settings/reports",
-    title: "Daily reports",
-    description:
-      "View your generated reports, and configure when the next one is generated and emailed.",
-    Icon: DocumentIcon,
-  },
-  {
-    href: "/settings/security",
-    title: "Security",
-    description: "Two-step verification, sign-in details, and active sessions.",
-    Icon: LockIcon,
-  },
-  {
-    href: "/settings/workspace",
-    title: "Spaces",
-    description: "Households and organizations — members and invites.",
-    Icon: UsersIcon,
-  },
-] as const;
+// The Settings home. Rendered straight from lib/settings-navigation.ts -
+// seven named groups, each with a one-line purpose, so a user can see the
+// whole shape of Settings at a glance (master prompt section 110). Rows
+// deep-link to the existing pages; this page owns only the grouping and
+// the visibility filter (experience mode + Spaces flag).
+export default async function SettingsPage() {
+  const [activeWorkspaceId, workspaces] = await Promise.all([
+    getActiveWorkspaceId(),
+    getUserWorkspaces(),
+  ]);
+  const experienceMode = resolveExperienceMode(activeWorkspaceId, workspaces);
+  const businessEnabled = isBusinessSurfacesEnabled(activeWorkspaceId);
 
-export default function SettingsPage() {
+  const groups = visibleSettingsGroups({
+    spacesEnabled: isSpacesEnabled(activeWorkspaceId),
+    surfaceVisible: (surface) =>
+      isSurfaceVisible(experienceMode, surface, { businessEnabled }),
+  });
+
   return (
     <div>
-      <PageHeader title="Settings" />
+      <PageHeader
+        title="Settings"
+        subtitle="Your profile, accounts, Spaces, and how OneLedger works for you."
+      />
 
-      <div className="flex flex-col gap-3">
-        {SETTINGS_LINKS.map(({ href, title, description, Icon }) => (
-          <Link
-            key={href}
-            href={href}
-            className="flex items-center gap-3 rounded-card border border-border-subtle bg-surface p-4 transition-colors hover:bg-background focus-visible:bg-background"
-          >
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-control bg-background text-text-secondary">
-              <Icon className="h-5 w-5" />
-            </span>
-            <span className="flex-1">
-              <span className="block text-sm font-medium text-text-primary">
-                {title}
-              </span>
-              <span className="block text-sm text-text-muted">
-                {description}
-              </span>
-            </span>
-          </Link>
+      <div className="flex flex-col gap-6">
+        {groups.map((group) => (
+          <section key={group.key} className="flex flex-col gap-2">
+            <div>
+              <h2 className="text-sm font-semibold text-text-primary">
+                {group.title}
+              </h2>
+              <p className="text-xs text-text-muted">{group.description}</p>
+            </div>
+            <ul className="flex flex-col gap-2">
+              {group.rows.map((row) => (
+                <li key={row.href}>
+                  <Link
+                    href={row.href}
+                    className="flex flex-col gap-0.5 rounded-card border border-border-subtle bg-surface p-4 transition-colors hover:bg-background focus-visible:bg-background"
+                  >
+                    <span className="text-sm font-medium text-text-primary">
+                      {row.label}
+                    </span>
+                    <span className="text-sm text-text-muted">
+                      {row.description}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </section>
         ))}
       </div>
     </div>

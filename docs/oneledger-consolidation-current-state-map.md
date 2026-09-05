@@ -613,3 +613,30 @@ web/app/auth/reset-password/confirm/page.tsx        (requirement hint — F3)
 web/app/api/cron/generate-reports/route.ts          (withLoggedRun reference — F10)
 web/playwright.config.ts                            (exclude visual from cross-browser projects)
 ```
+
+---
+
+## 12. Follow-on — Settings IA (gap G1, branch `feat/settings-ia-7group`)
+
+Stacked on `pfe/consolidation-2-core`. Closes the largest user-facing gap
+from `docs/oneledger-onboarding-architecture-audit.md` §2: the flat 10-row
+Settings home is replaced by the seven named groups of master-prompt §110.
+
+| Change | File |
+| --- | --- |
+| Single source of truth: 7 groups, rows, per-row visibility (experience mode + Spaces flag) | `web/lib/settings-navigation.ts` (new) + `settings_navigation_test.ts` (10 deno tests) |
+| Settings home renders from it — grouped, described, filtered | `web/app/settings/page.tsx` (rewritten) |
+| Post-onboarding profile + regional editing (reuses `save_onboarding_*` RPCs) | `web/app/settings/profile/page.tsx`, `web/components/ProfileSettingsForm.tsx` (new) |
+| Billing & Plan home (static; entitlements domain is a later phase) | `web/app/settings/billing/page.tsx` (new) |
+| Two Security rows → one "Security & Privacy" group; "Privacy and security" page retitled "Privacy"; Security page → "Sign-in & security" + back link | `web/app/settings/privacy/page.tsx`, `web/app/settings/security/page.tsx` |
+| "Shared accounts" folded into "Spaces & Members" as "Account sharing" (route unchanged) | via `settings-navigation.ts` |
+| e2e | `web/e2e/settings-ia.spec.ts` (new), `accessibility.spec.ts` / `visual.spec.ts` updated |
+| Doc | `docs/settings-information-architecture.md` (new) |
+
+No routes moved; no migration. Verification: deno `web/lib` 611/0, `next lint`
+0 errors, `next build` ✓. Visual baselines for `settings-index.png` /
+`settings-privacy.png` need regen with the rest of the Release 2 stack.
+
+Still open from the audit: G2 (entitlements/Billing behaviour), G3
+(account-detail tabs), G4 (onboarding-funnel analytics), G5 (setup review
+screen), G6 (F12 deletion/export).
