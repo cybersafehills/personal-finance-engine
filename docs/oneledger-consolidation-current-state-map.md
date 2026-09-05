@@ -581,6 +581,17 @@ This closes the rest:
 Verification: `deno test` (inbox model) 4/0; web lint 0 errors; web build ✓.
 Bill approve stays drill-in (one-shot approve would skip the review step).
 
+### 2026-09-05 — backlog follow-ups (PR #123, on `pfe/consolidation-4-followups`)
+
+| Piece | Detail |
+| --- | --- |
+| Release 6 — amount anomalies | `web/lib/intelligence/anomaly.ts` (pure) — `detectAmountAnomalies`: one recent outflow ≥ 3× the median of the *same counterparty's* prior payments, given ≥ 4 priors + a meaningful absolute gap. Never a first payment, a volatile counterparty, or a trivial amount. 6 Deno tests. Wired into `insights.ts` + `IntelligenceCard` with a high-confidence "Why am I seeing this?". |
+| Release 6 — bills in the forecast | when `BILLS_ENABLED`, open unpaid `bills` rows with a `due_date` inside the 30-day horizon are added to the forecast's KNOWN path as `bill_due` movements. |
+
+Verification: `deno test web/lib/intelligence` 12/0; web lint 0 errors; web build ✓. Still gated by `INTELLIGENCE_ENABLED`. ADR 0014 updated.
+
+**Remaining backlog:** reconciliation insights (needs a reconciliation-history query); wire the forecast into `ai/facts.ts` report commentary; "Send test" + MFA step-up on connector rotate/revoke (needs AAL2 in the connector RPCs); Android hardening review; full `queries.ts` split (needs `queries/core.ts` first); the connector cutover (prod window — follow the runbook).
+
 ### Files touched in Phase 0
 
 ```
