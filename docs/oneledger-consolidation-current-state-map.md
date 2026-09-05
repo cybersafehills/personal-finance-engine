@@ -493,9 +493,29 @@ Design system ✓ · 16px controls (pre-existing) ✓ · experience modes ✓ ·
 nav re-cut + admin shell ✓ · Inbox front door + inline actions ✓ ·
 queries.ts split 🔄 (pattern + 2 leaf domains; rest peels off per-area).
 
-Release 3 (First Run) is next: onboarding milestone state machine, intent
-selection, source-first onboarding, synthetic connection test, first-real-
-transaction review card, first insight, dashboard checklist.
+### 2026-09-05 — Release 3 (First Run) started
+
+**PR1 — the persisted milestone spine (ADR 0012), dark behind
+`ONBOARDING_JOURNEY_ENABLED`.**
+
+| Piece | Detail |
+| --- | --- |
+| Migration `20261129000000_onboarding_milestones.sql` | 4 additive nullable columns on `profiles` (`onboarding_intent`, `_intent_at`, `_first_review_at`, `_first_insight_at`) + consistency constraint; `set_onboarding_intent` / `mark_onboarding_milestone` SECURITY DEFINER RPCs (idempotent, `auth.uid()`-scoped, authenticated-only); one-time backfill of established users' intent from their personal workspace `kind`. |
+| Migration suite | 8 new "Release 3" assertions (columns, constraint, idempotency, derived-milestone rejection, cross-user isolation, ACL) + the function-count guard bumped 108→110. **493 passed / 0 failed** (PG17). |
+| Pure model `web/lib/onboarding-milestones.ts` | 7-milestone ordered journey `intent_selected → source_added → device_paired → connection_verified → first_real_transaction → first_review_completed → first_insight_seen`; most **derived** (device-independent, idempotent), only 3 persisted. `deriveOnboardingJourney(signals)` → steps + next-step pointer + complete. 6 Deno tests. |
+| Server reader `web/lib/onboarding/journey.ts` | collects derived signals (`financial_sources`, `ingestion_connections`, `transactions` counts) + persisted milestones; **deploy-drift safe** — a missing column is treated as "not yet". `ONBOARDING_JOURNEY_ENABLED` gate. |
+| Intent step | `/onboarding/intent` (redirects to `/get-started` while dark) + `IntentChoiceForm` + `setOnboardingIntent` / `markOnboardingMilestone` actions. Uses `ds/StepWizard`. Value promise inline. |
+| Synthetic connection test | **already exists** — `capture` `op:"test"` (ADR 0009) proves connectivity without a transaction; `connection_verified` reads `last_used_at`. |
+| Docs | ADR 0012; `.env.local.example`. |
+
+Verification: `deno test web/lib` 608/0; migration suite 493/0; web lint 0 errors; web build ✓.
+
+**Release 3 next PRs:** value-promise + source-first wizard screens; device
+pairing wired inline (not a `/pair` detour); first-transaction review card
+calling `mark_onboarding_milestone('first_review')`; first insight calling
+`('first_insight')`; the unobtrusive dashboard checklist reading
+`getOnboardingJourney()` (replacing the derived-only `getOnboardingState`
+nudge).
 
 ### Files touched in Phase 0
 
