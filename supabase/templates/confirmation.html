@@ -13,6 +13,17 @@
   than pulling in the app's own CSS - Supabase renders this server-side
   with no build step, so styles must be inlined per-element for the widest
   possible email client support.
+
+  Uses {{ .RedirectTo }} as the base, not {{ .SiteURL }}: SiteURL is
+  config.toml's static [auth] site_url (always the production domain,
+  even for the disposable local/CI stack - this one config.toml is
+  shared by every environment). RedirectTo is the actual emailRedirectTo
+  this app passed at signUp()/resend() time (web/lib/site-url.ts's
+  siteUrl() + "/auth/confirm"), which is already correctly scoped to
+  whichever environment sent the email - a hardcoded {{ .SiteURL }} link
+  pointed real production at the CI job that only ran against a local
+  Next server, which is why e2e/signup-email.spec.ts couldn't find the
+  confirm page there.
 -->
 <h2 style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; color: #07143a;">
   Confirm your email
@@ -23,7 +34,7 @@
 </p>
 <p style="margin: 24px 0;">
   <a
-    href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email"
+    href="{{ .RedirectTo }}?token_hash={{ .TokenHash }}&type=email"
     style="display: inline-block; background-color: #33509e; color: #ffffff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 15px; font-weight: 600; text-decoration: none; padding: 12px 20px; border-radius: 8px;"
   >
     Confirm your email address
