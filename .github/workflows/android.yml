@@ -113,6 +113,19 @@ jobs:
           SA_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
         run: printf '%s' "$SA_JSON" > "$RUNNER_TEMP/firebase-sa.json"
 
+      - name: Validate Firebase App ID
+        env:
+          FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
+        run: |
+          id="$(printf '%s' "$FIREBASE_APP_ID" | tr -d '[:space:]')"
+          if [[ ! "$id" =~ ^1:[0-9]+:android:[0-9a-f]+$ ]]; then
+            echo "::error::FIREBASE_APP_ID (${#id} chars) is not a valid Android App ID."
+            echo "Expected: 1:<project-number>:android:<hex>"
+            echo "Firebase console -> Project settings -> General -> Your apps -> OL Shortcuts -> App ID."
+            exit 1
+          fi
+          echo "FIREBASE_APP_ID format OK (${#id} chars)"
+
       - name: Build + upload to Firebase App Distribution
         env:
           COMMIT_MSG: ${{ github.event.head_commit.message }}
@@ -129,7 +142,7 @@ jobs:
           # GOOGLE_APPLICATION_CREDENTIALS env vars when there is no
           # google-services.json ("> Missing app id").
           ./gradlew :app:assembleRelease :app:appDistributionUploadRelease \
-            --appId="$FIREBASE_APP_ID" \
+            --appId="$(printf '%s' "$FIREBASE_APP_ID" | tr -d '[:space:]')" \
             --serviceCredentialsFile="$GOOGLE_APPLICATION_CREDENTIALS" \
             --artifactPath=app/build/outputs/apk/release/app-release.apk \
             --releaseNotesFile="$RUNNER_TEMP/release-notes.txt"
