@@ -54,11 +54,9 @@ test("Settings index", { tag: "@visual" }, async ({ page }) => {
 
 test("Settings - Appearance and navigation", { tag: "@visual" }, async ({ page }) => {
   await page.goto("/settings/appearance");
-  const restore = page.getByRole("button", { name: "Restore default order" });
-  if (await restore.isEnabled().catch(() => false)) {
-    await restore.click();
-    await expect(page.getByText("Saved")).toBeVisible();
-  }
+  await expect(
+    page.getByRole("heading", { name: "Appearance and navigation" }),
+  ).toBeVisible();
   await expect(page).toHaveScreenshot("settings-appearance.png", { fullPage: true });
 });
 

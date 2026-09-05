@@ -2808,17 +2808,17 @@ export async function getReportPreferences(): Promise<ReportPreferencesRow | nul
 // supabase/migrations/20260904000000_phase_l_ui_preferences.sql.
 // ===========================================================================
 
-import { normalizeNavOrder, type NavKey } from "./navigation";
-
 export type UiPreferencesRow = {
-  navOrder: NavKey[];
   hideBalance: boolean;
   privacyMode: boolean;
   reportsRelocationNoticeDismissed: boolean;
 };
 
+// nav_order is no longer read - the primary nav is a fixed journey now
+// (lib/navigation.ts). The column stays in the table until a deliberate
+// drop migration.
 const UI_PREFERENCES_COLUMNS =
-  "nav_order, hide_balance, privacy_mode, reports_relocation_notice_dismissed";
+  "hide_balance, privacy_mode, reports_relocation_notice_dismissed";
 
 /**
  * The caller's own shell/navigation/privacy preferences in their active
@@ -2831,7 +2831,6 @@ const UI_PREFERENCES_COLUMNS =
  */
 export async function getUiPreferences(): Promise<UiPreferencesRow> {
   const fallback: UiPreferencesRow = {
-    navOrder: normalizeNavOrder(undefined),
     hideBalance: false,
     privacyMode: false,
     reportsRelocationNoticeDismissed: false,
@@ -2860,7 +2859,6 @@ export async function getUiPreferences(): Promise<UiPreferencesRow> {
   if (!data) return fallback;
 
   return {
-    navOrder: normalizeNavOrder(data.nav_order),
     hideBalance: data.hide_balance,
     privacyMode: data.privacy_mode,
     reportsRelocationNoticeDismissed: data.reports_relocation_notice_dismissed,

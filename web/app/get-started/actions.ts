@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { supabaseSession } from "../../lib/supabase-session-server";
 import { getActiveWorkspaceId } from "../../lib/queries";
-import { DEFAULT_NAV_ORDER } from "../../lib/navigation";
+import { LEGACY_DEFAULT_NAV_ORDER } from "../../lib/navigation";
 
 export type OnboardingActionResult = { ok: true } | { ok: false; error: string };
 
@@ -50,7 +50,7 @@ export async function dismissOnboardingChecklist(): Promise<
     {
       workspace_id: workspaceId,
       user_id: user.id,
-      nav_order: existing?.nav_order ?? DEFAULT_NAV_ORDER,
+      nav_order: existing?.nav_order ?? LEGACY_DEFAULT_NAV_ORDER,
       hide_balance: existing?.hide_balance ?? false,
       privacy_mode: existing?.privacy_mode ?? false,
       reports_relocation_notice_dismissed:

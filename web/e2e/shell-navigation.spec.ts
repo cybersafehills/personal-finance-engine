@@ -1,62 +1,90 @@
 import { test, expect } from "./fixtures";
 
-// Covers master prompt §24's definition-of-done for the unified shell:
-// the tablet/desktop header nav's 5 primary destinations (Home + 4
-// movable), Reports removed from primary nav but still reachable from the
-// header icon and Settings, active-route highlighting, the phone bottom
-// bar's fixed five-slot Pay-centre layout + its More sheet, and the
-// profile menu's keyboard behavior.
+// The unified shell after the information-architecture re-cut (assessment
+// section 19 / ADR 0011): the primary nav is the FIXED financial journey -
+// Home, Activity, Inbox, Plan - plus a "More" affordance. No per-user
+// reordering. On desktop the four destinations + a More button live in
+// <header>; on phone the bottom bar is Home / Activity / [Pay] / Plan /
+// More, with Inbox reached from the header icon. Categories, Reports,
+// Settings and everything else live in the grouped More sheet.
 
-const PRIMARY_DESTINATIONS = ["Home", "Transactions", "Categories", "Budgets", "Settings"];
+const HEADER_DESTINATIONS = ["Home", "Activity", "Inbox", "Plan"];
 
-// The tablet/desktop nav lives inside <header>; the phone bar is a
-// separate <nav aria-label="Primary"> fixed to the bottom.
 const headerNav = (page: import("@playwright/test").Page) =>
   page.locator("header").getByRole("navigation", { name: "Primary" });
 
-test("the header primary nav has exactly 5 destinations, Home first, Reports absent", async ({
+test("the header primary nav is the fixed journey (Home, Activity, Inbox, Plan) + More, Reports absent", async ({
   page,
 }) => {
   await page.goto("/");
 
   const links = headerNav(page).getByRole("link");
-  await expect(links).toHaveCount(5);
+  await expect(links).toHaveCount(4);
   await expect(links.nth(0)).toHaveText("Home");
 
-  for (const destination of PRIMARY_DESTINATIONS) {
-    await expect(headerNav(page).getByRole("link", { name: destination })).toBeVisible();
+  for (const destination of HEADER_DESTINATIONS) {
+    await expect(
+      headerNav(page).getByRole("link", { name: destination }),
+    ).toBeVisible();
   }
-  await expect(headerNav(page).getByRole("link", { name: "Reports" })).toHaveCount(0);
+  await expect(
+    headerNav(page).getByRole("button", { name: "More" }),
+  ).toBeVisible();
+  await expect(
+    headerNav(page).getByRole("link", { name: "Reports" }),
+  ).toHaveCount(0);
+  // Categories & Settings are no longer primary destinations.
+  await expect(
+    headerNav(page).getByRole("link", { name: "Categories" }),
+  ).toHaveCount(0);
+  await expect(
+    headerNav(page).getByRole("link", { name: "Settings" }),
+  ).toHaveCount(0);
 });
 
-test("the active destination is marked aria-current", async ({ page }) => {
+test("the active destination is marked aria-current (Activity = /transactions)", async ({
+  page,
+}) => {
   await page.goto("/transactions");
 
   await expect(
-    headerNav(page).getByRole("link", { name: "Transactions" }),
+    headerNav(page).getByRole("link", { name: "Activity" }),
   ).toHaveAttribute("aria-current", "page");
-  await expect(headerNav(page).getByRole("link", { name: "Home" })).not.toHaveAttribute(
-    "aria-current",
-    "page",
-  );
+  await expect(
+    headerNav(page).getByRole("link", { name: "Home" }),
+  ).not.toHaveAttribute("aria-current", "page");
+});
+
+test("the header More button opens the grouped More sheet", async ({ page }) => {
+  await page.goto("/");
+  await headerNav(page).getByRole("button", { name: "More" }).click();
+
+  const sheet = page.getByRole("dialog", { name: "More" });
+  await expect(sheet).toBeVisible();
+  await expect(sheet.getByRole("button", { name: "Categories" })).toBeVisible();
+  await expect(sheet.getByRole("button", { name: "Reports" })).toBeVisible();
+  await expect(sheet.getByRole("button", { name: "Settings" })).toBeVisible();
+  // Grouped, not a flat list.
+  await expect(sheet.getByText("Manage money")).toBeVisible();
+  await expect(sheet.getByText("Account")).toBeVisible();
 });
 
 test.describe("phone bottom bar", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  // The bottom bar is the only `.fixed` <nav aria-label="Primary">; the
-  // header nav (display:none at this width) is not `.fixed`.
   const bottomBar = (page: import("@playwright/test").Page) =>
     page.locator('nav[aria-label="Primary"].fixed');
 
-  test("is a fixed five: Home, Transactions, [Pay], Budgets, More", async ({ page }) => {
+  test("is a fixed five: Home, Activity, [Pay], Plan, More", async ({ page }) => {
     await page.goto("/");
     const bar = bottomBar(page);
 
     await expect(bar.getByRole("link", { name: "Home" })).toBeVisible();
-    await expect(bar.getByRole("link", { name: "Transactions" })).toBeVisible();
-    await expect(bar.getByRole("button", { name: "Pay", exact: true })).toBeVisible();
-    await expect(bar.getByRole("link", { name: "Budgets" })).toBeVisible();
+    await expect(bar.getByRole("link", { name: "Activity" })).toBeVisible();
+    await expect(
+      bar.getByRole("button", { name: "Pay", exact: true }),
+    ).toBeVisible();
+    await expect(bar.getByRole("link", { name: "Plan" })).toBeVisible();
     await expect(bar.getByRole("button", { name: "More" })).toBeVisible();
 
     // Categories & Settings are NOT on the bar - they live in More.
@@ -64,7 +92,7 @@ test.describe("phone bottom bar", () => {
     await expect(bar.getByRole("link", { name: "Settings" })).toHaveCount(0);
   });
 
-  test("More opens a sheet with the displaced destinations and is keyboard-dismissible", async ({
+  test("More opens a grouped sheet and is keyboard-dismissible", async ({
     page,
   }) => {
     await page.goto("/");
@@ -101,19 +129,10 @@ test("Reports opens from the header icon", async ({ page }) => {
 test("Settings has a single Daily reports destination covering both viewing and configuring", async ({ page }) => {
   await page.goto("/settings");
 
-  // Reports and Daily reports used to be two separate Settings rows;
-  // they're merged into one now - only /settings/reports should be
-  // linked from the Settings index's <main> (the header's own
-  // ReportsButton still links to /reports separately and is out of
-  // scope for this locator).
   await expect(page.locator('main a[href="/reports"]')).toHaveCount(0);
   await page.locator('main a[href="/settings/reports"]').click();
   await expect(page).toHaveURL(/\/settings\/reports$/);
   await expect(page.getByRole("heading", { name: "Daily reports" })).toBeVisible();
-
-  // The merged page shows which workspace it's configuring - this is
-  // the fix for the bug that motivated the merge (a preferences row
-  // silently attaching to the wrong workspace with no visual cue).
   await expect(page.getByText(/^Reporting for /)).toBeVisible();
 });
 
@@ -142,19 +161,9 @@ test("the one-time Reports relocation notice can be dismissed and never reappear
   await page.goto("/");
 
   const notice = page.getByText("Reports has moved");
-  // Depending on suite run order this may already be dismissed from a
-  // prior test in the same worker - only assert the dismiss behavior
-  // when it's actually showing.
   if (await notice.isVisible().catch(() => false)) {
     await page.getByRole("button", { name: "Got it" }).click();
     await expect(notice).toBeHidden();
-    // The dismiss persists via a fire-and-forget Server Action call
-    // (ReportsRelocationNotice intentionally doesn't block the UI on it -
-    // this is a low-stakes one-time notice, not a security-sensitive
-    // toggle). Reloading immediately can abort that still-in-flight
-    // request before the server commits it, so wait for network activity
-    // to settle first - otherwise this assertion races the app's own
-    // persistence.
     await page.waitForLoadState("networkidle");
     await page.reload();
     await expect(notice).toHaveCount(0);

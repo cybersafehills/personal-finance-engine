@@ -10,7 +10,6 @@ import {
   getUnreadNotificationCount,
   getUserWorkspaces,
 } from "../lib/queries";
-import { DEFAULT_NAV_ORDER } from "../lib/navigation";
 import {
   isAssistedPayEnabled,
   isPayServicesEnabled,
@@ -116,7 +115,6 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
         [],
         null,
         {
-          navOrder: DEFAULT_NAV_ORDER,
           hideBalance: false,
           privacyMode: false,
           reportsRelocationNoticeDismissed: true,
@@ -162,7 +160,6 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           userEmail={user?.email ?? null}
           workspaces={workspaces}
           activeWorkspaceId={activeWorkspaceId}
-          navOrder={uiPreferences.navOrder}
           hideBalance={uiPreferences.hideBalance}
           privacyMode={uiPreferences.privacyMode}
           reportsRelocationNoticeDismissed={uiPreferences.reportsRelocationNoticeDismissed}

@@ -1,82 +1,155 @@
-// Single source of truth for the primary application-shell navigation:
-// the allowed movable destinations, their default order, and the
-// validation every nav-order write (and every stored/cached read) must
-// pass through. Both the header/bottom nav rendering and the settings
-// "Arrange navigation" screen import from here so they can never drift
-// apart - see the master prompt's "avoid maintaining unrelated mobile and
-// desktop navigation definitions" requirement.
+// Single source of truth for the application-shell navigation, re-cut
+// around the financial lifecycle (assessment section 6.2 / master prompt
+// section 19). Both the header nav, the phone bottom bar, and the grouped
+// "More" panel derive from here so mobile and desktop can never drift
+// into two competing definitions.
 //
-// Home is intentionally NOT a member of this set: it is permanently
-// first in the shell and never user-configurable. Reports is
-// intentionally NOT a member either: it was removed from primary
-// navigation entirely and lives only behind the header icon and the
-// Settings "Reports" link.
+// The primary nav is a FIXED journey - Home, Activity, Inbox, Plan, More -
+// not a user-orderable list. (The earlier per-user `nav_order` preference
+// and its "Arrange navigation" screen are retired; the ui_preferences
+// column stays in place, unused, to be dropped in a later deliberate
+// migration.) Pay stays an elevated action, rendered specially, not a
+// permanent peer route.
 
-export const MOVABLE_NAV_KEYS = [
+import type { SurfaceKey } from "./experience-mode.ts";
+
+export type PrimaryNavKey = "home" | "activity" | "inbox" | "plan";
+
+export type PrimaryNavItem = {
+  key: PrimaryNavKey;
+  href: string;
+  label: string;
+  /** Surface gate; `null` = always visible (the core journey). */
+  surface: SurfaceKey | null;
+};
+
+// Home is permanently first. "Activity" is the customer-facing umbrella
+// over the transaction ledger - existing /transactions deep links stay
+// valid (assessment section 43). "Plan" is the mental model over budgets +
+// goals + recurring commitments (they keep their own routes under
+// /budgets).
+export const PRIMARY_NAV: readonly PrimaryNavItem[] = [
+  { key: "home", href: "/", label: "Home", surface: null },
+  { key: "activity", href: "/transactions", label: "Activity", surface: "activity" },
+  { key: "inbox", href: "/inbox", label: "Inbox", surface: "inbox" },
+  { key: "plan", href: "/budgets", label: "Plan", surface: "plan" },
+] as const;
+
+// The phone bottom bar: Home, Activity, the elevated Pay action dead
+// centre (rendered by AppShell only when Pay is enabled), Plan, More.
+// Inbox is reached from the header icon at phone width (the 5 slots are
+// spoken for). Fixed roles - never driven by a preference.
+export const PHONE_BAR_KEYS: readonly Exclude<PrimaryNavKey, "home" | "inbox">[] =
+  ["activity", "plan"] as const;
+
+// The grouped "More" panel - customer language, not data-model terms
+// (assessment section 16 / master prompt section 19). Each item may carry
+// a SurfaceKey; AppShell/MoreSheet hides an item whose surface the active
+// experience mode does not grant, and additionally honours the Pay /
+// integrations feature flags.
+export type MoreItem = {
+  href: string;
+  label: string;
+  surface: SurfaceKey | null;
+  /** Extra gate beyond the experience mode, checked by MoreSheet. */
+  requires?: "integrations" | "pay" | "assistedPay";
+};
+
+export type MoreGroup = { title: string; items: readonly MoreItem[] };
+
+export const MORE_GROUPS: readonly MoreGroup[] = [
+  {
+    title: "Manage money",
+    items: [
+      { href: "/categories", label: "Categories", surface: "categories" },
+      { href: "/reports", label: "Reports", surface: "reports" },
+      { href: "/settings/sources", label: "Connected sources", surface: "sources" },
+      { href: "/bills", label: "Bills", surface: "bills" },
+    ],
+  },
+  {
+    title: "This Space",
+    items: [
+      { href: "/settings/workspace", label: "Space & members", surface: "members" },
+    ],
+  },
+  {
+    title: "Account",
+    items: [
+      { href: "/settings", label: "Settings", surface: null },
+      { href: "/settings/security", label: "Security", surface: null },
+      { href: "/settings/privacy", label: "Privacy", surface: null },
+      { href: "/settings/notifications", label: "Notifications", surface: null },
+      { href: "/settings/appearance", label: "Appearance", surface: null },
+    ],
+  },
+  {
+    title: "Advanced",
+    items: [
+      {
+        href: "/integrations",
+        label: "Integrations",
+        surface: "integrations",
+        requires: "integrations",
+      },
+      {
+        href: "/integrations/developer",
+        label: "Developer platform",
+        surface: "developer",
+        requires: "integrations",
+      },
+    ],
+  },
+  {
+    title: "Pay & Services",
+    items: [
+      { href: "/pay/ussd", label: "USSD directory", surface: "pay", requires: "pay" },
+      {
+        href: "/pay/activity",
+        label: "Payment activity",
+        surface: "pay",
+        requires: "assistedPay",
+      },
+      {
+        href: "/pay/reconciliation",
+        label: "Reconciliation",
+        surface: "pay",
+        requires: "assistedPay",
+      },
+      {
+        href: "/pay/recipients",
+        label: "Trusted recipients",
+        surface: "pay",
+        requires: "assistedPay",
+      },
+      {
+        href: "/pay/templates",
+        label: "Payment templates",
+        surface: "pay",
+        requires: "assistedPay",
+      },
+    ],
+  },
+] as const;
+
+// Routes that mark the "More" nav item as the active destination. `/inbox`
+// is NOT here - it is a primary destination now.
+export const MORE_MENU_PREFIXES = [
+  "/integrations",
+  "/categories",
+  "/reports",
+  "/bills",
+  "/settings",
+  "/pay",
+] as const;
+
+// Retained only as the literal still written into the vestigial
+// ui_preferences.nav_order column by the get-started / appearance upserts
+// (which preserve-or-default every column they don't own). Nothing reads
+// it any more.
+export const LEGACY_DEFAULT_NAV_ORDER: readonly string[] = [
   "transactions",
   "categories",
   "budgets",
   "settings",
 ] as const;
-
-export type NavKey = (typeof MOVABLE_NAV_KEYS)[number];
-
-export const DEFAULT_NAV_ORDER: NavKey[] = [...MOVABLE_NAV_KEYS];
-
-export const NAV_ITEM_META: Record<NavKey, { href: string; label: string }> = {
-  transactions: { href: "/transactions", label: "Transactions" },
-  categories: { href: "/categories", label: "Categories" },
-  budgets: { href: "/budgets", label: "Budgets" },
-  settings: { href: "/settings", label: "Settings" },
-};
-
-// The PHONE bottom bar is a fixed five - Home, two curated destinations,
-// the elevated Pay action dead-centre, and More - matching the master
-// prompt's "Home / Accounts / Pay / Activity / More" responsive pattern.
-// It is deliberately NOT driven by nav_order: those slots have fixed
-// roles. nav_order still orders the tablet/desktop header nav
-// (useOrderedNavItems in AppShell).
-export const MOBILE_BAR_KEYS: readonly NavKey[] = ["transactions", "budgets"];
-
-// Routes that mark the "More" bottom-nav item as the active destination.
-export const MORE_MENU_PREFIXES = [
-  "/inbox",
-  "/integrations",
-  "/categories",
-  "/reports",
-  "/settings",
-] as const;
-
-function isNavKey(value: unknown): value is NavKey {
-  return (
-    typeof value === "string" &&
-    (MOVABLE_NAV_KEYS as readonly string[]).includes(value)
-  );
-}
-
-/**
- * True only for an array that is an exact permutation of the four
- * allowed movable destinations - no duplicates, no unknown values, no
- * omissions, no wrong length. Mirrors the database's own
- * ui_preferences_nav_order_shape check constraint, so a rejected write
- * here would also be rejected there; kept as an explicit application-
- * level check so we can return a friendly error instead of a raw
- * constraint-violation message.
- */
-export function isValidNavOrder(value: unknown): value is NavKey[] {
-  if (!Array.isArray(value)) return false;
-  if (value.length !== MOVABLE_NAV_KEYS.length) return false;
-  if (!value.every(isNavKey)) return false;
-  return new Set(value).size === MOVABLE_NAV_KEYS.length;
-}
-
-/**
- * Safe fallback for reading a possibly-stale or malformed stored/cached
- * order (e.g. an optimistic localStorage cache written by an older
- * client, or a row that predates a future schema change) - never throws,
- * always returns a valid order, falling back to the default rather than
- * ever passing through something that would render fewer/extra nav items.
- */
-export function normalizeNavOrder(value: unknown): NavKey[] {
-  return isValidNavOrder(value) ? value : DEFAULT_NAV_ORDER;
-}

@@ -1,7 +1,8 @@
 # ADR 0011: Experience modes (Personal / Household / Business)
 
 - **Status:** Accepted for staged implementation (PR1: pure model + nav
-  surface-visibility wiring; Business surfaces dark)
+  surface-visibility wiring; PR2: the fixed-journey nav re-cut consumes
+  it; Business surfaces dark)
 - **Date:** 2026-09-05
 - **Builds on:** ADR 0005 (Spaces tenancy & source visibility). Does not
   change any authorization primitive.
@@ -69,8 +70,15 @@ usage demands them.
 
 - `web/lib/navigation.ts` stays the single nav source of truth; the shell
   filters its output through `isSurfaceVisible(mode, key, { businessEnabled })`.
-- The structural nav re-cut (Home / Activity / Inbox / Plan / More with a
-  grouped "More") is a separate change — it needs regenerated visual/e2e
-  baselines — and consumes this model when it lands.
+- **The structural nav re-cut landed in PR2.** Primary nav is now the
+  fixed journey `Home · Activity · Inbox · Plan · More`; the per-user
+  "Arrange navigation" preference (`nav_order` + `NavOrderForm` +
+  `MOVABLE_NAV_KEYS` + `saveNavOrder`) is retired. `ui_preferences.nav_order`
+  stays in the table (unread, seeded with its legacy default) until a
+  deliberate drop migration. `More` is a grouped panel (Manage money /
+  This Space / Account / Advanced / Pay & Services), each item hidden
+  unless its surface is granted and its feature flag is on. `/admin/*` got
+  an `app/admin/layout.tsx` "Operator tools" band so it never reads as a
+  customer surface.
 - Onboarding intent selection (Release 3) writes the Space kind that
   produces the chosen mode; it does not need its own mode store.

@@ -3,7 +3,7 @@ import "server-only";
 import {
   type ExperienceMode,
   experienceModeForWorkspaceKind,
-} from "../experience-mode";
+} from "../experience-mode.ts";
 import type { WorkspaceKind, WorkspaceSummary } from "../queries";
 
 // Server-side resolution of the active Space's experience mode, plus the
