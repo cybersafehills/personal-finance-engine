@@ -134,13 +134,23 @@ export async function createDraftIntent(
     let ussdRedacted: string | null = input.ussdTemplate && input.ussdParamSpecs
       ? redactUssdForAnalytics(input.ussdTemplate, input.ussdParamSpecs)
       : (input.ussdTemplate ?? null);
+    // Map the payment type onto the published directory `intent` we can
+    // hand off with. Without this, a merchant / bill payment never gets a
+    // service_code_id and the review screen can only ever say "no
+    // verified USSD route" - the concatenated *182*8*1*code*amount# form
+    // is generated from the resolved code, never hard-coded here.
+    const directoryIntent: string | null =
+      input.paymentType === "pay_person" || input.paymentType === "buy_airtime"
+        ? "send_money"
+        : input.paymentType === "pay_merchant"
+          ? "merchant_payment"
+          : null;
     if (
       !serviceCodeId &&
-      (input.paymentType === "pay_person" ||
-        input.paymentType === "buy_airtime") &&
+      directoryIntent &&
       (providerGuess === "mtn" || providerGuess === "airtel")
     ) {
-      const code = await getServiceCodeForPayment(providerGuess, "send_money");
+      const code = await getServiceCodeForPayment(providerGuess, directoryIntent);
       if (code) {
         serviceCodeId = code.id;
         ussdRedacted = redactUssdForAnalytics(

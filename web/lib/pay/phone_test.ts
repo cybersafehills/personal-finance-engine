@@ -4,6 +4,7 @@ import {
   guessProvider,
   maskMsisdn,
   normalizeRwandaMsisdn,
+  providerNetworkForAccount,
 } from "./phone.ts";
 
 Deno.test("normalizeRwandaMsisdn: accepts the common input shapes", () => {
@@ -45,4 +46,16 @@ Deno.test("guessProvider: MTN vs Airtel by prefix", () => {
 
 Deno.test("formatLocalMsisdn: groups a normalized number for display", () => {
   assertEquals(formatLocalMsisdn("250781234567"), "078 123 4567");
+});
+
+Deno.test("providerNetworkForAccount: maps a source account's provider to a network", () => {
+  for (const p of ["mtn_momo", "mtn", "MTN MoMo", "momo"]) {
+    assertEquals(providerNetworkForAccount(p), "mtn", p);
+  }
+  for (const p of ["airtel_money", "airtel", "Airtel Money"]) {
+    assertEquals(providerNetworkForAccount(p), "airtel", p);
+  }
+  for (const p of ["bank", "bk", "equity", "", null, undefined]) {
+    assertEquals(providerNetworkForAccount(p), null, String(p));
+  }
 });
