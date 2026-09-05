@@ -345,7 +345,7 @@ export const DEFAULT_ALERT_THRESHOLDS: ReportAlertThresholds = {
 /**
  * A report_preferences row's alert-threshold columns as stored (snake_case,
  * each independently nullable). See migration
- * 20261125000000_report_alert_thresholds.sql.
+ * 20261128000000_report_alert_thresholds.sql.
  */
 export type StoredAlertThresholds = {
   alert_large_transaction_rwf: number | null;

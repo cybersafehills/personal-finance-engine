@@ -2051,7 +2051,7 @@ else
   fail "Phase J RLS: User A could not create their own report preferences - policies are over-blocking"
 fi
 
-# Per-user alert thresholds (20261125000000_report_alert_thresholds.sql):
+# Per-user alert thresholds (20261128000000_report_alert_thresholds.sql):
 # the row just created (no threshold columns supplied) must carry the
 # system defaults verbatim, so existing behavior is unchanged for anyone
 # who never touches them. These must match DEFAULT_ALERT_THRESHOLDS in
