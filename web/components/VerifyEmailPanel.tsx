@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState, useTransition } from "react";
 import { resendVerificationEmail } from "../app/verify-email/actions";
+import { AlertIcon, MailIcon } from "./auth/AuthIcon";
 
 type VerificationStatus = "expired" | "invalid" | "missing" | null;
 
@@ -51,8 +52,11 @@ export function VerifyEmailPanel({
   const callbackMessage = statusMessage(status);
 
   return (
-    <div className="rounded-card border border-border-subtle bg-surface p-5 text-center">
-      <h1 className="text-xl font-semibold text-text-primary">
+    <div className="rounded-card border border-border-subtle bg-surface p-6 text-center shadow-[0_1px_2px_rgba(15,23,42,0.04),0_12px_32px_-16px_rgba(7,20,58,0.18)]">
+      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-accent/10 text-accent">
+        <MailIcon className="h-6 w-6" />
+      </div>
+      <h1 className="mt-4 text-xl font-semibold tracking-tight text-text-primary">
         Check your email
       </h1>
       <p className="mt-2 text-sm text-text-muted">
@@ -76,13 +80,14 @@ export function VerifyEmailPanel({
       {callbackMessage && (
         <p
           role="alert"
-          className="mt-4 rounded-control bg-attention/10 p-3 text-sm text-attention"
+          className="mt-4 flex items-start gap-2 rounded-control bg-attention-bg p-3 text-left text-sm text-attention"
         >
-          {callbackMessage}
+          <AlertIcon className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{callbackMessage}</span>
         </p>
       )}
       {notice && (
-        <p role="status" className="mt-4 text-sm text-accent">
+        <p role="status" className="mt-4 text-sm font-medium text-accent">
           {notice}
         </p>
       )}
@@ -116,7 +121,7 @@ export function VerifyEmailPanel({
                   setNotice("A fresh verification link is on its way.");
                 });
               }}
-              className="min-h-11 rounded-control bg-accent px-4 text-sm font-medium text-accent-foreground disabled:opacity-50"
+              className="min-h-11 rounded-control bg-accent px-4 text-sm font-semibold text-accent-foreground shadow-sm transition-opacity hover:opacity-95 disabled:opacity-50"
             >
               {isPending
                 ? "Sending…"
@@ -128,7 +133,7 @@ export function VerifyEmailPanel({
           : (
             <Link
               href="/signup"
-              className="flex min-h-11 items-center justify-center rounded-control bg-accent px-4 text-sm font-medium text-accent-foreground"
+              className="flex min-h-11 items-center justify-center rounded-control bg-accent px-4 text-sm font-semibold text-accent-foreground shadow-sm transition-opacity hover:opacity-95"
             >
               Return to sign up
             </Link>

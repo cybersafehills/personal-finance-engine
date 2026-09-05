@@ -34,14 +34,19 @@ export async function signUp(
   const nextPath = internalRedirectPath(next);
   const supabase = await supabaseSession();
 
-  const callbackUrl = new URL("/auth/callback", siteUrl());
-  callbackUrl.searchParams.set("next", nextPath);
+  // A fixed path, not a "verify and redirect" hop carrying `next` in its
+  // query - /auth/confirm/actions.ts reads the actual destination back out
+  // of PENDING_VERIFICATION_NEXT_COOKIE (set just below) once the token is
+  // spent. That page also doesn't verify anything on its own GET load -
+  // see its actions.ts comment for why (email security scanners prefetch
+  // links, burning the one-time token before a real click ever happens).
+  const emailRedirectTo = new URL("/auth/confirm", siteUrl());
 
   const { data, error } = await supabase.auth.signUp({
     email: validation.email,
     password,
     options: {
-      emailRedirectTo: callbackUrl.toString(),
+      emailRedirectTo: emailRedirectTo.toString(),
     },
   });
 

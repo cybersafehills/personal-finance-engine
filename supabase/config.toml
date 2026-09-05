@@ -176,6 +176,18 @@ additional_redirect_urls = [
   "https://web-tawny-omega-76.vercel.app/auth/callback",
   "http://127.0.0.1:3417/auth/callback",
   "http://localhost:3417/auth/callback",
+  # /auth/confirm - where the signup-confirmation email link now lands
+  # (app/auth/confirm/, replacing the old ConfirmationURL-via-/auth/callback
+  # link for this one flow). Deliberately a single fixed path with no
+  # query string: the actual post-confirmation destination travels via
+  # PENDING_VERIFICATION_NEXT_COOKIE, read back in
+  # app/auth/confirm/actions.ts, not via this URL - so this allow-list
+  # entry never needs to change no matter where a given signup started.
+  "https://www.oneledger.me/auth/confirm",
+  "https://oneledger.me/auth/confirm",
+  "https://web-tawny-omega-76.vercel.app/auth/confirm",
+  "http://127.0.0.1:3417/auth/confirm",
+  "http://localhost:3417/auth/confirm",
 ]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
 jwt_expiry = 3600
@@ -274,6 +286,25 @@ user = "resend"
 pass = "env(RESEND_API_KEY)"
 admin_email = "env(RESEND_FROM_EMAIL)"
 sender_name = "OneLedger"
+
+# Overridden so the confirmation link points at our own /auth/confirm page
+# instead of Supabase's default {{ .ConfirmationURL }} (which itself is a
+# GET to <project>.supabase.co/auth/v1/verify that spends the one-time
+# token immediately). {{ .ConfirmationURL }} being a bare, side-effecting
+# GET is exactly what corporate mail-security link scanners (Proofpoint,
+# Mimecast, Microsoft Safe Links, etc.) silently prefetch and burn before
+# the recipient ever clicks - the observed "that link is no longer
+# available... it may already have been used" failure. token_hash +
+# type=email defers the actual verifyOtp call to a button press on our own
+# page (app/auth/confirm/), which a scanner's automated GET never performs.
+# IMPORTANT: this file is not synced to the hosted project automatically
+# (deploy-supabase.yml only runs `supabase db push`) - the production
+# project's "Confirm signup" template must be updated to this same link,
+# and this exact URL added to Authentication > URL Configuration's
+# redirect allow-list, by hand in the Supabase dashboard.
+[auth.email.template.confirmation]
+subject = "Confirm your OneLedger email"
+content_path = "./supabase/templates/confirmation.html"
 
 # Uncomment to customize email template
 # [auth.email.template.invite]

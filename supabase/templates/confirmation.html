@@ -1,0 +1,46 @@
+<!--
+  "Confirm signup" email template.
+
+  The link points at our own /auth/confirm page (token_hash + type=email),
+  not {{ .ConfirmationURL }} - see the comment on
+  [auth.email.template.confirmation] in supabase/config.toml for why: the
+  default ConfirmationURL is a bare GET that spends the one-time token the
+  instant anything fetches it, including corporate mail-security link
+  scanners, before the recipient ever clicks. /auth/confirm only spends
+  the token from a real button press.
+
+  Kept deliberately plain (a heading, one paragraph, one button) rather
+  than pulling in the app's own CSS - Supabase renders this server-side
+  with no build step, so styles must be inlined per-element for the widest
+  possible email client support.
+
+  Uses {{ .RedirectTo }} as the base, not {{ .SiteURL }}: SiteURL is
+  config.toml's static [auth] site_url (always the production domain,
+  even for the disposable local/CI stack - this one config.toml is
+  shared by every environment). RedirectTo is the actual emailRedirectTo
+  this app passed at signUp()/resend() time (web/lib/site-url.ts's
+  siteUrl() + "/auth/confirm"), which is already correctly scoped to
+  whichever environment sent the email - a hardcoded {{ .SiteURL }} link
+  pointed real production at the CI job that only ran against a local
+  Next server, which is why e2e/signup-email.spec.ts couldn't find the
+  confirm page there.
+-->
+<h2 style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; color: #07143a;">
+  Confirm your email
+</h2>
+<p style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; color: #52525b; font-size: 15px; line-height: 1.5;">
+  Tap the button below to verify this address and finish setting up your
+  OneLedger account.
+</p>
+<p style="margin: 24px 0;">
+  <a
+    href="{{ .RedirectTo }}?token_hash={{ .TokenHash }}&type=email"
+    style="display: inline-block; background-color: #33509e; color: #ffffff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 15px; font-weight: 600; text-decoration: none; padding: 12px 20px; border-radius: 8px;"
+  >
+    Confirm your email address
+  </a>
+</p>
+<p style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; color: #6b6b73; font-size: 13px;">
+  If you didn't create a OneLedger account, you can safely ignore this
+  email.
+</p>

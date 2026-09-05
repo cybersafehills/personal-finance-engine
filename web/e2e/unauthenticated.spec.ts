@@ -12,7 +12,9 @@ test("the login page renders with no application shell chrome", async ({ page })
 
   await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
   await expect(page.getByLabel("Email")).toBeVisible();
-  await expect(page.getByLabel("Password")).toBeVisible();
+  // exact: true - the show/hide toggle's own aria-label ("Show password")
+  // also matches a substring search for "Password".
+  await expect(page.getByLabel("Password", { exact: true })).toBeVisible();
 
   // The unified shell header/nav must be entirely absent pre-auth - see
   // AppShell's `{userEmail && (...)}` gating and the commit that
