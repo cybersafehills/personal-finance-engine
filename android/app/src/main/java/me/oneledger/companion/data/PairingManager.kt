@@ -6,9 +6,6 @@ import kotlinx.coroutines.withContext
 import me.oneledger.companion.util.generateDeviceSecret
 import me.oneledger.companion.work.CaptureScheduler
 
-/** Matches the server's `^olp_[A-Za-z0-9]{4}[A-Za-z0-9_-]{16,}$`. */
-private val PAIRING_TOKEN_REGEX = Regex("^olp_[A-Za-z0-9]{4}[A-Za-z0-9_-]{16,}$")
-
 sealed interface PairingUiResult {
     data object Success : PairingUiResult
     data class Failed(val userMessage: String) : PairingUiResult
@@ -20,11 +17,12 @@ class PairingManager(
     private val client: CaptureClient,
     private val store: DeviceStore,
 ) {
-    fun looksLikeToken(raw: String): Boolean = PAIRING_TOKEN_REGEX.matches(raw.trim())
+    fun looksLikeToken(raw: String): Boolean = looksLikePairingToken(raw)
 
-    suspend fun pair(rawToken: String, deviceLabel: String?): PairingUiResult = withContext(Dispatchers.IO) {
-        val token = rawToken.trim()
-        if (!looksLikeToken(token)) {
+    suspend fun pair(rawInput: String, deviceLabel: String?): PairingUiResult = withContext(Dispatchers.IO) {
+        // Accept a bare code, a deep link, or a handoff URL.
+        val token = extractPairingToken(rawInput)
+        if (token == null) {
             return@withContext PairingUiResult.Failed("That code doesn't look right. Get a fresh one from OneLedger.")
         }
 

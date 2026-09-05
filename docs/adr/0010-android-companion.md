@@ -62,6 +62,12 @@ concerns, and the app is small enough that a JS bridge is pure overhead.
 - `INTERNET`, `ACCESS_NETWORK_STATE`, `RECEIVE_BOOT_COMPLETED` (re-arm the
   listener + reschedule the queue after reboot), `FOREGROUND_SERVICE` +
   `FOREGROUND_SERVICE_DATA_SYNC` for the upload worker when draining a backlog.
+- `CAMERA` (runtime, requested only when the user taps "scan" on the pairing
+  screen) to decode a pairing-code QR — the web wizard already renders one.
+  CameraX preview → ML Kit **bundled** barcode model (no Google Play Services
+  dependency; works on GMS-less enterprise handsets). No frame is captured,
+  stored, or sent; `extractPairingToken` accepts a bare `olp_…`, an
+  `oneledger://pair?c=…` deep link, or an `https://…/pair?c=…` handoff URL.
 - The listener **discards every notification that does not match a registered
   provider matcher** in `detection/ProviderMatchers.kt` — a direct port of
   `supabase/functions/_shared/providers.ts`. Non-financial notifications are
