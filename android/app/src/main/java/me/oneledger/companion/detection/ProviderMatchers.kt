@@ -67,14 +67,21 @@ private val PROVIDER_MATCHERS: List<ProviderMatcher> = listOf(
     ),
 )
 
-/** Package names that host the notifications we care about. Advisory only — the
- *  text matcher is the real gate — but it lets the listener skip obviously
- *  irrelevant apps without running any regex. */
-val WATCHED_PACKAGES: Set<String> = setOf(
-    "com.google.android.apps.messaging", // Android Messages (SMS)
-    "com.samsung.android.messaging",
-    "com.android.mms",
-    "rw.mtn.momo", // MTN MoMo app (best-effort id; refined with real-device data)
+/**
+ * Notifications from these packages are never a provider's financial message —
+ * skip them before running any regex. This is a *denylist*, deliberately:
+ * a real MoMo/bank SMS surfaces in whatever app renders it (Google Messages,
+ * Samsung Messages, Xiaomi's, a carrier app, the MoMo app…), and an allowlist
+ * of guessed package names silently drops transactions on any phone we didn't
+ * predict. The text matcher (`detectProvider`, ADR 0009 §3) is the real gate.
+ */
+val IGNORED_NOTIFICATION_PACKAGES: Set<String> = setOf(
+    "android",
+    "com.android.systemui",
+    "com.android.shell",
+    "com.google.android.gms", // Play services housekeeping
+    "me.oneledger.companion",
+    "me.oneledger.companion.debug",
 )
 
 /** First matcher whose `detect` accepts the message, or `null` (unknown). */
