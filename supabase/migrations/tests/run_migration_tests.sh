@@ -1388,6 +1388,173 @@ else
 fi
 
 # ===========================================================================
+# Phase 0 (audit F2 regression): tenant-scoped ingestion dedup.
+#
+# 20261009000000_tenant_scoped_ingestion_dedup.sql replaced three GLOBAL
+# uniqueness keys with scoped partial indexes, so one customer's provider
+# evidence can never suppress another customer's identical-looking event:
+#   momo_messages       -> unique (ingestion_connection_id, message_fingerprint)
+#                          where both are not null
+#   raw_financial_events -> unique (ingestion_connection_id, payload_hash)
+#                        OR unique (financial_source_id, payload_hash)  [conn null]
+#                        OR unique (channel, payload_hash)              [both null]
+#   transactions         -> unique (workspace_id, external_transaction_id)
+# All three tables are service-role-only, so the database constraint IS the
+# boundary the ingest path depends on; it is asserted here directly.
+# Reuses pfe_rls: USER_A/WORKSPACE_A + financial source d1 + account d1,
+# USER_B/WORKSPACE_B + account c1, all established above.
+# ===========================================================================
+echo "=== Phase 0: tenant-scoped ingestion dedup (F2 regression) ==="
+
+F2_SRC_A="00000000-0000-4000-8000-0000000000d1"   # financial_sources, owned by USER_A
+F2_ACCT_A="00000000-0000-0000-0000-0000000000d1"  # accounts, WORKSPACE_A (source d1)
+F2_ACCT_B="00000000-0000-0000-0000-0000000000c1"  # accounts, WORKSPACE_B (source c1, unattached)
+
+# One live connection per unrelated workspace. CONN_A (on account d1) was
+# created and then revoked by the Phase C block above - a revoked row is
+# still a valid fingerprint/payload scope, and the connector model forbids
+# a second installation on the same already-attached source - so reuse it
+# and only stand up the WORKSPACE_B side, on the so-far-unattached source c1.
+F2_CONN_A="$CONN_A"
+F2_CONN_B="$(as_user "$USER_B" "select public.create_ingestion_connection_dual_write('$WORKSPACE_B', '$F2_ACCT_B', 'B F2 Phone', 'mtn_momo', 'hash-f2-conn-b', 'pfe_f2bb');" | tail -1)"
+if [ -n "$F2_CONN_A" ] && [ -n "$F2_CONN_B" ] && [ "$F2_CONN_A" != "$F2_CONN_B" ]; then
+  pass "Phase 0 (F2): two ingestion connections exist in two unrelated workspaces (fixture)"
+else
+  fail "Phase 0 (F2): could not establish the two-connection fixture (A='$F2_CONN_A' B='$F2_CONN_B')"
+fi
+
+# --- momo_messages: the exact F2 failure mode -----------------------------
+
+# Tenant A and Tenant B each receive a textually identical provider SMS.
+# Both rows must persist; neither may be rejected as the other's duplicate.
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.momo_messages (raw_message, message_fingerprint, ingestion_connection_id)
+  values ('You have received RWF 5,000 from JOHN DOE', 'f2-shared-fp', '$F2_CONN_A'),
+         ('You have received RWF 5,000 from JOHN DOE', 'f2-shared-fp', '$F2_CONN_B');
+" >/dev/null 2>$ARTIFACT_DIR/pfe_f2_momo_two_tenant.log; then
+  pass "Phase 0 (F2): an identical SMS fingerprint is kept independently for each ingestion connection"
+else
+  fail "Phase 0 (F2): a second tenant's identical SMS was rejected as a global duplicate - cross-tenant suppression"
+fi
+rm -f $ARTIFACT_DIR/pfe_f2_momo_two_tenant.log
+
+# Within ONE connection the fingerprint is still an idempotency key.
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.momo_messages (raw_message, message_fingerprint, ingestion_connection_id)
+  values ('You have received RWF 5,000 from JOHN DOE', 'f2-shared-fp', '$F2_CONN_A');
+" >/dev/null 2>$ARTIFACT_DIR/pfe_f2_momo_same_conn.log; then
+  fail "Phase 0 (F2): a redelivered SMS on the same connection was accepted twice - within-scope idempotency lost"
+else
+  pass "Phase 0 (F2): a redelivered SMS on the same connection is still rejected as a duplicate"
+fi
+rm -f $ARTIFACT_DIR/pfe_f2_momo_same_conn.log
+
+# Legacy evidence predates connections, keeps a NULL scope, and is exempt:
+# two NULL-connection rows with an identical fingerprint both survive.
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.momo_messages (raw_message, message_fingerprint)
+  values ('legacy evidence', 'f2-legacy-fp'), ('legacy evidence', 'f2-legacy-fp');
+" >/dev/null 2>$ARTIFACT_DIR/pfe_f2_momo_legacy.log; then
+  pass "Phase 0 (F2): legacy NULL-connection evidence is not constrained by the scoped fingerprint index"
+else
+  fail "Phase 0 (F2): the scoped partial index wrongly rejected NULL-connection legacy evidence"
+fi
+rm -f $ARTIFACT_DIR/pfe_f2_momo_legacy.log
+
+# --- raw_financial_events: payload_hash scoped by connection ---------------
+
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.raw_financial_events (channel, received_at, payload_hash, ingestion_connection_id)
+  values ('sms', now(), 'f2-shared-ph', '$F2_CONN_A'),
+         ('sms', now(), 'f2-shared-ph', '$F2_CONN_B');
+" >/dev/null 2>$ARTIFACT_DIR/pfe_f2_raw_two_tenant.log; then
+  pass "Phase 0 (F2): an identical raw-event payload hash is kept independently for each connection"
+else
+  fail "Phase 0 (F2): a second tenant's identical raw-event payload was rejected as a global duplicate"
+fi
+rm -f $ARTIFACT_DIR/pfe_f2_raw_two_tenant.log
+
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.raw_financial_events (channel, received_at, payload_hash, ingestion_connection_id)
+  values ('sms', now(), 'f2-shared-ph', '$F2_CONN_A');
+" >/dev/null 2>$ARTIFACT_DIR/pfe_f2_raw_same_conn.log; then
+  fail "Phase 0 (F2): a redelivered raw event on the same connection was accepted twice"
+else
+  pass "Phase 0 (F2): a redelivered raw event on the same connection is still rejected as a duplicate"
+fi
+rm -f $ARTIFACT_DIR/pfe_f2_raw_same_conn.log
+
+# Connection-less evidence (e.g. statement import) is scoped by source.
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.raw_financial_events (channel, received_at, payload_hash, financial_source_id)
+  values ('statement', now(), 'f2-source-ph', '$F2_SRC_A');
+" >/dev/null
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.raw_financial_events (channel, received_at, payload_hash, financial_source_id)
+  values ('statement', now(), 'f2-source-ph', '$F2_SRC_A');
+" >/dev/null 2>$ARTIFACT_DIR/pfe_f2_raw_same_source.log; then
+  fail "Phase 0 (F2): a duplicate connection-less payload for the same financial source was accepted twice"
+else
+  pass "Phase 0 (F2): a duplicate connection-less payload is rejected within one financial source"
+fi
+rm -f $ARTIFACT_DIR/pfe_f2_raw_same_source.log
+
+# Fully unscoped evidence falls back to (channel, payload_hash).
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.raw_financial_events (channel, received_at, payload_hash)
+  values ('manual', now(), 'f2-unscoped-ph');
+" >/dev/null
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.raw_financial_events (channel, received_at, payload_hash)
+  values ('manual', now(), 'f2-unscoped-ph');
+" >/dev/null 2>$ARTIFACT_DIR/pfe_f2_raw_unscoped_dup.log; then
+  fail "Phase 0 (F2): a duplicate fully-unscoped (channel,payload_hash) event was accepted twice"
+else
+  pass "Phase 0 (F2): a duplicate fully-unscoped event is rejected on (channel, payload_hash)"
+fi
+rm -f $ARTIFACT_DIR/pfe_f2_raw_unscoped_dup.log
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.raw_financial_events (channel, received_at, payload_hash)
+  values ('receipt', now(), 'f2-unscoped-ph');
+" >/dev/null 2>$ARTIFACT_DIR/pfe_f2_raw_other_channel.log; then
+  pass "Phase 0 (F2): the same unscoped payload hash on a different channel is still allowed"
+else
+  fail "Phase 0 (F2): the unscoped index over-blocked a different channel with the same payload hash"
+fi
+rm -f $ARTIFACT_DIR/pfe_f2_raw_other_channel.log
+
+# --- transactions: external_transaction_id scoped by workspace ------------
+
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.momo_messages (id, raw_message, processing_status)
+  values ('00000000-0000-4000-8000-00000000f201', 'f2 seed a', 'processed'),
+         ('00000000-0000-4000-8000-00000000f202', 'f2 seed b', 'processed');
+" >/dev/null
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.transactions
+    (momo_message_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version, external_transaction_id)
+  values
+    ('00000000-0000-4000-8000-00000000f201', '$F2_ACCT_A', '$WORKSPACE_A', 'send_money', 'out', 'success', 100, 0, now(), 'test', 'F2-EXT-1'),
+    ('00000000-0000-4000-8000-00000000f202', '$F2_ACCT_B', '$WORKSPACE_B', 'send_money', 'out', 'success', 100, 0, now(), 'test', 'F2-EXT-1');
+" >/dev/null 2>$ARTIFACT_DIR/pfe_f2_txn_two_ws.log; then
+  pass "Phase 0 (F2): the same provider external_transaction_id is kept independently per workspace"
+else
+  fail "Phase 0 (F2): a second workspace's transaction was rejected for reusing a provider external id"
+fi
+rm -f $ARTIFACT_DIR/pfe_f2_txn_two_ws.log
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.transactions
+    (momo_message_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version, external_transaction_id)
+  values
+    ('00000000-0000-4000-8000-00000000f201', '$F2_ACCT_A', '$WORKSPACE_A', 'send_money', 'out', 'success', 100, 0, now(), 'test', 'F2-EXT-1');
+" >/dev/null 2>$ARTIFACT_DIR/pfe_f2_txn_same_ws.log; then
+  fail "Phase 0 (F2): a duplicate external_transaction_id within one workspace was accepted twice"
+else
+  pass "Phase 0 (F2): a duplicate external_transaction_id within one workspace is still rejected"
+fi
+rm -f $ARTIFACT_DIR/pfe_f2_txn_same_ws.log
+
+# ===========================================================================
 # Phase D: budgets, allocations, category mappings, and goals. Reuses
 # pfe_rls (USER_A/WORKSPACE_A, USER_B/WORKSPACE_B already established
 # above) rather than standing up a fresh database.

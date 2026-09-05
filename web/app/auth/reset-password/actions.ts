@@ -2,6 +2,7 @@
 
 import { supabaseSession } from "../../../lib/supabase-session-server";
 import { siteUrl } from "../../../lib/site-url";
+import { passwordError } from "../../../lib/registration";
 
 export type ResetResult = { ok: true } | { ok: false; error: string };
 
@@ -20,6 +21,11 @@ export async function requestPasswordReset(email: string): Promise<ResetResult> 
 }
 
 export async function updatePassword(password: string): Promise<ResetResult> {
+  const policyError = passwordError(password);
+  if (policyError) {
+    return { ok: false, error: policyError };
+  }
+
   const supabase = await supabaseSession();
 
   const { error } = await supabase.auth.updateUser({ password });
