@@ -17,6 +17,10 @@ import {
   isScanToPayEnabled,
 } from "../lib/pay/gate";
 import { isIntegrationsEnabled } from "../lib/integrations/gate";
+import {
+  isBusinessSurfacesEnabled,
+  resolveExperienceMode,
+} from "../lib/experience-mode/gate";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -130,6 +134,14 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   const integrationsEnabled =
     Boolean(user) && isIntegrationsEnabled(activeWorkspaceId);
 
+  // Experience mode (assessment section 6.2): derived from the active
+  // Space's kind, decides which surfaces are visible - never an
+  // authorization check. Business-only surfaces stay dark until their
+  // rollout flag is on.
+  const experienceMode = resolveExperienceMode(activeWorkspaceId, workspaces);
+  const businessSurfacesEnabled = Boolean(user) &&
+    isBusinessSurfacesEnabled(activeWorkspaceId);
+
   return (
     <html lang="en" className={`${geistSans.variable} h-full antialiased`}>
       <body className="min-h-full bg-background font-sans text-text-primary">
@@ -158,6 +170,8 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           assistedPayEnabled={assistedPayEnabled}
           scanToPayEnabled={scanToPayEnabled}
           integrationsEnabled={integrationsEnabled}
+          experienceMode={experienceMode}
+          businessSurfacesEnabled={businessSurfacesEnabled}
           unreadNotificationCount={unreadNotificationCount}
         >
           {children}

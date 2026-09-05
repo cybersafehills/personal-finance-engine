@@ -3,6 +3,10 @@
 import { useEffect, useId, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { DocumentIcon, GearIcon, InboxIcon, ListIcon, PayIcon, PieIcon, PlugIcon, StarIcon, UsersIcon } from "./icons";
+import {
+  type ExperienceMode,
+  isSurfaceVisible,
+} from "../lib/experience-mode";
 
 // The phone-only "More" destination. Holds the primary destinations that
 // don't fit the fixed five-slot bottom bar (Categories / Reports /
@@ -27,12 +31,16 @@ export function MoreSheet({
   payEnabled,
   assistedPayEnabled,
   integrationsEnabled,
+  experienceMode,
+  businessSurfacesEnabled,
 }: {
   open: boolean;
   onClose: () => void;
   payEnabled: boolean;
   assistedPayEnabled: boolean;
   integrationsEnabled: boolean;
+  experienceMode: ExperienceMode;
+  businessSurfacesEnabled: boolean;
 }) {
   if (!open) return null;
   return (
@@ -41,6 +49,8 @@ export function MoreSheet({
       payEnabled={payEnabled}
       assistedPayEnabled={assistedPayEnabled}
       integrationsEnabled={integrationsEnabled}
+      experienceMode={experienceMode}
+      businessSurfacesEnabled={businessSurfacesEnabled}
     />
   );
 }
@@ -50,11 +60,15 @@ function MorePanel({
   payEnabled,
   assistedPayEnabled,
   integrationsEnabled,
+  experienceMode,
+  businessSurfacesEnabled,
 }: {
   onClose: () => void;
   payEnabled: boolean;
   assistedPayEnabled: boolean;
   integrationsEnabled: boolean;
+  experienceMode: ExperienceMode;
+  businessSurfacesEnabled: boolean;
 }) {
   const router = useRouter();
   const panelRef = useRef<HTMLDivElement>(null);
@@ -104,9 +118,18 @@ function MorePanel({
     onClose();
   }
 
+  // Integrations is off for a Personal Space regardless of the env flag:
+  // the experience mode decides whether the surface is shown at all
+  // (assessment section 6.2 - "a personal user should never see ...
+  // the developer platform"). Household/Business still require the flag.
+  const showIntegrations = integrationsEnabled &&
+    isSurfaceVisible(experienceMode, "integrations", {
+      businessEnabled: businessSurfacesEnabled,
+    });
+
   const appItems: Item[] = [
     { href: "/inbox", label: "Financial Inbox", Icon: InboxIcon },
-    ...(integrationsEnabled
+    ...(showIntegrations
       ? [{ href: "/integrations", label: "Integrations", Icon: PlugIcon }]
       : []),
     { href: "/categories", label: "Categories", Icon: PieIcon },

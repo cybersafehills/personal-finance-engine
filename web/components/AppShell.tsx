@@ -14,6 +14,7 @@ import { PayProvider } from "./pay/PayProvider";
 import { PayTrigger } from "./pay/PayTrigger";
 import { ReportsButton } from "./ReportsButton";
 import { ReportsRelocationNotice } from "./ReportsRelocationNotice";
+import type { ExperienceMode } from "../lib/experience-mode";
 import {
   MORE_MENU_PREFIXES,
   NAV_ITEM_META,
@@ -89,6 +90,8 @@ export function AppShell({
   assistedPayEnabled,
   scanToPayEnabled,
   integrationsEnabled,
+  experienceMode,
+  businessSurfacesEnabled,
   unreadNotificationCount,
 }: {
   children: React.ReactNode;
@@ -103,6 +106,10 @@ export function AppShell({
   assistedPayEnabled: boolean;
   scanToPayEnabled: boolean;
   integrationsEnabled: boolean;
+  /** The active Space's experience mode - decides surface visibility only. */
+  experienceMode: ExperienceMode;
+  /** Whether the dark-by-default Business-only surfaces are switched on. */
+  businessSurfacesEnabled: boolean;
   unreadNotificationCount: number;
 }) {
   const pathname = usePathname();
@@ -237,6 +244,8 @@ export function AppShell({
             payEnabled={payEnabled}
             assistedPayEnabled={assistedPayEnabled}
             integrationsEnabled={integrationsEnabled}
+            experienceMode={experienceMode}
+            businessSurfacesEnabled={businessSurfacesEnabled}
           />
         </>
       )}
