@@ -546,6 +546,26 @@ the runbook); Connected Sources / Devices "Send test" handshake + MFA
 step-up on rotate/revoke (needs connector-RPC AAL2 work); Android
 companion hardening review (§40); ingestion convergence parity fixtures.
 
+### 2026-09-05 — Release 6 (Intelligence)
+
+**PR1 — deterministic-first insights (ADR 0014), dark behind
+`INTELLIGENCE_ENABLED`.**
+
+| Piece | Detail |
+| --- | --- |
+| `web/lib/intelligence/cash-flow-forecast.ts` (pure) | `computeCashFlowForecast` — projects the balance over a horizon keeping **known/scheduled** (verified balance + dated recurring items + bill due dates) and **estimated** (minus a flat daily discretionary rate from 90-day history) separate at every checkpoint; reports projected low, projected end, `mayGoNegative`, a `basis` list, and a disclaimer. 6 Deno tests. |
+| `web/lib/intelligence/insights.ts` (server) | `getIntelligenceInsights()` — gated; wires the previously-unwired `detectRecurringPatterns` over the last 4 complete months, derives the discretionary daily rate, builds the forecast, and computes a **spending-baseline comparison** (this-month-to-date vs same-first-N-days average of prior months; ±10% = above/below). |
+| `ds/WhyThisInsight.tsx` | the "Why am I seeing this?" `<details>` disclosure — supporting facts, period, method, confidence. Required on every insight. |
+| `IntelligenceCard.tsx` + Home wiring | text + one soft warning band, no charts; each block has its disclosure. Gated so no extra queries when off. |
+| ADR 0014 | deterministic-first, no invented scores, known-vs-estimated never merged, recurring stays a heuristic, AI explains never computes, gated + no decorative charts. |
+
+Verification: `deno test web/lib/intelligence` 6/0; web lint 0 errors; web build ✓. No e2e/visual change (flag off in e2e env).
+
+**Release 6 remaining:** high-confidence single-transaction anomaly
+detection; reconciliation insights; feeding `BILLS_ENABLED` bill due dates
+into the forecast's scheduled list; wiring the forecast into `ai/facts.ts`
+report commentary.
+
 ### Files touched in Phase 0
 
 ```

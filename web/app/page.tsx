@@ -15,7 +15,12 @@ import {
   getOnboardingJourney,
   isOnboardingJourneyEnabled,
 } from "../lib/onboarding/journey";
+import {
+  getIntelligenceInsights,
+  isIntelligenceEnabled,
+} from "../lib/intelligence/insights";
 import { BalanceCard } from "../components/BalanceCard";
+import { IntelligenceCard } from "../components/IntelligenceCard";
 import { OnboardingCard } from "../components/OnboardingCard";
 import { OnboardingJourneyCard } from "../components/OnboardingJourneyCard";
 import {
@@ -41,6 +46,7 @@ export default async function HomePage() {
   if (profileOnboarding?.step === "preferences") redirect("/onboarding/preferences");
 
   const journeyEnabled = isOnboardingJourneyEnabled();
+  const intelligenceEnabled = isIntelligenceEnabled();
 
   const [
     balance,
@@ -52,6 +58,7 @@ export default async function HomePage() {
     onboarding,
     journey,
     categoryTotals,
+    insights,
   ] = await Promise.all([
     getCurrentBalance(),
     getTodayTotals(),
@@ -62,6 +69,7 @@ export default async function HomePage() {
     getOnboardingState(),
     journeyEnabled ? getOnboardingJourney() : Promise.resolve(null),
     journeyEnabled ? getCategoryTotals() : Promise.resolve([]),
+    intelligenceEnabled ? getIntelligenceInsights() : Promise.resolve(null),
   ]);
 
   // Release 3 first-run surfaces (ADR 0012), dark unless
@@ -176,6 +184,12 @@ export default async function HomePage() {
       {attentionItems.length > 0 && (
         <div className="lg:col-start-3 lg:row-start-2">
           <AttentionItemsCard items={attentionItems} />
+        </div>
+      )}
+
+      {insights && (
+        <div className={`lg:col-start-1 ${mainColumnSpan}`}>
+          <IntelligenceCard insights={insights} />
         </div>
       )}
 
