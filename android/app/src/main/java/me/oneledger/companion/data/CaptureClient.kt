@@ -10,6 +10,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.logging.HttpLoggingInterceptor
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
@@ -152,6 +153,17 @@ class CaptureClient(
             .readTimeout(20, TimeUnit.SECONDS)
             .callTimeout(40, TimeUnit.SECONDS)
             .retryOnConnectionFailure(true)
+            .apply {
+                if (BuildConfig.DEBUG) {
+                    // BASIC = method, URL, status, timing. No headers (so no
+                    // x-device-key), no bodies (so no message text). Debug only.
+                    addInterceptor(
+                        HttpLoggingInterceptor().apply {
+                            level = HttpLoggingInterceptor.Level.BASIC
+                        },
+                    )
+                }
+            }
             .build()
 
         fun nowIso(): String = java.time.Instant.now().toString()

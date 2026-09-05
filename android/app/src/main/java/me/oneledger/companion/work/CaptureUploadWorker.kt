@@ -1,8 +1,10 @@
 package me.oneledger.companion.work
 
 import android.content.Context
+import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import me.oneledger.companion.BuildConfig
 import me.oneledger.companion.OneLedgerCompanionApp
 import me.oneledger.companion.data.SendOutcome
 
@@ -29,9 +31,12 @@ class CaptureUploadWorker(
         var sawRetryable = false
         val batch = queue.nextBatch(limit = 25)
         if (batch.isEmpty()) return Result.success()
+        debug { "draining ${batch.size} row(s)" }
 
         for (row in batch) {
-            when (val outcome = client.capture(row.message, row.receivedAt)) {
+            val outcome = client.capture(row.message, row.receivedAt)
+            debug { "row ${row.id} (${row.providerKey}) → ${outcome::class.simpleName}" }
+            when (outcome) {
                 is SendOutcome.Accepted -> {
                     queue.onDelivered(row.id)
                     store.lastSuccessAtMs = System.currentTimeMillis()
@@ -59,6 +64,12 @@ class CaptureUploadWorker(
             Result.retry()
         } else {
             Result.success()
+        }
+    }
+
+    private companion object {
+        private inline fun debug(msg: () -> String) {
+            if (BuildConfig.DEBUG) Log.i("OLCapture", msg())
         }
     }
 }

@@ -1,8 +1,11 @@
 # ADR 0010: OneLedger Android Companion
 
-- **Status:** Accepted for staged implementation (PR1: app scaffold, pairing,
-  notification capture, offline queue, health)
-- **Date:** 2026-09-03
+- **Status:** Accepted. PR1 (app scaffold, pairing, notification capture,
+  offline queue, health) + the web wizard's Android branch shipped. Pair →
+  `op:"test"` → real `op:"capture"` validated end-to-end from an Android
+  emulator against production (2026-09-05); the listener-rebind and
+  package-denylist points below came out of that test.
+- **Date:** 2026-09-03 (validated 2026-09-05)
 - **Builds on:** ADR 0008 (consumer device pairing + stable `/capture`
   endpoint), ADR 0009 (asynchronous capture ingestion & provider detection),
   ADR 0007 (connector installation / financial source / account / device
@@ -59,6 +62,17 @@ concerns, and the app is small enough that a JS bridge is pure overhead.
   `supabase/functions/_shared/providers.ts`. Non-financial notifications are
   never parsed, never stored, never transmitted, never logged. Only the matched
   message text, its post time, and the source package name leave the device.
+  The package is **not** an allowlist gate: `IGNORED_NOTIFICATION_PACKAGES` is a
+  short denylist (own app, `android`, `systemui`, GMS) and everything else is
+  decided by the text matcher — a real provider SMS surfaces in whatever app
+  the phone uses to render it (Google/Samsung/Xiaomi Messages, a carrier app,
+  the MoMo app), and an allowlist of guessed names silently drops transactions.
+- Android often leaves the `NotificationListenerService` **unbound after an app
+  reinstall or Play update** — still "enabled", `isConnected` can be a stale
+  `true`, but `onNotificationPosted` never fires until the permission is
+  toggled. `MainActivity.onCreate` calls
+  `NotificationListenerService.requestRebind(...)` once per launch when the
+  permission is granted (`ensureBound`), which recovers it with no user action.
 - The privacy disclosure screen (shown before the listener is enabled) states
   this in plain language and links the Play Data Safety declaration.
 

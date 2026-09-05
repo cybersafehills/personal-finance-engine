@@ -11,6 +11,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.launch
+import me.oneledger.companion.service.CaptureNotificationListenerService
 import me.oneledger.companion.ui.CompanionScreen
 import me.oneledger.companion.ui.CompanionViewModel
 import me.oneledger.companion.ui.theme.OneLedgerCompanionTheme
@@ -23,6 +24,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         CaptureScheduler.ensurePeriodic(applicationContext)
+        // Recover a listener binding that Android dropped on the last app update
+        // (see CaptureNotificationListenerService.ensureBound). Once per launch.
+        CaptureNotificationListenerService.ensureBound(applicationContext)
         handleDeepLink(intent)
 
         setContent {

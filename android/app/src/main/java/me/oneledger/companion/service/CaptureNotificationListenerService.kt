@@ -1,15 +1,20 @@
 package me.oneledger.companion.service
 
 import android.app.Notification
+import android.content.ComponentName
+import android.content.Context
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
+import android.util.Log
+import androidx.core.app.NotificationManagerCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import me.oneledger.companion.BuildConfig
 import me.oneledger.companion.OneLedgerCompanionApp
-import me.oneledger.companion.detection.WATCHED_PACKAGES
+import me.oneledger.companion.detection.IGNORED_NOTIFICATION_PACKAGES
 import me.oneledger.companion.detection.detectProvider
 import me.oneledger.companion.queue.CaptureQueueRepository
 import me.oneledger.companion.work.CaptureScheduler
@@ -29,10 +34,12 @@ class CaptureNotificationListenerService : NotificationListenerService() {
 
     override fun onListenerConnected() {
         isConnected = true
+        debug { "listener connected" }
     }
 
     override fun onListenerDisconnected() {
         isConnected = false
+        debug { "listener disconnected" }
     }
 
     override fun onDestroy() {
@@ -43,26 +50,37 @@ class CaptureNotificationListenerService : NotificationListenerService() {
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         val notification = sbn ?: return
 
-        // Cheap pre-filter: skip ongoing/group-summary/foreground-service noise
-        // and apps we never care about.
+        // Cheap pre-filter: skip ongoing / group-summary noise and the handful
+        // of packages that never carry a provider's financial message.
         if (notification.isOngoing) return
-        val flags = notification.notification.flags
-        if (flags and Notification.FLAG_GROUP_SUMMARY != 0) return
-        if (WATCHED_PACKAGES.isNotEmpty() && notification.packageName !in WATCHED_PACKAGES) return
+        if (notification.notification.flags and Notification.FLAG_GROUP_SUMMARY != 0) return
+        if (notification.packageName in IGNORED_NOTIFICATION_PACKAGES) return
 
-        val text = extractText(notification) ?: return
-        val provider = detectProvider(text) ?: return // unknown → discarded, nothing leaves the device
+        val text = extractText(notification)
+        if (text == null) {
+            debug { "posted pkg=${notification.packageName} — no usable text, skipped" }
+            return
+        }
+
+        val provider = detectProvider(text)
+        if (provider == null) {
+            // Unknown → discarded. Nothing leaves the device; content never logged.
+            debug { "posted pkg=${notification.packageName} — no provider match, discarded" }
+            return
+        }
 
         val receivedAt = Instant.ofEpochMilli(notification.postTime).toString()
         val pkg = notification.packageName
+        debug { "matched ${provider.providerKey} from pkg=$pkg — enqueuing" }
 
         scope.launch {
-            queue.enqueue(
+            val result = queue.enqueue(
                 providerKey = provider.providerKey,
                 message = text,
                 receivedAtIso = receivedAt,
                 sourcePackage = pkg,
             )
+            debug { "enqueue result=$result" }
             CaptureScheduler.requestDrain(applicationContext)
         }
     }
@@ -83,10 +101,42 @@ class CaptureNotificationListenerService : NotificationListenerService() {
     }
 
     companion object {
+        private const val TAG = "OLCapture"
+
         /** Set from the listener lifecycle callbacks; read by HealthRepository.
          *  `getEnabledListenerPackages` alone can lag a revoke. */
         @Volatile
         var isConnected: Boolean = false
             private set
+
+        private inline fun debug(msg: () -> String) {
+            if (BuildConfig.DEBUG) Log.i(TAG, msg())
+        }
+
+        /**
+         * Ask the system to (re)bind this listener when the permission is
+         * granted. Android frequently leaves a `NotificationListenerService`
+         * unbound after the app is reinstalled or updated — it still shows as
+         * "enabled", `isConnected` can even be a stale `true`, but
+         * `onNotificationPosted` never fires until the user toggles the
+         * permission. `requestRebind` fixes that with no user action.
+         *
+         * Deliberately **not** guarded on `isConnected` (that is exactly the
+         * value that lies in the broken state) and deliberately called only
+         * once per process launch (from `MainActivity.onCreate`) — a rebind
+         * when already healthy costs one instant disconnect/reconnect cycle,
+         * which is fine once but not on every foreground resume.
+         */
+        fun ensureBound(context: Context) {
+            val granted = NotificationManagerCompat.getEnabledListenerPackages(context)
+                .contains(context.packageName)
+            if (!granted) return
+            val component = ComponentName(
+                context.packageName,
+                CaptureNotificationListenerService::class.java.name,
+            )
+            runCatching { NotificationListenerService.requestRebind(component) }
+                .onFailure { if (BuildConfig.DEBUG) Log.w(TAG, "requestRebind failed", it) }
+        }
     }
 }
