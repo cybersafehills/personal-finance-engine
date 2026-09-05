@@ -1,10 +1,15 @@
 # ADR 0010: OneLedger Android Companion
 
+> Shipped product name: **OneLedger Shortcuts** (launcher label **OL Shortcuts**).
+> Package `me.oneledger.companion` unchanged. "Companion" persists only in code
+> identifiers and this ADR's historical title.
+
 - **Status:** Accepted. PR1 (app scaffold, pairing, notification capture,
   offline queue, health) + the web wizard's Android branch shipped. Pair →
   `op:"test"` → real `op:"capture"` validated end-to-end from an Android
   emulator against production (2026-09-05); the listener-rebind and
-  package-denylist points below came out of that test.
+  package-denylist points below came out of that test. Release signing +
+  Firebase App Distribution wired (2026-09-05, `docs/android-companion-release.md`).
 - **Date:** 2026-09-03 (validated 2026-09-05)
 - **Builds on:** ADR 0008 (consumer device pairing + stable `/capture`
   endpoint), ADR 0009 (asynchronous capture ingestion & provider detection),

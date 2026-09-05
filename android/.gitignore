@@ -10,6 +10,17 @@ build/
 *.keystore
 !debug.keystore
 
+# Release signing — never commit
+keystore.properties
+*.jks
+*.p12
+/app/*.keystore
+
+# Firebase / Google service credentials — never commit
+/app/google-services.json
+**/service-account*.json
+**/firebase-credentials*.json
+
 # IDE
 .idea/
 *.iml

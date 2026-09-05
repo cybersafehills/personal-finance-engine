@@ -1,9 +1,14 @@
-# OneLedger Android Companion
+# OneLedger Shortcuts (OL Shortcuts) — Android app
 
 A thin native Kotlin app that pairs an Android phone with OneLedger and forwards
 **supported financial notifications** (MTN MoMo today) to the stable `/capture`
 endpoint. It is a client of the ADR 0008 / ADR 0009 protocol — no server change
 was needed to add it. Design rationale: `docs/adr/0010-android-companion.md`.
+Release & distribution: `docs/android-companion-release.md`.
+
+Package `me.oneledger.companion` (debug: `me.oneledger.companion.debug`).
+Product name is **OneLedger Shortcuts**; "Companion" survives only in code
+identifiers.
 Protocol reference: `docs/device-pairing.md`, `docs/android-companion.md`.
 
 ## What it does
@@ -67,12 +72,20 @@ The whole feature rides the existing `DEVICE_PAIRING_V2` Edge secret. If it is
 not `enabled`, `/capture` is a 404 and the app shows "OneLedger isn't accepting
 new phone connections yet." There is no separate Android flag.
 
-## Follow-ups (not in PR1)
+## Done since PR1
 
-- Instrumented tests: `CaptureClient` against MockWebServer, listener smoke test,
-  pairing deep-link flow.
-- Web wizard "Android phone" branch in `web/components/PairWizard.tsx` +
-  `oneledger://pair` handoff (see ADR 0010 §7).
+- Web wizard "Android phone" branch + `oneledger://pair` handoff (#98).
+- End-to-end pair → test → real capture validated on an emulator against prod.
+- Listener rebind, package denylist, debug logging (#118); deterministic
+  `extractText` (#119).
+- Release signing (env-driven) + Firebase App Distribution + signed-AAB CI —
+  see `docs/android-companion-release.md`.
+
+## Follow-ups
+
+- Real-device test with a live MTN MoMo SIM.
 - Additional provider matchers (Airtel, bank SMS) — append to both
   `ProviderMatchers.kt` and `_shared/providers.ts`.
-- Play Store listing, Data Safety form, signing config, CI `android` job.
+- Instrumented tests: `CaptureClient` against MockWebServer, listener smoke test.
+- Play Store submission (Notification Access declaration, Data Safety form,
+  listing assets) — content drafted in `docs/android-companion-release.md`.

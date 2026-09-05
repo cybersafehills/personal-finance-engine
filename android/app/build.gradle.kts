@@ -1,10 +1,25 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.firebase.appdistribution)
 }
+
+// Release signing inputs, in priority order: environment variables (CI), then
+// android/keystore.properties (local, git-ignored). Absent ⇒ `assembleRelease`
+// still runs and produces an *unsigned* APK (useful for verifying R8 in CI);
+// only the Firebase upload needs a real signature.
+val keystoreProperties = Properties().apply {
+    val f = rootProject.file("keystore.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+fun signingInput(key: String): String? =
+    System.getenv(key)?.takeIf { it.isNotBlank() }
+        ?: keystoreProperties.getProperty(key)?.takeIf { it.isNotBlank() }
 
 android {
     namespace = "me.oneledger.companion"
@@ -17,6 +32,18 @@ android {
         versionCode = 1
         versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    signingConfigs {
+        create("release") {
+            val storeFilePath = signingInput("ANDROID_KEYSTORE_FILE")
+            if (storeFilePath != null) {
+                storeFile = file(storeFilePath)
+                storePassword = signingInput("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = signingInput("ANDROID_KEY_ALIAS")
+                keyPassword = signingInput("ANDROID_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
@@ -41,6 +68,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            // Only sign when a keystore was supplied; otherwise unsigned.
+            signingConfigs.getByName("release").takeIf { it.storeFile != null }
+                ?.let { signingConfig = it }
             // Same project as debug — OneLedger runs one Supabase project,
             // gated by feature flags + workspace allowlists, not by environment.
             buildConfigField(
@@ -48,6 +78,15 @@ android {
                 "DEFAULT_CAPTURE_BASE_URL",
                 "\"https://zttxsaiywkfrbdxgzbjd.functions.supabase.co\"",
             )
+
+            // Firebase App Distribution. `appId` + `serviceCredentialsFile` are
+            // read from the FIREBASE_APP_ID / GOOGLE_APPLICATION_CREDENTIALS
+            // env vars by the plugin — nothing sensitive lives in the repo.
+            // Upload with `./gradlew :app:appDistributionUploadRelease`.
+            firebaseAppDistribution {
+                artifactType = "APK"
+                groups = "internal"
+            }
         }
     }
 

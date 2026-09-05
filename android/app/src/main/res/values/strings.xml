@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">OneLedger Companion</string>
-    <string name="notification_listener_label">OneLedger financial-notification capture</string>
+    <!-- Launcher label. Product name: OneLedger Shortcuts, short form OL Shortcuts. -->
+    <string name="app_name">OL Shortcuts</string>
+    <string name="notification_listener_label">OneLedger Shortcuts financial-notification capture</string>
 </resources>

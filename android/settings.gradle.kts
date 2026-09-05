@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "OneLedgerCompanion"
+rootProject.name = "OLShortcuts"
 include(":app")
