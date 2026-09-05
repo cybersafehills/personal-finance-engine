@@ -2,14 +2,22 @@
 
 import { useEffect, useId, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { DocumentIcon, GearIcon, InboxIcon, ListIcon, PayIcon, PieIcon, PlugIcon, StarIcon, UsersIcon } from "./icons";
+import {
+  type ExperienceMode,
+  isSurfaceVisible,
+} from "../lib/experience-mode";
+import { MORE_GROUPS, type MoreItem } from "../lib/navigation";
 
-// The phone-only "More" destination. Holds the primary destinations that
-// don't fit the fixed five-slot bottom bar (Categories / Reports /
-// Settings), plus a Pay & Services group when those features are on.
-// Modal mechanics mirror components/pay/PayLauncher.tsx exactly:
-// Esc + backdrop close, focus trap, focus restored to the trigger,
-// background scroll locked, child mounts only while open.
+// The "More" panel - the structured home for everything that is not on the
+// fixed primary journey (assessment section 19). Grouped, not a flat list:
+// Manage money / This Space / Account / Advanced / Pay & Services. Each
+// item is hidden unless the active experience mode grants its surface AND
+// (where set) its feature flag is on. Opened from the phone bottom bar and
+// the desktop header "More" button - one implementation for both.
+//
+// Modal mechanics mirror components/pay/PayLauncher.tsx: Esc + backdrop
+// close, focus trap, focus restored to the trigger, background scroll
+// locked, child mounts only while open.
 
 function focusable(container: HTMLElement): HTMLElement[] {
   return Array.from(
@@ -19,20 +27,22 @@ function focusable(container: HTMLElement): HTMLElement[] {
   ).filter((el) => el.offsetParent !== null || el === document.activeElement);
 }
 
-type Item = { href: string; label: string; Icon: (p: { className?: string }) => React.JSX.Element };
-
 export function MoreSheet({
   open,
   onClose,
   payEnabled,
   assistedPayEnabled,
   integrationsEnabled,
+  experienceMode,
+  businessSurfacesEnabled,
 }: {
   open: boolean;
   onClose: () => void;
   payEnabled: boolean;
   assistedPayEnabled: boolean;
   integrationsEnabled: boolean;
+  experienceMode: ExperienceMode;
+  businessSurfacesEnabled: boolean;
 }) {
   if (!open) return null;
   return (
@@ -41,6 +51,8 @@ export function MoreSheet({
       payEnabled={payEnabled}
       assistedPayEnabled={assistedPayEnabled}
       integrationsEnabled={integrationsEnabled}
+      experienceMode={experienceMode}
+      businessSurfacesEnabled={businessSurfacesEnabled}
     />
   );
 }
@@ -50,11 +62,15 @@ function MorePanel({
   payEnabled,
   assistedPayEnabled,
   integrationsEnabled,
+  experienceMode,
+  businessSurfacesEnabled,
 }: {
   onClose: () => void;
   payEnabled: boolean;
   assistedPayEnabled: boolean;
   integrationsEnabled: boolean;
+  experienceMode: ExperienceMode;
+  businessSurfacesEnabled: boolean;
 }) {
   const router = useRouter();
   const panelRef = useRef<HTMLDivElement>(null);
@@ -79,12 +95,22 @@ function MorePanel({
     };
   }, []);
 
-  function onKeyDown(e: React.KeyboardEvent) {
-    if (e.key === "Escape") {
-      e.stopPropagation();
-      onClose();
-      return;
+  // Escape closes the sheet from anywhere - a document listener rather
+  // than the panel's onKeyDown so it does not depend on focus having
+  // already moved into the panel (the focus rAF above may not have run
+  // yet when a fast keypress arrives).
+  useEffect(() => {
+    function onDocKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onClose();
+      }
     }
+    document.addEventListener("keydown", onDocKeyDown);
+    return () => document.removeEventListener("keydown", onDocKeyDown);
+  }, [onClose]);
+
+  function onKeyDown(e: React.KeyboardEvent) {
     if (e.key !== "Tab" || !panelRef.current) return;
     const nodes = focusable(panelRef.current);
     if (nodes.length === 0) return;
@@ -104,32 +130,31 @@ function MorePanel({
     onClose();
   }
 
-  const appItems: Item[] = [
-    { href: "/inbox", label: "Financial Inbox", Icon: InboxIcon },
-    ...(integrationsEnabled
-      ? [{ href: "/integrations", label: "Integrations", Icon: PlugIcon }]
-      : []),
-    { href: "/categories", label: "Categories", Icon: PieIcon },
-    { href: "/reports", label: "Reports", Icon: DocumentIcon },
-    { href: "/settings", label: "Settings", Icon: GearIcon },
-  ];
+  function itemVisible(item: MoreItem): boolean {
+    if (
+      item.surface !== null &&
+      !isSurfaceVisible(experienceMode, item.surface, {
+        businessEnabled: businessSurfacesEnabled,
+      })
+    ) {
+      return false;
+    }
+    if (item.requires === "integrations" && !integrationsEnabled) return false;
+    if (item.requires === "pay" && !payEnabled) return false;
+    if (item.requires === "assistedPay" && !assistedPayEnabled) return false;
+    return true;
+  }
 
-  const payItems: Item[] = [];
-  if (payEnabled) {
-    payItems.push({ href: "/pay/ussd", label: "USSD directory", Icon: ListIcon });
-  }
-  if (assistedPayEnabled) {
-    payItems.push(
-      { href: "/pay/activity", label: "Payment activity", Icon: PayIcon },
-      { href: "/pay/reconciliation", label: "Reconciliation", Icon: PayIcon },
-      { href: "/pay/recipients", label: "Trusted recipients", Icon: UsersIcon },
-      { href: "/pay/templates", label: "Payment templates", Icon: StarIcon },
-    );
-  }
+  const groups = MORE_GROUPS
+    .map((group) => ({
+      title: group.title,
+      items: group.items.filter(itemVisible),
+    }))
+    .filter((group) => group.items.length > 0);
 
   return (
     <div
-      className="fixed inset-0 z-40 flex items-end justify-center lg:hidden"
+      className="fixed inset-0 z-40 flex items-end justify-center sm:items-center"
       role="presentation"
     >
       <button
@@ -146,7 +171,7 @@ function MorePanel({
         aria-labelledby={titleId}
         tabIndex={-1}
         onKeyDown={onKeyDown}
-        className="relative z-10 w-full max-w-lg rounded-t-card border border-border-subtle bg-surface p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-lg outline-none"
+        className="relative z-10 max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-t-card border border-border-subtle bg-surface p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-lg outline-none sm:rounded-card sm:pb-5"
       >
         <div className="mb-3 flex items-center justify-between">
           <h2 id={titleId} className="text-base font-semibold text-text-primary">
@@ -162,36 +187,29 @@ function MorePanel({
           </button>
         </div>
 
-        <ItemList items={appItems} onPick={go} />
-
-        {payItems.length > 0 && (
-          <>
-            <p className="mb-1.5 mt-4 text-xs font-medium uppercase tracking-wide text-text-muted">
-              Pay &amp; Services
-            </p>
-            <ItemList items={payItems} onPick={go} />
-          </>
-        )}
+        <div className="flex flex-col gap-4">
+          {groups.map((group) => (
+            <section key={group.title}>
+              <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-text-muted">
+                {group.title}
+              </p>
+              <ul className="flex flex-col">
+                {group.items.map((item) => (
+                  <li key={item.href}>
+                    <button
+                      type="button"
+                      onClick={() => go(item.href)}
+                      className="w-full rounded-control px-2 py-3 text-left text-sm font-medium text-text-primary hover:bg-background"
+                    >
+                      {item.label}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
+        </div>
       </div>
     </div>
-  );
-}
-
-function ItemList({ items, onPick }: { items: Item[]; onPick: (href: string) => void }) {
-  return (
-    <ul className="flex flex-col">
-      {items.map(({ href, label, Icon }) => (
-        <li key={href}>
-          <button
-            type="button"
-            onClick={() => onPick(href)}
-            className="flex w-full items-center gap-3 rounded-control px-2 py-3 text-left text-sm font-medium text-text-primary hover:bg-background"
-          >
-            <Icon className="h-5 w-5 text-text-muted" />
-            {label}
-          </button>
-        </li>
-      ))}
-    </ul>
   );
 }

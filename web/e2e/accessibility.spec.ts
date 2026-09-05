@@ -28,7 +28,7 @@ test("every primary nav destination and the Reports button have accessible names
   await page.goto("/");
 
   const nav = page.getByRole("navigation", { name: "Primary" }).first();
-  for (const name of ["Home", "Transactions", "Categories", "Budgets", "Settings"]) {
+  for (const name of ["Home", "Activity", "Inbox", "Plan"]) {
     await expect(nav.getByRole("link", { name })).toHaveAccessibleName(name);
   }
   await expect(page.getByLabel("Open reports")).toHaveAccessibleName("Open reports");

@@ -48,4 +48,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
-web/lib/deno.lock
+# deno test writes this next to web/lib/deno.json; paths in this file are
+# relative to web/, so the entry must be lib/… not web/lib/…
+lib/deno.lock
