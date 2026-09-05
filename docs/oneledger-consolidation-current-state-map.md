@@ -1,0 +1,479 @@
+# OneLedger Product Consolidation — Current-State Implementation Map
+
+- **Date:** 2026-09-05
+- **Author:** Discovery pass for the Product Consolidation program (no code changed)
+- **Method:** Repository inspection of `main` @ `baba853`. Every audit finding
+  (`ONELEDGER_AUDIT.md`, dated 2026-08-30) re-verified against current code.
+- **Scope of this document:** the mandatory current-state map required by the
+  master prompt §3–§4 and §79A, plus a phased execution plan. It is a
+  prerequisite deliverable; no implementation has begun.
+
+---
+
+## 0. Headline
+
+OneLedger is **substantially more mature than the master prompt's baseline
+assumes**. The audit it references is five days stale and predates a large
+amount of shipped work. **Both audit P0 defects are already closed in code.**
+Most Release 1 ("Trust") items are done or nearly done. The genuinely open work
+is concentrated in Releases 2–6 (design system, information architecture,
+experience modes, onboarding state machine, actionable Inbox, connector
+cutover, intelligence) plus a short list of verified small gaps in Release 1.
+
+`ONELEDGER_PLATFORM_ASSESSMENT.md` referenced by the prompt **does not exist**
+in the repository. Only `ONELEDGER_AUDIT.md` (2026-08-30) is present.
+
+### Scale
+
+| Metric | Count |
+| --- | --- |
+| App routes (`page.tsx`) | 96 |
+| Route handlers (`route.ts`) | ~40 (17 cron, 10 `/api/v1`, rest internal) |
+| SQL migrations | 128 (+ 4 report docs) |
+| Edge Functions | 5 (`ingest-momo`, `capture`, `process-raw-events`, `reconcile-balances`, `send-notifications`) |
+| ADRs | 11 (0001–0010, with two 0007s) |
+| `web/lib` modules | ~90 top-level + `ai/ bills/ integrations/ pay/ spaces/ directory/ ussd/ api/ auth/` |
+| `web/components` | ~110 top-level + `auth/ bills/ brand/ directory/ pay/ ussd/` |
+| Feature flags (env-gated) | ~40 distinct `*_ENABLED` / `*_ALLOWLIST` / `*_SECRET` |
+| Migration test suite | `run_migration_tests.sh`, 6,717 lines |
+
+---
+
+## 1. Architecture map
+
+### 1.1 Trusted boundaries
+
+| Boundary | Where | Notes |
+| --- | --- | --- |
+| Session client (RLS as the user) | `web/lib/supabase-session-server.ts` (`supabaseSession()`) | anon key + request cookie. All ordinary page reads/writes. This is the real tenant boundary. |
+| Service-role client (RLS bypass) | `web/lib/supabase-server.ts` (`supabaseServer()`) | `server-only` import guard + non-`NEXT_PUBLIC_` key. |
+| Browser client | `web/lib/supabase-browser.ts` | anon key only. |
+| Route protection | `web/proxy.ts` | `auth.getUser()` for session refresh + redirect; **not** the security boundary. |
+| Active workspace resolution | `web/lib/queries.ts` (`getActiveWorkspace`, cookie → membership validation) | |
+| Cron auth | `web/lib/cron-auth.ts` (`isAuthorizedCronRequest`) | `REPORT_CRON_SECRET` in `x-report-cron-secret`, `timingSafeEqual`. Used by all `app/api/cron/*`. |
+| Edge Function auth | per-function shared secrets, `verify_jwt = false` in `supabase/config.toml` | `ingest-momo` (per-connection key), `send-notifications` (`NOTIFICATION_CRON_SECRET`), `process-raw-events` (`RAW_EVENTS_PROCESSOR_SECRET`), `capture`, `reconcile-balances`. |
+
+### 1.2 Service-role / RLS-bypass consumers (must be continuously tested)
+
+- All 5 Edge Functions.
+- All 17 cron route handlers (`app/api/cron/*`): reports, webhooks, bill
+  monitoring, pairing expiry, payment-intent expiry, directory sweep,
+  balance reconciliation, export jobs, integration syncs, accountant packages,
+  API-log purge.
+- New-user backfill tooling.
+- `/api/admin/*` (operational health, email log, directory evidence).
+
+### 1.3 Duplicated / divergent implementations
+
+| Area | Canonical | Legacy / parallel | Status |
+| --- | --- | --- | --- |
+| Connector model | `connector_installations` + `financial_sources` + `accounts` + `device_credentials` (ADR 0007, migrations `20261011`–`20261023`) | `ingestion_connections` (one connection ⇒ one account; `20260823`, `20260923`) | **Dual-write + shadow-compare live.** Auth & routing still authoritative in legacy. Cutover gated on `ONELEDGER_CANONICAL_CONNECTIONS_UI` + `ONELEDGER_MTN_MOMO_ADAPTER`, pending a clean production observation window. |
+| MoMo ingestion | `_shared/connector-adapter.ts` + `ingest-momo/adapter.ts` (`mtn_momo_sms_v1`) event-envelope route | `ingest-momo/index.ts` legacy path (1,285 lines) | Adapter route default-off (`ONELEDGER_MTN_MOMO_ADAPTER=enabled`). Both paths live. |
+| Raw-event processing | `process-raw-events` Edge Function + `20261106_raw_events_processor` | inline processing inside `ingest-momo/index.ts` | Both live; `CANONICAL_INGESTION_ENABLED` referenced. |
+| Oversized mixed-domain modules | — | `web/lib/queries.ts` **3,187 lines** (grew from 2,832), `report-generation.ts` 889, `ingest-momo/index.ts` 1,285 | Not split (audit F14). |
+
+---
+
+## 2. Data model map
+
+### 2.1 Canonical chain (present today)
+
+```text
+auth.users
+  └─ profiles
+       └─ workspaces  (Personal auto-provisioned by handle_new_user trigger)
+            └─ memberships  (role: owner|admin|member|viewer  + additive capability grants)
+                 └─ financial_sources         (owned by a user; ADR 0005)
+                      ├─ source_space_links    (explicit visibility into a Space; owner-controlled)
+                      └─ accounts              (1..* per source in the canonical model)
+                           └─ transactions     (integer minor units + currency; workspace-scoped)
+                                └─ momo_message_id / raw_financial_event linkage (provenance)
+
+raw_financial_events   (channel, payload_hash, ingestion_connection_id?, financial_source_id?)
+momo_messages          (message_fingerprint, ingestion_connection_id?)  -- predates tenancy
+```
+
+### 2.2 Connector chain (ADR 0007, staged)
+
+```text
+connector_installations
+  ├─ 1..* financial_sources ─ 1..* accounts        (discovery + ledger routing)
+  └─ 1..* device_credentials ─ 0..1 account scope  (authentication only; owns no money)
+```
+
+- Stage A: schema (`20261011`).
+- Stage B: preflight + reversible legacy backfill (`20261012`).
+- Stage C: atomic enrollment, lifecycle mirroring, canonical provenance,
+  shadow comparison, service-only shadow-health counters (`20261013`, `20261014`).
+- Stage D: canonical credential resolver (default-off, `20261017`),
+  multi-source discovery + deterministic route resolver (`20261018`),
+  adapter route health (`20261019`), lifecycle (`20261015`), credential
+  history (`20261016`), shared visibility (`20261023`).
+- UI read projection ready: `web/lib/connector-read-model.ts`
+  (`getCanonicalConnectorInstallations()`), `connector-ui-mode.ts`.
+- **Divergence:** legacy `ingestion_connections` still binds one connection to
+  one account and remains the authoritative auth/routing store. `momo_messages`
+  still predates tenancy (nullable `ingestion_connection_id` for legacy rows).
+
+### 2.3 Tenant-scoping of evidence / dedup (audit F2)
+
+Migration `20261009000000_tenant_scoped_ingestion_dedup.sql` (Phase 0 hardening):
+
+- `momo_messages`: dropped global `message_fingerprint` unique; added
+  `ingestion_connection_id` FK; new partial unique
+  `(ingestion_connection_id, message_fingerprint)`.
+- `raw_financial_events`: dropped global `payload_hash` unique; added three
+  partial uniques scoped by connection / source / `(channel, payload_hash)`.
+- `transactions`: dropped global `external_id` unique; added
+  `unique (workspace_id, external_transaction_id)`.
+- `ingest-momo/index.ts` duplicate lookups now filter
+  `.eq("ingestion_connection_id", connection.id)` throughout.
+
+**Gap:** no regression test exists for this rescoping — neither an
+`ingest-momo` two-tenant test nor a migration-suite assertion (grep for
+`20261009` / `connection_fingerprint` / `raw_events_connection_payload` in
+`run_migration_tests.sh` returns nothing). The audit (F2) and prompt (§9, §68)
+both mandate it.
+
+---
+
+## 3. Authorization map
+
+| Layer | Where | State |
+| --- | --- | --- |
+| Fixed roles | `memberships.role` = owner/admin/member/viewer | live |
+| Named capabilities | `20260912_phase_r_spaces_authz_and_audit.sql` + integration capability set; documented in `docs/authorization-matrix.md` | live, ~28 capabilities enumerated (space.*, members.manage, budget/goal/rule/report/category.manage, transaction.create/categorize, audit.view, integration.* ×16) |
+| Additive grants | member-scoped, workspace-scoped, cannot deny a role capability, do not cross workspaces | live |
+| RLS policies | per-table; tenant isolation tested in `run_migration_tests.sh` ("RLS: tenant isolation", "Phase C adversarial cross-workspace", "Phase D category mappings", "Phase J reporting RLS", "Phase K report_artifacts zero access") | broad coverage |
+| SECURITY DEFINER RPCs | payment orchestration, SMS reconciliation, statement import, invite redemption, connector enrollment, claim/ack notification | live; each needs `search_path` + caller/scope checks audited |
+| Server actions | per route `actions.ts` | capability checks inconsistent vs RLS in older code (audit F6) |
+| Service-role jobs | see §1.2 | bypass RLS by design |
+
+**Fragmentation (audit F6):** newer integration code is capability-driven and
+well documented in `authorization-matrix.md`; older core RLS leans on the
+four role tiers. Effective per-resource matrix is partially documented, not
+fully consolidated or exhaustively tested. `docs/authorization-matrix.md`
+exists and is a good spine to extend.
+
+---
+
+## 4. Reliability map
+
+| Stage | Mechanism | Idempotency / retry | Notes |
+| --- | --- | --- | --- |
+| Capture | `capture` Edge Function → `raw_financial_events` | payload-hash partial uniques (§2.3) | |
+| Normalization / parse | `ingest-momo/parser.ts`, `policy-engine.ts`, `_shared/connector-adapter.ts` | deterministic | |
+| Dedup | exact: connection-scoped fingerprint / payload-hash. advisory: `compute_transaction_fingerprint` → `transaction_duplicate_candidates` → `possible_duplicate` state + human review | exact = reject; fuzzy = surfaced, never auto-merged (ADR-aligned) | matches prompt §7 |
+| Transaction creation | `ingest-momo/index.ts` (legacy) / adapter route | `(workspace_id, external_transaction_id)` unique + optimistic-loser treated as idempotent duplicate | |
+| Raw-event processor | `process-raw-events` (secret-gated) | claim-based | |
+| Notifications | `send-notifications` drainer | `claim_notification_emails` (claim token + 300s lease) → Resend with stable `Idempotency-Key` → `ack`/`release` RPCs | **F1 fully resolved.** No dead-letter table; failures logged + lease-expiry retried. |
+| Scheduled reports | `api/cron/generate-reports`, `deliver-reports`; `report-generation.ts`, `report-delivery.ts` | `REPORT_GENERATION_ENABLED`, `REPORT_EMAIL_DELIVERY_ENABLED` kill-switches | |
+| Cron fleet | 17 handlers, all behind `isAuthorizedCronRequest` | | no scheduler heartbeat / SLO evidence |
+| Reconciliation | `reconcile-balances` Edge Function + `api/cron/run-balance-reconciliation`, `reconcile-pending-payments` | `BALANCE_RECONCILIATION_ENABLED`, `SMS_RECONCILIATION_ENABLED` | |
+| Observability | structured JSON `console.*` everywhere; `web/lib/operational-health.ts` + `/api/admin/operational-health` + `/api/health/email` + `email-health-rules.ts` | | no external sink / aggregation / alerting confirmed (audit F10) |
+
+---
+
+## 5. Product-surface map
+
+### 5.1 Current primary navigation (`web/lib/navigation.ts` + `AppShell.tsx`)
+
+- **Permanent:** `Home` (`/`).
+- **Movable (user-orderable, desktop header):** `transactions`, `categories`,
+  `budgets`, `settings`.
+- **Phone bottom bar (fixed 5):** Home · Transactions · **Pay** (elevated,
+  centre) · Budgets · More.
+- **Header icons:** merged **Inbox/Notifications** button; Reports button.
+- **"More" prefixes:** `/inbox`, `/integrations`, `/categories`, `/reports`,
+  `/settings`.
+
+`navigation.ts` is already the single source of truth for both surfaces
+(prompt §20 satisfied). Reports was already removed from primary nav.
+
+### 5.2 Prompt's target IA vs today
+
+| Prompt target (§19) | Today | Gap |
+| --- | --- | --- |
+| Home | `/` | Home is feature-tiled, not a financial-state page (§22) |
+| Activity | `/transactions` (+ `/transactions/review`, `/transfers`, `/[id]`, `/new`) | no "Activity" umbrella concept; no ADR for an Activity read model (§43, §75) |
+| Inbox | `/inbox` + `/notifications` (merged icon) | Inbox exists as a projection (`financial-inbox-model.ts`, 74 lines; `AttentionItemsCard`, `DuplicateReviewList`, `ReviewQueueList`) but is **not** the unified actionable decision layer of §33–§35 |
+| Plan | `/budgets`, `/budgets/goals`, `/budgets/categories` | no unified "Plan" mental model over budgets + goals + recurring + forecast |
+| More → Manage money / Space / Account / Advanced | flat-ish `/settings/*` (14 pages) + `/integrations/*` (18 pages) + `/admin/*` (directory + ussd) | settings overloaded (§53); admin/developer shells not visually separated from consumer surface (§21) |
+
+### 5.3 Route inventory by domain (96 routes)
+
+- **Auth / onboarding (10):** `/login`, `/signup`, `/verify-email`,
+  `/auth/confirm`, `/auth/mfa`, `/auth/reset-password(/confirm)`,
+  `/get-started`, `/onboarding/profile`, `/onboarding/preferences`,
+  `/invite/[token]`.
+- **Core ledger (12):** `/`, `/transactions(/[id]|/new|/review|/transfers)`,
+  `/categories(/insights|/rules…7)`.
+- **Plan (7):** `/budgets(/[id]|/new|/categories|/goals…4)`.
+- **Inbox / reports (5):** `/inbox`, `/notifications`, `/reports(/[id])`,
+  `/settings/reports`.
+- **Sources / devices / pairing (9):** `/pair`, `/settings/sources(/import)`,
+  `/settings/accounts`, `/settings/connections(/setup)`,
+  `/integrations/connections(/pair|/setup)`.
+- **Integrations (16):** `/integrations` + accountant, activity, developer,
+  exports, imports(3), marketplace, reconciliation, sync(3).
+- **Pay (13):** `/pay/[id]`, `/pay/new/[type]`, activity, recipients,
+  reconciliation, suggest, templates, ussd(2), networks(3).
+- **Bills (3):** `/bills(/[id])`, `/settings` cross-links.
+- **Admin (14):** `/admin/directory/*` (11), `/admin/ussd/*` (3).
+- **Settings (14):** index + accounts, appearance, connections(2), notifications,
+  privacy, reports, security, sources(2), workspace.
+
+**Observations:** duplicate connection entry points
+(`/settings/connections`, `/settings/connections/setup`,
+`/integrations/connections`, `/integrations/connections/pair`,
+`/integrations/connections/setup`, `/pair`); overlapping source vs account vs
+connection pages; `/inbox` and `/notifications` still distinct routes behind
+one icon; technical vocabulary in `AdvancedConnectionSetup`, `ConnectionDetails`.
+
+### 5.4 Experience modes (§18)
+
+**Not implemented.** No Personal / Household / Business mode concept.
+`SPACES_ENABLED` (+ allowlist) gates household Spaces; Business is only latent
+in Bills / integration capabilities. Mode would be a new cross-cutting
+experience-config primitive (candidate for a new ADR, §75).
+
+---
+
+## 6. Audit finding verification (F1–F15 vs current code)
+
+| ID | Audit claim | Current state | Verdict |
+| --- | --- | --- | --- |
+| **F1** | Unauthenticated `send-notifications`, no claim/lease/idempotency | POST-only; `NOTIFICATION_CRON_SECRET` (≥32 chars) constant-time compare; `claim_notification_emails` claim-token + 300s lease; Resend stable `Idempotency-Key`; `ack`/`release` RPCs; structured redacted logs | **RESOLVED** (dead-letter table still absent — minor) |
+| **F2** | Global SMS/evidence dedup across tenants | `20261009` rescopes every uniqueness key to connection/source/workspace; `ingest-momo` lookups filter by `ingestion_connection_id` | **RESOLVED in code; regression test missing** |
+| **F3** | Backend password floor 6, no complexity, no breach check/captcha | `minimum_password_length = 8` ✅; `password_requirements = ""` ❌; `secure_password_change = false` ❌; no `[auth.captcha]` ❌ | **PARTIAL** |
+| **F4** | MFA enabled but no UX | `/auth/mfa`, `/settings/security` with `MfaManager` (enroll/list/remove factors), `MfaChallenge`, AAL2 gating ("sensitive actions unlocked for this session") | **SUBSTANTIALLY RESOLVED** (recovery-code guidance + which actions step-up = verify) |
+| **F5** | Email-agnostic bearer invite redemption | `/invite/[token]`, `CreateInviteForm`, `InviteItem`; RPC binding **not re-verified this pass** | **UNVERIFIED — check `20260912` invite RPC** |
+| **F6** | Authorization fragmented role tiers vs capabilities | `docs/authorization-matrix.md` exists + broad; capability model live; older core RLS still role-tier; not fully consolidated/tested | **PARTIAL** |
+| **F7** | Manual URL/header/JSON connection setup | `PairWizard`, `PairHandoff`, `ConnectionReadinessProbe`, device pairing v2 (ADR 0008), `/pair`, `/integrations/connections/pair`, pairing-session expiry cron, credential rotation on re-pair (`20261127`) | **RESOLVED** (technical `AdvancedConnectionSetup` still exists as fallback) |
+| **F8** | No onboarding state machine | `web/lib/onboarding.ts` (90 lines), `/get-started`, `/onboarding/profile`, `/onboarding/preferences`, `OnboardingCard`, `OnboardingChoiceLink`, checklist behind `ONBOARDING_CHECKLIST_ENABLED` (+ allowlist) | **PARTIAL** — not a persisted milestone state machine (`intent → source → paired → verified → first_txn → first_review → first_insight`) |
+| **F9** | One-connection/one-account model | ADR 0007 Stages A–D implemented as dual-write + shadow compare; canonical read model prepared; cutover gated | **IN PROGRESS (large remainder)** |
+| **F10** | No production observability | structured logs; `operational-health.ts` + admin route; email-health rules | **PARTIAL** — no external sink / SLO / alerting |
+| **F11** | Unvalidated `next` redirect | `web/lib/internal-redirect.ts` (`internalRedirectPath`) + `internal_redirect_test.ts` | **RESOLVED** (verify every `redirect(next)` call site uses it) |
+| **F12** | No deletion/export/retention | `/settings/privacy` = hide-balance + privacy-mode only; no account-deletion or data-export workflow found | **OPEN** |
+| **F13** | `next/font/google` breaks offline build; Turbopack root | `web/app/layout.tsx:3` still `import { Geist } from "next/font/google"` | **OPEN** |
+| **F14** | Oversized modules | `queries.ts` 3,187 (worse), `report-generation.ts` 889, `ingest-momo/index.ts` 1,285 (but now has extracted siblings) | **OPEN** |
+| **F15** | Mobile controls < 16px (`text-sm`) | `text-sm` in `LoginForm`, `SignUpForm`, ~128 component files | **OPEN** |
+
+---
+
+## 7. Preserved strong decisions (do not regress)
+
+Non-custodial boundary (ADR 0001); integer minor units + currency (`web/lib/money.ts`
+with SQL parity + `money_test.ts`); RLS as the tenant boundary; explicit
+Workspace/Membership separation; source ownership + explicit Space visibility
+(ADR 0005); revocable per-connection credentials + rotation on re-pair;
+raw-evidence provenance retention; conservative dedup (exact reject / fuzzy
+review); provider-neutral connector adapter contract (ADR 0007);
+deterministic financial math; `navigation.ts` single source of truth;
+structured redacted logging convention.
+
+---
+
+## 8. Phased execution plan
+
+Ordering follows the prompt's Release sequence (§77), adjusted for what is
+already done.
+
+### Release 1 — Trust (mostly done; close the verified gaps)
+
+| # | Work | Size | Risk |
+| --- | --- | --- | --- |
+| 1.1 | **Two-tenant dedup regression tests** — `ingest-momo` test (Tenant A + Tenant B, textually identical SMS on different connections, both processed independently, no leak) **and** a `run_migration_tests.sh` block asserting the `20261009` partial uniques (same fingerprint on two connections both insert; same connection rejects). | S | low |
+| 1.2 | **Password policy** — set `password_requirements`, flip `secure_password_change = true`, decide on captcha / breach check; align `SignUpForm` copy; document new prod-dashboard steps. | S | low |
+| 1.3 | **Redirect audit** — confirm every `redirect()` fed by caller input routes through `internalRedirectPath`; add a lint or test. | S | low |
+| 1.4 | **Invite recipient binding (F5)** — verify `20260912` redemption RPC; add recipient binding or an explicit transferable-link invite type + migration test. | M | med |
+| 1.5 | **Authorization matrix consolidation (F6)** — extend `docs/authorization-matrix.md` to every resource/action in §52; add missing capability-enforcement migration tests; make it the living matrix. | M | med |
+| 1.6 | **Observability baseline (F10)** — formalize the structured-log field convention (request/correlation id, workspace surrogate, source id, stage, outcome, duration, retry); wire ingestion-lag / duplicate-rate / scheduler-heartbeat / notification-failure signals into `operational-health`. No new tracing platform. | M | low |
+| 1.7 | **CI coverage** — add WebKit + iPhone-viewport smoke (login, signup, onboarding, amount fields, source setup, pairing, dropdown, keyboard focus / no iOS zoom) to `.github/workflows/ci.yml`. | M | low |
+
+**Exit:** verified trust; CI proves mobile/WebKit; matrix is exhaustive.
+
+### Release 2 — Core (design system + IA + shells)
+
+Formal component system (Field, CurrencyInput, SourceStatusBadge,
+ActionRequiredItem, FinancialTable/List, EmptyState/SetupState, StepWizard,
+DestructiveConfirm, PermissionGate) — audit `web/components` first, refactor not
+duplicate (`EmptyState`, `Badge`, `StatTile`, `StepWizard`-like `PairWizard`
+already exist). Internal design-system reference route. Content/terminology
+pass. Experience-mode primitive (**new ADR**). Re-cut IA to Home / Activity /
+Inbox / Plan / More, all from `navigation.ts`. Home → financial-state page
+(§22–§23, deterministic, no invented score). Settings reorg (§53) with
+redirects. Admin/developer shell separation (§21).
+
+### Release 3 — First Run
+
+Persisted onboarding milestone state machine (§24), idempotent, resumable:
+`intent_selected → source_added → device_paired → connection_verified →
+first_real_transaction → first_review_completed → first_insight_seen`.
+Intent step, value-promise step, source-first step, pairing integrated inline,
+**synthetic connection test** distinct from ledger evidence (§29), first-real-
+transaction review card (§30), first insight (§31), post-onboarding checklist.
+
+### Release 4 — Inbox
+
+Turn `/inbox` into the actionable decision layer (§33–§35): unify review,
+duplicates, attribution, categorization, reconciliation, source health, budget
+alerts, bill matching/approval; inline actions that call the authoritative
+domain RPC (Inbox stays a projection); deterministic prioritization model.
+Collapse `/notifications` into `/inbox`.
+
+### Release 5 — Connections
+
+Finish ADR 0007 cutover (§37): production observation window → flip
+`ONELEDGER_MTN_MOMO_ADAPTER` then `ONELEDGER_CANONICAL_CONNECTIONS_UI` →
+migrate remaining legacy consumers → retire `ingestion_connections` in a
+separate deliberate migration. Connected Sources / Connected Devices UX
+(§36, §38, §39). Ingestion convergence (§50–§51) with parity tests before
+retiring the legacy `ingest-momo` path. Android hardening (§40). iOS
+direction ADR (§41).
+
+### Release 6 — Intelligence
+
+Deterministic-first: recurring-transaction detection (explainable, §45),
+conservative cash-flow forecast (known vs estimated, §46), spending-baseline
+comparison, high-confidence anomaly detection, reconciliation insights, "Why
+am I seeing this?" everywhere (§47). AI only for explaining/summarizing
+deterministic facts (§48).
+
+### Cross-cutting (every release)
+
+Feature-gate server-side not just UI (§56); additive reversible migrations
+with two-tenant tests (§57); accessibility (§59) and responsive (§60)
+validation; error design (§66); audit logging for sensitive actions (§65);
+analytics funnel events (§64); update docs + ADRs (§74–§75).
+
+---
+
+## 9. Open questions for the product owner
+
+1. **`ONELEDGER_PLATFORM_ASSESSMENT.md` is missing** — is there a newer
+   assessment to reconcile against, or is `ONELEDGER_AUDIT.md` the baseline?
+2. **Release 1 is ~80% done.** Confirm we do the small gaps (§8 Release 1
+   1.1–1.7) and then move to Release 2, rather than re-litigating closed items.
+3. **Connector cutover (Release 5)** depends on a production observation
+   window that this program can't fast-forward. Do we schedule it or treat the
+   canonical model as "ready when telemetry says so"?
+4. **Experience modes** — is Business in scope for this program at all, or
+   Personal + Household only with Business kept latent?
+5. Order preference: strictly Release 1→6, or parallelize Release 2 (design
+   system / IA) alongside Release 1 gap-closure since they barely overlap?
+
+---
+
+## 10. Decisions (locked 2026-09-05)
+
+`ONELEDGER_PLATFORM_ASSESSMENT.md` (2026-09-05) was supplied after this map's
+first draft and is now the authoritative brief. It supersedes the audit's
+status sections; audit findings F1–F15, the roadmap, and the "what not to
+build" list still hold. The five open questions are resolved as follows,
+derived from the assessment's own direction (§1 product model, §6 upgrade
+plan, §6.6 monetization, §7 guardrails).
+
+### Product direction (what OneLedger is becoming)
+
+A **non-custodial financial operating system for fragmented, Mobile-Money-first
+markets** (Rwanda first). Not a budgeting app. The wedge is *effortless MTN
+MoMo ingestion + a trustworthy reviewable ledger*; everything else compounds on
+the same person-owned-source / explicit-Space-visibility model. Lifecycle the
+whole product must express: **Connect → Capture → Understand → Review →
+Reconcile → Learn → Act**, and never hold or move funds.
+
+### Monetization (feasible path, not built in this program)
+
+Plan tiers that charge for **automation volume, collaboration, and operational
+control** — never for a user's own data, export, deletion, or security:
+
+| Plan | Value gated |
+| --- | --- |
+| Free | 1 Personal Space, manual + statement import, 1 source, full ledger + security + export |
+| Personal Plus | automated ingestion, multiple sources, rules, scheduled reports, extended history, forecasting |
+| Household | shared Space, members, shared goals, shared Inbox, source sharing |
+| Business | multi-account, finance roles, approvals, Bills, reconciliation, professional reports, audit retention |
+
+Later, secondary: developer-platform / marketplace revenue share, accountant
+packages. The **entitlements domain is designed in Phase 3** (schema + gate
+checks), payment processing only when separately requested.
+
+### Answers
+
+| # | Question | Decision |
+| --- | --- | --- |
+| 1 | Missing assessment doc | Resolved — the 2026-09-05 assessment is the brief. |
+| 2 | Release 1 ~80% done — close gaps then move on? | **Yes.** Do the verified Phase-0 gaps only; do not re-open F1/F2/F7/F11 (closed). Then Phase 1 (IA + design system). |
+| 3 | Connector cutover (ADR 0007 D→E) needs a prod observation window | **Treat as "ready when telemetry says so."** Do not block the program on it; it stays a Phase-2 (Release 5) item. All *new* connector work targets the canonical model; legacy `ingestion_connections` is not extended. |
+| 4 | Experience modes — Business in scope? | **Build the mode primitive with all three modes** (Personal / Household / Business) as an experience-config that gates *surface visibility only*. **Do not build new Business features** — Business mode just reveals already-latent, still-flagged surfaces (Bills, accounting connectors, reconciliation). No custom roles / SSO / org-policy console (guardrail §7). |
+| 5 | Strict order vs parallelize | **Lead with Phase 0** (trust gaps — small, de-risks everything), then Phase 1. Design-system extraction may begin in parallel since it does not touch trust code, but Phase 0 lands first. |
+
+### Execution mapping (this program → assessment §8 backlog)
+
+Phase 0 (now) → assessment §8 items 1–5. Phase 1 → items 6–10. Phase 2 →
+items 11–14. Phase 3 → items 15–17. Phase 4 → item 18.
+
+---
+
+## 11. Progress log
+
+### 2026-09-05 — Phase 0 started
+
+| Item | Change | Status |
+| --- | --- | --- |
+| **F2 regression** | Added an 11-assertion "Phase 0: tenant-scoped ingestion dedup (F2 regression)" block to `supabase/migrations/tests/run_migration_tests.sh`: two-tenant identical-SMS survival + within-connection idempotency for `momo_messages`; connection / source / `(channel,payload_hash)` scoping for `raw_financial_events`; `(workspace_id, external_transaction_id)` scoping for `transactions`; legacy NULL-scope exemption. | ✅ Full suite **484 passed / 0 failed** locally (PG17 spawn mode). |
+| **CI gap** | New `web-quality` job in `.github/workflows/ci.yml`: `npm ci` → `next lint` → `next build` with placeholder env. Fast, Supabase-free signal for lint regressions and build-time breaks (previously only implicit inside the e2e job). | ✅ `lint` + `build` green locally. |
+| **F3 — password policy parity** | `supabase/config.toml`: `password_requirements = "letters_digits"`, `secure_password_change = true` (with dashboard-sync notes). New shared `passwordError()` in `web/lib/registration.ts` enforced by `validateRegistration` (signup) and `updatePassword` (reset-password confirm); `PASSWORD_REQUIREMENT_HINT` shown on both forms; `registration_test.ts` updated (+ new complexity test). | ✅ `deno test` 4/4, `lint`, `build` green. e2e password fixtures already satisfy the rule. |
+
+| **F10 — structured logging** | New `web/lib/log.ts` + `supabase/functions/_shared/log.ts` (mirrored): one JSON line per event, stable `{ts,stage,outcome,correlation_id,duration_ms,…}` shape, `redact()` backstop (sensitive key names + secret-shaped values), `withLoggedRun()` for cron heartbeat. Co-located tests (6 + 5). `app/api/cron/generate-reports/route.ts` adopts it as the reference. New "Structured logging convention" section in `docs/operational-health.md`. `_shared/log` added to CI's `deno check` loop. | ✅ `deno test` 105/0 (`_shared`), 597/0 (`web/lib`); fmt + lint clean. |
+| **F6 — authorization matrix** | `docs/authorization-matrix.md` rewritten from a 12-capability catalog into the §52 living matrix: the two enforcement styles (role-tier RLS vs closed capability catalog) named as the F6 fragmentation + convergence direction; full 34-capability × role table with grant/catalog provenance; per-resource/action table (18 resources: sources, links, accounts, transactions, categories, rules, budgets, goals, reports, members, invites, connections, connector installations, raw evidence, integrations, bills, pay, developer keys, export, deletion) with scope / RLS / RPC / UI / audited-vs-partial status; tracked-gaps section (F5, F6, F12). | ✅ doc-only. |
+| **WebKit / iPhone CI** | `playwright.config.ts`: `visual.spec.ts` excluded from the `webkit-desktop` / `mobile-safari` / `chrome-android` projects (pixel regression stays chromium-only by design). `ci.yml` e2e job: installs `webkit`, runs `--project=webkit-desktop --project=mobile-safari` over the 201 functional/a11y/responsive tests as a **non-blocking** step (`continue-on-error`, `::warning` on failure, report uploaded) — to be promoted to required once hardened. | ✅ config parses; `playwright test --list` = 201 tests, `visual` excluded. Not executed here (needs local Supabase stack). |
+
+### Deferred out of Phase 0 (with rationale)
+
+- **F12 — account deletion / data export / retention.** Its own workstream:
+  needs a product decision on retention windows and a carefully-tested cascade
+  migration across the tenant schema. Tracked in `authorization-matrix.md §5`.
+- **F5 — recipient-bound invites.** Assessment §8 item 18 explicitly places
+  this in Release 4 (collaboration hardening). Current bearer model documented
+  with its `accepted_by` audit compensation.
+- **Full `partial` → `audited` sweep in the authz matrix.** Closing the
+  remaining core-table mutation-RPC test gaps is Phase 1 work, done per-area as
+  each is touched.
+
+### Phase 0 verification summary
+
+| Check | Result |
+| --- | --- |
+| `run_migration_tests.sh` (PG17) | **484 passed / 0 failed** (incl. 11 new F2) |
+| `deno test supabase/functions/_shared/tests` | 105 / 0 |
+| `deno test --config web/lib/deno.json web/lib` | 597 / 0 |
+| `deno fmt --check` + `deno lint` (supabase/functions) | clean |
+| `npm run lint` (web) | 0 errors (2 pre-existing warnings) |
+| `npm run build` (web, placeholder env) | ✓ compiled |
+
+**Nothing committed** — the entire Phase 0 diff is in the working tree of
+`claude/oneledger-consolidation-08bed7` for review.
+
+### Files touched in Phase 0
+
+```
+docs/oneledger-consolidation-current-state-map.md   (new — this doc)
+docs/authorization-matrix.md                        (rewritten — F6)
+docs/operational-health.md                          (+ structured-logging section — F10)
+.github/workflows/ci.yml                            (+ web-quality job; webkit e2e; _shared/log check)
+supabase/config.toml                                (password_requirements, secure_password_change — F3)
+supabase/functions/_shared/log.ts                   (new — F10)
+supabase/functions/_shared/tests/log_test.ts        (new — F10)
+supabase/migrations/tests/run_migration_tests.sh    (+ Phase 0 F2 regression block, 11 assertions)
+web/lib/log.ts                                      (new — F10)
+web/lib/log_test.ts                                 (new — F10)
+web/lib/registration.ts                             (passwordError() shared floor — F3)
+web/lib/registration_test.ts                        (+ complexity tests — F3)
+web/app/signup/SignUpForm.tsx                       (PASSWORD_REQUIREMENT_HINT — F3)
+web/app/auth/reset-password/actions.ts              (updatePassword validates — F3)
+web/app/auth/reset-password/confirm/page.tsx        (requirement hint — F3)
+web/app/api/cron/generate-reports/route.ts          (withLoggedRun reference — F10)
+web/playwright.config.ts                            (exclude visual from cross-browser projects)
+```

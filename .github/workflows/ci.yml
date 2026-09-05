@@ -78,7 +78,7 @@ jobs:
       - name: deno check (_shared entry points)
         run: |
           set -euo pipefail
-          for f in accounting kigali-time money reconciliation types; do
+          for f in accounting kigali-time log money reconciliation types; do
             deno check "supabase/functions/_shared/$f.ts"
           done
 
@@ -122,6 +122,51 @@ jobs:
         # not auto-discover a per-directory config when invoked from the repo
         # root, so it must be passed explicitly.
         run: deno test --config web/lib/deno.json web/lib
+
+  web-quality:
+    name: Web lint + production build
+    runs-on: ubuntu-24.04
+    # Closes the audit's CI gap: until now nothing in CI ran `next lint` or
+    # `next build` (the e2e job builds only as a side effect of Playwright's
+    # webServer, and only on the two jobs that also boot Supabase). This job
+    # is a fast, Supabase-free signal - a lint regression or a build-time
+    # break (e.g. next/font/google resolving at build, a bad server/client
+    # import boundary) fails here in a couple of minutes instead of surfacing
+    # deep inside the e2e job or, worse, only in the Vercel deploy.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: next lint
+        working-directory: web
+        run: npm run lint
+
+      # Placeholder values: the build must not depend on real Supabase
+      # credentials or hostnames. lib/supabase-server.ts and lib/site-url.ts
+      # throw at import time if these are unset, but the build never connects
+      # anywhere - it only needs them to be present and syntactically valid.
+      # Every feature gate is left at its default (dark), so this builds the
+      # exact surface a fresh production deploy would.
+      - name: next build
+        working-directory: web
+        env:
+          SUPABASE_URL: "https://placeholder.supabase.co"
+          SUPABASE_SERVICE_ROLE_KEY: "placeholder-service-role-key"
+          NEXT_PUBLIC_SUPABASE_URL: "https://placeholder.supabase.co"
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: "placeholder-anon-key"
+          SITE_URL: "http://127.0.0.1:3417"
+        run: npm run build
 
   migration-tests:
     name: Migration chain tests (disposable PostgreSQL 17)
@@ -217,9 +262,12 @@ jobs:
         working-directory: web
         run: npm ci
 
-      - name: Install Playwright browsers (chromium only - this job only runs the chromium-desktop project)
+      - name: Install Playwright browsers (chromium + webkit)
         working-directory: web
-        run: npx playwright install --with-deps chromium
+        # webkit powers the webkit-desktop + mobile-safari projects added
+        # below; chromium powers chromium-desktop + chrome-android +
+        # unauthenticated.
+        run: npx playwright install --with-deps chromium webkit
 
       # Boots a fully local, disposable stack (Postgres + GoTrue + PostgREST
       # + Storage, all in throwaway Docker containers this step starts and
@@ -263,8 +311,27 @@ jobs:
         working-directory: web
         run: npx playwright test --project=unauthenticated --project=chromium-desktop
 
+      # WebKit (desktop Safari) + Mobile Safari (iPhone) over the FUNCTIONAL
+      # journeys only - login, signup, onboarding, shell nav, connections,
+      # pairing, a11y, responsive layout (visual.spec.ts / pay-scan excluded
+      # in playwright.config.ts). Closes the audit's "Chromium desktop only"
+      # CI gap. Non-blocking for now (continue-on-error) while the core
+      # specs are hardened for real WebKit/iOS behavior differences; the
+      # report is still uploaded, and this is intended to become a required
+      # check. Do not remove without replacing the coverage.
+      - name: Run WebKit + Mobile Safari functional smoke (non-blocking)
+        id: webkit_smoke
+        continue-on-error: true
+        working-directory: web
+        run: npx playwright test --project=webkit-desktop --project=mobile-safari
+
+      - name: Flag WebKit/Mobile Safari smoke failure (non-blocking)
+        if: steps.webkit_smoke.outcome == 'failure'
+        run: |
+          echo "::warning title=WebKit/Mobile Safari smoke::Cross-browser functional smoke failed - see the uploaded Playwright report. Non-blocking for now."
+
       - name: Upload Playwright report on failure
-        if: failure()
+        if: failure() || steps.webkit_smoke.outcome == 'failure'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: playwright-report

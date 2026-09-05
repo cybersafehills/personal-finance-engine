@@ -3,7 +3,10 @@
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { EyeIcon, EyeOffIcon, LockIcon, MailIcon } from "../../components/auth/AuthIcon";
-import { MIN_PASSWORD_LENGTH } from "../../lib/registration";
+import {
+  MIN_PASSWORD_LENGTH,
+  PASSWORD_REQUIREMENT_HINT,
+} from "../../lib/registration";
 import { signUp } from "./actions";
 
 function passwordStrength(password: string): { label: string; level: 0 | 1 | 2 | 3 } {
@@ -117,8 +120,7 @@ export function SignUpForm({ next }: { next: string }) {
           : null}
 
         <span id="password-requirement" className="text-xs text-text-muted">
-          At least {MIN_PASSWORD_LENGTH}{" "}
-          characters. You can paste from a password manager.
+          {PASSWORD_REQUIREMENT_HINT} You can paste from a password manager.
         </span>
       </div>
 
