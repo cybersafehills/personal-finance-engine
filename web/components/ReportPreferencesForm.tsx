@@ -3,10 +3,16 @@
 import { useState, useTransition } from "react";
 import { saveReportPreferences } from "../app/settings/reports/actions";
 import { REPORT_TIMEZONE_OPTIONS } from "../lib/timezones";
+import { DEFAULT_ALERT_THRESHOLDS } from "../lib/report-math";
 import type { ReportPreferencesRow } from "../lib/queries";
 
 const inputClass =
   "min-h-11 rounded-control border border-border-strong bg-background px-3 py-2 text-sm text-text-primary";
+
+/** Parse a number input's string value; NaN for blank/invalid so the server rejects it. */
+function num(value: string): number {
+  return value.trim() === "" ? NaN : Number(value);
+}
 
 export function ReportPreferencesForm({
   preferences,
@@ -32,6 +38,36 @@ export function ReportPreferencesForm({
   const [includeAiAnalysis, setIncludeAiAnalysis] = useState(
     preferences?.include_ai_analysis ?? false,
   );
+
+  // Alert thresholds - seeded from the stored row, falling back to the
+  // system defaults. Kept as strings so the number inputs can be cleared
+  // while editing; parsed on submit.
+  const [largeTransaction, setLargeTransaction] = useState(
+    String(preferences?.alert_large_transaction_rwf ?? DEFAULT_ALERT_THRESHOLDS.largeTransactionRwf),
+  );
+  const [highDailySpend, setHighDailySpend] = useState(
+    String(preferences?.alert_high_daily_spend_rwf ?? DEFAULT_ALERT_THRESHOLDS.highDailySpendRwf),
+  );
+  const [elevatedFees, setElevatedFees] = useState(
+    String(preferences?.alert_elevated_fees_rwf ?? DEFAULT_ALERT_THRESHOLDS.elevatedFeesRwf),
+  );
+  const storedLowBalance = preferences?.alert_low_balance_rwf ?? null;
+  const [lowBalanceEnabled, setLowBalanceEnabled] = useState(
+    preferences ? storedLowBalance !== null : DEFAULT_ALERT_THRESHOLDS.lowBalanceRwf !== null,
+  );
+  const [lowBalance, setLowBalance] = useState(
+    String(storedLowBalance ?? DEFAULT_ALERT_THRESHOLDS.lowBalanceRwf ?? 10000),
+  );
+  const [negativeDays, setNegativeDays] = useState(
+    String(
+      preferences?.alert_sustained_negative_cashflow_days ??
+        DEFAULT_ALERT_THRESHOLDS.sustainedNegativeCashflowDays,
+    ),
+  );
+  const [uncategorizedPercent, setUncategorizedPercent] = useState(
+    String(preferences?.alert_uncategorized_percent ?? DEFAULT_ALERT_THRESHOLDS.uncategorizedPercentThreshold),
+  );
+
   const [isPending, startTransition] = useTransition();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -51,6 +87,14 @@ export function ReportPreferencesForm({
             emailEnabled,
             deliveryEmail,
             includeAiAnalysis,
+            alertThresholds: {
+              largeTransactionRwf: num(largeTransaction),
+              highDailySpendRwf: num(highDailySpend),
+              elevatedFeesRwf: num(elevatedFees),
+              lowBalanceRwf: lowBalanceEnabled ? num(lowBalance) : null,
+              sustainedNegativeCashflowDays: num(negativeDays),
+              uncategorizedPercentThreshold: num(uncategorizedPercent),
+            },
           });
           if (result.ok) {
             setSavedAt(Date.now());
@@ -122,6 +166,109 @@ export function ReportPreferencesForm({
           </span>
         </span>
       </label>
+
+      <fieldset className="flex flex-col gap-3 border-t border-border-subtle pt-4">
+        <legend className="text-sm font-medium text-text-primary">Alert thresholds</legend>
+        <p className="text-xs text-text-muted">
+          When a report is generated, these decide which watch-outs appear. Amounts are in RWF.
+          Leave them at the defaults unless a warning is firing too often or not often enough.
+        </p>
+
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-text-secondary">Large single transaction at or above</span>
+          <input
+            type="number"
+            inputMode="numeric"
+            min={1}
+            step={1000}
+            value={largeTransaction}
+            onChange={(event) => setLargeTransaction(event.target.value)}
+            className={`${inputClass} w-40`}
+          />
+        </label>
+
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-text-secondary">Total spent in a day at or above</span>
+          <input
+            type="number"
+            inputMode="numeric"
+            min={1}
+            step={1000}
+            value={highDailySpend}
+            onChange={(event) => setHighDailySpend(event.target.value)}
+            className={`${inputClass} w-40`}
+          />
+        </label>
+
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-text-secondary">Transaction fees in a day at or above</span>
+          <input
+            type="number"
+            inputMode="numeric"
+            min={1}
+            step={500}
+            value={elevatedFees}
+            onChange={(event) => setElevatedFees(event.target.value)}
+            className={`${inputClass} w-40`}
+          />
+        </label>
+
+        <div className="flex flex-col gap-1 text-sm">
+          <label className="flex items-start gap-3">
+            <input
+              type="checkbox"
+              checked={lowBalanceEnabled}
+              onChange={(event) => setLowBalanceEnabled(event.target.checked)}
+              className="mt-0.5 h-5 w-5 shrink-0 accent-accent"
+            />
+            <span className="font-medium text-text-secondary">
+              Warn when the closing balance drops to or below
+            </span>
+          </label>
+          <input
+            type="number"
+            inputMode="numeric"
+            min={0}
+            step={1000}
+            value={lowBalance}
+            disabled={!lowBalanceEnabled}
+            onChange={(event) => setLowBalance(event.target.value)}
+            className={`${inputClass} w-40 disabled:opacity-50`}
+          />
+        </div>
+
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-text-secondary">
+            Sustained negative cash flow after this many consecutive days
+          </span>
+          <input
+            type="number"
+            inputMode="numeric"
+            min={1}
+            max={30}
+            step={1}
+            value={negativeDays}
+            onChange={(event) => setNegativeDays(event.target.value)}
+            className={`${inputClass} w-24`}
+          />
+        </label>
+
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-text-secondary">
+            Too much uncategorized spending at or above this % of the day&apos;s transactions
+          </span>
+          <input
+            type="number"
+            inputMode="numeric"
+            min={1}
+            max={100}
+            step={1}
+            value={uncategorizedPercent}
+            onChange={(event) => setUncategorizedPercent(event.target.value)}
+            className={`${inputClass} w-24`}
+          />
+        </label>
+      </fieldset>
 
       <div className="border-t border-border-subtle pt-4">
         <label className="flex items-start gap-3 text-sm">

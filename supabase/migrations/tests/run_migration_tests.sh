@@ -2051,6 +2051,39 @@ else
   fail "Phase J RLS: User A could not create their own report preferences - policies are over-blocking"
 fi
 
+# Per-user alert thresholds (20261125000000_report_alert_thresholds.sql):
+# the row just created (no threshold columns supplied) must carry the
+# system defaults verbatim, so existing behavior is unchanged for anyone
+# who never touches them. These must match DEFAULT_ALERT_THRESHOLDS in
+# web/lib/report-math.ts.
+THRESHOLD_DEFAULTS="$(psql -d pfe_rls -t -A -c "select alert_large_transaction_rwf||','||alert_high_daily_spend_rwf||','||alert_elevated_fees_rwf||','||alert_low_balance_rwf||','||alert_sustained_negative_cashflow_days||','||alert_uncategorized_percent from public.report_preferences where workspace_id = '$WORKSPACE_A' and user_id = '$USER_A';")"
+if [ "$THRESHOLD_DEFAULTS" = "100000,200000,5000,10000,3,50" ]; then
+  pass "Phase J: a fresh report_preferences row gets the documented alert-threshold defaults"
+else
+  fail "Phase J: report_preferences alert-threshold defaults drifted ($THRESHOLD_DEFAULTS) - must match DEFAULT_ALERT_THRESHOLDS"
+fi
+
+# The owner can retune their own thresholds, and null low-balance (disable
+# the check) is allowed.
+as_user "$USER_A" "update public.report_preferences set alert_large_transaction_rwf = 250000, alert_low_balance_rwf = null where workspace_id = '$WORKSPACE_A' and user_id = '$USER_A';" >/dev/null
+THRESHOLD_UPDATED="$(psql -d pfe_rls -t -A -c "select alert_large_transaction_rwf||','||coalesce(alert_low_balance_rwf::text,'null') from public.report_preferences where workspace_id = '$WORKSPACE_A' and user_id = '$USER_A';")"
+if [ "$THRESHOLD_UPDATED" = "250000,null" ]; then
+  pass "Phase J: the owner can retune alert thresholds and disable the low-balance check (null)"
+else
+  fail "Phase J: alert-threshold owner update did not apply ($THRESHOLD_UPDATED)"
+fi
+
+# The CHECK constraint rejects out-of-range values.
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  update public.report_preferences set alert_uncategorized_percent = 150 where workspace_id = '$WORKSPACE_A' and user_id = '$USER_A';
+" >/dev/null 2>$ARTIFACT_DIR/pfe_rls_j_threshold_stderr.log; then
+  fail "Phase J: report_preferences accepted alert_uncategorized_percent = 150 - CHECK constraint missing/broken"
+else
+  pass "Phase J: report_preferences CHECK rejects an out-of-range alert threshold"
+fi
+rm -f $ARTIFACT_DIR/pfe_rls_j_threshold_stderr.log
+
 psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
   set role service_role;
   insert into public.report_runs (id, workspace_id, user_id, period_start, period_end, timezone, scheduled_for, status, report_payload)
