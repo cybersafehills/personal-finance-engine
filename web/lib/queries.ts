@@ -2879,14 +2879,33 @@ export type ReportRunSummary = {
 const REPORT_RUN_SUMMARY_COLUMNS =
   "id, report_type, period_start, period_end, timezone, status, generated_at, created_at";
 
-/** Most recent reports first, for the caller's own user_id (RLS: report_runs_select_own) - never filtered by workspace_id here, since a report belongs to its recipient, not broadly to every workspace member. */
-export async function getReportRuns(limit = 30): Promise<ReportRunSummary[]> {
+/**
+ * Most recent reports first, for the caller's own user_id (RLS:
+ * report_runs_select_own). By default NOT filtered by workspace_id - a
+ * report belongs to its recipient, not broadly to every workspace member,
+ * and a user can have report_preferences (and therefore report_runs) in
+ * more than one workspace they belong to. Pass `workspaceId` when the
+ * caller wants only that workspace's reports (e.g. the Daily Reports
+ * settings page, which is itself scoped to one workspace's preferences -
+ * mixing another workspace's reports in there would misleadingly suggest
+ * they belong to the one being configured).
+ */
+export async function getReportRuns(
+  limit = 30,
+  workspaceId?: string,
+): Promise<ReportRunSummary[]> {
   const supabase = await supabaseSession();
-  const { data, error } = await supabase
+  let query = supabase
     .from("report_runs")
     .select(REPORT_RUN_SUMMARY_COLUMNS)
     .order("period_start", { ascending: false })
     .limit(limit);
+
+  if (workspaceId) {
+    query = query.eq("workspace_id", workspaceId);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     console.error("getReportRuns failed:", error.message);

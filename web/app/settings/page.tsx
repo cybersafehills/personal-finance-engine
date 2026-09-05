@@ -52,16 +52,10 @@ const SETTINGS_LINKS = [
     Icon: DocumentIcon,
   },
   {
-    href: "/reports",
-    title: "Reports",
-    description: "View your generated daily financial reports.",
-    Icon: DocumentIcon,
-  },
-  {
     href: "/settings/reports",
     title: "Daily reports",
     description:
-      "Configure when your daily financial report is generated and emailed.",
+      "View your generated reports, and configure when the next one is generated and emailed.",
     Icon: DocumentIcon,
   },
   {
