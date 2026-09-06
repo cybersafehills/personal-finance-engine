@@ -1,6 +1,10 @@
 import type { Metadata, Viewport } from "next";
 import { cookies } from "next/headers";
-import { Geist } from "next/font/google";
+// `geist/font/sans` is `next/font/local` over the woff2 files bundled in
+// the `geist` npm package - no Google Fonts fetch, so `next build` works
+// fully offline (audit F13). Same typeface + same `--font-geist-sans`
+// variable as the old `next/font/google` import, so nothing visual moves.
+import { GeistSans } from "geist/font/sans";
 import { AppShell } from "../components/AppShell";
 import { BrandSplashScreen, SPLASH_CRITICAL_CSS } from "../components/brand/BrandSplashScreen";
 import { supabaseSession } from "../lib/supabase-session-server";
@@ -21,11 +25,6 @@ import {
   resolveExperienceMode,
 } from "../lib/experience-mode/gate";
 import "./globals.css";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
 
 // One <link rel="apple-touch-startup-image"> per iPhone family. Without
 // these, an installed iOS PWA shows a solid BLACK screen for the whole
@@ -141,7 +140,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
     isBusinessSurfacesEnabled(activeWorkspaceId);
 
   return (
-    <html lang="en" className={`${geistSans.variable} h-full antialiased`}>
+    <html lang="en" className={`${GeistSans.variable} h-full antialiased`}>
       <body className="min-h-full bg-background font-sans text-text-primary">
         {/* Critical opening-screen CSS, hoisted into <head> by React so it
             applies on the first frame - it must not wait for the app's
