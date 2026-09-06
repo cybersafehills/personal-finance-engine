@@ -613,3 +613,65 @@ web/app/auth/reset-password/confirm/page.tsx        (requirement hint — F3)
 web/app/api/cron/generate-reports/route.ts          (withLoggedRun reference — F10)
 web/playwright.config.ts                            (exclude visual from cross-browser projects)
 ```
+
+---
+
+## 15. Follow-on — Account detail object (gap G3, branch `feat/account-detail-tabs`)
+
+Off `main`. Master prompt §16/§24. `/settings/accounts/[id]` — one server page
+with `?tab=` sections (Overview / Transactions / Connections / Rules / Access /
+Settings), reached by clicking an account name on `/settings/accounts`.
+
+| Change | File |
+| --- | --- |
+| `getAccountDetail(id)` (composes account + linked financial source + its Space links + bound `ingestion_connections` + source-scoped rules) and `getAccountTransactions(id, n)`; `AccountRow` gains `financial_source_id` + `created_at` | `web/lib/queries.ts` |
+| The tabbed detail page | `web/app/settings/accounts/[id]/page.tsx` |
+| Settings tab controls (rename / set primary / archive) reusing the existing actions | `web/components/AccountSettingsControls.tsx` |
+| Account name on the list links into the detail object (list keeps its inline controls) | `web/components/AccountItem.tsx` |
+| e2e | `web/e2e/account-detail.spec.ts` |
+| Doc | `docs/account-detail.md` |
+
+Read-only aggregation over existing RLS-scoped reads — no parallel management
+path, no migration, no new RPC, no routes moved. deno `web/lib` 622/0, `next
+lint` 0 errors, `next build` ✓.
+
+Still open: G6 (F12 deletion/export/retention — own workstream, needs a
+retention-window product decision), G7-G12.
+
+---
+
+## 13. Follow-on — Onboarding funnel analytics + setup review (gaps G4, G5)
+
+Branch `feat/onboarding-analytics-review`, off `main` (Release 2-6 stack now
+merged: `#128`/`#122`/`#127`). Closes G4 + G5 from
+`docs/oneledger-onboarding-architecture-audit.md` §2.
+
+**G4 — analytics** (`docs/onboarding-analytics.md`):
+- `web/lib/onboarding/analytics.ts` — no-sink, redact-first module mirroring
+  `lib/spaces/analytics.ts`. `OnboardingEventName` (10), `sanitizeOnboarding
+  EventProps` (allow-lists the intent enum + milestone keys, drops ids /
+  names / amounts / opaque strings), `trackOnboardingEvent` (never throws),
+  and the pure `journeyCompletionEvents(prev, next)` diff for the derived
+  milestones. `analytics_test.ts` 8 deno tests.
+- Wired at the once-only transitions: `onboarding_started` /
+  `profile_completed` / `preferences_completed` / `intent_selected` /
+  `first_review_completed` / `first_insight_seen` in
+  `app/onboarding/actions.ts`; `onboarding_dismissed` in
+  `app/get-started/actions.ts`; `setup_review_viewed` on the review render.
+  `onboarding_step_completed` / `onboarding_completed` are defined but not
+  auto-emitted (need a stateful caller — see the doc).
+
+**G5 — setup review screen** (master prompt §19):
+- `web/app/onboarding/review/page.tsx` — "Your OneLedger setup": every
+  milestone as ready / "Set up later", no shaming, `Go to Home` primary +
+  `Finish setup` when incomplete. Reads `getOnboardingJourney()`, never
+  writes. Flag-gated (`ONBOARDING_JOURNEY_ENABLED`) → redirects to
+  `/get-started` when off, like `/onboarding/intent`.
+- `/get-started` (journey branch) gains a "See your setup summary" link.
+- `web/e2e/onboarding-review.spec.ts` — route-resolves-coherently smoke.
+
+No migration, no routes moved. deno `web/lib` 630/0, `next lint` 0 errors,
+`next build` ✓.
+
+Still open from the audit: G2 (entitlements/Billing behaviour — next), G3
+(account-detail tabs), G6 (F12 deletion/export), G7-G12.
