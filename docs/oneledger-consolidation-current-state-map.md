@@ -616,6 +616,30 @@ web/playwright.config.ts                            (exclude visual from cross-b
 
 ---
 
+## 15. Follow-on — Account detail object (gap G3, branch `feat/account-detail-tabs`)
+
+Off `main`. Master prompt §16/§24. `/settings/accounts/[id]` — one server page
+with `?tab=` sections (Overview / Transactions / Connections / Rules / Access /
+Settings), reached by clicking an account name on `/settings/accounts`.
+
+| Change | File |
+| --- | --- |
+| `getAccountDetail(id)` (composes account + linked financial source + its Space links + bound `ingestion_connections` + source-scoped rules) and `getAccountTransactions(id, n)`; `AccountRow` gains `financial_source_id` + `created_at` | `web/lib/queries.ts` |
+| The tabbed detail page | `web/app/settings/accounts/[id]/page.tsx` |
+| Settings tab controls (rename / set primary / archive) reusing the existing actions | `web/components/AccountSettingsControls.tsx` |
+| Account name on the list links into the detail object (list keeps its inline controls) | `web/components/AccountItem.tsx` |
+| e2e | `web/e2e/account-detail.spec.ts` |
+| Doc | `docs/account-detail.md` |
+
+Read-only aggregation over existing RLS-scoped reads — no parallel management
+path, no migration, no new RPC, no routes moved. deno `web/lib` 622/0, `next
+lint` 0 errors, `next build` ✓.
+
+Still open: G6 (F12 deletion/export/retention — own workstream, needs a
+retention-window product decision), G7-G12.
+
+---
+
 ## 13. Follow-on — Onboarding funnel analytics + setup review (gaps G4, G5)
 
 Branch `feat/onboarding-analytics-review`, off `main` (Release 2-6 stack now

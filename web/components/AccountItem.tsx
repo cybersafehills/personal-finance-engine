@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useTransition } from "react";
 import {
   archiveAccount,
@@ -73,9 +74,12 @@ export function AccountItem({ account }: { account: AccountRow }) {
             </form>
           ) : (
             <div className="flex flex-wrap items-center gap-2">
-              <span className="truncate text-sm font-medium text-text-primary">
+              <Link
+                href={`/settings/accounts/${account.id}`}
+                className="truncate text-sm font-medium text-text-primary hover:underline"
+              >
                 {account.name}
-              </span>
+              </Link>
               {account.is_primary && <Badge variant="accent">Primary</Badge>}
               {isArchived && <Badge variant="attention">Archived</Badge>}
             </div>
