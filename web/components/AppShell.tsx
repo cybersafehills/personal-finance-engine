@@ -106,8 +106,8 @@ export function AppShell({
   // The fixed financial-journey nav, filtered by the active experience
   // mode (personal/household/business all keep the four core destinations;
   // the filter is future-proofing + keeps navigation.ts the one source of
-  // truth). Home/Activity/Inbox/Plan; Reports/Categories/Settings live in
-  // the grouped More sheet.
+  // truth). Home/Transactions/Inbox/Plan; Reports/Categories/Settings live
+  // in the grouped More sheet.
   const primaryNav = PRIMARY_NAV.filter((item) =>
     item.surface === null ||
     isSurfaceVisible(experienceMode, item.surface, {
@@ -214,7 +214,7 @@ export function AppShell({
         {children}
       </main>
 
-      {/* Phone/tablet: a FIXED five-slot bottom bar - Home, Activity, the
+      {/* Phone/tablet: a FIXED five-slot bottom bar - Home, Transactions, the
           elevated Pay action dead-centre, Plan, and More (master prompt
           section 19). Deliberately NOT the same list as the desktop header
           nav: the phone bar's slots have fixed roles, Inbox is reached

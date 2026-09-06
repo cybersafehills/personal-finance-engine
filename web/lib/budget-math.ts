@@ -651,6 +651,11 @@ export function aggregateOutflowsByAllocation(
       continue;
     }
 
+    // Effective-dated per transaction, not per budget period, so a later
+    // re-map never rewrites a closed period. A category's *first-ever*
+    // mapping is stored with an epoch effective_from by the write path
+    // (web/app/budgets/categories/actions.ts) precisely so it covers
+    // spend already recorded - do not "fix" this to ignore the dates.
     const mapping = mappings.find((m) =>
       m.category === row.category &&
       m.effectiveFrom <= row.occurredAtDateKey &&

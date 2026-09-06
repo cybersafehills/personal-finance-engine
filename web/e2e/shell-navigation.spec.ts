@@ -2,18 +2,18 @@ import { test, expect } from "./fixtures";
 
 // The unified shell after the information-architecture re-cut (assessment
 // section 19 / ADR 0011): the primary nav is the FIXED financial journey -
-// Home, Activity, Inbox, Plan - plus a "More" affordance. No per-user
+// Home, Transactions, Inbox, Plan - plus a "More" affordance. No per-user
 // reordering. On desktop the four destinations + a More button live in
-// <header>; on phone the bottom bar is Home / Activity / [Pay] / Plan /
+// <header>; on phone the bottom bar is Home / Transactions / [Pay] / Plan /
 // More, with Inbox reached from the header icon. Categories, Reports,
 // Settings and everything else live in the grouped More sheet.
 
-const HEADER_DESTINATIONS = ["Home", "Activity", "Inbox", "Plan"];
+const HEADER_DESTINATIONS = ["Home", "Transactions", "Inbox", "Plan"];
 
 const headerNav = (page: import("@playwright/test").Page) =>
   page.locator("header").getByRole("navigation", { name: "Primary" });
 
-test("the header primary nav is the fixed journey (Home, Activity, Inbox, Plan) + More, Reports absent", async ({
+test("the header primary nav is the fixed journey (Home, Transactions, Inbox, Plan) + More, Reports absent", async ({
   page,
 }) => {
   await page.goto("/");
@@ -42,13 +42,13 @@ test("the header primary nav is the fixed journey (Home, Activity, Inbox, Plan) 
   ).toHaveCount(0);
 });
 
-test("the active destination is marked aria-current (Activity = /transactions)", async ({
+test("the active destination is marked aria-current (Transactions = /transactions)", async ({
   page,
 }) => {
   await page.goto("/transactions");
 
   await expect(
-    headerNav(page).getByRole("link", { name: "Activity" }),
+    headerNav(page).getByRole("link", { name: "Transactions" }),
   ).toHaveAttribute("aria-current", "page");
   await expect(
     headerNav(page).getByRole("link", { name: "Home" }),
@@ -75,12 +75,12 @@ test.describe("phone bottom bar", () => {
   const bottomBar = (page: import("@playwright/test").Page) =>
     page.locator('nav[aria-label="Primary"].fixed');
 
-  test("is a fixed five: Home, Activity, [Pay], Plan, More", async ({ page }) => {
+  test("is a fixed five: Home, Transactions, [Pay], Plan, More", async ({ page }) => {
     await page.goto("/");
     const bar = bottomBar(page);
 
     await expect(bar.getByRole("link", { name: "Home" })).toBeVisible();
-    await expect(bar.getByRole("link", { name: "Activity" })).toBeVisible();
+    await expect(bar.getByRole("link", { name: "Transactions" })).toBeVisible();
     await expect(
       bar.getByRole("button", { name: "Pay", exact: true }),
     ).toBeVisible();

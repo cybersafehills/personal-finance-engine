@@ -1237,7 +1237,49 @@ export async function getCategoryMappings(): Promise<CategoryMappingRow[]> {
       transactionCount: count,
       totalRwf: total,
     }))
-    .sort((a, b) => b.totalRwf - a.totalRwf);
+    // Unmapped categories float to the top (they need the user's
+    // action); within each group, largest spend first.
+    .sort((a, b) => {
+      const aUnmapped = a.allocationType === null ? 0 : 1;
+      const bUnmapped = b.allocationType === null ? 0 : 1;
+      if (aUnmapped !== bUnmapped) return aUnmapped - bUnmapped;
+      return b.totalRwf - a.totalRwf;
+    });
+}
+
+/**
+ * Settled outgoing spend that carries no category at all - it can't be
+ * mapped to an allocation until it's categorized (in the review queue).
+ * Surfaced as a single summary row on the category-mappings screen so
+ * both kinds of "not counted toward budget" are visible in one place.
+ * Matches getBudgetActuals' filters (settled, out, not a merged dupe).
+ */
+export async function getUncategorizedOutflowSummary(): Promise<{
+  count: number;
+  totalRwf: number;
+}> {
+  const supabase = await supabaseSession();
+
+  const { data, error } = await supabase
+    .from("transactions")
+    .select("principal_effect_rwf, fee_effect_rwf")
+    .is("category", null)
+    .eq("direction", "out")
+    .eq("settlement_state", "settled")
+    .neq("dedupe_state", "merged");
+
+  if (error) {
+    console.error("getUncategorizedOutflowSummary failed:", error.message);
+    return { count: 0, totalRwf: 0 };
+  }
+
+  const rows = data ?? [];
+  const totalRwf = rows.reduce(
+    (sum, row) =>
+      sum + Math.abs(Number(row.principal_effect_rwf) + Number(row.fee_effect_rwf)),
+    0,
+  );
+  return { count: rows.length, totalRwf };
 }
 
 export type { AllocationStatus };

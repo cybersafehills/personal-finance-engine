@@ -15,6 +15,16 @@ function todayDateKey(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+// The first time a category is ever mapped there is no prior
+// classification to preserve, so the mapping is backdated to cover every
+// transaction already recorded under that category - "this category has
+// always meant X". Only a later *re-map* (history already exists) is
+// effective-dated from the change date, keeping closed periods
+// reproducible. aggregateOutflowsByAllocation() in lib/budget-math.ts
+// relies on this: it matches on effective_from <= occurred_at and must
+// not be "fixed" to ignore dates.
+const EPOCH_DATE_KEY = "1970-01-01";
+
 /**
  * Sets (or changes) a category's mapping to an allocation type.
  * Effective-dated, never overwritten in place: any existing open-ended
@@ -59,6 +69,21 @@ export async function setCategoryMapping(
     return { ok: true };
   }
 
+  // Has this category ever been mapped before (open OR closed row)? If
+  // not, this is a first mapping and backdates to the epoch so it covers
+  // spend already recorded; otherwise it takes effect from today.
+  const { count: priorMappingCount, error: priorError } = await supabase
+    .from("budget_category_mappings")
+    .select("id", { count: "exact", head: true })
+    .eq("workspace_id", workspaceId)
+    .eq("category", trimmedCategory);
+
+  if (priorError) {
+    return { ok: false, error: "Could not check the existing mapping." };
+  }
+
+  const effectiveFrom = (priorMappingCount ?? 0) > 0 ? today : EPOCH_DATE_KEY;
+
   if (existing) {
     const { error: closeError } = await supabase
       .from("budget_category_mappings")
@@ -75,7 +100,7 @@ export async function setCategoryMapping(
       workspace_id: workspaceId,
       category: trimmedCategory,
       allocation_type: allocationType,
-      effective_from: today,
+      effective_from: effectiveFrom,
     });
 
   if (insertError) {
@@ -84,6 +109,8 @@ export async function setCategoryMapping(
 
   revalidatePath("/budgets/categories");
   revalidatePath("/budgets");
+  revalidatePath("/reports");
+  revalidatePath("/");
   return { ok: true };
 }
 
@@ -110,5 +137,7 @@ export async function removeCategoryMapping(
 
   revalidatePath("/budgets/categories");
   revalidatePath("/budgets");
+  revalidatePath("/reports");
+  revalidatePath("/");
   return { ok: true };
 }

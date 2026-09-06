@@ -33,10 +33,25 @@ export function CategoryMappingItem({ row }: { row: CategoryMappingRow }) {
     });
   }
 
+  const unmapped = row.allocationType === null;
+
   return (
-    <div className="flex flex-col gap-2 rounded-card border border-border-subtle bg-surface p-4">
+    <div
+      className={`flex flex-col gap-2 rounded-card border p-4 ${
+        unmapped
+          ? "border-needs-map-border bg-needs-map-bg"
+          : "border-border-subtle bg-surface"
+      }`}
+    >
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-sm font-medium text-text-primary">{row.category}</span>
+        <span className="flex items-center gap-2 text-sm font-medium text-text-primary">
+          {row.category}
+          {unmapped && (
+            <span className="rounded-full bg-attention-bg px-2 py-0.5 text-xs font-medium text-attention">
+              Needs allocation
+            </span>
+          )}
+        </span>
         <span className="text-xs text-text-muted">
           {row.transactionCount} transaction{row.transactionCount === 1 ? "" : "s"} · {formatRwf(row.totalRwf)}
         </span>
