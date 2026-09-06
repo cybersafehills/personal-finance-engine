@@ -6,7 +6,7 @@ import { test, expect } from "./fixtures";
 // the old reorder suite - it asserts the feature is gone and the primary
 // nav is stable.
 
-const FIXED_JOURNEY = ["Home", "Activity", "Inbox", "Plan"];
+const FIXED_JOURNEY = ["Home", "Transactions", "Inbox", "Plan"];
 
 async function headerNavLabels(page: import("@playwright/test").Page) {
   return page
@@ -16,7 +16,7 @@ async function headerNavLabels(page: import("@playwright/test").Page) {
     .allTextContents();
 }
 
-test("the primary nav is a fixed journey: Home, Activity, Inbox, Plan", async ({
+test("the primary nav is a fixed journey: Home, Transactions, Inbox, Plan", async ({
   page,
 }) => {
   await page.goto("/");

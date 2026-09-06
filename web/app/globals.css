@@ -25,6 +25,11 @@
   --money-negative: var(--text-primary);
   --attention: #92620a;
   --attention-bg: #fdf3d9;
+  /* A very light rose wash for list rows that still need the user's
+     action (an unmapped category, uncategorized spend). Deliberately
+     restrained - this is a "not done yet" tint, not an error state. */
+  --needs-map-bg: #fdf1f0;
+  --needs-map-border: #ecd0cd;
 
   /* One restrained accent for navigation/focus/primary actions. */
   --accent: #33509e;
@@ -60,6 +65,8 @@
   --color-money-negative: var(--money-negative);
   --color-attention: var(--attention);
   --color-attention-bg: var(--attention-bg);
+  --color-needs-map-bg: var(--needs-map-bg);
+  --color-needs-map-border: var(--needs-map-border);
 
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);

@@ -97,6 +97,10 @@ export async function correctCategory(
   revalidatePath("/transactions");
   revalidatePath(`/transactions/${transactionId}`);
   revalidatePath("/categories");
+  // A newly categorized transaction changes what the category-mappings
+  // screen and the budget aggregates show.
+  revalidatePath("/budgets/categories");
+  revalidatePath("/budgets");
 
   return { ok: true };
 }

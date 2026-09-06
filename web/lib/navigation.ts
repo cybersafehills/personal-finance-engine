@@ -4,8 +4,8 @@
 // "More" panel derive from here so mobile and desktop can never drift
 // into two competing definitions.
 //
-// The primary nav is a FIXED journey - Home, Activity, Inbox, Plan, More -
-// not a user-orderable list. (The earlier per-user `nav_order` preference
+// The primary nav is a FIXED journey - Home, Transactions, Inbox, Plan,
+// More - not a user-orderable list. (The earlier per-user `nav_order` preference
 // and its "Arrange navigation" screen are retired; the ui_preferences
 // column stays in place, unused, to be dropped in a later deliberate
 // migration.) Pay stays an elevated action, rendered specially, not a
@@ -23,19 +23,20 @@ export type PrimaryNavItem = {
   surface: SurfaceKey | null;
 };
 
-// Home is permanently first. "Activity" is the customer-facing umbrella
-// over the transaction ledger - existing /transactions deep links stay
-// valid (assessment section 43). "Plan" is the mental model over budgets +
-// goals + recurring commitments (they keep their own routes under
-// /budgets).
+// Home is permanently first. "Transactions" is the customer-facing label
+// for the transaction ledger - existing /transactions deep links stay
+// valid (assessment section 43). The `activity` key / `activity` surface
+// are unchanged internal identifiers. "Plan" is the mental model over
+// budgets + goals + recurring commitments (they keep their own routes
+// under /budgets).
 export const PRIMARY_NAV: readonly PrimaryNavItem[] = [
   { key: "home", href: "/", label: "Home", surface: null },
-  { key: "activity", href: "/transactions", label: "Activity", surface: "activity" },
+  { key: "activity", href: "/transactions", label: "Transactions", surface: "activity" },
   { key: "inbox", href: "/inbox", label: "Inbox", surface: "inbox" },
   { key: "plan", href: "/budgets", label: "Plan", surface: "plan" },
 ] as const;
 
-// The phone bottom bar: Home, Activity, the elevated Pay action dead
+// The phone bottom bar: Home, Transactions, the elevated Pay action dead
 // centre (rendered by AppShell only when Pay is enabled), Plan, More.
 // Inbox is reached from the header icon at phone width (the 5 slots are
 // spoken for). Fixed roles - never driven by a preference.
