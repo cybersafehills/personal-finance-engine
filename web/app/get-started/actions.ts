@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { supabaseSession } from "../../lib/supabase-session-server";
 import { getActiveWorkspaceId } from "../../lib/queries";
 import { LEGACY_DEFAULT_NAV_ORDER } from "../../lib/navigation";
+import { trackOnboardingEvent } from "../../lib/onboarding/analytics";
 
 export type OnboardingActionResult = { ok: true } | { ok: false; error: string };
 
@@ -65,6 +66,7 @@ export async function dismissOnboardingChecklist(): Promise<
     return { ok: false, error: "Could not dismiss the checklist." };
   }
 
+  trackOnboardingEvent("onboarding_dismissed");
   revalidatePath("/", "layout");
   revalidatePath("/get-started");
   return { ok: true };
