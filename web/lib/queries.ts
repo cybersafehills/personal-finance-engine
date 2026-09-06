@@ -803,13 +803,18 @@ export type AccountRow = {
   is_active: boolean;
   is_primary: boolean;
   archived_at: string | null;
+  financial_source_id: string | null;
+  created_at: string;
 };
+
+const ACCOUNT_COLUMNS =
+  "id, name, provider, currency, is_active, is_primary, archived_at, financial_source_id, created_at";
 
 export async function getAccounts(): Promise<AccountRow[]> {
   const supabase = await supabaseSession();
   const { data, error } = await supabase
     .from("accounts")
-    .select("id, name, provider, currency, is_active, is_primary, archived_at")
+    .select(ACCOUNT_COLUMNS)
     .order("is_primary", { ascending: false })
     .order("created_at", { ascending: true });
 
@@ -1885,6 +1890,162 @@ export async function getCategorizationPolicyById(
   }
 
   return data;
+}
+
+/**
+ * One account as a first-class object (master prompt section 16/24): the
+ * account row plus its linked financial source (masked identifier + Space
+ * visibility links), the ingestion connections bound to it, and the
+ * categorization rules scoped specifically to it. RLS-scoped; read-only.
+ * Returns null when the id is not an account the caller can see.
+ */
+export type AccountDetail = {
+  account: AccountRow;
+  source:
+    | {
+      id: string;
+      displayName: string;
+      maskedIdentifier: string | null;
+      provider: string;
+      visibilityMode: SourceVisibilityMode;
+      status: "active" | "paused" | "archived";
+      links: SourceSpaceLink[];
+    }
+    | null;
+  connections: {
+    id: string;
+    label: string;
+    provider: string;
+    status: "active" | "paused" | "revoked";
+    lastUsedAt: string | null;
+    credentialPrefix: string;
+  }[];
+  rules: CategorizationPolicyRow[];
+};
+
+export async function getAccountDetail(
+  accountId: string,
+): Promise<AccountDetail | null> {
+  const supabase = await supabaseSession();
+
+  const { data: accountData, error: accountError } = await supabase
+    .from("accounts")
+    .select(ACCOUNT_COLUMNS)
+    .eq("id", accountId)
+    .maybeSingle();
+
+  if (accountError) {
+    console.error("getAccountDetail account read failed:", accountError.message);
+    return null;
+  }
+  if (!accountData) return null;
+  const account = accountData as AccountRow;
+  const sourceId = account.financial_source_id;
+
+  const [sourceRes, connRes, policyRes] = await Promise.all([
+    sourceId
+      ? supabase
+        .from("financial_sources")
+        .select(
+          "id, display_name, provider, masked_identifier, visibility_mode, status, source_space_links(workspace_id, visibility_mode, status, is_default_target, workspaces(name))",
+        )
+        .eq("id", sourceId)
+        .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    supabase
+      .from("ingestion_connections")
+      .select(
+        "id, label, provider, status, credential_prefix, last_used_at, account_id",
+      )
+      .eq("account_id", accountId)
+      .order("created_at", { ascending: true }),
+    sourceId
+      ? supabase
+        .from("categorization_policies")
+        .select(CATEGORIZATION_POLICY_COLUMNS)
+        .eq("scope_type", "source")
+        .eq("scope_source_id", sourceId)
+        .order("priority", { ascending: true })
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  type RawLink = {
+    workspace_id: string;
+    visibility_mode: "share_transactions" | "share_account";
+    status: "active" | "paused" | "revoked";
+    is_default_target: boolean;
+    workspaces: { name: string } | null;
+  };
+  const rawSource = sourceRes.data as
+    | {
+      id: string;
+      display_name: string;
+      provider: string;
+      masked_identifier: string | null;
+      visibility_mode: SourceVisibilityMode;
+      status: "active" | "paused" | "archived";
+      source_space_links: RawLink[] | null;
+    }
+    | null;
+
+  return {
+    account,
+    source: rawSource
+      ? {
+        id: rawSource.id,
+        displayName: rawSource.display_name,
+        maskedIdentifier: rawSource.masked_identifier ?? null,
+        provider: rawSource.provider,
+        visibilityMode: rawSource.visibility_mode,
+        status: rawSource.status,
+        links: (rawSource.source_space_links ?? [])
+          .filter((l) => l.status !== "revoked")
+          .map((l) => ({
+            workspaceId: l.workspace_id,
+            workspaceName: l.workspaces?.name ?? null,
+            visibilityMode: l.visibility_mode,
+            status: l.status,
+            isDefaultTarget: l.is_default_target,
+          })),
+      }
+      : null,
+    connections: ((connRes.data ?? []) as Array<{
+      id: string;
+      label: string;
+      provider: string;
+      status: "active" | "paused" | "revoked";
+      credential_prefix: string;
+      last_used_at: string | null;
+    }>).map((c) => ({
+      id: c.id,
+      label: c.label,
+      provider: c.provider,
+      status: c.status,
+      lastUsedAt: c.last_used_at,
+      credentialPrefix: c.credential_prefix,
+    })),
+    rules: (policyRes.data ?? []) as CategorizationPolicyRow[],
+  };
+}
+
+export async function getAccountTransactions(
+  accountId: string,
+  limit = 20,
+): Promise<TransactionRow[]> {
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("transactions")
+    .select(TRANSACTION_COLUMNS)
+    .eq("account_id", accountId)
+    .neq("dedupe_state", "merged")
+    .order("occurred_at", { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    console.error("getAccountTransactions failed:", error.message);
+    return [];
+  }
+  return data ?? [];
 }
 
 export type LearnedPolicySuggestionSample = {
