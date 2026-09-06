@@ -106,9 +106,13 @@ export async function correctCategory(
 }
 
 // ===========================================================================
-// Space category vocabulary (Phase T PR4). Thin wrappers over the
-// capability-gated, audited RPCs in
-// supabase/migrations/20260920000000_phase_t_workspace_categories.sql.
+// Workspace category vocabulary. Thin wrappers over the audited RPCs in
+// supabase/migrations/20260920000000_phase_t_workspace_categories.sql and
+// 20261206000000_workspace_category_owner_management.sql (which relaxed
+// the gate to any workspace owner and added rename_workspace_category).
+// The vocabulary feeds every category picker (correction form, manual
+// entry, review queue, rule builder) and the budget category-mappings
+// screen, so a change here revalidates all of them.
 // ===========================================================================
 
 export type SpaceCategoryActionResult =
@@ -124,6 +128,16 @@ function slugifyCategoryKey(label: string): string {
     .slice(0, 49);
 }
 
+function revalidateCategorySurfaces(): void {
+  revalidatePath("/categories");
+  revalidatePath("/categories/rules");
+  revalidatePath("/budgets/categories");
+  revalidatePath("/budgets");
+  revalidatePath("/transactions");
+  revalidatePath("/transactions/new");
+  revalidatePath("/transactions/review");
+}
+
 export async function addSpaceCategory(
   label: string,
   parentKey: string | null,
@@ -137,7 +151,7 @@ export async function addSpaceCategory(
 
   const supabase = await supabaseSession();
   const workspaceId = await getActiveWorkspaceId();
-  if (!workspaceId) return { ok: false, error: "Could not resolve your Space." };
+  if (!workspaceId) return { ok: false, error: "Could not resolve your workspace." };
 
   const { error } = await supabase.rpc("upsert_workspace_category", {
     p_workspace_id: workspaceId,
@@ -155,7 +169,45 @@ export async function addSpaceCategory(
     };
   }
 
-  revalidatePath("/categories");
+  revalidateCategorySurfaces();
+  return { ok: true };
+}
+
+/**
+ * Relabels an existing category (key stays put) and re-parents it. The
+ * rename_workspace_category RPC cascades the new label onto every
+ * transaction, rule and budget mapping in the workspace that used the old
+ * one, so historical data stays consistent.
+ */
+export async function editSpaceCategory(
+  key: string,
+  label: string,
+  parentKey: string | null,
+): Promise<SpaceCategoryActionResult> {
+  const trimmed = label.trim();
+  if (!trimmed) return { ok: false, error: "Give the category a name." };
+
+  const supabase = await supabaseSession();
+  const workspaceId = await getActiveWorkspaceId();
+  if (!workspaceId) return { ok: false, error: "Could not resolve your workspace." };
+
+  const { error } = await supabase.rpc("rename_workspace_category", {
+    p_workspace_id: workspaceId,
+    p_key: key,
+    p_new_label: trimmed,
+    p_new_parent_key: parentKey,
+  });
+  if (error) {
+    return {
+      ok: false,
+      error:
+        error.message.length > 0 && error.message.length < 200
+          ? error.message
+          : "Could not rename the category.",
+    };
+  }
+
+  revalidateCategorySurfaces();
   return { ok: true };
 }
 
@@ -165,7 +217,7 @@ export async function setSpaceCategoryArchived(
 ): Promise<SpaceCategoryActionResult> {
   const supabase = await supabaseSession();
   const workspaceId = await getActiveWorkspaceId();
-  if (!workspaceId) return { ok: false, error: "Could not resolve your Space." };
+  if (!workspaceId) return { ok: false, error: "Could not resolve your workspace." };
 
   const { error } = await supabase.rpc("set_workspace_category_archived", {
     p_workspace_id: workspaceId,
@@ -182,6 +234,6 @@ export async function setSpaceCategoryArchived(
     };
   }
 
-  revalidatePath("/categories");
+  revalidateCategorySurfaces();
   return { ok: true };
 }

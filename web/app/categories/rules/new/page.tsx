@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { PageHeader } from "../../../../components/PageHeader";
 import { PolicyForm } from "../../../../components/PolicyForm";
-import { getMyFinancialSources } from "../../../../lib/queries";
+import { getCategorySuggestions, getMyFinancialSources } from "../../../../lib/queries";
 import { financialSourceOptions } from "../../../../lib/financial-source-options";
 import { findPolicyTemplate, type PolicyTemplate } from "../../../../lib/policy-templates";
 
@@ -10,7 +10,11 @@ export default async function NewCategorizationRulePage({
 }: PageProps<"/categories/rules/new">) {
   const params = await searchParams;
   const templateSlug = typeof params.template === "string" ? params.template : undefined;
-  const sources = financialSourceOptions(await getMyFinancialSources());
+  const [sourcesRaw, categorySuggestions] = await Promise.all([
+    getMyFinancialSources(),
+    getCategorySuggestions(),
+  ]);
+  const sources = financialSourceOptions(sourcesRaw);
 
   // "Edit before accepting" from a learned suggestion (LearnedSuggestionItem)
   // links here with ?template=learned&name=...&category=...&pattern=... -
@@ -45,7 +49,12 @@ export default async function NewCategorizationRulePage({
           </Link>
         }
       />
-      <PolicyForm mode="create" template={template} sources={sources} />
+      <PolicyForm
+        mode="create"
+        template={template}
+        sources={sources}
+        categorySuggestions={categorySuggestions}
+      />
     </div>
   );
 }

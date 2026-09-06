@@ -23,10 +23,12 @@ export function ReviewQueueItem({
   transaction,
   selected,
   onToggleSelect,
+  categorySuggestions = [],
 }: {
   transaction: TransactionRow;
   selected: boolean;
   onToggleSelect: (id: string) => void;
+  categorySuggestions?: string[];
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -157,8 +159,20 @@ export function ReviewQueueItem({
             onChange={(e) => setCategory(e.target.value)}
             placeholder="Category"
             required
+            list={
+              categorySuggestions.length > 0
+                ? `review-category-suggestions-${transaction.id}`
+                : undefined
+            }
             className="min-h-9 rounded-control border border-border-strong bg-background px-2 text-xs text-text-primary"
           />
+          {categorySuggestions.length > 0 && (
+            <datalist id={`review-category-suggestions-${transaction.id}`}>
+              {categorySuggestions.map((name) => (
+                <option key={name} value={name} />
+              ))}
+            </datalist>
+          )}
           <input
             type="text"
             value={subcategory}

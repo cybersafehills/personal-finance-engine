@@ -24,13 +24,15 @@ const INPUT_CLASS =
   "min-h-11 rounded-control border border-border-strong bg-background px-3 py-2 text-sm text-text-primary";
 
 export function PolicyForm(
-  { mode, policy, template, sources = [] }: {
+  { mode, policy, template, sources = [], categorySuggestions = [] }: {
     mode: "create" | "edit";
     policy?: CategorizationPolicyRow;
     /** Pre-fills defaults on a fresh create form; ignored in edit mode. Nothing is saved until the user submits. */
     template?: PolicyTemplate;
     /** The caller's financial sources, for the "applies to one account" option. */
     sources?: Array<{ id: string; label: string }>;
+    /** Workspace category vocabulary + names already seen on transactions. */
+    categorySuggestions?: string[];
   },
 ) {
   const router = useRouter();
@@ -125,8 +127,16 @@ export function PolicyForm(
             onChange={(e) => setCategory(e.target.value)}
             required
             placeholder="e.g. Transport"
+            list={categorySuggestions.length > 0 ? "policy-category-suggestions" : undefined}
             className={INPUT_CLASS}
           />
+          {categorySuggestions.length > 0 && (
+            <datalist id="policy-category-suggestions">
+              {categorySuggestions.map((name) => (
+                <option key={name} value={name} />
+              ))}
+            </datalist>
+          )}
         </label>
         <label className="flex flex-col gap-1 text-sm">
           <span className="font-medium text-text-secondary">Subcategory (optional)</span>
