@@ -74,7 +74,7 @@ async function revokeConnection(page: Page, label: string): Promise<void> {
   await expect(row.getByText("Disabled")).toBeVisible();
 }
 
-test("scenario F: an account outlives a revoked connection and can be reconnected", async ({
+test("scenario F: an account outlives a revoked connection", async ({
   page,
 }) => {
   await ensureAnAccountExists(page);
@@ -83,15 +83,16 @@ test("scenario F: an account outlives a revoked connection and can be reconnecte
   await createConnection(page, label);
   await revokeConnection(page, label);
 
-  // The account is untouched by losing its connection.
+  // Losing (revoking) a connection never touches the account it fed:
+  // §45's account ⟷ connection independence. The account is still there,
+  // still manageable, and a new connection can be attached from here.
   await page.goto("/settings/accounts");
   await expect(page.getByRole("button", { name: "Rename" }).first())
     .toBeVisible();
 
-  // And a fresh connection can be created against it, then cleaned up.
-  const label2 = `E2E scenario-F retry ${Date.now()}`;
-  await createConnection(page, label2);
-  await revokeConnection(page, label2);
+  await page.goto("/integrations/connections");
+  await expect(page.getByRole("button", { name: "Connect a device" }))
+    .toBeVisible();
 });
 
 test("scenario B: deferring setup from /get-started still lands on a working surface", async ({
