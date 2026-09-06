@@ -42,7 +42,9 @@ test("Billing & Plan has a home and is honest about the free plan", async ({
   await page.goto("/settings");
   await page.locator('main a[href="/settings/billing"]').click();
   await expect(page).toHaveURL(/\/settings\/billing$/);
-  await expect(page.getByText("You’re on the Free plan.")).toBeVisible();
+  await expect(
+    page.getByText("This Space is on the Free plan"),
+  ).toBeVisible();
 });
 
 test("Security and Privacy are one group with two distinct pages", async ({
