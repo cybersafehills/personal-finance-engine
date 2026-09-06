@@ -5,6 +5,10 @@ import { supabaseSession } from "../../../../lib/supabase-session-server";
 import { logSpacesError } from "../../../../lib/spaces/monitoring";
 import type { NormalizedStatementRow } from "../../../../lib/statement-import";
 import { trackSpacesEvent } from "../../../../lib/spaces/analytics";
+import {
+  inboundAddressFor,
+  isEmailStatementIngestEnabled,
+} from "../../../../lib/email-ingest";
 
 export type ImportStatementResult =
   | {
@@ -95,4 +99,93 @@ export async function importStatement(
   revalidatePath("/");
 
   return { ok: true, created, flaggedPossibleDuplicate, skipped };
+}
+
+// ---------------------------------------------------------------------------
+// Email statement ingestion (ADR 0018 Slice B). A source can be given a
+// private inbound address; mail sent there is parsed and imported by the
+// `inbound-email` Edge Function. These actions only drive the per-source
+// token lifecycle RPCs (migration 20261204000000) - all owner-gated
+// server-side, never trusted from the client.
+// ---------------------------------------------------------------------------
+
+export type IngestEmailResult =
+  | { ok: true; address: string | null }
+  | { ok: false; error: string };
+
+const EMAIL_OFF: IngestEmailResult = {
+  ok: false,
+  error: "Email statement import isn't available yet.",
+};
+
+async function runIngestEmailRpc(
+  rpc: "set_source_ingest_email" | "rotate_source_ingest_email",
+  financialSourceId: string,
+): Promise<IngestEmailResult> {
+  if (!isEmailStatementIngestEnabled()) return EMAIL_OFF;
+  if (!financialSourceId) {
+    return { ok: false, error: "Choose which account this is for." };
+  }
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase.rpc(rpc, {
+    p_source_id: financialSourceId,
+  });
+  if (error) {
+    logSpacesError("email_ingest", error);
+    return {
+      ok: false,
+      error: error.message.includes("own")
+        ? "You can only manage your own accounts."
+        : "Could not update the inbound address.",
+    };
+  }
+  revalidatePath("/settings/sources/import");
+  return { ok: true, address: data ? inboundAddressFor(String(data)) : null };
+}
+
+/** Mint the source's inbound address (idempotent - returns the existing one). */
+export async function enableIngestEmail(
+  financialSourceId: string,
+): Promise<IngestEmailResult> {
+  const res = await runIngestEmailRpc("set_source_ingest_email", financialSourceId);
+  if (res.ok) trackSpacesEvent("statement_email_enabled");
+  return res;
+}
+
+/** Rotate to a fresh address, invalidating the previous one. */
+export async function rotateIngestEmail(
+  financialSourceId: string,
+): Promise<IngestEmailResult> {
+  const res = await runIngestEmailRpc(
+    "rotate_source_ingest_email",
+    financialSourceId,
+  );
+  if (res.ok) trackSpacesEvent("statement_email_rotated");
+  return res;
+}
+
+/** Disable inbound mail for this source (clears the token). */
+export async function disableIngestEmail(
+  financialSourceId: string,
+): Promise<IngestEmailResult> {
+  if (!isEmailStatementIngestEnabled()) return EMAIL_OFF;
+  if (!financialSourceId) {
+    return { ok: false, error: "Choose which account this is for." };
+  }
+  const supabase = await supabaseSession();
+  const { error } = await supabase.rpc("clear_source_ingest_email", {
+    p_source_id: financialSourceId,
+  });
+  if (error) {
+    logSpacesError("email_ingest", error);
+    return {
+      ok: false,
+      error: error.message.includes("own")
+        ? "You can only manage your own accounts."
+        : "Could not disable the inbound address.",
+    };
+  }
+  trackSpacesEvent("statement_email_disabled");
+  revalidatePath("/settings/sources/import");
+  return { ok: true, address: null };
 }
