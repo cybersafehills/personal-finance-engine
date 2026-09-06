@@ -2420,6 +2420,38 @@ export async function getMyFinancialSources(): Promise<FinancialSourceRow[]> {
 }
 
 /**
+ * Per-source inbound-email addresses the caller owns (ADR 0018 Slice B).
+ * Returns { [financialSourceId]: "u+<token>@<domain>" } for sources that
+ * currently have a token; sources without one are absent. RLS keeps this
+ * to the caller's own sources.
+ */
+export async function getSourceIngestEmails(): Promise<Record<string, string>> {
+  const supabase = await supabaseSession();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return {};
+
+  const { data, error } = await supabase
+    .from("financial_sources")
+    .select("id, ingest_email_token")
+    .eq("owner_user_id", user.id)
+    .not("ingest_email_token", "is", null);
+
+  if (error) {
+    console.error("getSourceIngestEmails failed:", error.message);
+    return {};
+  }
+
+  const domain = process.env.INBOUND_EMAIL_DOMAIN?.trim() || "in.oneledger.me";
+  const out: Record<string, string> = {};
+  for (const row of (data ?? []) as { id: string; ingest_email_token: string }[]) {
+    out[row.id] = `u+${row.ingest_email_token}@${domain}`;
+  }
+  return out;
+}
+
+/**
  * Households the caller can share a source into - every active household
  * membership above 'viewer' (allocate_source_to_space requires 'member').
  */

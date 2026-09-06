@@ -544,6 +544,21 @@ verify_jwt = false
 enabled = true
 verify_jwt = false
 
+# Email statement ingestion (docs/adr/0018-email-and-pdf-statement-ingestion.md,
+# Slice B). The Resend Inbound webhook. No JWT - Resend authenticates with a
+# Svix signature, verified in-function against INBOUND_EMAIL_WEBHOOK_SECRET;
+# a browser session never reaches it. It is a clean no-op (HTTP 200, nothing
+# imported) until BOTH are set as Edge Function secrets:
+#   EMAIL_STATEMENT_INGEST_ENABLED = true
+#   INBOUND_EMAIL_WEBHOOK_SECRET   = <the Svix signing secret, whsec_...>
+# Optional: INBOUND_EMAIL_DOMAIN (default in.oneledger.me) - the domain
+# Resend is configured to receive. Mail to u+<token>@<domain> is resolved
+# to a financial_source and imported via import_statement_rows_for_source
+# (migration 20261204000000), the same write path as a manual CSV upload.
+[functions.inbound-email]
+enabled = true
+verify_jwt = false
+
 [analytics]
 enabled = true
 port = 54327

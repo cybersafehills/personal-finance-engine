@@ -23,6 +23,9 @@ export type SpacesEventName =
   | "duplicate_merged"
   | "duplicate_dismissed"
   | "statement_imported"
+  | "statement_email_enabled"
+  | "statement_email_rotated"
+  | "statement_email_disabled"
   | "rule_scope_set";
 
 // Keys that must never reach analytics, and value shapes that look like

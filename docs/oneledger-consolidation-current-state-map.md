@@ -827,5 +827,32 @@ unsupported (CSV fallback). deno `web/lib` 656/0, `next lint` 0 errors, `next
 build` ✓ (`new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url)`
 worker).
 
-**G10 Slice B (email ingestion) remains design-only** — needs the inbound-mail
-provider decision + a security review (ADR 0018).
+**Merged to `main` as `a6ff3eb` (PR #140).**
+
+---
+
+## 21. Follow-on — email statement ingestion (gap G10 Slice B, branch `feat/email-statement-ingest`)
+
+ADR 0018 Slice B, **implemented**. Provider: **Resend Inbound** (Svix-signed
+webhook). Dark behind `EMAIL_STATEMENT_INGEST_ENABLED` (+
+`INBOUND_EMAIL_WEBHOOK_SECRET` as an Edge Function secret). This closes G10.
+
+| Change | File |
+| --- | --- |
+| `financial_sources.ingest_email_token` (nullable, unique, 32-hex `gen_random_uuid()`); owner-gated `set_/rotate_/clear_source_ingest_email` (authenticated) + `resolve_ingest_email_source` (service-role); `import_statement_transactions` body extracted into service-role core `_import_statement_rows(source, rows, actor?)`, authenticated wrapper now a thin `auth.uid()`+`owns_financial_source` check over it (manual CSV flow unchanged); service-role `import_statement_rows_for_source` wrapper for the webhook | `supabase/migrations/20261204000000_email_statement_ingest.sql` |
+| Deno port of `web/lib/csv.ts` + `web/lib/statement-import.ts` + a body-line splitter (`linesToRows`) | `supabase/functions/_shared/statement-parse.ts` (+ `_shared/tests/statement_parse_test.ts`) |
+| Resend Inbound webhook: Svix signature verify (`whsec_` base64, `${id}.${ts}.${body}` HMAC-SHA256, ±5 min), recipient-token extraction (never `From:`), Resend payload normalization, CSV/TSV attachments (column-guessed, ≤5 MB) + plain-text body → rows → `import_statement_rows_for_source` with a null actor. Missing config ⇒ HTTP 200 no-op. PDF attachments not parsed (web-only). | `supabase/functions/inbound-email/{index,lib}.ts` (+ `tests/lib_test.ts`, 14 tests) |
+| `[functions.inbound-email] verify_jwt = false` | `supabase/config.toml` |
+| CI: `deno check` + `deno test` for `inbound-email`, `statement-parse` added to `_shared` entry-point check | `.github/workflows/ci.yml` |
+| "Email statements in" panel (generate / rotate / disable + address) on `/settings/sources/import`, flag-gated; `getSourceIngestEmails()` query; `enable/rotate/disableIngestEmail` server actions; 3 new `SpacesEventName`s | `web/components/EmailIngestPanel.tsx`, `web/app/settings/sources/import/{page,actions}.ts(x)`, `web/lib/{email-ingest,queries,spaces/analytics}.ts` |
+| Flag docs | `web/.env.local.example` |
+
+No new table, no new `channel` value (rows are `channel='statement'` like the
+manual upload). Migration harness: **521/0**, `AUTHENTICATED_FN_EXEC_COUNT`
+guard 112 → **115** (+3 owner-gated RPCs). deno fmt/lint/check ✓, new suites
+`inbound-email` 14/0 + `_shared` `statement_parse` 6/0.
+
+Deferred (not dark-ship blockers): per-token rate limit (Resend throttle +
+signature gate + token space cover it for now), parse-failure quarantine
+table (nothing is queued, so nothing drops silently — `no_rows`/`no_source`
+logged with counts).
