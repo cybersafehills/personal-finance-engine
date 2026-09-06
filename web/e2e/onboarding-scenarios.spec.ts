@@ -49,19 +49,22 @@ test("scenario G: an established user reaches Home and Settings without a forced
   await expect(page).toHaveURL(/\/(onboarding\/review|get-started)$/);
 });
 
-test("scenario F: an account outlives a revoked connection and can be reconnected", async ({
-  page,
-}) => {
-  await ensureAnAccountExists(page);
-
-  const label = `E2E scenario-F ${Date.now()}`;
+async function createConnection(page: Page, label: string): Promise<void> {
   await page.goto("/integrations/connections");
   await page.getByRole("button", { name: "Connect a device" }).click();
   await page.getByLabel("Label").fill(label);
   await page.getByRole("button", { name: "Create connection" }).click();
-  await expect(page.getByText(/Copy this now/)).toBeVisible();
-  await page.getByRole("button", { name: "Done" }).click();
+  // The one-time secret reveal appears after a server-action round trip;
+  // a busy CI web server can be slow, so wait generously, then dismiss.
+  const done = page.getByRole("button", { name: "Done" });
+  await expect(done).toBeVisible({ timeout: 20_000 });
+  await done.click();
+  await expect(
+    page.locator("div.rounded-card").filter({ hasText: label }).first(),
+  ).toBeVisible();
+}
 
+async function revokeConnection(page: Page, label: string): Promise<void> {
   const row = page
     .locator("div.rounded-card")
     .filter({ hasText: label })
@@ -69,28 +72,26 @@ test("scenario F: an account outlives a revoked connection and can be reconnecte
   await row.getByRole("button", { name: "Revoke" }).click();
   await row.getByRole("button", { name: "Confirm revoke" }).click();
   await expect(row.getByText("Disabled")).toBeVisible();
+}
+
+test("scenario F: an account outlives a revoked connection and can be reconnected", async ({
+  page,
+}) => {
+  await ensureAnAccountExists(page);
+
+  const label = `E2E scenario-F ${Date.now()}`;
+  await createConnection(page, label);
+  await revokeConnection(page, label);
 
   // The account is untouched by losing its connection.
   await page.goto("/settings/accounts");
   await expect(page.getByRole("button", { name: "Rename" }).first())
     .toBeVisible();
 
-  // And a fresh connection can be created against it.
+  // And a fresh connection can be created against it, then cleaned up.
   const label2 = `E2E scenario-F retry ${Date.now()}`;
-  await page.goto("/integrations/connections");
-  await page.getByRole("button", { name: "Connect a device" }).click();
-  await page.getByLabel("Label").fill(label2);
-  await page.getByRole("button", { name: "Create connection" }).click();
-  await expect(page.getByText(/Copy this now/)).toBeVisible();
-  await page.getByRole("button", { name: "Done" }).click();
-
-  // Clean up: revoke the retry connection too.
-  const row2 = page
-    .locator("div.rounded-card")
-    .filter({ hasText: label2 })
-    .first();
-  await row2.getByRole("button", { name: "Revoke" }).click();
-  await row2.getByRole("button", { name: "Confirm revoke" }).click();
+  await createConnection(page, label2);
+  await revokeConnection(page, label2);
 });
 
 test("scenario B: deferring setup from /get-started still lands on a working surface", async ({
