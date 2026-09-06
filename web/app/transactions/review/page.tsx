@@ -1,5 +1,6 @@
 import Link from "next/link";
 import {
+  getCategorySuggestions,
   getNeedsAttributionTransactions,
   getReviewQueueTransactions,
   getSpaceDuplicateReview,
@@ -13,11 +14,13 @@ import { DuplicateReviewList } from "../../../components/DuplicateReviewList";
 export const dynamic = "force-dynamic";
 
 export default async function ReviewQueuePage() {
-  const [transactions, needsAttribution, duplicateClusters] = await Promise.all([
-    getReviewQueueTransactions(),
-    getNeedsAttributionTransactions(),
-    getSpaceDuplicateReview(),
-  ]);
+  const [transactions, needsAttribution, duplicateClusters, categorySuggestions] =
+    await Promise.all([
+      getReviewQueueTransactions(),
+      getNeedsAttributionTransactions(),
+      getSpaceDuplicateReview(),
+      getCategorySuggestions(),
+    ]);
 
   const nothingToDo =
     transactions.length === 0 &&
@@ -94,7 +97,10 @@ export default async function ReviewQueuePage() {
                   Category review ({transactions.length})
                 </h2>
               )}
-              <ReviewQueueList transactions={transactions} />
+              <ReviewQueueList
+                transactions={transactions}
+                categorySuggestions={categorySuggestions}
+              />
             </section>
           )}
         </div>
