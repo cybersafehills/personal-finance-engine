@@ -1107,6 +1107,7 @@ export async function getSystemTemplate(): Promise<SystemTemplate | null> {
 export type BudgetRow = {
   id: string;
   name: string;
+  workspace_id: string;
   currency: string;
   period_start: string;
   period_end: string;
@@ -1121,7 +1122,7 @@ export type BudgetRow = {
 };
 
 const BUDGET_COLUMNS =
-  "id, name, currency, period_start, period_end, income_amount_minor, normalized_monthly_income_minor, normalized_annual_income_minor, income_frequency, income_mode, status, created_at, activated_at";
+  "id, name, workspace_id, currency, period_start, period_end, income_amount_minor, normalized_monthly_income_minor, normalized_annual_income_minor, income_frequency, income_mode, status, created_at, activated_at";
 
 export async function getBudgets(): Promise<BudgetRow[]> {
   const supabase = await supabaseSession();
@@ -1189,23 +1190,32 @@ export type CategoryMappingRow = {
 
 /**
  * Every distinct spending category currently in use (settled, direction
- * out), alongside its currently-open budget_category_mappings row (if
- * any). RWF-denominated totals only - see the Phase D migration's own
- * note on why transaction actuals only ever exist for RWF today.
+ * out) in the active workspace, alongside its currently-open
+ * budget_category_mappings row (if any). RWF-denominated totals only -
+ * see the Phase D migration's own note on why transaction actuals only
+ * ever exist for RWF today. Workspace-scoped: mappings are per-workspace,
+ * and RLS alone would fold in categories from every workspace the caller
+ * belongs to (the mapping the write path creates is scoped to the active
+ * workspace, so the read must match).
  */
 export async function getCategoryMappings(): Promise<CategoryMappingRow[]> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!workspaceId) return [];
+
   const supabase = await supabaseSession();
 
   const [txnsResult, mappingsResult] = await Promise.all([
     supabase
       .from("transactions")
       .select("category, principal_effect_rwf, fee_effect_rwf")
+      .eq("workspace_id", workspaceId)
       .not("category", "is", null)
       .eq("direction", "out")
       .eq("settlement_state", "settled"),
     supabase
       .from("budget_category_mappings")
       .select("category, allocation_type")
+      .eq("workspace_id", workspaceId)
       .is("effective_until", null),
   ]);
 
@@ -1253,8 +1263,12 @@ export async function getCategoryMappings(): Promise<CategoryMappingRow[]> {
  * Surfaced as a single summary row on the category-mappings screen so
  * both kinds of "not counted toward budget" are visible in one place.
  * Matches getBudgetActuals' filters (settled, out, not a merged dupe).
+ * Workspace-scoped for the same reason getBudgetActuals is - RLS would
+ * otherwise pull in every workspace the caller belongs to.
  */
-export async function getUncategorizedOutflowSummary(): Promise<{
+export async function getUncategorizedOutflowSummary(
+  workspaceId: string,
+): Promise<{
   count: number;
   totalRwf: number;
 }> {
@@ -1263,6 +1277,7 @@ export async function getUncategorizedOutflowSummary(): Promise<{
   const { data, error } = await supabase
     .from("transactions")
     .select("principal_effect_rwf, fee_effect_rwf")
+    .eq("workspace_id", workspaceId)
     .is("category", null)
     .eq("direction", "out")
     .eq("settlement_state", "settled")
@@ -1328,6 +1343,11 @@ export async function getBudgetActuals(
     supabase
       .from("transactions")
       .select("id, category, principal_effect_rwf, fee_effect_rwf, occurred_at")
+      // A budget belongs to one workspace; its actuals must only ever
+      // count that workspace's transactions. RLS alone is not enough -
+      // it returns rows for every workspace the caller belongs to, which
+      // would fold other workspaces' spend into this budget.
+      .eq("workspace_id", budget.workspace_id)
       .eq("currency", budget.currency)
       .eq("direction", "out")
       .eq("settlement_state", "settled")
@@ -1338,6 +1358,7 @@ export async function getBudgetActuals(
     supabase
       .from("transactions")
       .select("id, principal_effect_rwf, fee_effect_rwf")
+      .eq("workspace_id", budget.workspace_id)
       .eq("currency", budget.currency)
       .eq("direction", "in")
       .eq("settlement_state", "settled")
@@ -1346,7 +1367,8 @@ export async function getBudgetActuals(
       .lte("occurred_at", endUtc.toISOString()),
     supabase
       .from("budget_category_mappings")
-      .select("category, allocation_type, effective_from, effective_until"),
+      .select("category, allocation_type, effective_from, effective_until")
+      .eq("workspace_id", budget.workspace_id),
     supabase
       .from("transfer_links")
       .select("out_transaction_id, in_transaction_id")
