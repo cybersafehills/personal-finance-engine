@@ -616,30 +616,28 @@ web/playwright.config.ts                            (exclude visual from cross-b
 
 ---
 
-## 12. Follow-on — Settings IA (gap G1, branch `feat/settings-ia-7group`)
+## 15. Follow-on — Account detail object (gap G3, branch `feat/account-detail-tabs`)
 
-Stacked on `pfe/consolidation-2-core`. Closes the largest user-facing gap
-from `docs/oneledger-onboarding-architecture-audit.md` §2: the flat 10-row
-Settings home is replaced by the seven named groups of master-prompt §110.
+Off `main`. Master prompt §16/§24. `/settings/accounts/[id]` — one server page
+with `?tab=` sections (Overview / Transactions / Connections / Rules / Access /
+Settings), reached by clicking an account name on `/settings/accounts`.
 
 | Change | File |
 | --- | --- |
-| Single source of truth: 7 groups, rows, per-row visibility (experience mode + Spaces flag) | `web/lib/settings-navigation.ts` (new) + `settings_navigation_test.ts` (10 deno tests) |
-| Settings home renders from it — grouped, described, filtered | `web/app/settings/page.tsx` (rewritten) |
-| Post-onboarding profile + regional editing (reuses `save_onboarding_*` RPCs) | `web/app/settings/profile/page.tsx`, `web/components/ProfileSettingsForm.tsx` (new) |
-| Billing & Plan home (static; entitlements domain is a later phase) | `web/app/settings/billing/page.tsx` (new) |
-| Two Security rows → one "Security & Privacy" group; "Privacy and security" page retitled "Privacy"; Security page → "Sign-in & security" + back link | `web/app/settings/privacy/page.tsx`, `web/app/settings/security/page.tsx` |
-| "Shared accounts" folded into "Spaces & Members" as "Account sharing" (route unchanged) | via `settings-navigation.ts` |
-| e2e | `web/e2e/settings-ia.spec.ts` (new), `accessibility.spec.ts` / `visual.spec.ts` updated |
-| Doc | `docs/settings-information-architecture.md` (new) |
+| `getAccountDetail(id)` (composes account + linked financial source + its Space links + bound `ingestion_connections` + source-scoped rules) and `getAccountTransactions(id, n)`; `AccountRow` gains `financial_source_id` + `created_at` | `web/lib/queries.ts` |
+| The tabbed detail page | `web/app/settings/accounts/[id]/page.tsx` |
+| Settings tab controls (rename / set primary / archive) reusing the existing actions | `web/components/AccountSettingsControls.tsx` |
+| Account name on the list links into the detail object (list keeps its inline controls) | `web/components/AccountItem.tsx` |
+| e2e | `web/e2e/account-detail.spec.ts` |
+| Doc | `docs/account-detail.md` |
 
-No routes moved; no migration. Verification: deno `web/lib` 611/0, `next lint`
-0 errors, `next build` ✓. Visual baselines for `settings-index.png` /
-`settings-privacy.png` need regen with the rest of the Release 2 stack.
+Read-only aggregation over existing RLS-scoped reads — no parallel management
+path, no migration, no new RPC, no routes moved. deno `web/lib` 622/0, `next
+lint` 0 errors, `next build` ✓.
 
-Still open from the audit: G2 (entitlements/Billing behaviour), G3
-(account-detail tabs), G4 (onboarding-funnel analytics), G5 (setup review
-screen), G6 (F12 deletion/export).
+Still open: G6 (F12 deletion/export/retention — own workstream, needs a
+retention-window product decision), G7-G12.
+
 ---
 
 ## 13. Follow-on — Onboarding funnel analytics + setup review (gaps G4, G5)
@@ -677,3 +675,31 @@ No migration, no routes moved. deno `web/lib` 630/0, `next lint` 0 errors,
 
 Still open from the audit: G2 (entitlements/Billing behaviour — next), G3
 (account-detail tabs), G6 (F12 deletion/export), G7-G12.
+
+---
+
+## 12. Follow-on — Settings IA (gap G1, branch `feat/settings-ia-7group`)
+
+Stacked on `pfe/consolidation-2-core`. Closes the largest user-facing gap
+from `docs/oneledger-onboarding-architecture-audit.md` §2: the flat 10-row
+Settings home is replaced by the seven named groups of master-prompt §110.
+
+| Change | File |
+| --- | --- |
+| Single source of truth: 7 groups, rows, per-row visibility (experience mode + Spaces flag) | `web/lib/settings-navigation.ts` (new) + `settings_navigation_test.ts` (10 deno tests) |
+| Settings home renders from it — grouped, described, filtered | `web/app/settings/page.tsx` (rewritten) |
+| Post-onboarding profile + regional editing (reuses `save_onboarding_*` RPCs) | `web/app/settings/profile/page.tsx`, `web/components/ProfileSettingsForm.tsx` (new) |
+| Billing & Plan home (static; entitlements domain is a later phase) | `web/app/settings/billing/page.tsx` (new) |
+| Two Security rows → one "Security & Privacy" group; "Privacy and security" page retitled "Privacy"; Security page → "Sign-in & security" + back link | `web/app/settings/privacy/page.tsx`, `web/app/settings/security/page.tsx` |
+| "Shared accounts" folded into "Spaces & Members" as "Account sharing" (route unchanged) | via `settings-navigation.ts` |
+| e2e | `web/e2e/settings-ia.spec.ts` (new), `accessibility.spec.ts` / `visual.spec.ts` updated |
+| Doc | `docs/settings-information-architecture.md` (new) |
+
+No routes moved; no migration. Verification: deno `web/lib` 611/0, `next lint`
+0 errors, `next build` ✓. Visual baselines for `settings-index.png` /
+`settings-privacy.png` need regen with the rest of the Release 2 stack.
+
+Still open from the audit: G2 (entitlements/Billing behaviour), G3
+(account-detail tabs), G4 (onboarding-funnel analytics), G5 (setup review
+screen), G6 (F12 deletion/export).
+---
