@@ -812,6 +812,31 @@ a static list. deno migration **513/0**, `next lint` 0 errors, `next build` ✓.
 
 ---
 
+## 18. Follow-on — named onboarding e2e scenarios (gap G8, branch `feat/onboarding-e2e-scenarios`)
+
+`web/e2e/onboarding-scenarios.spec.ts` — the master-prompt §97 scenarios
+adapted to the one shared seeded e2e identity and CI's flag state
+(`ONBOARDING_JOURNEY_ENABLED` dark, so the derived `/get-started` checklist
+is what's exercised):
+
+- **B** — deferring setup from `/get-started` ("Do it later" / dismiss) still
+  lands on a working surface, and the steps stay reachable.
+- **E** — the checklist count is recomputed from live state and never
+  regresses on reload (resumability, §35).
+- **F** — an account outlives a revoked connection and a fresh connection
+  can be created against it (account ⟷ connection independence, §45).
+- **G** — an established user reaches Home / Settings / `/get-started` /
+  `/onboarding/review` with no forced onboarding wall.
+- **D** — the organization path is discoverable from `/settings/workspace`.
+
+Web-only, no migration. `playwright test --list` parses (21 across the
+cross-browser projects); `next lint` 0 errors. Scenario A (brand-new signup)
+and full multi-device resume are left to `signup-email.spec.ts` +
+`spaces-household.spec.ts` — the shared-identity suite can't cheaply add a
+second real signup.
+
+---
+
 ## 20. Follow-on — PDF statement import (gap G10 Slice A, branch `feat/pdf-statement-import`)
 
 ADR 0018 Slice A, **implemented**. Dark behind `PDF_STATEMENT_IMPORT_ENABLED`.
