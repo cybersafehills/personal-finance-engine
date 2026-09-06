@@ -51,7 +51,7 @@ class MainActivity : ComponentActivity() {
     private fun handleDeepLink(intent: Intent?) {
         val data = intent?.data ?: return
         if (data.scheme == "oneledger" && data.host == "pair") {
-            vm.onDeepLinkToken(data.getQueryParameter("c"))
+            vm.submitPairingInput(data.toString(), autoPair = true)
         }
     }
 }

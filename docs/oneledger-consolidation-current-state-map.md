@@ -640,3 +640,40 @@ No routes moved; no migration. Verification: deno `web/lib` 611/0, `next lint`
 Still open from the audit: G2 (entitlements/Billing behaviour), G3
 (account-detail tabs), G4 (onboarding-funnel analytics), G5 (setup review
 screen), G6 (F12 deletion/export).
+---
+
+## 13. Follow-on — Onboarding funnel analytics + setup review (gaps G4, G5)
+
+Branch `feat/onboarding-analytics-review`, off `main` (Release 2-6 stack now
+merged: `#128`/`#122`/`#127`). Closes G4 + G5 from
+`docs/oneledger-onboarding-architecture-audit.md` §2.
+
+**G4 — analytics** (`docs/onboarding-analytics.md`):
+- `web/lib/onboarding/analytics.ts` — no-sink, redact-first module mirroring
+  `lib/spaces/analytics.ts`. `OnboardingEventName` (10), `sanitizeOnboarding
+  EventProps` (allow-lists the intent enum + milestone keys, drops ids /
+  names / amounts / opaque strings), `trackOnboardingEvent` (never throws),
+  and the pure `journeyCompletionEvents(prev, next)` diff for the derived
+  milestones. `analytics_test.ts` 8 deno tests.
+- Wired at the once-only transitions: `onboarding_started` /
+  `profile_completed` / `preferences_completed` / `intent_selected` /
+  `first_review_completed` / `first_insight_seen` in
+  `app/onboarding/actions.ts`; `onboarding_dismissed` in
+  `app/get-started/actions.ts`; `setup_review_viewed` on the review render.
+  `onboarding_step_completed` / `onboarding_completed` are defined but not
+  auto-emitted (need a stateful caller — see the doc).
+
+**G5 — setup review screen** (master prompt §19):
+- `web/app/onboarding/review/page.tsx` — "Your OneLedger setup": every
+  milestone as ready / "Set up later", no shaming, `Go to Home` primary +
+  `Finish setup` when incomplete. Reads `getOnboardingJourney()`, never
+  writes. Flag-gated (`ONBOARDING_JOURNEY_ENABLED`) → redirects to
+  `/get-started` when off, like `/onboarding/intent`.
+- `/get-started` (journey branch) gains a "See your setup summary" link.
+- `web/e2e/onboarding-review.spec.ts` — route-resolves-coherently smoke.
+
+No migration, no routes moved. deno `web/lib` 630/0, `next lint` 0 errors,
+`next build` ✓.
+
+Still open from the audit: G2 (entitlements/Billing behaviour — next), G3
+(account-detail tabs), G6 (F12 deletion/export), G7-G12.

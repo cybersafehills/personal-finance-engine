@@ -35,3 +35,12 @@
 -dontwarn com.google.crypto.tink.**
 -dontwarn com.google.errorprone.annotations.**
 -dontwarn javax.annotation.**
+
+# --- ML Kit barcode (bundled) + CameraX ----------------------------------
+# Both ship consumer rules; keep the model-loading internals and silence
+# optional-dependency warnings.
+-keep class com.google.mlkit.** { *; }
+-keep class com.google.android.gms.internal.mlkit_vision_barcode.** { *; }
+-dontwarn com.google.mlkit.**
+-dontwarn com.google.android.gms.**
+-dontwarn androidx.camera.**
