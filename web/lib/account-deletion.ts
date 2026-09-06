@@ -6,11 +6,19 @@ import { supabaseSession } from "./supabase-session-server";
 // ACCOUNT_DELETION_ENABLED - when off, the /settings/privacy/data page
 // still offers data export (always safe) but hides the delete flow.
 //
-// This module is the request side only: schedule / cancel with a 30-day
-// grace window. The irreversible erasure is a separate follow-up.
+// The request side (schedule / cancel, 30-day grace) is gated by
+// ACCOUNT_DELETION_ENABLED. The irreversible erasure that the
+// process-account-deletions cron performs is gated separately by
+// ACCOUNT_DELETION_EXECUTE_ENABLED (ADR 0016 §3) - the request flow is
+// usable without anything actually being erased until an operator flips
+// the second switch and wires the scheduler.
 
 export function isAccountDeletionEnabled(): boolean {
   return process.env.ACCOUNT_DELETION_ENABLED === "true";
+}
+
+export function isAccountDeletionExecuteEnabled(): boolean {
+  return process.env.ACCOUNT_DELETION_EXECUTE_ENABLED === "true";
 }
 
 export type AccountDeletionRequest = {
