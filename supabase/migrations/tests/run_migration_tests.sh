@@ -657,7 +657,9 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # Integrations Phase 4 P4-PR7 (20261124000000) is a wrapper-only
 # create-or-replace of get_operational_health_snapshot - no table, no
 # grant, no RLS change. Count stays 118 / 117.
-if [ "$TABLE_COUNT" = "118" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Account deletion request (20261201000000) adds account_deletion_requests
+# (RLS enabled, SELECT-own for authenticated) - 119 tables, 118 with RLS.
+if [ "$TABLE_COUNT" = "119" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -773,10 +775,13 @@ fi
 # a SELECT-only grant for authenticated; webhook_subscription_secrets and
 # webhook_deliveries get zero authenticated grants. 148 + 1 = 149.
 AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and grantee = 'authenticated';")"
-if [ "$AUTHENTICATED_GRANT_COUNT" = "149" ]; then
-  pass "authenticated holds exactly the 149 table grants expected, no more"
+# Account deletion request (20261201000000) adds account_deletion_requests
+# with a SELECT-only grant for authenticated (writes service-role only).
+# 149 + 1 = 150.
+if [ "$AUTHENTICATED_GRANT_COUNT" = "150" ]; then
+  pass "authenticated holds exactly the 150 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 149 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 150 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -946,10 +951,12 @@ AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_p
 # create_device_pairing_session) - count stays 108.
 # Release 3 onboarding milestones (20261129000000) adds set_onboarding_intent
 # and mark_onboarding_milestone, both authenticated-callable. 108 + 2 = 110.
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "110" ]; then
-  pass "authenticated holds EXECUTE on exactly the 110 functions expected, no more"
+# Account deletion request (20261201000000) adds request_account_deletion
+# and cancel_account_deletion, both authenticated-callable. 110 + 2 = 112.
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "112" ]; then
+  pass "authenticated holds EXECUTE on exactly the 112 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 110 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 112 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -6968,6 +6975,77 @@ else
   pass "Integrations P4: webhook_subscriptions requires an https url"
 fi
 rm -f $ARTIFACT_DIR/pfe_p4_whurl.log
+
+# ===========================================================================
+# Account deletion request (20261201000000): request/cancel with a 30-day
+# grace window, the shared-Space sole-owner guard, and RLS.
+# ===========================================================================
+echo "=== Account deletion request ==="
+
+ADR_USER="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('adr-user@example.com') returning id;" | head -1)"
+ADR_OTHER="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('adr-other@example.com') returning id;" | head -1)"
+
+ADR_ROW="$(as_user "$ADR_USER" "select status || '|' || (scheduled_for > now() + interval '29 days') || '|' || (scheduled_for < now() + interval '31 days') from public.request_account_deletion('leaving');")"
+if [ "$ADR_ROW" = "scheduled|t|t" ] || [ "$ADR_ROW" = "scheduled|true|true" ]; then
+  pass "Account deletion: request_account_deletion schedules 30 days out"
+else
+  fail "Account deletion: request row wrong ('$ADR_ROW')"
+fi
+
+as_user "$ADR_USER" "select public.request_account_deletion();" >/dev/null
+ADR_COUNT="$(psql -d pfe_rls -t -A -c "select count(*) from public.account_deletion_requests where user_id = '$ADR_USER';")"
+if [ "$ADR_COUNT" = "1" ]; then
+  pass "Account deletion: re-requesting keeps exactly one row (idempotent)"
+else
+  fail "Account deletion: expected 1 request row, found $ADR_COUNT"
+fi
+
+ADR_CANCEL="$(as_user "$ADR_USER" "select status from public.cancel_account_deletion();")"
+if [ "$ADR_CANCEL" = "cancelled" ]; then
+  pass "Account deletion: cancel_account_deletion withdraws a scheduled request"
+else
+  fail "Account deletion: cancel returned '$ADR_CANCEL'"
+fi
+
+if as_user "$ADR_USER" "select public.cancel_account_deletion();" >/dev/null 2>$ARTIFACT_DIR/pfe_adr_c.log; then
+  fail "Account deletion: cancel succeeded with nothing scheduled"
+else
+  pass "Account deletion: cancel with nothing scheduled raises"
+fi
+rm -f $ARTIFACT_DIR/pfe_adr_c.log
+
+as_user "$ADR_USER" "select public.request_account_deletion();" >/dev/null
+ADR_OTHER_SEES="$(as_user "$ADR_OTHER" "select count(*) from public.account_deletion_requests where user_id = '$ADR_USER';")"
+if [ "$ADR_OTHER_SEES" = "0" ]; then
+  pass "Account deletion: a request row is visible only to its own user"
+else
+  fail "Account deletion: another user saw the request row ($ADR_OTHER_SEES)"
+fi
+
+ADR_HH_RAW="$(as_user "$ADR_USER" "select public.create_household_workspace('ADR Household');")"
+ADR_HH="$(printf '%s' "$ADR_HH_RAW" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+psql -d pfe_rls -c "set role service_role; insert into public.workspace_memberships (workspace_id, user_id, role, status, joined_at) values ('$ADR_HH', '$ADR_OTHER', 'member', 'active', now());" >/dev/null
+if as_user "$ADR_USER" "select public.request_account_deletion();" >/dev/null 2>$ARTIFACT_DIR/pfe_adr_g.log; then
+  fail "Account deletion: sole owner of a shared Space with members was allowed to schedule deletion"
+else
+  pass "Account deletion: blocked while sole owner of a shared Space with other active members"
+fi
+rm -f $ARTIFACT_DIR/pfe_adr_g.log
+psql -d pfe_rls -c "set role service_role; update public.workspace_memberships set status = 'removed' where workspace_id = '$ADR_HH' and user_id = '$ADR_OTHER';" >/dev/null
+ADR_AFTER="$(as_user "$ADR_USER" "select status from public.request_account_deletion();")"
+if [ "$ADR_AFTER" = "scheduled" ]; then
+  pass "Account deletion: allowed once the shared Space has no other active members"
+else
+  fail "Account deletion: still blocked after co-member removed ('$ADR_AFTER')"
+fi
+
+ADR_GRANTS="$(psql -d pfe_rls -t -A -c "select string_agg(privilege_type, ',' order by privilege_type) from information_schema.role_table_grants where table_schema='public' and table_name='account_deletion_requests' and grantee='authenticated';")"
+ADR_ANON="$(psql -d pfe_rls -t -A -c "select count(*) from information_schema.role_table_grants where table_schema='public' and table_name='account_deletion_requests' and grantee='anon';")"
+if [ "$ADR_GRANTS" = "SELECT" ] && [ "$ADR_ANON" = "0" ]; then
+  pass "Account deletion: authenticated holds SELECT-only on account_deletion_requests, anon nothing"
+else
+  fail "Account deletion: grants wrong (authenticated='$ADR_GRANTS' anon=$ADR_ANON)"
+fi
 
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="
