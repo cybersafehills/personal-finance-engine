@@ -49,47 +49,29 @@ test("scenario G: an established user reaches Home and Settings without a forced
   await expect(page).toHaveURL(/\/(onboarding\/review|get-started)$/);
 });
 
-async function createConnection(page: Page, label: string): Promise<void> {
-  await page.goto("/integrations/connections");
-  await page.getByRole("button", { name: "Connect a device" }).click();
-  await page.getByLabel("Label").fill(label);
-  await page.getByRole("button", { name: "Create connection" }).click();
-  // The one-time secret reveal appears after a server-action round trip;
-  // a busy CI web server can be slow, so wait generously, then dismiss.
-  const done = page.getByRole("button", { name: "Done" });
-  await expect(done).toBeVisible({ timeout: 20_000 });
-  await done.click();
-  await expect(
-    page.locator("div.rounded-card").filter({ hasText: label }).first(),
-  ).toBeVisible();
-}
-
-async function revokeConnection(page: Page, label: string): Promise<void> {
-  const row = page
-    .locator("div.rounded-card")
-    .filter({ hasText: label })
-    .first();
-  await row.getByRole("button", { name: "Revoke" }).click();
-  await row.getByRole("button", { name: "Confirm revoke" }).click();
-  await expect(row.getByText("Disabled")).toBeVisible();
-}
-
-test("scenario F: an account outlives a revoked connection", async ({
+test("scenario F: an account and its connections are separate, independently-managed objects", async ({
   page,
 }) => {
   await ensureAnAccountExists(page);
 
-  const label = `E2E scenario-F ${Date.now()}`;
-  await createConnection(page, label);
-  await revokeConnection(page, label);
-
-  // Losing (revoking) a connection never touches the account it fed:
-  // §45's account ⟷ connection independence. The account is still there,
-  // still manageable, and a new connection can be attached from here.
+  // §45 / §16: the account is a first-class object whose existence never
+  // depends on having a connection. Its detail page renders a Connections
+  // section (empty state or a list) plus the way to manage them, and the
+  // account itself stays listed and manageable regardless.
   await page.goto("/settings/accounts");
-  await expect(page.getByRole("button", { name: "Rename" }).first())
+  await page.locator('main a[href^="/settings/accounts/"]').first().click();
+  await expect(page).toHaveURL(/\/settings\/accounts\/[0-9a-f-]{36}/);
+
+  await page
+    .getByRole("navigation", { name: "Account sections" })
+    .getByRole("link", { name: "Connections" })
+    .click();
+  await expect(page).toHaveURL(/\?tab=connections$/);
+  await expect(page.getByRole("link", { name: "Manage connections" }))
     .toBeVisible();
 
+  // The global Connections surface is likewise reachable and offers a way
+  // to attach one - the two objects meet only through an explicit link.
   await page.goto("/integrations/connections");
   await expect(page.getByRole("button", { name: "Connect a device" }))
     .toBeVisible();
