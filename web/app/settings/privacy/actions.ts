@@ -8,12 +8,13 @@ import { LEGACY_DEFAULT_NAV_ORDER } from "../../../lib/navigation";
 export type PrivacyActionResult = { ok: true } | { ok: false; error: string };
 
 /**
- * Same read-then-merge upsert as app/settings/appearance/actions.ts's
- * upsertUiPreferences - duplicated rather than shared across the route
- * boundary (matches this codebase's existing per-settings-route actions
- * file convention, e.g. reports/actions.ts vs security/actions.ts never
- * importing each other). Display-privacy only: this never touches any
- * report/export/API authorization path (master prompt §6.5).
+ * Read-then-merge upsert over the whole ui_preferences row - duplicated
+ * per settings route rather than shared across the route boundary
+ * (matches this codebase's existing per-settings-route actions file
+ * convention, e.g. get-started/actions.ts, reports/actions.ts vs
+ * security/actions.ts never importing each other). Display-privacy only:
+ * this never touches any report/export/API authorization path (master
+ * prompt §6.5).
  */
 async function upsertUiPreferences(
   patch: Record<string, unknown>,
@@ -34,7 +35,7 @@ async function upsertUiPreferences(
   const { data: existing } = await supabase
     .from("ui_preferences")
     .select(
-      "nav_order, hide_balance, privacy_mode, reports_relocation_notice_dismissed, onboarding_dismissed",
+      "nav_order, hide_balance, privacy_mode, onboarding_dismissed",
     )
     .eq("workspace_id", workspaceId)
     .eq("user_id", user.id)
@@ -47,8 +48,6 @@ async function upsertUiPreferences(
       nav_order: existing?.nav_order ?? LEGACY_DEFAULT_NAV_ORDER,
       hide_balance: existing?.hide_balance ?? false,
       privacy_mode: existing?.privacy_mode ?? false,
-      reports_relocation_notice_dismissed:
-        existing?.reports_relocation_notice_dismissed ?? false,
       onboarding_dismissed: existing?.onboarding_dismissed ?? false,
       ...patch,
     },
