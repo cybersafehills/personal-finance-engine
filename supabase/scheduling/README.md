@@ -114,3 +114,25 @@ function, so reactivating later is just re-running the two
   `supabase/migrations/README.md`), and has no privileges granted to
   `anon`/`authenticated` - only `cron.schedule`'s own job execution ever
   calls it.
+
+## Account erasure tick (`activate_account_deletions.sql`)
+
+Separate file, same shape: a once-daily job (`account-deletion-tick`,
+`15 3 * * *`) that POSTs `/api/cron/process-account-deletions`, reusing
+the same `call_report_cron_route()` helper and `report_cron_secret` Vault
+entry. Drains `account_deletion_requests` past their 30-day grace window
+via `execute_account_deletion()` (ADR 0016 section 3, migration
+`20261203000000`).
+
+Two independent switches, by design:
+
+- `ACCOUNT_DELETION_ENABLED` (Vercel prod) — users can *schedule* and
+  *cancel* deletion, with a 30-day grace. Nothing is ever erased.
+- `ACCOUNT_DELETION_EXECUTE_ENABLED` (Vercel prod) — the cron route
+  actually calls `execute_account_deletion()`. **Leave this off until the
+  cron is scheduled and smoke-tested.** Until then the route returns
+  `{"skipped":"disabled","erased":0}` on every tick, so running
+  `activate_account_deletions.sql` early is safe.
+
+Rollback: `select cron.unschedule('account-deletion-tick');` (leaves the
+helper function and pending requests untouched).
