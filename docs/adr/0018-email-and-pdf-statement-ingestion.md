@@ -1,7 +1,10 @@
 # ADR 0018: Email and PDF statement ingestion
 
-- **Status:** Accepted (design). **Not yet implemented** — this ADR records
-  the plan and the seams so a future session ships it in bounded slices.
+- **Status:**
+  - **Slice A (PDF import): implemented** behind `PDF_STATEMENT_IMPORT_ENABLED`
+    (`web/lib/pdf-statement.ts` + `/settings/sources/import`).
+  - **Slice B (email ingestion): design only** — still needs the
+    inbound-mail provider decision + a security review.
 - **Date:** 2026-09-06
 - **Closes (design):** audit gap **G10**, master prompt §5 / §14 / §87.
 - **Related:** ADR 0007 (provider-neutral connector model), ADR 0009 (async
@@ -42,19 +45,30 @@ transaction mails) and **PDF statements** — surfaced in the same
 
 ## Decision — two slices
 
-### Slice A — PDF statement import (ship first; lower risk)
+### Slice A — PDF statement import (implemented)
 
-1. `/settings/sources/import` accepts a `.pdf` alongside CSV/Excel.
-2. A server action runs the Bills extractor's text/table layer over the
-   PDF → `string[][]` candidate rows (best-effort; the existing
-   column-mapping + live-preview UI lets the user fix the mapping, and CSV
-   stays the fallback when a layout defeats extraction).
-3. Confirmed rows → `import_statement_transactions` (unchanged).
-4. Flag `PDF_STATEMENT_IMPORT_ENABLED` (needs `AI_PROVIDER`). No new
-   table, no new RPC, no new channel value.
-5. Tests: extractor unit tests with `AI_PROVIDER=mock` fixtures for 2–3
-   real bank layouts; an e2e that uploads a fixture PDF and reaches the
-   result screen.
+**As built** (simpler than the original sketch — no AI, no server work):
+
+1. `/settings/sources/import` accepts `.pdf` when
+   `PDF_STATEMENT_IMPORT_ENABLED` is `"true"`.
+2. **The browser** runs `pdf.js` (`pdfjs-dist`, loaded on demand) to read
+   the text layer; `web/lib/pdf-statement.ts` (pure, deno-tested) turns
+   positioned text items into visual lines, keeps lines carrying both a
+   date and a money amount, and splits each into
+   `[Date, Description, Amount]` — the same `string[][]` the CSV
+   column-mapping + live-preview UI already consumes. A second trailing
+   amount (running balance) is ignored.
+3. Confirmed rows → `import_statement_transactions` (**unchanged**).
+4. No new table, no new RPC, no new `channel` value, no AI provider.
+   Scanned-image PDFs are unsupported (no OCR) — CSV stays the fallback,
+   and an empty extraction tells the user to use CSV.
+5. Tests: `web/lib/pdf_statement_test.ts` (line reconstruction, amount
+   detection, row splitting). No e2e — driving `pdf.js` in the flaky CI
+   browser isn't worth it; the pure logic is covered.
+
+Rejected: the Bills AI extractor. It is invoice-shaped, needs
+`AI_PROVIDER` + a key, and costs per import; a text-layer heuristic covers
+the common case for free.
 
 ### Slice B — email statement ingestion (ship second)
 

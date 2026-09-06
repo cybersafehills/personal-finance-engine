@@ -809,3 +809,23 @@ a static list. deno migration **513/0**, `next lint` 0 errors, `next build` ✓.
 
 **G6 is now complete.** Remaining audit gaps: G8 (named e2e scenarios), G10
 (email/PDF ingestion).
+
+---
+
+## 20. Follow-on — PDF statement import (gap G10 Slice A, branch `feat/pdf-statement-import`)
+
+ADR 0018 Slice A, **implemented**. Dark behind `PDF_STATEMENT_IMPORT_ENABLED`.
+
+| Change | File |
+| --- | --- |
+| Pure PDF-text → rows heuristic: `itemsToLines` (positioned items → visual lines, page-break safe), `looksLikeAmount`, `linesToRows` (date+amount lines → `[Date, Description, Amount]`, running balance ignored). 6 deno tests. | `web/lib/pdf-statement.ts` (+ `pdf_statement_test.ts`) |
+| `/settings/sources/import` accepts `.pdf`: the browser runs `pdf.js` (`pdfjs-dist`, dynamic import) to read the text layer, then the existing column-mapping + `import_statement_transactions` path takes over unchanged | `components/StatementImportFlow.tsx`, `app/settings/sources/import/page.tsx` |
+| Flag doc | `web/.env.local.example` |
+
+No AI, no server work, no migration, no new RPC/channel. Scanned-image PDFs
+unsupported (CSV fallback). deno `web/lib` 656/0, `next lint` 0 errors, `next
+build` ✓ (`new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url)`
+worker).
+
+**G10 Slice B (email ingestion) remains design-only** — needs the inbound-mail
+provider decision + a security review (ADR 0018).

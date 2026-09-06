@@ -15,6 +15,40 @@ import {
   type ImportStatementResult,
 } from "../app/settings/sources/import/actions";
 import { formatRwf } from "../lib/format";
+import {
+  pdfItemsToStatementRows,
+  type PdfTextItem,
+} from "../lib/pdf-statement";
+
+// PDF text extraction runs entirely in the browser via pdf.js, loaded on
+// demand so the CSV path stays dependency-free. Text-layer PDFs (bank /
+// wallet exports) work; scanned images do not - CSV is the fallback.
+async function extractPdfRows(
+  file: File,
+): Promise<{ headers: string[]; rows: string[][] }> {
+  const pdfjs = await import("pdfjs-dist");
+  pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+    "pdfjs-dist/build/pdf.worker.min.mjs",
+    import.meta.url,
+  ).toString();
+
+  const buf = await file.arrayBuffer();
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(buf) }).promise;
+  const items: PdfTextItem[] = [];
+  for (let p = 1; p <= doc.numPages; p += 1) {
+    const page = await doc.getPage(p);
+    const content = await page.getTextContent();
+    // Push each later page's y downward in a shared coordinate space so
+    // itemsToLines never merges lines across a page break.
+    const pageOffset = (doc.numPages - p) * 100_000;
+    for (const it of content.items) {
+      if (!("str" in it) || typeof it.str !== "string") continue;
+      const tr = it.transform as number[];
+      items.push({ str: it.str, x: tr[4], y: tr[5] + pageOffset });
+    }
+  }
+  return pdfItemsToStatementRows(items);
+}
 
 const INPUT_CLASS =
   "min-h-11 rounded-control border border-border-strong bg-background px-3 py-2 text-sm text-text-primary";
@@ -36,8 +70,10 @@ const PREVIEW_LIMIT = 8;
 
 export function StatementImportFlow({
   sources,
+  pdfEnabled = false,
 }: {
   sources: Array<{ id: string; label: string }>;
+  pdfEnabled?: boolean;
 }) {
   const [sourceId, setSourceId] = useState(sources[0]?.id ?? "");
   const [fileName, setFileName] = useState<string | null>(null);
@@ -52,33 +88,59 @@ export function StatementImportFlow({
     Extract<ImportStatementResult, { ok: true }> | null
   >(null);
 
+  function applyParsed(parsed: { headers: string[]; rows: string[][] }) {
+    setHeaders(parsed.headers);
+    setRows(parsed.rows);
+    setMapping({
+      date: 0,
+      amount: 0,
+      counterparty: null,
+      externalRef: null,
+      directionStrategy: "sign",
+      directionColumn: null,
+      dateOrder: "dmy",
+      ...guessMapping(parsed.headers),
+    });
+  }
+
   async function onFile(file: File) {
     setParseError(null);
     setActionError(null);
     setResult(null);
     setFileName(file.name);
+    setHeaders([]);
+    setRows([]);
+    setMapping(null);
+
+    const isPdf = /\.pdf$/i.test(file.name) || file.type === "application/pdf";
+    if (isPdf) {
+      if (!pdfEnabled) {
+        setParseError("PDF import isn't available yet - export a CSV instead.");
+        return;
+      }
+      try {
+        const parsed = await extractPdfRows(file);
+        if (parsed.rows.length === 0) {
+          setParseError(
+            "No dated transaction lines were found in that PDF. If it's a scanned image, export a CSV instead.",
+          );
+          return;
+        }
+        applyParsed(parsed);
+      } catch {
+        setParseError("That PDF could not be read.");
+      }
+      return;
+    }
+
     try {
       const text = await file.text();
       const parsed = parseCsv(text);
       if (parsed.headers.length === 0 || parsed.rows.length === 0) {
-        setHeaders([]);
-        setRows([]);
-        setMapping(null);
         setParseError("That file has no header row and rows we could read.");
         return;
       }
-      setHeaders(parsed.headers);
-      setRows(parsed.rows);
-      setMapping({
-        date: 0,
-        amount: 0,
-        counterparty: null,
-        externalRef: null,
-        directionStrategy: "sign",
-        directionColumn: null,
-        dateOrder: "dmy",
-        ...guessMapping(parsed.headers),
-      });
+      applyParsed(parsed);
     } catch {
       setParseError("That file could not be read as text.");
     }
@@ -163,11 +225,11 @@ export function StatementImportFlow({
 
       <label className="flex flex-col gap-1 text-sm">
         <span className="font-medium text-text-secondary">
-          Statement file (CSV)
+          Statement file ({pdfEnabled ? "CSV or PDF" : "CSV"})
         </span>
         <input
           type="file"
-          accept=".csv,text/csv"
+          accept={pdfEnabled ? ".csv,text/csv,.pdf,application/pdf" : ".csv,text/csv"}
           onChange={(e) => {
             const f = e.target.files?.[0];
             if (f) void onFile(f);
