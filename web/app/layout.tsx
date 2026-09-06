@@ -116,7 +116,6 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
         {
           hideBalance: false,
           privacyMode: false,
-          reportsRelocationNoticeDismissed: true,
         },
         0,
       ];

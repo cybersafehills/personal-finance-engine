@@ -41,7 +41,7 @@ export async function dismissOnboardingChecklist(): Promise<
   const { data: existing } = await supabase
     .from("ui_preferences")
     .select(
-      "nav_order, hide_balance, privacy_mode, reports_relocation_notice_dismissed",
+      "nav_order, hide_balance, privacy_mode",
     )
     .eq("workspace_id", workspaceId)
     .eq("user_id", user.id)
@@ -54,8 +54,6 @@ export async function dismissOnboardingChecklist(): Promise<
       nav_order: existing?.nav_order ?? LEGACY_DEFAULT_NAV_ORDER,
       hide_balance: existing?.hide_balance ?? false,
       privacy_mode: existing?.privacy_mode ?? false,
-      reports_relocation_notice_dismissed:
-        existing?.reports_relocation_notice_dismissed ?? false,
       onboarding_dismissed: true,
     },
     { onConflict: "workspace_id,user_id" },
