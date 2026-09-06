@@ -149,3 +149,114 @@ export function deriveOnboardingJourney(
     intent: signals.intent,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Presented shape: four screens, not seven checklist rows.
+//
+// The seven milestones stay the unit of completion (each still tracked and
+// derived independently); the first-run WIZARD groups them into four
+// coherent tasks so the user faces one screen at a time instead of a long
+// list. Nothing is dropped - a group is simply done once all its
+// milestones are.
+// ---------------------------------------------------------------------------
+
+export const ONBOARDING_GROUPS = [
+  "intent",
+  "connect",
+  "activity",
+  "insight",
+] as const;
+
+export type OnboardingGroupKey = (typeof ONBOARDING_GROUPS)[number];
+
+export type OnboardingGroup = {
+  key: OnboardingGroupKey;
+  /** Wizard progress-bar label. */
+  label: string;
+  title: string;
+  subtitle: string;
+  /** The milestones this screen is responsible for, in order. */
+  milestones: MilestoneStep[];
+  done: boolean;
+};
+
+export type GroupedOnboardingJourney = {
+  groups: OnboardingGroup[];
+  /** Index of the first not-done group; groups.length once complete. */
+  currentIndex: number;
+  doneCount: number;
+  totalCount: number;
+  complete: boolean;
+};
+
+const GROUP_DEFS: {
+  key: OnboardingGroupKey;
+  label: string;
+  title: string;
+  subtitle: string;
+  members: readonly OnboardingMilestone[];
+}[] = [
+  {
+    key: "intent",
+    label: "Intent",
+    title: "How will you use OneLedger?",
+    subtitle: "This shapes what you see - you can change it later.",
+    members: ["intent_selected"],
+  },
+  {
+    key: "connect",
+    label: "Connect",
+    title: "Connect your money",
+    subtitle:
+      "Add an account, link this phone, and run one quick test - then your activity flows in on its own.",
+    members: ["source_added", "device_paired", "connection_verified"],
+  },
+  {
+    key: "activity",
+    label: "First activity",
+    title: "Your first transaction",
+    subtitle:
+      "When a real transaction arrives, OneLedger files it. Confirm its category once and it learns your preference.",
+    members: ["first_real_transaction", "first_review_completed"],
+  },
+  {
+    key: "insight",
+    label: "Insight",
+    title: "Your first insight",
+    subtitle:
+      "A first read on where your money goes, once there's enough activity.",
+    members: ["first_insight_seen"],
+  },
+];
+
+/** Fold a derived journey into the four wizard screens. */
+export function groupOnboardingJourney(
+  journey: OnboardingJourney,
+): GroupedOnboardingJourney {
+  const byKey = new Map(journey.steps.map((s) => [s.key, s]));
+
+  const groups: OnboardingGroup[] = GROUP_DEFS.map((def) => {
+    const milestones = def.members
+      .map((k) => byKey.get(k))
+      .filter((s): s is MilestoneStep => s !== undefined);
+    return {
+      key: def.key,
+      label: def.label,
+      title: def.title,
+      subtitle: def.subtitle,
+      milestones,
+      done: milestones.length > 0 && milestones.every((m) => m.done),
+    };
+  });
+
+  const doneCount = groups.filter((g) => g.done).length;
+  const firstNotDone = groups.findIndex((g) => !g.done);
+
+  return {
+    groups,
+    currentIndex: firstNotDone === -1 ? groups.length : firstNotDone,
+    doneCount,
+    totalCount: groups.length,
+    complete: doneCount === groups.length,
+  };
+}

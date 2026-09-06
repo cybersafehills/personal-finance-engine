@@ -32,8 +32,10 @@ export function FinancialPreferencesOnboardingForm({ initial }: {
       setError(null);
       startTransition(async () => {
         const result = await saveFinancialPreferences({ preferredCurrency: currency, timezone, locale });
-        if (result.ok) router.push("/get-started");
-        else setError(result.error);
+        if (result.ok) {
+          router.push("/onboarding");
+          router.refresh();
+        } else setError(result.error);
       });
     }}>
       <label className="flex flex-col gap-1 text-sm">

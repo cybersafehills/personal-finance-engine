@@ -48,7 +48,8 @@ export function IntentChoiceForm({
         setError(result.error);
         return;
       }
-      router.push("/get-started");
+      router.push("/onboarding");
+      router.refresh();
     });
   }
 

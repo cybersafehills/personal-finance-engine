@@ -2,7 +2,10 @@
 
 import Link from "next/link";
 import { useEffect, useState, useTransition } from "react";
-import { resendVerificationEmail } from "../app/verify-email/actions";
+import {
+  resendVerificationEmail,
+  verifySignupCode,
+} from "../app/verify-email/actions";
 import { AlertIcon, MailIcon } from "./auth/AuthIcon";
 
 type VerificationStatus = "expired" | "invalid" | "missing" | null;
@@ -39,6 +42,10 @@ export function VerifyEmailPanel({
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
+  const [code, setCode] = useState("");
+  const [codeError, setCodeError] = useState<string | null>(null);
+  const [isVerifying, startVerify] = useTransition();
+
   useEffect(() => {
     if (resendAvailableAt <= Date.now()) return;
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -73,9 +80,55 @@ export function VerifyEmailPanel({
           )}
       </p>
       <p className="mt-2 text-sm text-text-muted">
-        Click the link to verify your address and continue setting up your
-        profile.
+        Enter the 6-digit code from that email below, or just tap the link in
+        it - either one verifies your address.
       </p>
+
+      {email && (
+        <form
+          className="mt-5 flex flex-col gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            setCodeError(null);
+            startVerify(async () => {
+              const result = await verifySignupCode(code);
+              // Success redirects server-side; we only get here on failure.
+              setCodeError(result.error);
+            });
+          }}
+        >
+          <label
+            htmlFor="verify-code"
+            className="text-left text-sm font-medium text-text-secondary"
+          >
+            Verification code
+          </label>
+          <input
+            id="verify-code"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            pattern="[0-9]*"
+            maxLength={6}
+            value={code}
+            onChange={(event) =>
+              setCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+            placeholder="123456"
+            className="min-h-11 rounded-control border border-border-strong bg-surface px-3 text-center text-lg tracking-[0.4em] text-text-primary focus:border-accent"
+          />
+          <button
+            type="submit"
+            disabled={isVerifying || code.length < 6}
+            className="min-h-11 rounded-control bg-accent px-4 text-sm font-semibold text-accent-foreground shadow-sm transition-opacity hover:opacity-95 disabled:opacity-50"
+          >
+            {isVerifying ? "Verifying…" : "Verify and continue"}
+          </button>
+          {codeError && (
+            <p role="alert" className="text-left text-sm text-attention">
+              {codeError}
+            </p>
+          )}
+        </form>
+      )}
 
       {callbackMessage && (
         <p

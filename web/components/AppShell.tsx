@@ -13,7 +13,6 @@ import { PrivacyProvider } from "./PrivacyProvider";
 import { PayProvider } from "./pay/PayProvider";
 import { PayTrigger } from "./pay/PayTrigger";
 import { ReportsButton } from "./ReportsButton";
-import { ReportsRelocationNotice } from "./ReportsRelocationNotice";
 import {
   type ExperienceMode,
   isSurfaceVisible,
@@ -39,6 +38,16 @@ const NAV_ICONS: Record<
 function isActive(pathname: string, href: string): boolean {
   if (href === "/") return pathname === "/";
   return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+// First-run routes get their own focused frame (own layout, own back
+// control) - the app header and bottom nav would only invite the user to
+// wander off mid-setup. `/onboarding/*` carries its own OnboardingTopBar;
+// `/get-started` is the legacy resume view kept on the same footing.
+function isFirstRunRoute(pathname: string): boolean {
+  return pathname === "/onboarding" ||
+    pathname.startsWith("/onboarding/") ||
+    pathname === "/get-started";
 }
 
 /** One icon+label item in the phone bottom bar. */
@@ -73,7 +82,6 @@ export function AppShell({
   activeWorkspaceId,
   hideBalance,
   privacyMode,
-  reportsRelocationNoticeDismissed,
   payEnabled,
   assistedPayEnabled,
   scanToPayEnabled,
@@ -88,7 +96,6 @@ export function AppShell({
   activeWorkspaceId: string | null;
   hideBalance: boolean;
   privacyMode: boolean;
-  reportsRelocationNoticeDismissed: boolean;
   payEnabled: boolean;
   assistedPayEnabled: boolean;
   scanToPayEnabled: boolean;
@@ -102,6 +109,11 @@ export function AppShell({
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
   const moreActive = MORE_MENU_PREFIXES.some((p) => isActive(pathname, p));
+
+  // Show the app chrome only for a signed-in user who is NOT in first-run
+  // setup. Unauthenticated pages (login/signup/verify) never had it; the
+  // onboarding subtree opts out too so setup stays a single focused task.
+  const showChrome = Boolean(userEmail) && !isFirstRunRoute(pathname);
 
   // The fixed financial-journey nav, filtered by the active experience
   // mode (personal/household/business all keep the four core destinations;
@@ -125,15 +137,15 @@ export function AppShell({
 
   const shell = (
     <div className="flex min-h-full flex-col">
-      {userEmail && <LiveDataSync workspaceId={activeWorkspaceId} />}
+      {showChrome && <LiveDataSync workspaceId={activeWorkspaceId} />}
 
       {/* Unified authenticated header - one definition for every device
           size, so mobile and desktop can never drift into two competing
           navigation/account implementations. Brand left; Reports icon
           and the profile menu (email, workspace switcher, settings
-          shortcuts, sign-out) on the right. Absent entirely on
-          unauthenticated pages (no user yet). */}
-      {userEmail && (
+          shortcuts, sign-out) on the right. Absent on unauthenticated
+          pages (no user yet) and during first-run setup. */}
+      {showChrome && userEmail && (
         <header className="sticky top-0 z-10 border-b border-border-subtle bg-surface/95 backdrop-blur">
           <div className="mx-auto flex max-w-3xl items-center justify-between gap-3 px-4 py-2.5 sm:px-6 lg:max-w-5xl lg:px-8">
             <Link href="/" aria-label="OneLedger home" className="shrink-0">
@@ -203,8 +215,6 @@ export function AppShell({
         </header>
       )}
 
-      {userEmail && !reportsRelocationNoticeDismissed && <ReportsRelocationNotice />}
-
       {/* Wider (not full-bleed) on large screens - see master prompt §10:
           "constrained but appropriately wider content container" -
           giving Home's desktop two-column grid (app/page.tsx) room to
@@ -220,8 +230,8 @@ export function AppShell({
           nav: the phone bar's slots have fixed roles, Inbox is reached
           from the header icon at this width, and Categories / Reports /
           Settings live in the More sheet. Visible below lg: (1024px).
-          Absent on auth pages. */}
-      {userEmail && (
+          Absent on auth pages and during first-run setup. */}
+      {showChrome && (
         <>
           <nav
             aria-label="Primary"

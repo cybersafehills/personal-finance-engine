@@ -79,3 +79,73 @@ Deno.test("intent alone does not imply any downstream milestone", () => {
   assertEquals(j.doneCount, 1);
   assertEquals(j.nextStep?.key, "source_added");
 });
+
+// ---------------------------------------------------------------------------
+// groupOnboardingJourney: the four wizard screens over the seven milestones.
+// ---------------------------------------------------------------------------
+
+import {
+  groupOnboardingJourney,
+  ONBOARDING_GROUPS,
+} from "./onboarding-milestones.ts";
+
+Deno.test("grouping: brand-new user -> 4 groups, none done, current = intent (0)", () => {
+  const g = groupOnboardingJourney(deriveOnboardingJourney(NOTHING));
+  assertEquals(g.totalCount, 4);
+  assertEquals(g.doneCount, 0);
+  assertEquals(g.complete, false);
+  assertEquals(g.currentIndex, 0);
+  assertEquals(g.groups.map((x) => x.key), [...ONBOARDING_GROUPS]);
+});
+
+Deno.test("grouping: intent chosen -> group 0 done, current = connect (1)", () => {
+  const g = groupOnboardingJourney(
+    deriveOnboardingJourney({ ...NOTHING, intent: "personal" }),
+  );
+  assertEquals(g.groups[0].done, true);
+  assertEquals(g.doneCount, 1);
+  assertEquals(g.currentIndex, 1);
+});
+
+Deno.test("grouping: connect group needs ALL of source+device+verified", () => {
+  const partial = groupOnboardingJourney(deriveOnboardingJourney({
+    ...NOTHING,
+    intent: "personal",
+    sourceCount: 1,
+    pairedDeviceCount: 1,
+    verifiedConnectionCount: 0,
+  }));
+  assertEquals(partial.groups[1].done, false);
+  assertEquals(partial.currentIndex, 1);
+
+  const full = groupOnboardingJourney(deriveOnboardingJourney({
+    ...NOTHING,
+    intent: "personal",
+    sourceCount: 1,
+    pairedDeviceCount: 1,
+    verifiedConnectionCount: 1,
+  }));
+  assertEquals(full.groups[1].done, true);
+  assertEquals(full.currentIndex, 2);
+});
+
+Deno.test("grouping: every milestone done -> complete, currentIndex past the end", () => {
+  const g = groupOnboardingJourney(deriveOnboardingJourney({
+    intent: "household",
+    sourceCount: 2,
+    pairedDeviceCount: 1,
+    verifiedConnectionCount: 1,
+    realTransactionCount: 5,
+    firstReviewAt: "2026-09-05T00:00:00Z",
+    firstInsightAt: "2026-09-06T00:00:00Z",
+  }));
+  assertEquals(g.complete, true);
+  assertEquals(g.doneCount, 4);
+  assertEquals(g.currentIndex, 4);
+});
+
+Deno.test("grouping: all seven milestones are covered exactly once", () => {
+  const g = groupOnboardingJourney(deriveOnboardingJourney(NOTHING));
+  const covered = g.groups.flatMap((x) => x.milestones.map((m) => m.key)).sort();
+  assertEquals(covered, [...ONBOARDING_MILESTONES].sort());
+});
