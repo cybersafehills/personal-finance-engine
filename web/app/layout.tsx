@@ -161,7 +161,6 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           activeWorkspaceId={activeWorkspaceId}
           hideBalance={uiPreferences.hideBalance}
           privacyMode={uiPreferences.privacyMode}
-          reportsRelocationNoticeDismissed={uiPreferences.reportsRelocationNoticeDismissed}
           payEnabled={payEnabled}
           assistedPayEnabled={assistedPayEnabled}
           scanToPayEnabled={scanToPayEnabled}

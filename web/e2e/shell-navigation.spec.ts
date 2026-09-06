@@ -156,16 +156,3 @@ test("profile menu closes on outside click", async ({ page }) => {
   await page.mouse.click(10, 10);
   await expect(page.getByText("e2e-shell-suite@oneledger.test")).toBeHidden();
 });
-
-test("the one-time Reports relocation notice can be dismissed and never reappears", async ({ page }) => {
-  await page.goto("/");
-
-  const notice = page.getByText("Reports has moved");
-  if (await notice.isVisible().catch(() => false)) {
-    await page.getByRole("button", { name: "Got it" }).click();
-    await expect(notice).toBeHidden();
-    await page.waitForLoadState("networkidle");
-    await page.reload();
-    await expect(notice).toHaveCount(0);
-  }
-});

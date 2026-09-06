@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { PageHeader } from "../../../components/PageHeader";
+import { StepWizard } from "../../../components/ds/StepWizard";
 import { FinancialPreferencesOnboardingForm } from "../../../components/FinancialPreferencesOnboardingForm";
 import { getProfileOnboarding } from "../../../lib/queries";
 
@@ -8,14 +9,22 @@ export const dynamic = "force-dynamic";
 export default async function OnboardingPreferencesPage() {
   const profile = await getProfileOnboarding();
   if (!profile) redirect("/login");
-  if (profile.step === "profile") redirect("/onboarding/profile");
-  if (profile.step === "setup") redirect("/get-started");
+  // Only bounce back to step 1 if it genuinely isn't done. A cache/replication
+  // lag right after saving step 1 can briefly still read step="profile" even
+  // though the name is saved - don't trap the user on step 1 in that window.
+  if (profile.step === "profile" && !profile.firstName.trim()) {
+    redirect("/onboarding/profile");
+  }
+  if (profile.step === "setup") redirect("/onboarding");
   if (profile.step === "completed") redirect("/");
 
-  return <div className="mx-auto max-w-xl">
-    <p className="mb-2 text-xs font-medium uppercase tracking-wide text-accent">Step 2 of 2</p>
-    <PageHeader title="Set your financial preferences" subtitle="Confirm how OneLedger should format money, dates, and scheduled activity." />
-    <FinancialPreferencesOnboardingForm initial={profile} />
-  </div>;
+  return (
+    <StepWizard steps={["Your details", "Preferences"]} current={1}>
+      <PageHeader
+        title="Set your financial preferences"
+        subtitle="Confirm how OneLedger should format money, dates, and scheduled activity."
+      />
+      <FinancialPreferencesOnboardingForm initial={profile} />
+    </StepWizard>
+  );
 }
-
