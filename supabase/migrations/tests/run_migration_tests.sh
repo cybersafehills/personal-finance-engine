@@ -659,7 +659,7 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # grant, no RLS change. Count stays 118 / 117.
 # Account deletion request (20261201000000) adds account_deletion_requests
 # (RLS enabled, SELECT-own for authenticated) - 119 tables, 118 with RLS.
-# Entitlements (20261130000000) adds workspace_plans (RLS enabled, SELECT
+# Entitlements (20261202000000) adds workspace_plans (RLS enabled, SELECT
 # gated on is_workspace_member) - 120 tables, 119 with RLS.
 if [ "$TABLE_COUNT" = "120" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
@@ -7050,7 +7050,7 @@ else
 fi
 
 # ===========================================================================
-# Entitlements & plan tiers (20261130000000): workspace_plans.
+# Entitlements & plan tiers (20261202000000): workspace_plans.
 # ===========================================================================
 echo "=== Entitlements: workspace_plans ==="
 

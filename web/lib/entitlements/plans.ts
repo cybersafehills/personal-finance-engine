@@ -1,7 +1,7 @@
 // Entitlements & plan tiers - the single source of truth for the
 // tier -> capability map (ADR 0015 / master prompt section 52). Pure and
 // framework-free so it is unit-testable and importable from both server
-// and (future) client code. The SQL side (20261130000000) only STORES a
+// and (future) client code. The SQL side (20261202000000) only STORES a
 // workspace's plan; it never encodes this map.
 //
 // Guardrail (assessment section 7): an entitlement gates automation
