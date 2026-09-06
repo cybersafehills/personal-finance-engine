@@ -740,7 +740,7 @@ Stacked on `feat/settings-ia-7group` (G1). ADR 0015. Closes G2 from
 
 | Change | File |
 | --- | --- |
-| Per-workspace plan table + default-free backfill + `ensure_workspace_plan` AFTER INSERT trigger; member-SELECT RLS, no authenticated write | `supabase/migrations/20261130000000_entitlements.sql` |
+| Per-workspace plan table + default-free backfill + `ensure_workspace_plan` AFTER INSERT trigger; member-SELECT RLS, no authenticated write | `supabase/migrations/20261202000000_entitlements.sql` |
 | Migration-suite: 8 assertions (backfill coverage, default, trigger, plan check, member/outsider RLS, denied member write, grants); guard counts 118→119 tables / 149→150 authenticated grants | `supabase/migrations/tests/run_migration_tests.sh` — **501/0** |
 | Tier→capability map (single source, TS) + `planHasEntitlement`/`lowestPlanFor`/`planLabel`; 8 deno tests incl. the "no data/export/security entitlement" guardrail | `web/lib/entitlements/plans.ts` (+ `plans_test.ts`) |
 | Server gate mirroring `experience-mode/gate.ts`: `ENTITLEMENTS_ENABLED` (+ `_ALLOWLIST`), `getWorkspacePlanState`, `workspaceHasEntitlement` (permissive when dark) | `web/lib/entitlements/gate.ts` |
