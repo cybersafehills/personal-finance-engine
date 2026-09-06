@@ -756,3 +756,28 @@ Supabase types not regenerated here (no project access) — regen on deploy;
 Enforcement is the deliberate next step, per capability, behind
 `ENTITLEMENTS_ENABLED`. Still open: G3 (account-detail tabs), G6 (F12
 deletion/export), G7-G12.
+
+---
+
+## 17. Follow-on — Account erasure (gap G6 completion, branch `feat/account-erasure`)
+
+Off `main`. ADR 0016 §3, closing the irreversible half of audit F12.
+`20261203000000_account_erasure.sql` + a cron; dark behind the **separate**
+`ACCOUNT_DELETION_EXECUTE_ENABLED`.
+
+| Change | File |
+| --- | --- |
+| 5 `workspace_id` FKs (`accounts`, `categorization_policies`, `transactions`, `transaction_category_history`, `learned_policy_suggestion_decisions`) NO ACTION → CASCADE, matching every other workspace-scoped table | `20261203000000_account_erasure.sql` |
+| `account_deletion_log` (no auth.users FK - outlives the erasure; service-role only) | ″ |
+| `execute_account_deletion(uuid)` SECURITY DEFINER service-role-only: bottom-up teardown of the RESTRICT chain (raw events → txn-graph → transactions → momo_messages → device creds/pairing → ingestion → connectors), workspace cascade, owned sources/connectors, catalogue-driven null/delete of every remaining NO ACTION/RESTRICT `auth.users` FK, log, `delete from auth.users`. Re-checks P0001 + P0004. | ″ |
+| `pending_account_deletions(int)` — the cron queue (scheduled + past `scheduled_for`), service-role only | ″ |
+| `request_account_deletion` guard extended: also blocks while an owned source is shared into a populated Space (P0004) | ″ |
+| Migration suite: +4 assertions (guard, full teardown vs. an intact household, P0004, queue+ACL); guard 120→121 tables. **513/0** | `run_migration_tests.sh` |
+| `process-account-deletions` cron (cron-auth + `ACCOUNT_DELETION_EXECUTE_ENABLED`; per-user failure isolation, no user id in logs) | `web/app/api/cron/process-account-deletions/route.ts` |
+| `isAccountDeletionExecuteEnabled()` + flag doc | `web/lib/account-deletion.ts`, `web/.env.local.example` |
+
+The FK graph was captured from the real built schema (probe in the PR), not
+a static list. deno migration **513/0**, `next lint` 0 errors, `next build` ✓.
+
+**G6 is now complete.** Remaining audit gaps: G8 (named e2e scenarios), G10
+(email/PDF ingestion).

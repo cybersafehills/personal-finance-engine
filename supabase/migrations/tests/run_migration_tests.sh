@@ -661,7 +661,10 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # (RLS enabled, SELECT-own for authenticated) - 119 tables, 118 with RLS.
 # Entitlements (20261202000000) adds workspace_plans (RLS enabled, SELECT
 # gated on is_workspace_member) - 120 tables, 119 with RLS.
-if [ "$TABLE_COUNT" = "120" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Account erasure (20261203000000) adds account_deletion_log (RLS enabled,
+# no policy - service-role only, like raw_financial_events) - 121 tables,
+# 120 with RLS.
+if [ "$TABLE_COUNT" = "121" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -7121,6 +7124,103 @@ if [ "$ENT_GRANTS" = "SELECT" ] && [ "$ENT_ANON_GRANTS" = "0" ]; then
   pass "Entitlements: authenticated holds SELECT-only on workspace_plans, anon holds nothing"
 else
   fail "Entitlements: workspace_plans grants wrong (authenticated='$ENT_GRANTS' anon=$ENT_ANON_GRANTS)"
+fi
+
+# ===========================================================================
+# Account erasure (20261203000000): execute_account_deletion tears down the
+# user's solo Space + owned sources, nulls attribution refs in shared
+# Spaces, deletes auth.users; the request guard also blocks a still-shared
+# source. Reuses pfe_rls.
+# ===========================================================================
+echo "=== Account erasure ==="
+
+ERZ_USER="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('erz-user@example.com') returning id;" | head -1)"
+ERZ_OTHER="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('erz-other@example.com') returning id;" | head -1)"
+ERZ_WS="$(psql -d pfe_rls -t -A -c "select w.id from public.workspaces w join public.workspace_memberships m on m.workspace_id=w.id where m.user_id='$ERZ_USER' and w.kind='personal';" | head -1)"
+
+psql -d pfe_rls -v ON_ERROR_STOP=1 >/dev/null <<SQL
+set role service_role;
+insert into public.financial_sources (id, owner_user_id, provider, source_type, display_name, currency)
+  values ('00000000-0000-0000-0000-0000000e9001','$ERZ_USER','mtn_momo','mobile_money','Erz MoMo','RWF');
+insert into public.accounts (id, workspace_id, financial_source_id, name, provider, currency)
+  values ('00000000-0000-0000-0000-0000000e9002','$ERZ_WS','00000000-0000-0000-0000-0000000e9001','Erz Acct','mtn_momo','RWF');
+insert into public.ingestion_connections (id, workspace_id, account_id, label, credential_hash, credential_prefix)
+  values ('00000000-0000-0000-0000-0000000e9003','$ERZ_WS','00000000-0000-0000-0000-0000000e9002','Erz phone', repeat('e',64), 'pfe_erz1');
+insert into public.momo_messages (id, raw_message, processing_status, ingestion_connection_id)
+  values ('00000000-0000-0000-0000-0000000e9004','seed sms','processed','00000000-0000-0000-0000-0000000e9003');
+insert into public.transactions (id, momo_message_id, account_id, workspace_id, financial_source_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version)
+  values ('00000000-0000-0000-0000-0000000e9005','00000000-0000-0000-0000-0000000e9004','00000000-0000-0000-0000-0000000e9002','$ERZ_WS','00000000-0000-0000-0000-0000000e9001','send_money','out','success',1000,0,now(),'test');
+insert into public.ui_preferences (workspace_id, user_id) values ('$ERZ_WS','$ERZ_USER');
+SQL
+
+ERZ_HH="$(as_user "$ERZ_OTHER" "select public.create_household_workspace('Erz Household');" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+psql -d pfe_rls -c "set role service_role;
+  insert into public.workspace_memberships (workspace_id, user_id, role, status, joined_at) values ('$ERZ_HH','$ERZ_USER','member','active',now());
+  insert into public.space_activity (workspace_id, actor_user_id, kind, summary) values ('$ERZ_HH','$ERZ_USER','note','erz was here');" >/dev/null
+
+# Guard: ERZ_OTHER solely owns a populated household -> erasure refuses.
+if psql -d pfe_rls -c "set role service_role; select public.execute_account_deletion('$ERZ_OTHER');" >/dev/null 2>$ARTIFACT_DIR/pfe_erz_g.log; then
+  fail "Account erasure: sole owner of a populated shared Space was erased"
+else
+  pass "Account erasure: refuses a user who still solely owns a populated shared Space"
+fi
+rm -f $ARTIFACT_DIR/pfe_erz_g.log
+
+# Erase ERZ_USER (only a plain member of the household).
+set +e
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; select public.execute_account_deletion('$ERZ_USER');" > $ARTIFACT_DIR/pfe_erz.log 2>&1
+ERZ_RC=$?
+set -e
+if [ "$ERZ_RC" != "0" ]; then fail "Account erasure: execute_account_deletion exit=$ERZ_RC"; sed 's/^/  ERZ| /' $ARTIFACT_DIR/pfe_erz.log >&2; fi
+rm -f $ARTIFACT_DIR/pfe_erz.log
+
+ERZ_STATE="$(psql -d pfe_rls -t -A -c "
+  select (select count(*) from auth.users where id='$ERZ_USER')
+    || '|' || (select count(*) from public.workspaces where id='$ERZ_WS')
+    || '|' || (select count(*) from public.transactions where id='00000000-0000-0000-0000-0000000e9005')
+    || '|' || (select count(*) from public.financial_sources where owner_user_id='$ERZ_USER')
+    || '|' || (select count(*) from public.ingestion_connections where id='00000000-0000-0000-0000-0000000e9003')
+    || '|' || (select count(*) from public.momo_messages where id='00000000-0000-0000-0000-0000000e9004')
+    || '|' || (select coalesce(max(workspaces_removed),-1) from public.account_deletion_log where deleted_user_id='$ERZ_USER')
+    || '|' || (select count(*) from public.workspaces where id='$ERZ_HH')
+    || '|' || (select count(*) from public.space_activity where workspace_id='$ERZ_HH' and kind='note')
+    || '|' || (select coalesce(actor_user_id::text,'NULL') from public.space_activity where workspace_id='$ERZ_HH' and kind='note')
+    || '|' || (select count(*) from auth.users where id='$ERZ_OTHER');
+")"
+if [ "$ERZ_STATE" = "0|0|0|0|0|0|1|1|1|NULL|1" ]; then
+  pass "Account erasure: solo Space + owned source/connector/evidence gone, household kept with actor nulled, log written, other user intact"
+else
+  fail "Account erasure: post-state wrong ('$ERZ_STATE', want '0|0|0|0|0|0|1|1|1|NULL|1')"
+fi
+
+# Request guard P0004: a source still shared into a populated Space.
+ERZ_P4_A="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('erz-p4a@example.com') returning id;" | head -1)"
+ERZ_P4_B="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('erz-p4b@example.com') returning id;" | head -1)"
+ERZ_P4_HH="$(as_user "$ERZ_P4_B" "select public.create_household_workspace('P4 Household');" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+psql -d pfe_rls -c "set role service_role;
+  insert into public.workspace_memberships (workspace_id,user_id,role,status,joined_at) values ('$ERZ_P4_HH','$ERZ_P4_A','member','active',now());
+  insert into public.financial_sources (id,owner_user_id,provider,source_type,display_name,currency) values ('00000000-0000-0000-0000-0000000e9101','$ERZ_P4_A','mtn_momo','mobile_money','P4 src','RWF');
+  insert into public.source_space_links (financial_source_id,workspace_id,visibility_mode,status) values ('00000000-0000-0000-0000-0000000e9101','$ERZ_P4_HH','share_transactions','active');" >/dev/null
+if as_user "$ERZ_P4_A" "select public.request_account_deletion();" >/dev/null 2>$ARTIFACT_DIR/pfe_erz_p4.log; then
+  fail "Account erasure: request allowed while a source is shared into a populated Space"
+else
+  pass "Account erasure: request blocked while an owned source is still shared into a populated Space (P0004)"
+fi
+rm -f $ARTIFACT_DIR/pfe_erz_p4.log
+
+# pending_account_deletions: the cron's queue - scheduled + past the grace
+# window, service-role only.
+ERZ_Q1="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('erz-q1@example.com') returning id;" | head -1)"
+ERZ_Q2="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('erz-q2@example.com') returning id;" | head -1)"
+as_user "$ERZ_Q1" "select public.request_account_deletion();" >/dev/null
+as_user "$ERZ_Q2" "select public.request_account_deletion();" >/dev/null
+psql -d pfe_rls -c "set role service_role; update public.account_deletion_requests set scheduled_for = now() - interval '1 day' where user_id = '$ERZ_Q1';" >/dev/null
+ERZ_PEND="$(psql -d pfe_rls -t -A -c "select string_agg(x::text, ',' order by x::text) from public.pending_account_deletions(50) x;" | tail -1)"
+ERZ_PEND_ACL="$(as_user "$ERZ_Q1" "select has_function_privilege('authenticated','public.pending_account_deletions(int)','execute') || '|' || has_function_privilege('authenticated','public.execute_account_deletion(uuid)','execute');")"
+if [ "$ERZ_PEND" = "$ERZ_Q1" ] && { [ "$ERZ_PEND_ACL" = "false|false" ] || [ "$ERZ_PEND_ACL" = "f|f" ]; }; then
+  pass "Account erasure: pending_account_deletions returns only past-due scheduled requests, and the erasure fns are service-role only"
+else
+  fail "Account erasure: pending queue wrong (pending='$ERZ_PEND' want '$ERZ_Q1', acl='$ERZ_PEND_ACL')"
 fi
 
 echo ""

@@ -1,8 +1,11 @@
 # ADR 0016: Account deletion and data export
 
-- **Status:** Accepted. Request side + export implemented behind
-  `ACCOUNT_DELETION_ENABLED` (`20261201000000`). **Irreversible erasure is
-  a deliberately separate follow-up** — this ADR carries its spec.
+- **Status:** Accepted, fully implemented.
+  - Request + export: `20261201000000`, behind `ACCOUNT_DELETION_ENABLED`.
+  - Irreversible erasure: `20261203000000` (`execute_account_deletion` +
+    `pending_account_deletions` + `account_deletion_log` + the
+    `process-account-deletions` cron), behind the **separate**
+    `ACCOUNT_DELETION_EXECUTE_ENABLED`.
 - **Date:** 2026-09-06
 - **Closes:** audit **F12**, master prompt §94–§95.
 - **Guardrail:** account deletion and data export are **never** behind a
@@ -38,9 +41,42 @@ and the personal Space, are fine.
 
 ### 3. Irreversible erasure — the follow-up (`execute_account_deletion`)
 
-A `SECURITY DEFINER`, service-role-only function invoked by a cron
-(`process-account-deletions`) for every `scheduled` row past
-`scheduled_for`. It must, in order:
+**Implemented in `20261203000000`.** `execute_account_deletion(p_user_id)`
+is a `SECURITY DEFINER`, service-role-only function; the
+`process-account-deletions` cron calls `pending_account_deletions()` for
+the due ids and runs it per user, isolating per-user failures.
+
+**Schema prep:** five tenant-scoped tables (`accounts`,
+`categorization_policies`, `transactions`, `transaction_category_history`,
+`learned_policy_suggestion_decisions`) were left `ON DELETE NO ACTION` on
+their `workspace_id` FK by older migrations and are converted to
+`CASCADE`, matching every other workspace-scoped table — so the
+Personal-Space delete is one statement once the RESTRICT chain is
+cleared.
+
+The function, in order:
+
+0. Re-checks both request guards (sole owner of a populated shared Space →
+   `P0001`; an owned source still shared into a populated Space → `P0004`,
+   a check also added to `request_account_deletion`).
+1. For each **solo workspace** (the only active member is this user):
+   dismantles the RESTRICT-guarded chain bottom-up — raw events →
+   transaction-graph NO-ACTION rows → transactions → `momo_messages` →
+   device credentials / pairing sessions → ingestion connections →
+   connector installations — then `delete from workspaces` cascades the
+   ~46 CASCADE children.
+2. Deletes the user's own `financial_sources` / `pairing_sessions` /
+   `connector_installations` (now unblocked).
+3. Neutralises every remaining single-column NO ACTION / RESTRICT
+   `auth.users` FK, discovered from `pg_constraint`: nullable columns are
+   nulled (the shared-ledger row stays, the actor becomes "a former
+   member"); a NOT NULL column means the row is meaningless without its
+   user, so the row is deleted.
+4. Writes `account_deletion_log` (no FK to `auth.users`, so it survives).
+5. `delete from auth.users` — cascades profiles, memberships, and the ~20
+   other CASCADE user FKs.
+
+Historical spec (kept for context) — the function must, in order:
 
 1. For each workspace the caller **solely owns with no other active
    member** (their personal Space + any solo household/org):
