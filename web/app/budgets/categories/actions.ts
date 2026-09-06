@@ -22,7 +22,9 @@ function todayDateKey(): string {
 // effective-dated from the change date, keeping closed periods
 // reproducible. aggregateOutflowsByAllocation() in lib/budget-math.ts
 // relies on this: it matches on effective_from <= occurred_at and must
-// not be "fixed" to ignore dates.
+// not be "fixed" to ignore dates. Mappings saved before this change with
+// today's date were repaired by migration
+// 20260906091843_backdate_sole_category_mappings.
 const EPOCH_DATE_KEY = "1970-01-01";
 
 /**

@@ -15,6 +15,12 @@
 -- are touched. If a category has ever been re-mapped (a closed row also
 -- exists) its effective-dating is deliberate and left alone, keeping
 -- closed budget periods reproducible.
+--
+-- Idempotent: the `effective_from > '1970-01-01'` guard makes a re-run a
+-- no-op. Already applied to production out-of-band via the Supabase MCP
+-- (recorded as version 20260906091843); this file lets a fresh
+-- environment reproduce it and is skipped by `supabase db push` where it
+-- is already recorded.
 
 update public.budget_category_mappings m
    set effective_from = date '1970-01-01'
