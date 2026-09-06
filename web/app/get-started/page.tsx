@@ -87,12 +87,20 @@ export default async function GetStartedPage() {
               ))}
             </ol>
           )}
-        {!journey.complete && (
-          <DismissOnboardingButton
-            label="Dismiss setup reminder"
-            className="mt-6 w-fit min-h-8 text-xs font-medium text-text-muted hover:text-text-primary"
-          />
-        )}
+        <div className="mt-6 flex flex-wrap items-center gap-4">
+          <Link
+            href="/onboarding/review"
+            className="min-h-8 text-xs font-medium leading-8 text-accent hover:underline"
+          >
+            See your setup summary
+          </Link>
+          {!journey.complete && (
+            <DismissOnboardingButton
+              label="Dismiss setup reminder"
+              className="w-fit min-h-8 text-xs font-medium text-text-muted hover:text-text-primary"
+            />
+          )}
+        </div>
       </div>
     );
   }
