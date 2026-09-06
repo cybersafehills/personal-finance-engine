@@ -77,6 +77,12 @@ jobs:
             echo "NEXT_PUBLIC_SUPABASE_URL=$(echo "$STATUS_JSON" | jq -r '.API_URL')"
             echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$(echo "$STATUS_JSON" | jq -r '.ANON_KEY')"
             echo "SITE_URL=http://127.0.0.1:3417"
+            # Match ci.yml's e2e-tests job exactly, or the regenerated
+            # baselines render a different app than the one CI screenshots
+            # against: OneLedger Spaces is opt-in (lib/spaces/gate.ts) and
+            # its surfaces (the Settings "Account sharing" row, the
+            # household create form) only appear with it on.
+            echo "SPACES_ENABLED=true"
           } >> "$GITHUB_ENV"
 
       - name: Generate/update snapshots
