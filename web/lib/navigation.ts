@@ -47,9 +47,27 @@ export const PHONE_BAR_KEYS: readonly Exclude<PrimaryNavKey, "home" | "inbox">[]
 // a SurfaceKey; AppShell/MoreSheet hides an item whose surface the active
 // experience mode does not grant, and additionally honours the Pay /
 // integrations feature flags.
+// Icon identity per item - resolved to an SVG component in MoreSheet
+// (MORE_ICONS), the same key->component indirection AppShell uses for the
+// primary nav, so this file stays free of component imports.
+export type MoreIconKey =
+  | "categories"
+  | "reports"
+  | "sources"
+  | "bills"
+  | "members"
+  | "settings"
+  | "notifications"
+  | "integrations"
+  | "developer"
+  | "ussd"
+  | "recipients"
+  | "templates";
+
 export type MoreItem = {
   href: string;
   label: string;
+  icon: MoreIconKey;
   surface: SurfaceKey | null;
   /** Extra gate beyond the experience mode, checked by MoreSheet. */
   requires?: "integrations" | "pay" | "assistedPay";
@@ -57,30 +75,33 @@ export type MoreItem = {
 
 export type MoreGroup = { title: string; items: readonly MoreItem[] };
 
+// Consolidated (assessment section 16 / master prompt section 19):
+//  - Security / Privacy / Appearance are not peers here; they live inside
+//    the Settings console (/settings) and are reached from there.
+//  - "Payment activity" is opened from the Pay launcher, not listed as a
+//    destination here; "Reconciliation" is a shortcut on that activity
+//    page, not a standalone More entry.
 export const MORE_GROUPS: readonly MoreGroup[] = [
   {
     title: "Manage money",
     items: [
-      { href: "/categories", label: "Categories", surface: "categories" },
-      { href: "/reports", label: "Reports", surface: "reports" },
-      { href: "/settings/sources", label: "Connected sources", surface: "sources" },
-      { href: "/bills", label: "Bills", surface: "bills" },
+      { href: "/categories", label: "Categories", icon: "categories", surface: "categories" },
+      { href: "/reports", label: "Reports", icon: "reports", surface: "reports" },
+      { href: "/settings/sources", label: "Connected sources", icon: "sources", surface: "sources" },
+      { href: "/bills", label: "Bills", icon: "bills", surface: "bills" },
     ],
   },
   {
     title: "This Space",
     items: [
-      { href: "/settings/workspace", label: "Space & members", surface: "members" },
+      { href: "/settings/workspace", label: "Space & members", icon: "members", surface: "members" },
     ],
   },
   {
     title: "Account",
     items: [
-      { href: "/settings", label: "Settings", surface: null },
-      { href: "/settings/security", label: "Security", surface: null },
-      { href: "/settings/privacy", label: "Privacy", surface: null },
-      { href: "/settings/notifications", label: "Notifications", surface: null },
-      { href: "/settings/appearance", label: "Appearance", surface: null },
+      { href: "/settings", label: "Settings", icon: "settings", surface: null },
+      { href: "/settings/notifications", label: "Notifications", icon: "notifications", surface: null },
     ],
   },
   {
@@ -89,12 +110,14 @@ export const MORE_GROUPS: readonly MoreGroup[] = [
       {
         href: "/integrations",
         label: "Integrations",
+        icon: "integrations",
         surface: "integrations",
         requires: "integrations",
       },
       {
         href: "/integrations/developer",
         label: "Developer platform",
+        icon: "developer",
         surface: "developer",
         requires: "integrations",
       },
@@ -103,28 +126,18 @@ export const MORE_GROUPS: readonly MoreGroup[] = [
   {
     title: "Pay & Services",
     items: [
-      { href: "/pay/ussd", label: "USSD directory", surface: "pay", requires: "pay" },
-      {
-        href: "/pay/activity",
-        label: "Payment activity",
-        surface: "pay",
-        requires: "assistedPay",
-      },
-      {
-        href: "/pay/reconciliation",
-        label: "Reconciliation",
-        surface: "pay",
-        requires: "assistedPay",
-      },
+      { href: "/pay/ussd", label: "USSD directory", icon: "ussd", surface: "pay", requires: "pay" },
       {
         href: "/pay/recipients",
         label: "Trusted recipients",
+        icon: "recipients",
         surface: "pay",
         requires: "assistedPay",
       },
       {
         href: "/pay/templates",
         label: "Payment templates",
+        icon: "templates",
         surface: "pay",
         requires: "assistedPay",
       },

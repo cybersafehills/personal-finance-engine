@@ -1,20 +1,9 @@
 "use client";
 
-import {
-  Suspense,
-  lazy,
-  useEffect,
-  useId,
-  useRef,
-  useState,
-  useTransition,
-} from "react";
+import { Suspense, lazy, useEffect, useId, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { messages } from "../../lib/ussd/messages";
-import {
-  getLauncherSnapshot,
-  type LauncherSnapshot,
-} from "../../app/pay/actions";
+import type { LauncherSnapshot } from "../../app/pay/actions";
 import { trackScanEvent } from "../../lib/pay/scan-analytics";
 import { CloseIcon, PayIcon, QrScanIcon, StarIcon } from "../icons";
 
@@ -69,11 +58,13 @@ export function PayLauncher({
   onClose,
   assistedEnabled,
   scanEnabled,
+  snapshot,
 }: {
   open: boolean;
   onClose: () => void;
   assistedEnabled: boolean;
   scanEnabled: boolean;
+  snapshot: LauncherSnapshot | null;
 }) {
   if (!open) return null;
   return (
@@ -81,6 +72,7 @@ export function PayLauncher({
       onClose={onClose}
       assistedEnabled={assistedEnabled}
       scanEnabled={scanEnabled}
+      snapshot={snapshot}
     />
   );
 }
@@ -89,10 +81,12 @@ function LauncherPanel({
   onClose,
   assistedEnabled,
   scanEnabled,
+  snapshot,
 }: {
   onClose: () => void;
   assistedEnabled: boolean;
   scanEnabled: boolean;
+  snapshot: LauncherSnapshot | null;
 }) {
   const router = useRouter();
   const panelRef = useRef<HTMLDivElement>(null);
@@ -106,8 +100,6 @@ function LauncherPanel({
   // "menu" is the payment-action list; "scan" swaps the body for the
   // camera scanner. Returning to "menu" unmounts it (releases the camera).
   const [view, setView] = useState<"menu" | "scan">("menu");
-  const [snapshot, setSnapshot] = useState<LauncherSnapshot | null>(null);
-  const [, startLoad] = useTransition();
 
   function requestClose() {
     if (closingRef.current) return;
@@ -125,12 +117,6 @@ function LauncherPanel({
   }
 
   useEffect(() => {
-    startLoad(() => {
-      getLauncherSnapshot()
-        .then((s) => setSnapshot(s))
-        .catch(() => setSnapshot({ favourites: [], recent: [] }));
-    });
-
     previouslyFocused.current = document.activeElement as HTMLElement | null;
     const { body } = document;
     const prevOverflow = body.style.overflow;
@@ -269,9 +255,9 @@ function LauncherPanel({
                   ref={scanEntryRef}
                   type="button"
                   onClick={openScanner}
-                  className="mb-3 flex w-full items-center gap-3 rounded-control border border-accent bg-surface px-3 py-3 text-left hover:bg-background"
+                  className="mb-3 flex w-full items-center gap-3 rounded-control border border-money-positive bg-surface px-3 py-3 text-left hover:bg-background"
                 >
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-money-positive text-white">
                     <QrScanIcon className="h-5 w-5" />
                   </span>
                   <span className="min-w-0">
@@ -341,19 +327,14 @@ function LauncherPanel({
                 )}
               </div>
 
+              {/* A single starred favourite - one line, no "recently
+                  used" list. The server caps `favourites` at one entry. */}
               {snapshot && snapshot.favourites.length > 0 && (
                 <LauncherList
                   heading={t.favourites}
-                  entries={snapshot.favourites}
+                  entries={snapshot.favourites.slice(0, 1)}
                   onPick={(slug) => go(`/pay/ussd/${slug}`)}
                   starred
-                />
-              )}
-              {snapshot && snapshot.recent.length > 0 && (
-                <LauncherList
-                  heading={t.recent}
-                  entries={snapshot.recent}
-                  onPick={(slug) => go(`/pay/ussd/${slug}`)}
                 />
               )}
             </>

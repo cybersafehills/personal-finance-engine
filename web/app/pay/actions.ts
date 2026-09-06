@@ -8,7 +8,7 @@ import {
   FeatureDisabledError,
   isUssdDirectoryEnabled,
 } from "../../lib/pay/gate";
-import { getFavourites, getRecentServices } from "../../lib/ussd/queries";
+import { getFavourites } from "../../lib/ussd/queries";
 
 export type LauncherEntry = {
   slug: string;
@@ -19,23 +19,21 @@ export type LauncherEntry = {
 
 export type LauncherSnapshot = {
   favourites: LauncherEntry[];
-  recent: LauncherEntry[];
 };
 
 /**
- * Lazily loaded when the Pay launcher opens, so the root layout doesn't
- * pay for this fetch on every page. Returns only the compact fields the
- * launcher shows.
+ * Kicked off the moment the Pay launcher opens (from the same gesture, so
+ * it is in flight while the sheet animates in), NOT from the root layout -
+ * the layout must not pay for this fetch on every page. Returns only the
+ * compact fields the launcher shows: a single starred favourite. There is
+ * deliberately no "recently used" list.
  */
 export async function getLauncherSnapshot(): Promise<LauncherSnapshot> {
   const workspaceId = await getActiveWorkspaceId();
   if (!isUssdDirectoryEnabled(workspaceId)) {
-    return { favourites: [], recent: [] };
+    return { favourites: [] };
   }
-  const [favourites, recent] = await Promise.all([
-    getFavourites(),
-    getRecentServices(1),
-  ]);
+  const favourites = await getFavourites();
   const toEntry = (c: {
     slug: string;
     display_name_en: string;
@@ -48,8 +46,7 @@ export async function getLauncherSnapshot(): Promise<LauncherSnapshot> {
     provider: c.provider.display_name,
   });
   return {
-    favourites: favourites.slice(0, 5).map(toEntry),
-    recent: recent.slice(0, 1).map(toEntry),
+    favourites: favourites.slice(0, 1).map(toEntry),
   };
 }
 

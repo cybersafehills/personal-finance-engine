@@ -6,7 +6,41 @@ import {
   type ExperienceMode,
   isSurfaceVisible,
 } from "../lib/experience-mode";
-import { MORE_GROUPS, type MoreItem } from "../lib/navigation";
+import { MORE_GROUPS, type MoreIconKey, type MoreItem } from "../lib/navigation";
+import {
+  BellIcon,
+  BookmarkIcon,
+  CodeIcon,
+  DocumentIcon,
+  GearIcon,
+  GridIcon,
+  LinkIcon,
+  PhoneIcon,
+  ReceiptIcon,
+  ShieldIcon,
+  TagIcon,
+  UsersIcon,
+} from "./icons";
+
+// key -> glyph, mirroring AppShell's NAV_ICONS indirection so lib/navigation
+// stays component-free.
+const MORE_ICONS: Record<
+  MoreIconKey,
+  (props: { className?: string }) => React.JSX.Element
+> = {
+  categories: TagIcon,
+  reports: DocumentIcon,
+  sources: LinkIcon,
+  bills: ReceiptIcon,
+  members: UsersIcon,
+  settings: GearIcon,
+  notifications: BellIcon,
+  integrations: GridIcon,
+  developer: CodeIcon,
+  ussd: PhoneIcon,
+  recipients: ShieldIcon,
+  templates: BookmarkIcon,
+};
 
 // The "More" panel - the structured home for everything that is not on the
 // fixed primary journey (assessment section 19). Grouped, not a flat list:
@@ -194,17 +228,21 @@ function MorePanel({
                 {group.title}
               </p>
               <ul className="flex flex-col">
-                {group.items.map((item) => (
-                  <li key={item.href}>
-                    <button
-                      type="button"
-                      onClick={() => go(item.href)}
-                      className="w-full rounded-control px-2 py-3 text-left text-sm font-medium text-text-primary hover:bg-background"
-                    >
-                      {item.label}
-                    </button>
-                  </li>
-                ))}
+                {group.items.map((item) => {
+                  const Icon = MORE_ICONS[item.icon];
+                  return (
+                    <li key={item.href}>
+                      <button
+                        type="button"
+                        onClick={() => go(item.href)}
+                        className="flex w-full items-center gap-3 rounded-control px-2 py-3 text-left text-sm font-medium text-text-primary hover:bg-background"
+                      >
+                        <Icon className="h-5 w-5 shrink-0 text-text-muted" />
+                        {item.label}
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             </section>
           ))}
