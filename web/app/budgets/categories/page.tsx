@@ -1,5 +1,9 @@
 import Link from "next/link";
-import { getCategoryMappings, getUncategorizedOutflowSummary } from "../../../lib/queries";
+import {
+  getActiveWorkspaceId,
+  getCategoryMappings,
+  getUncategorizedOutflowSummary,
+} from "../../../lib/queries";
 import { PageHeader } from "../../../components/PageHeader";
 import { EmptyState } from "../../../components/EmptyState";
 import { CategoryMappingItem } from "../../../components/CategoryMappingItem";
@@ -8,9 +12,12 @@ import { formatRwf } from "../../../lib/format";
 export const dynamic = "force-dynamic";
 
 export default async function CategoryMappingsPage() {
+  const workspaceId = await getActiveWorkspaceId();
   const [categories, uncategorized] = await Promise.all([
     getCategoryMappings(),
-    getUncategorizedOutflowSummary(),
+    workspaceId
+      ? getUncategorizedOutflowSummary(workspaceId)
+      : Promise.resolve({ count: 0, totalRwf: 0 }),
   ]);
   const unmappedCount = categories.filter((c) => c.allocationType === null).length;
 
