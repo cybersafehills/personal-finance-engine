@@ -49,6 +49,9 @@ test("Home dashboard - full privacy mode", { tag: "@visual" }, async ({ page }) 
 
 test("Settings index", { tag: "@visual" }, async ({ page }) => {
   await page.goto("/settings");
+  await expect(
+    page.getByRole("heading", { name: "Profile & Preferences" }),
+  ).toBeVisible();
   await expect(page).toHaveScreenshot("settings-index.png", { fullPage: true });
 });
 

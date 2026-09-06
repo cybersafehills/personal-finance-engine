@@ -36,8 +36,9 @@ export default async function SecurityPage() {
   return (
     <div>
       <PageHeader
-        title="Security"
-        subtitle="Your sign-in details and active sessions"
+        backHref="/settings"
+        title="Sign-in & security"
+        subtitle="Your password, two-step verification, and active sessions"
       />
 
       <div className="flex flex-col gap-3">
