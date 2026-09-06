@@ -958,10 +958,15 @@ AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_p
 # and mark_onboarding_milestone, both authenticated-callable. 108 + 2 = 110.
 # Account deletion request (20261201000000) adds request_account_deletion
 # and cancel_account_deletion, both authenticated-callable. 110 + 2 = 112.
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "112" ]; then
-  pass "authenticated holds EXECUTE on exactly the 112 functions expected, no more"
+# Email statement ingestion (20261204000000) adds set_source_ingest_email,
+# rotate_source_ingest_email and clear_source_ingest_email - all
+# authenticated-callable and owner-gated. resolve_ingest_email_source,
+# _import_statement_rows and import_statement_rows_for_source are
+# service-role-only (no authenticated grant). 112 + 3 = 115.
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "115" ]; then
+  pass "authenticated holds EXECUTE on exactly the 115 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 112 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 115 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -4038,6 +4043,92 @@ else
   pass "Phase U PR7: import_statement_transactions refuses a caller who does not own the source"
 fi
 rm -f $ARTIFACT_DIR/pfe_u_pr7.log
+
+# ===========================================================================
+# Email statement ingestion (20261204000000, ADR 0018 Slice B): the
+# per-source ingest_email_token lifecycle + the service-role import core
+# the inbound-email Edge Function calls. Continues on pfe_rls / U_SRC.
+# ===========================================================================
+echo "=== Email statement ingestion ==="
+
+# set_source_ingest_email is owner-gated.
+if as_user "$USER_B" "select public.set_source_ingest_email('$U_SRC');" >/dev/null 2>$ARTIFACT_DIR/pfe_eml.log; then
+  fail "Email ingest: a non-owner minted an ingest address for another user's source"
+else
+  pass "Email ingest: set_source_ingest_email refuses a non-owner"
+fi
+
+EML_T1="$(as_user "$USER_A" "select public.set_source_ingest_email('$U_SRC');")"
+EML_T1B="$(as_user "$USER_A" "select public.set_source_ingest_email('$U_SRC');")"
+EML_COL="$(psql -d pfe_rls -t -A -c "select ingest_email_token from public.financial_sources where id = '$U_SRC';")"
+if [ -n "$EML_T1" ] && [ "$EML_T1" = "$EML_T1B" ] && [ "$EML_T1" = "$EML_COL" ] && printf '%s' "$EML_T1" | grep -Eq '^[a-f0-9]{32}$'; then
+  pass "Email ingest: set_source_ingest_email mints a 32-hex token and is idempotent"
+else
+  fail "Email ingest: set_source_ingest_email wrong (t1='$EML_T1' t1b='$EML_T1B' col='$EML_COL')"
+fi
+
+# rotate produces a new token; clear removes it.
+EML_T2="$(as_user "$USER_A" "select public.rotate_source_ingest_email('$U_SRC');")"
+if [ -n "$EML_T2" ] && [ "$EML_T2" != "$EML_T1" ]; then
+  pass "Email ingest: rotate_source_ingest_email issues a fresh token"
+else
+  fail "Email ingest: rotate did not change the token (t1='$EML_T1' t2='$EML_T2')"
+fi
+
+# resolve_ingest_email_source is service-role only and maps token -> source.
+EML_RESOLVE="$(psql -d pfe_rls -t -A -c "set role service_role; select public.resolve_ingest_email_source('$EML_T2');" | tail -1)"
+if [ "$EML_RESOLVE" = "$U_SRC" ]; then
+  pass "Email ingest: resolve_ingest_email_source (service_role) returns the owning source for a live token"
+else
+  fail "Email ingest: resolve returned '$EML_RESOLVE', expected '$U_SRC'"
+fi
+if as_user "$USER_A" "select public.resolve_ingest_email_source('$EML_T2');" >/dev/null 2>$ARTIFACT_DIR/pfe_eml.log; then
+  fail "Email ingest: an authenticated user could execute resolve_ingest_email_source"
+else
+  pass "Email ingest: resolve_ingest_email_source denies EXECUTE to authenticated"
+fi
+
+# import_statement_rows_for_source (service_role) writes statement rows with
+# no auth.uid() and a null actor.
+EML_ROWS='[{"occurred_at":"2026-09-01T08:00:00Z","amount_minor":9100,"direction":"out","counterparty":"EMAIL CP 1","external_ref":"EML-1"},{"occurred_at":"2026-09-02T08:00:00Z","amount_minor":15000,"direction":"in","counterparty":"EMAIL CP 2"}]'
+EML_IMPORT="$(psql -d pfe_rls -t -A -c "set role service_role; select (j->>'created')||','||(j->>'skipped') from (select public.import_statement_rows_for_source('$U_SRC', '$EML_ROWS'::jsonb) as j) r;" | tail -1)"
+EML_TX="$(psql -d pfe_rls -t -A -c "select count(*) from public.transactions where financial_source_id = '$U_SRC' and source = 'statement' and counterparty_name like 'EMAIL CP %';")"
+EML_NULLACTOR="$(psql -d pfe_rls -t -A -c "select count(*) from public.transactions where financial_source_id = '$U_SRC' and counterparty_name like 'EMAIL CP %' and record_created_by_user_id is null;")"
+if [ "$EML_IMPORT" = "2,0" ] && [ "$EML_TX" = "2" ] && [ "$EML_NULLACTOR" = "2" ]; then
+  pass "Email ingest: import_statement_rows_for_source writes statement rows with no auth.uid() and a null actor"
+else
+  fail "Email ingest: service-role import wrong (result='$EML_IMPORT' tx=$EML_TX nullactor=$EML_NULLACTOR; want 2,0 / 2 / 2)"
+fi
+
+# The authenticated wrapper still enforces auth + ownership after the refactor.
+if as_user "$USER_B" "select public.import_statement_transactions('$U_SRC', '[]'::jsonb);" >/dev/null 2>$ARTIFACT_DIR/pfe_eml.log; then
+  fail "Email ingest: import_statement_transactions no longer enforces ownership after the _import_statement_rows refactor"
+else
+  pass "Email ingest: import_statement_transactions still refuses a non-owner after the refactor"
+fi
+
+# clear removes the address; resolve then finds nothing.
+as_user "$USER_A" "select public.clear_source_ingest_email('$U_SRC');" >/dev/null
+EML_CLEARED="$(psql -d pfe_rls -t -A -c "select coalesce(ingest_email_token, 'NULL') from public.financial_sources where id = '$U_SRC';")"
+EML_RESOLVE_GONE="$(psql -d pfe_rls -t -A -c "set role service_role; select coalesce(public.resolve_ingest_email_source('$EML_T2')::text, 'NULL');" | tail -1)"
+if [ "$EML_CLEARED" = "NULL" ] && [ "$EML_RESOLVE_GONE" = "NULL" ]; then
+  pass "Email ingest: clear_source_ingest_email nulls the token and the address stops resolving"
+else
+  fail "Email ingest: clear wrong (col='$EML_CLEARED' resolve='$EML_RESOLVE_GONE')"
+fi
+
+# Undo the two rows this block imported, so later assertions on WORKSPACE_A's
+# ledger / budget state see exactly what the Phase U PR7 block left behind.
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  delete from public.raw_financial_events
+    where canonical_transaction_id in (
+      select id from public.transactions
+      where financial_source_id = '$U_SRC' and counterparty_name like 'EMAIL CP %');
+  delete from public.transactions
+    where financial_source_id = '$U_SRC' and counterparty_name like 'EMAIL CP %';
+" >/dev/null
+rm -f $ARTIFACT_DIR/pfe_eml.log
 
 # ===========================================================================
 # Phase V PR1: notification delivery spine (notifications table +

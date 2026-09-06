@@ -29,15 +29,15 @@ export function ProfileMenu({
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   const activeWorkspaceName =
     workspaces.length > 1
       ? (workspaces.find((w) => w.id === activeWorkspaceId)?.name ?? null)
       : null;
 
-  // Escape-to-close, with focus returned to the trigger - the click-
-  // outside backdrop below handles the mouse case, this handles the
-  // keyboard one (master prompt §3.1/§13).
+  // Escape-to-close, with focus returned to the trigger (master prompt
+  // §3.1/§13).
   useEffect(() => {
     if (!open) return;
     function onKeyDown(event: KeyboardEvent) {
@@ -48,6 +48,29 @@ export function ProfileMenu({
     }
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
+  }, [open]);
+
+  // Dismiss on any interaction outside the menu - a document-level
+  // pointerdown listener rather than a painted backdrop <button>, so it
+  // fires no matter which stacking context the target lives in (the phone
+  // bottom bar, the Pay trigger, the header "More" button all sit in
+  // their own fixed layers that a header-scoped backdrop never covered).
+  // The outside tap still activates whatever it hit - opening another
+  // page or sheet closes this menu in the same gesture.
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(event: PointerEvent) {
+      const target = event.target as Node | null;
+      if (
+        panelRef.current?.contains(target) ||
+        triggerRef.current?.contains(target)
+      ) {
+        return;
+      }
+      setOpen(false);
+    }
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
   }, [open]);
 
   return (
@@ -72,16 +95,10 @@ export function ProfileMenu({
       </button>
 
       {open && (
-        <>
-          {/* Click-outside backdrop - transparent, just closes the panel. */}
-          <button
-            type="button"
-            aria-hidden="true"
-            tabIndex={-1}
-            onClick={() => setOpen(false)}
-            className="fixed inset-0 z-10 cursor-default"
-          />
-          <div className="absolute right-0 top-11 z-20 w-64 rounded-card border border-border-subtle bg-surface p-3 shadow-lg">
+        <div
+          ref={panelRef}
+          className="absolute right-0 top-11 z-20 w-64 rounded-card border border-border-subtle bg-surface p-3 shadow-lg"
+        >
             <p className="truncate text-sm font-medium text-text-primary">
               {userEmail}
             </p>
@@ -134,8 +151,7 @@ export function ProfileMenu({
                 {isPending ? "Signing out…" : "Sign out"}
               </button>
             </div>
-          </div>
-        </>
+        </div>
       )}
     </div>
   );

@@ -8,6 +8,10 @@ import {
   useState,
 } from "react";
 import { PayLauncher } from "./PayLauncher";
+import {
+  getLauncherSnapshot,
+  type LauncherSnapshot,
+} from "../../app/pay/actions";
 
 type PayContextValue = {
   enabled: boolean;
@@ -60,9 +64,19 @@ export function PayProvider({
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+  // The favourites snapshot is kicked off from the SAME gesture that
+  // opens the launcher (not from an effect after the panel has mounted),
+  // so the starred line is in flight while the sheet animates in rather
+  // than popping in a beat later. `null` renders nothing - never a
+  // flash of an empty "Favourites" heading.
+  const [snapshot, setSnapshot] = useState<LauncherSnapshot | null>(null);
 
   const openPay = useCallback(() => {
-    if (enabled) setOpen(true);
+    if (!enabled) return;
+    setOpen(true);
+    getLauncherSnapshot()
+      .then(setSnapshot)
+      .catch(() => setSnapshot({ favourites: [] }));
   }, [enabled]);
 
   const closePay = useCallback(() => setOpen(false), []);
@@ -81,6 +95,7 @@ export function PayProvider({
           onClose={closePay}
           assistedEnabled={assistedEnabled}
           scanEnabled={scanEnabled}
+          snapshot={snapshot}
         />
       )}
     </PayContext.Provider>

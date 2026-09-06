@@ -75,10 +75,13 @@ jobs:
       - name: deno check (process-raw-events entry point)
         run: deno check supabase/functions/process-raw-events/index.ts
 
+      - name: deno check (inbound-email entry point)
+        run: deno check supabase/functions/inbound-email/index.ts
+
       - name: deno check (_shared entry points)
         run: |
           set -euo pipefail
-          for f in accounting kigali-time log money reconciliation types; do
+          for f in accounting kigali-time log money reconciliation statement-parse types; do
             deno check "supabase/functions/_shared/$f.ts"
           done
 
@@ -99,6 +102,9 @@ jobs:
 
       - name: deno test (process-raw-events)
         run: deno test supabase/functions/process-raw-events/tests
+
+      - name: deno test (inbound-email)
+        run: deno test supabase/functions/inbound-email/tests
 
       - name: deno test (_shared)
         run: deno test supabase/functions/_shared/tests
