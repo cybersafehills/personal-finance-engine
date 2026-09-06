@@ -10,6 +10,7 @@ import kotlinx.coroutines.launch
 import me.oneledger.companion.OneLedgerCompanionApp
 import me.oneledger.companion.data.PairingManager
 import me.oneledger.companion.data.PairingUiResult
+import me.oneledger.companion.data.extractPairingToken
 import me.oneledger.companion.health.HealthSnapshot
 import me.oneledger.companion.health.HealthState
 
@@ -41,10 +42,20 @@ class CompanionViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun onDeepLinkToken(token: String?) {
-        if (!token.isNullOrBlank()) {
-            _state.value = _state.value.copy(prefillToken = token.trim())
+    /** A deep link (`oneledger://pair?c=…`) or a scanned QR. Accepts a bare
+     *  code, a deep link, or a handoff URL; pairs immediately when [autoPair]. */
+    fun submitPairingInput(raw: String?, autoPair: Boolean) {
+        val token = extractPairingToken(raw)
+        if (token == null) {
+            if (!raw.isNullOrBlank()) {
+                _state.value = _state.value.copy(
+                    pairError = "That isn't a OneLedger pairing code.",
+                )
+            }
+            return
         }
+        _state.value = _state.value.copy(prefillToken = token, pairError = null)
+        if (autoPair) pair(token, android.os.Build.MODEL)
     }
 
     fun pair(rawToken: String, deviceLabel: String?) {

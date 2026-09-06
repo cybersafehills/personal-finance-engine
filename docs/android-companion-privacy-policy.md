@@ -14,8 +14,11 @@ forward supported financial-transaction notifications from your Android phone to
   notifications **on your device** and keeps a notification only if its content
   matches a known financial-provider message pattern (for example, an MTN Mobile
   Money transaction alert).
+- **Camera** — only when you tap "scan" during setup, to read a pairing-code QR.
+  The preview is decoded on-device; no photo or video is captured, stored, or
+  transmitted. You can decline and type the code instead.
 - The app does **not** request or access SMS, call logs, contacts, location,
-  photos, files, the microphone, or the camera.
+  photos, files, or the microphone.
 
 ## What leaves your device
 

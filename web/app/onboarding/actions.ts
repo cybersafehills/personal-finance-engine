@@ -8,6 +8,7 @@ import {
   isOnboardingCurrency,
   isOnboardingLocale,
 } from "../../lib/profile-onboarding";
+import { trackOnboardingEvent } from "../../lib/onboarding/analytics";
 
 export type ProfileOnboardingActionResult =
   | { ok: true }
@@ -57,6 +58,7 @@ export async function saveProfileOnboarding(input: {
     return { ok: false, error: "Could not save your profile. Try again." };
   }
 
+  trackOnboardingEvent("profile_completed");
   revalidatePath("/", "layout");
   return { ok: true };
 }
@@ -91,6 +93,7 @@ export async function saveFinancialPreferences(input: {
     return { ok: false, error: "Could not save your preferences. Try again." };
   }
 
+  trackOnboardingEvent("preferences_completed");
   revalidatePath("/", "layout");
   return { ok: true };
 }
@@ -103,6 +106,8 @@ export async function completeProfileOnboarding(): Promise<ProfileOnboardingActi
     console.error("completeProfileOnboarding failed:", error.message);
     return { ok: false, error: "Could not finish setup. Try again." };
   }
+  // Identity setup is done; the product-setup funnel starts here.
+  trackOnboardingEvent("onboarding_started");
   revalidatePath("/", "layout");
   return { ok: true };
 }
@@ -131,6 +136,7 @@ export async function setOnboardingIntent(
     console.error("setOnboardingIntent failed:", error.message);
     return { ok: false, error: "Could not save your choice. Try again." };
   }
+  trackOnboardingEvent("intent_selected", { intent });
   revalidatePath("/", "layout");
   return { ok: true };
 }
@@ -153,6 +159,9 @@ export async function markOnboardingMilestone(
     console.error("markOnboardingMilestone failed:", error.message);
     return { ok: false, error: "Could not record that. Try again." };
   }
+  trackOnboardingEvent(
+    milestone === "first_review" ? "first_review_completed" : "first_insight_seen",
+  );
   revalidatePath("/", "layout");
   return { ok: true };
 }

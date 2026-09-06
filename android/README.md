@@ -79,7 +79,10 @@ new phone connections yet." There is no separate Android flag.
 - Listener rebind, package denylist, debug logging (#118); deterministic
   `extractText` (#119).
 - Release signing (env-driven) + Firebase App Distribution + signed-AAB CI —
-  see `docs/android-companion-release.md`.
+  see `docs/android-companion-release.md`. Shipping to testers as **OL Shortcuts**.
+- Pairing screen: **QR scan** (camera icon in the code field → CameraX + ML Kit
+  bundled), paste-from-clipboard, inline validation, sticky button, condensed
+  privacy copy, step indicator.
 
 ## Follow-ups
 

@@ -136,6 +136,7 @@ Answer text to use:
 | Can the user request deletion? | **Yes** — via their OneLedger account |
 | Device or other IDs | **Not collected** (the pairing credential is app-generated, not a device identifier) |
 | Location, contacts, messages (SMS), photos, files | **Not collected** |
+| Photos/videos (camera) | **Not collected** — camera is used only to decode a pairing QR on-device; no image is captured or kept |
 
 ### 3.3 Other Play Console items
 
