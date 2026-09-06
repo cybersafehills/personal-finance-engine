@@ -759,6 +759,34 @@ deletion/export), G7-G12.
 
 ---
 
+## 19. Follow-on — email / PDF statement ingestion DESIGN (gap G10, branch `docs/g10-ingestion-adr`)
+
+ADR 0018. **Design only** — G10 is genuinely L-sized (a PDF extractor + an
+inbound-mail provider decision + an unauthenticated-endpoint security
+review), so it is scoped into two shippable slices rather than rushed:
+
+- **Slice A — PDF statement import** (lower risk): `/settings/sources/import`
+  accepts `.pdf`, the Bills extractor's text/table layer produces candidate
+  rows, the existing column-mapping UI + `import_statement_transactions`
+  RPC do the rest. One flag (`PDF_STATEMENT_IMPORT_ENABLED`), no migration.
+- **Slice B — email statement ingestion**: a per-user ingest address
+  (`financial_sources.ingest_email_token`, one small migration) + an
+  inbound-mail webhook writing `raw_financial_events(channel='email')` for
+  the existing worker to drain. Needs a provider decision + security
+  review; its own PR.
+
+Key finding: **the seams already exist** — `raw_financial_events.channel`
+permits `'email'`/`'statement'`/`'receipt'` (Phase Q), the raw-events
+processor drains them, `import_statement_transactions` is the shared row
+writer, and `web/lib/bills/extraction/` is a working PDF pipeline. No
+schema change for Slice A.
+
+**Audit gap status:** G1–G9, G11, G12 delivered; **G6 complete** (incl.
+irreversible erasure); **G8** e2e scenarios delivered; **G10** designed
+(ADR 0018), slices deferred.
+
+---
+
 ## 17. Follow-on — Account erasure (gap G6 completion, branch `feat/account-erasure`)
 
 Off `main`. ADR 0016 §3, closing the irreversible half of audit F12.
