@@ -131,7 +131,7 @@ async function runIngestEmailRpc(
     p_source_id: financialSourceId,
   });
   if (error) {
-    logSpacesError("email_ingest", error);
+    logSpacesError("statement_import", error);
     return {
       ok: false,
       error: error.message.includes("own")
@@ -177,7 +177,7 @@ export async function disableIngestEmail(
     p_source_id: financialSourceId,
   });
   if (error) {
-    logSpacesError("email_ingest", error);
+    logSpacesError("statement_import", error);
     return {
       ok: false,
       error: error.message.includes("own")
