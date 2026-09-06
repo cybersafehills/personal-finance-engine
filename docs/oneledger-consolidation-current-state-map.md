@@ -613,3 +613,29 @@ web/app/auth/reset-password/confirm/page.tsx        (requirement hint — F3)
 web/app/api/cron/generate-reports/route.ts          (withLoggedRun reference — F10)
 web/playwright.config.ts                            (exclude visual from cross-browser projects)
 ```
+
+---
+
+## 16. Follow-on — Account deletion request + data export (gap G6, branch `feat/account-deletion-export`)
+
+Off `main`. ADR 0016. Closes the *request* + *export* half of audit F12
+(§94-95). Dark behind `ACCOUNT_DELETION_ENABLED`.
+
+| Change | File |
+| --- | --- |
+| `account_deletion_requests` (1/user, 30-day `scheduled_for`, RLS SELECT-own) + `request_account_deletion(reason?)` / `cancel_account_deletion()` SECURITY DEFINER RPCs; request blocked while the caller solely owns a shared Space with other active members | `supabase/migrations/20261201000000_account_deletion_requests.sql` |
+| Migration suite: +8 assertions; guards 118→119 tables / 149→150 grants / 110→112 authenticated fns; **501/0** | `supabase/migrations/tests/run_migration_tests.sh` |
+| Self-serve JSON data export (RLS-scoped, txns capped at 10k w/ truncation flag) | `web/lib/account-data.ts`, `web/components/DataExportButton.tsx` |
+| Request state reader + flag | `web/lib/account-deletion.ts` |
+| `/settings/privacy/data` page + controls + link from `/settings/privacy` | `web/app/settings/privacy/data/*`, `web/components/AccountDeletionControls.tsx` |
+| Flag doc | `web/.env.local.example` |
+
+**Irreversible erasure (`execute_account_deletion` + a cron) is explicitly
+deferred** — ADR 0016 §3 carries its spec, incl. the full `auth.users` FK
+inventory (most are plain NO ACTION and block `delete from auth.users`).
+
+deno migration 501/0, `next lint` 0 errors, `next build` ✓. ⚠️ Guard-count
+collision with G2 (#131): both bump the same literals — whichever merges
+second needs a rebase + bump to 120/151.
+
+Still open: G6 erasure follow-up; G7-G12.
