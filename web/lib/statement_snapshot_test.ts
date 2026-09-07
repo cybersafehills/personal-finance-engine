@@ -1,6 +1,8 @@
 import { assert, assertEquals, assertThrows } from "jsr:@std/assert@1";
 import { computeStatementMath } from "./statement-math.ts";
 import {
+  buildPendingStatementRecord,
+  buildStatementFinancials,
   buildStatementRecord,
   buildStatementTransactionRows,
   humanizeTransactionType,
@@ -305,4 +307,55 @@ Deno.test("buildStatementRecord: mixed currency -> zero top-line totals, per_cur
   assert(Array.isArray(rec.per_currency));
   assertEquals(rec.per_currency?.map((c) => c.currency), ["RWF", "USD"]);
   assertEquals(rec.reconciles, null);
+});
+
+Deno.test("buildStatementFinancials: derives the computed columns from a math result", () => {
+  const rows = [
+    row({ id: "a", direction: "in", principal_effect_rwf: 8_000 }),
+    row({
+      id: "b",
+      direction: "out",
+      principal_effect_rwf: -3_000,
+      fee_effect_rwf: -25,
+    }),
+  ];
+  const math = computeStatementMath(rows.map(toMathFact), {
+    currency: "RWF",
+    openingBalanceMinor: 100,
+    closingBalanceMinor: 5_075,
+  });
+  const fin = buildStatementFinancials(math, "RWF");
+  assertEquals(fin.currency, "RWF");
+  assertEquals(fin.total_credit_minor, 8_000);
+  assertEquals(fin.total_debit_minor, 3_000);
+  assertEquals(fin.total_fees_minor, 25);
+  assertEquals(fin.transaction_count, 2);
+  assertEquals(fin.reconciles, true);
+  assertEquals(fin.per_currency, null);
+});
+
+Deno.test("buildPendingStatementRecord: a generating stub has zeroed totals and no generated_at", () => {
+  const rec = buildPendingStatementRecord({
+    statementPublicId: "OL-ST-20260907-ABCDEF",
+    workspaceId: "ws-1",
+    createdBy: "user-1",
+    statementType: "standard",
+    scope: "all_accounts",
+    accountIds: ["src-1", "src-2"],
+    filters: {},
+    periodStartUtc: new Date("2026-08-01T00:00:00.000Z"),
+    periodEndUtc: new Date("2026-09-01T00:00:00.000Z"),
+    timezone: "Africa/Kigali",
+    currencyHint: "RWF",
+    supersedesId: null,
+    clientToken: "tok-async",
+  });
+  assertEquals(rec.status, "generating");
+  assertEquals(rec.generated_at, null);
+  assertEquals(rec.transaction_count, 0);
+  assertEquals(rec.total_credit_minor, 0);
+  assertEquals(rec.opening_balance_minor, null);
+  assertEquals(rec.per_currency, null);
+  assertEquals(rec.account_ids, ["src-1", "src-2"]);
+  assertEquals(rec.currency, "RWF");
 });

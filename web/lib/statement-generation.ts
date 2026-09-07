@@ -19,6 +19,8 @@ import {
   type StatementSourceMetadata,
 } from "./statement-coverage";
 import {
+  buildPendingStatementRecord,
+  buildStatementFinancials,
   buildStatementRecord,
   buildStatementTransactionRows,
   hasStatementFilter,
@@ -74,6 +76,20 @@ const FACT_PAGE_SIZE = 1000;
 const MAX_REQUESTED_SOURCES = 100;
 const PREVIEW_SAMPLE_ROWS = 8;
 const CHILD_INSERT_CHUNK = 500;
+
+/**
+ * Above this many in-period transactions, createStatement inserts a
+ * `status='generating'` stub and lets the statement-jobs worker
+ * (app/api/cron/run-statement-jobs) assemble + render it, instead of doing
+ * that work inside the request (master prompt section 27). A request may
+ * also force this with `async: true`. Configurable; default 8000.
+ */
+const STATEMENT_ASYNC_THRESHOLD = (() => {
+  const n = Number(process.env.STATEMENT_ASYNC_THRESHOLD);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 8000;
+})();
+const STATEMENT_JOB_BATCH = 20;
+const STATEMENT_JOB_MIN_AGE_MS = 2000;
 
 const TXN_COLUMNS =
   "id, occurred_at, transaction_type, direction, principal_effect_rwf, fee_effect_rwf, balance_after_rwf, currency, counterparty_name, counterparty_reference, category, financial_source_id";
@@ -311,19 +327,86 @@ export async function getStatementFormOptions(): Promise<StatementFormOptions> {
 }
 
 // ---------------------------------------------------------------------------
-// Fact + balance queries (session client / RLS)
+// Fact + balance queries. Parameterised by client + workspaceId so the
+// synchronous path (session client / RLS) and the statement-jobs worker
+// (service-role client, explicit workspace scoping - already authorised at
+// createStatement time) share one implementation.
 // ---------------------------------------------------------------------------
 
-async function fetchFacts(
-  ctx: Context,
+// The PostgREST query/filter builder chains are hard to thread through
+// helper functions with precise generics, and this module must accept
+// EITHER the session client (RLS) or the service-role client. `any` here
+// is deliberate and contained to the four query helpers below; every
+// public entry point is fully typed.
+/* eslint-disable @typescript-eslint/no-explicit-any */
+type AnySupabase = { from(t: string): any };
+
+type FactFilterOpts = {
+  sourceIds: string[];
+  restrictToSources: boolean;
+  direction?: "in" | "out";
+  category?: string;
+  merchant?: string;
+};
+
+function applyFactFilters(q: any, opts: FactFilterOpts): any {
+  if (opts.restrictToSources) q = q.in("financial_source_id", opts.sourceIds);
+  if (opts.direction) q = q.eq("direction", opts.direction);
+  if (opts.category) {
+    q = opts.category === "Uncategorized"
+      ? q.is("category", null)
+      : q.eq("category", opts.category);
+  }
+  if (opts.merchant) {
+    const safe = opts.merchant.replace(/[%,()\\]/g, " ").trim();
+    if (safe) q = q.ilike("counterparty_name", `%${safe}%`);
+  }
+  return q;
+}
+
+function baseFactQuery(
+  workspaceId: string,
   period: ResolvedStatementPeriod,
-  opts: {
-    sourceIds: string[];
-    restrictToSources: boolean;
-    direction?: "in" | "out";
-    category?: string;
-    merchant?: string;
-  },
+  selected: any,
+): any {
+  return selected
+    .eq("workspace_id", workspaceId)
+    .eq("settlement_state", "settled")
+    .neq("dedupe_state", "merged")
+    .gte("occurred_at", period.periodStartUtc.toISOString())
+    .lt("occurred_at", period.periodEndUtc.toISOString());
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
+async function fetchFactCount(
+  client: AnySupabase,
+  workspaceId: string,
+  period: ResolvedStatementPeriod,
+  opts: FactFilterOpts,
+): Promise<number | null> {
+  const { count, error } = await applyFactFilters(
+    baseFactQuery(
+      workspaceId,
+      period,
+      client.from("transactions").select("id", {
+        count: "exact",
+        head: true,
+      }),
+    ),
+    opts,
+  );
+  if (error) {
+    console.error("fetchFactCount failed:", error.message);
+    return null;
+  }
+  return count ?? 0;
+}
+
+async function fetchFacts(
+  client: AnySupabase,
+  workspaceId: string,
+  period: ResolvedStatementPeriod,
+  opts: FactFilterOpts,
 ): Promise<
   { ok: true; rows: LedgerTxnRow[] } | { ok: false; kind: StatementErrorKind }
 > {
@@ -331,34 +414,17 @@ async function fetchFacts(
   let offset = 0;
 
   while (true) {
-    let q = ctx.session
-      .from("transactions")
-      .select(TXN_COLUMNS)
-      .eq("workspace_id", ctx.workspace.id)
-      .eq("settlement_state", "settled")
-      .neq("dedupe_state", "merged")
-      .gte("occurred_at", period.periodStartUtc.toISOString())
-      .lt("occurred_at", period.periodEndUtc.toISOString())
-      .order("occurred_at", { ascending: true })
-      .order("created_at", { ascending: true })
-      .range(offset, offset + FACT_PAGE_SIZE - 1);
-
-    if (opts.restrictToSources) {
-      q = q.in("financial_source_id", opts.sourceIds);
-    }
-    if (opts.direction) {
-      q = q.eq("direction", opts.direction);
-    }
-    if (opts.category) {
-      q = opts.category === "Uncategorized"
-        ? q.is("category", null)
-        : q.eq("category", opts.category);
-    }
-    if (opts.merchant) {
-      // Escape PostgREST ilike wildcards / the pattern separators.
-      const safe = opts.merchant.replace(/[%,()\\]/g, " ").trim();
-      if (safe) q = q.ilike("counterparty_name", `%${safe}%`);
-    }
+    const q = applyFactFilters(
+      baseFactQuery(
+        workspaceId,
+        period,
+        client.from("transactions").select(TXN_COLUMNS),
+      )
+        .order("occurred_at", { ascending: true })
+        .order("created_at", { ascending: true })
+        .range(offset, offset + FACT_PAGE_SIZE - 1),
+      opts,
+    );
 
     const { data, error } = await q;
     if (error) {
@@ -379,14 +445,15 @@ async function fetchFacts(
 
 /** The provider-reported balance immediately before `instant` for one source, or null. */
 async function fetchBalanceBefore(
-  ctx: Context,
+  client: AnySupabase,
+  workspaceId: string,
   instant: Date,
   sourceId: string,
 ): Promise<number | null> {
-  const { data, error } = await ctx.session
+  const { data, error } = await client
     .from("transactions")
     .select("balance_after_rwf")
-    .eq("workspace_id", ctx.workspace.id)
+    .eq("workspace_id", workspaceId)
     .eq("settlement_state", "settled")
     .neq("dedupe_state", "merged")
     .eq("financial_source_id", sourceId)
@@ -406,17 +473,121 @@ async function fetchBalanceBefore(
 // Assembly (shared by preview + persist)
 // ---------------------------------------------------------------------------
 
-type Assembled = {
+function normalizeFilters(
+  input: StatementFilters | undefined,
+): StatementFilters {
+  return {
+    ...(input?.direction ? { direction: input.direction } : {}),
+    ...(input?.category?.trim() ? { category: input.category.trim() } : {}),
+    ...(input?.merchant?.trim() ? { merchant: input.merchant.trim() } : {}),
+  };
+}
+
+type ScopeResult = {
   scope: StatementScope;
   sourceIds: string[];
-  currencyHint: string;
+  restrictToSources: boolean;
   filters: StatementFilters;
+  scopedDescriptors: StatementSourceDescriptor[];
+  currencyHint: string;
+};
+
+async function resolveScopeAndSources(
+  ctx: Context,
+  req: { sourceIds: string[]; filters?: StatementFilters },
+): Promise<
+  { ok: true; scope: ScopeResult } | { ok: false; kind: StatementErrorKind }
+> {
+  const filters = normalizeFilters(req.filters);
+  const { descriptors, currencyById } = await fetchAuthorizedSources(ctx);
+  const scopeRes = resolveStatementScope(
+    req.sourceIds,
+    descriptors.map((d) => d.id),
+    filters,
+  );
+  if (!scopeRes.ok) return { ok: false, kind: scopeRes.kind };
+
+  const { scope, sourceIds } = scopeRes;
+  const scopedDescriptors = descriptors.filter((d) => sourceIds.includes(d.id));
+  const scopedCurrencies = Array.from(
+    new Set(
+      sourceIds.map((id) => currencyById.get(id)).filter((c): c is string =>
+        !!c
+      ),
+    ),
+  );
+  return {
+    ok: true,
+    scope: {
+      scope,
+      sourceIds,
+      restrictToSources: req.sourceIds.length > 0,
+      filters,
+      scopedDescriptors,
+      currencyHint: scopedCurrencies.length === 1 ? scopedCurrencies[0] : "RWF",
+    },
+  };
+}
+
+type Assembly = {
   math: StatementMathResult;
   source: StatementSourceMetadata;
   coverage: StatementCoverageMetadata;
-  rows: LedgerTxnRow[];
   rowsById: Map<string, LedgerTxnRow>;
+  rowCount: number;
 };
+
+/**
+ * Turn already-fetched ledger rows + a resolved scope into the computed
+ * math + disclosure metadata. Client-agnostic: the sync path calls it with
+ * session-fetched rows, the statement-jobs worker with service-role rows.
+ */
+async function computeAssembly(
+  client: AnySupabase,
+  workspaceId: string,
+  period: ResolvedStatementPeriod,
+  scope: ScopeResult,
+  rows: LedgerTxnRow[],
+): Promise<Assembly> {
+  let openingBalanceMinor: number | null = null;
+  let closingBalanceMinor: number | null = null;
+  if (scope.sourceIds.length === 1) {
+    openingBalanceMinor = await fetchBalanceBefore(
+      client,
+      workspaceId,
+      period.periodStartUtc,
+      scope.sourceIds[0],
+    );
+    closingBalanceMinor = await fetchBalanceBefore(
+      client,
+      workspaceId,
+      period.periodEndUtc,
+      scope.sourceIds[0],
+    );
+  }
+
+  const math = computeStatementMath(rows.map(toMathFact), {
+    openingBalanceMinor,
+    closingBalanceMinor,
+    currency: scope.currencyHint,
+  });
+
+  const { source, coverage } = buildStatementCoverageMetadata({
+    facts: rows.map(toCoverageFact),
+    sources: scope.scopedDescriptors,
+    filters: hasStatementFilter(scope.filters) ? scope.filters : undefined,
+  });
+
+  return {
+    math,
+    source,
+    coverage,
+    rowsById: new Map(rows.map((r) => [r.id, r])),
+    rowCount: rows.length,
+  };
+}
+
+type Assembled = ScopeResult & Assembly & { rows: LedgerTxnRow[] };
 
 async function assembleStatement(
   ctx: Context,
@@ -430,92 +601,31 @@ async function assembleStatement(
   | { ok: true; assembled: Assembled }
   | { ok: false; kind: StatementErrorKind; message: string }
 > {
-  const filters: StatementFilters = {
-    ...(req.filters?.direction ? { direction: req.filters.direction } : {}),
-    ...(req.filters?.category?.trim()
-      ? { category: req.filters.category.trim() }
-      : {}),
-    ...(req.filters?.merchant?.trim()
-      ? { merchant: req.filters.merchant.trim() }
-      : {}),
-  };
-
-  const { descriptors, currencyById } = await fetchAuthorizedSources(ctx);
-  const scopeRes = resolveStatementScope(
-    req.sourceIds,
-    descriptors.map((d) => d.id),
-    filters,
-  );
+  const scopeRes = await resolveScopeAndSources(ctx, req);
   if (!scopeRes.ok) return err(scopeRes.kind);
+  const scope = scopeRes.scope;
 
-  const { scope, sourceIds } = scopeRes;
-  const restrictToSources = req.sourceIds.length > 0;
-
-  const scopedDescriptors = descriptors.filter((d) => sourceIds.includes(d.id));
-  const scopedCurrencies = Array.from(
-    new Set(
-      sourceIds.map((id) => currencyById.get(id)).filter((c): c is string =>
-        !!c
-      ),
-    ),
-  );
-  const currencyHint = scopedCurrencies.length === 1
-    ? scopedCurrencies[0]
-    : "RWF";
-
-  const factsRes = await fetchFacts(ctx, period, {
-    sourceIds,
-    restrictToSources,
-    direction: filters.direction,
-    category: filters.category,
-    merchant: filters.merchant,
+  const factsRes = await fetchFacts(ctx.session, ctx.workspace.id, period, {
+    sourceIds: scope.sourceIds,
+    restrictToSources: scope.restrictToSources,
+    direction: scope.filters.direction,
+    category: scope.filters.category,
+    merchant: scope.filters.merchant,
   });
   if (!factsRes.ok) return err(factsRes.kind);
   const rows = factsRes.rows;
 
-  // Opening / closing balances are only well-defined for a single source.
-  let openingBalanceMinor: number | null = null;
-  let closingBalanceMinor: number | null = null;
-  if (sourceIds.length === 1) {
-    openingBalanceMinor = await fetchBalanceBefore(
-      ctx,
-      period.periodStartUtc,
-      sourceIds[0],
-    );
-    closingBalanceMinor = await fetchBalanceBefore(
-      ctx,
-      period.periodEndUtc,
-      sourceIds[0],
-    );
-  }
-
-  const math = computeStatementMath(rows.map(toMathFact), {
-    openingBalanceMinor,
-    closingBalanceMinor,
-    currency: currencyHint,
-  });
-
-  const { source, coverage } = buildStatementCoverageMetadata({
-    facts: rows.map(toCoverageFact),
-    sources: scopedDescriptors,
-    filters: hasStatementFilter(filters) ? filters : undefined,
-  });
-
-  const rowsById = new Map(rows.map((r) => [r.id, r]));
+  const assembly = await computeAssembly(
+    ctx.session,
+    ctx.workspace.id,
+    period,
+    scope,
+    rows,
+  );
 
   return {
     ok: true,
-    assembled: {
-      scope,
-      sourceIds,
-      currencyHint,
-      filters,
-      math,
-      source,
-      coverage,
-      rows,
-      rowsById,
-    },
+    assembled: { ...scope, ...assembly, rows },
   };
 }
 
@@ -852,13 +962,341 @@ export async function createStatement(
     };
   }
 
-  return persistStatement(ctx, periodRes.period, {
+  const period = periodRes.period;
+
+  // Size probe: resolve the scope, then count the in-period rows without
+  // fetching them. A large statement (or an explicit `async`) is queued
+  // for the statement-jobs worker rather than assembled in this request.
+  const scopeRes = await resolveScopeAndSources(ctx, {
+    sourceIds: req.sourceIds,
+    filters: req.filters,
+  });
+  if (!scopeRes.ok) {
+    if (scopeRes.kind === "unauthorized_source") {
+      void recordStatementAudit(service, {
+        workspaceId: ctx.workspace.id,
+        actorUserId: ctx.userId,
+        eventType: "statement.access_denied",
+        statementUuid: null,
+        metadata: { reason: "unauthorized_source" },
+      });
+    }
+    return err(scopeRes.kind);
+  }
+  const scope = scopeRes.scope;
+
+  const count = await fetchFactCount(ctx.session, ctx.workspace.id, period, {
+    sourceIds: scope.sourceIds,
+    restrictToSources: scope.restrictToSources,
+    direction: scope.filters.direction,
+    category: scope.filters.category,
+    merchant: scope.filters.merchant,
+  });
+  if (count === 0) return err("no_transactions");
+  if (count !== null && count > MAX_STATEMENT_TRANSACTIONS) {
+    return err("too_large");
+  }
+
+  const shouldQueue = req.async === true ||
+    (count !== null && count > STATEMENT_ASYNC_THRESHOLD);
+  if (shouldQueue) {
+    return queueStatement(ctx, service, period, scope, {
+      statementType: req.statementType,
+      clientToken: req.clientToken,
+      supersedesId: null,
+    });
+  }
+
+  return persistStatement(ctx, period, {
     statementType: req.statementType,
     requestedSourceIds: req.sourceIds,
     filters: req.filters,
     clientToken: req.clientToken,
     supersedesId: null,
   });
+}
+
+/**
+ * Insert a `status='generating'` stub. The statement-jobs worker
+ * (runStatementJobsTick) fetches, computes and renders it, then flips it
+ * to 'ready'. Same idempotency + public-id-collision handling as the sync
+ * path.
+ */
+async function queueStatement(
+  ctx: Context,
+  service: ServiceClient,
+  period: ResolvedStatementPeriod,
+  scope: ScopeResult,
+  params: {
+    statementType: StatementType;
+    clientToken: string;
+    supersedesId: string | null;
+  },
+): Promise<GenerateOutcome> {
+  const { generateStatementId } = await import("./statement-id");
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const record = buildPendingStatementRecord({
+      statementPublicId: generateStatementId({ now: new Date() }),
+      workspaceId: ctx.workspace.id,
+      createdBy: ctx.userId,
+      statementType: params.statementType,
+      scope: scope.scope,
+      accountIds: scope.sourceIds,
+      filters: scope.filters,
+      periodStartUtc: period.periodStartUtc,
+      periodEndUtc: period.periodEndUtc,
+      timezone: period.timezone,
+      currencyHint: scope.currencyHint,
+      supersedesId: params.supersedesId,
+      clientToken: params.clientToken,
+    });
+
+    const { data, error } = await service
+      .from("statements")
+      .insert(record)
+      .select("id, statement_id")
+      .single();
+
+    if (!error && data) {
+      await recordStatementAudit(service, {
+        workspaceId: ctx.workspace.id,
+        actorUserId: ctx.userId,
+        eventType: "statement.generated",
+        statementUuid: data.id,
+        metadata: {
+          statementId: data.statement_id,
+          scope: scope.scope,
+          statementType: params.statementType,
+          async: true,
+          status: "generating",
+        },
+      });
+      return {
+        ok: true,
+        id: data.id,
+        statementId: data.statement_id,
+        deduped: false,
+      };
+    }
+
+    if (error?.code === "23505") {
+      const msg = error.message.toLowerCase();
+      if (msg.includes("client_token")) {
+        const { data: e } = await service
+          .from("statements")
+          .select("id, statement_id")
+          .eq("workspace_id", ctx.workspace.id)
+          .eq("client_token", params.clientToken)
+          .maybeSingle();
+        if (e) {
+          return {
+            ok: true,
+            id: e.id,
+            statementId: e.statement_id,
+            deduped: true,
+          };
+        }
+      }
+      if (msg.includes("statement_id") && attempt === 0) continue;
+    }
+
+    console.error("queueStatement: insert failed:", error?.message);
+    return err("persist_failed");
+  }
+  return err("persist_failed");
+}
+
+// ---------------------------------------------------------------------------
+// Statement-jobs worker (service role). NOT scheduled - the cron route
+// exists for a later, explicitly-approved rollout step, matching
+// app/api/cron/generate-reports. Idempotent per job: children are wiped
+// and the final flip is conditional on status still being 'generating'.
+// ---------------------------------------------------------------------------
+
+export type StatementJobsTickSummary = {
+  picked: number;
+  finalized: number;
+  failed: number;
+  disabled?: true;
+};
+
+type StatementJobRow = {
+  id: string;
+  workspace_id: string;
+  created_by: string | null;
+  statement_type: StatementType;
+  scope: StatementScope;
+  account_ids: string[] | null;
+  filters: StatementFilters | null;
+  period_start: string;
+  period_end: string;
+  timezone: string;
+};
+
+async function finalizeStatementJob(
+  service: ServiceClient,
+  job: StatementJobRow,
+): Promise<boolean> {
+  try {
+    const period = reconstructStatementPeriod(
+      new Date(job.period_start),
+      new Date(job.period_end),
+      job.timezone,
+    );
+    const filters = normalizeFilters(job.filters ?? undefined);
+    const accountIds = job.account_ids ?? [];
+    const restrictToSources = accountIds.length > 0;
+
+    // Idempotency: drop any children from a previous partial run.
+    await service.from("statement_transactions").delete().eq(
+      "statement_id",
+      job.id,
+    );
+
+    const factsRes = await fetchFacts(service, job.workspace_id, period, {
+      sourceIds: accountIds,
+      restrictToSources,
+      direction: filters.direction,
+      category: filters.category,
+      merchant: filters.merchant,
+    });
+    if (!factsRes.ok) throw new Error(`fact fetch: ${factsRes.kind}`);
+    const rows = factsRes.rows;
+
+    if (rows.length === 0) {
+      await service.from("statements").update({
+        status: "failed",
+        failure_reason:
+          "No transactions were found for this account and period.",
+      }).eq("id", job.id).eq("status", "generating");
+      return false;
+    }
+
+    const { data: srcRows } = restrictToSources
+      ? await service
+        .from("financial_sources")
+        .select(
+          "id, display_name, provider, source_type, currency, masked_identifier",
+        )
+        .in("id", accountIds)
+      : { data: [] as SourceRow[] };
+    const scopedDescriptors = ((srcRows ?? []) as SourceRow[]).map(
+      toDescriptor,
+    );
+    const currencies = Array.from(
+      new Set(((srcRows ?? []) as SourceRow[]).map((s) => s.currency)),
+    );
+    const currencyHint = currencies.length === 1 ? currencies[0] : "RWF";
+
+    const scope: ScopeResult = {
+      scope: job.scope,
+      sourceIds: accountIds,
+      restrictToSources,
+      filters,
+      scopedDescriptors,
+      currencyHint,
+    };
+    const assembly = await computeAssembly(
+      service,
+      job.workspace_id,
+      period,
+      scope,
+      rows,
+    );
+
+    const childRows = buildStatementTransactionRows(
+      assembly.math,
+      assembly.rowsById,
+      { statementUuid: job.id, statementType: job.statement_type },
+    );
+    for (let i = 0; i < childRows.length; i += CHILD_INSERT_CHUNK) {
+      const { error } = await service.from("statement_transactions").insert(
+        childRows.slice(i, i + CHILD_INSERT_CHUNK),
+      );
+      if (error) throw new Error(`child insert: ${error.message}`);
+    }
+
+    const { error: upErr } = await service.from("statements").update({
+      ...buildStatementFinancials(assembly.math, currencyHint),
+      source_metadata: assembly.source,
+      coverage_metadata: assembly.coverage,
+      status: "ready",
+      generated_at: new Date().toISOString(),
+    }).eq("id", job.id).eq("status", "generating");
+    if (upErr) throw new Error(`finalize update: ${upErr.message}`);
+
+    if (assembly.math.totals?.reconciles === false) {
+      console.warn("[statement.monitor] reconcile_mismatch", {
+        workspaceId: job.workspace_id,
+        statementUuid: job.id,
+      });
+    }
+    if (job.created_by) {
+      await recordStatementAudit(service, {
+        workspaceId: job.workspace_id,
+        actorUserId: job.created_by,
+        eventType: "statement.generated",
+        statementUuid: job.id,
+        metadata: {
+          scope: job.scope,
+          statementType: job.statement_type,
+          transactionCount: rows.length,
+          async: true,
+        },
+      });
+    }
+    return true;
+  } catch (e) {
+    console.error(
+      "[statement.monitor] job_failed",
+      { statementUuid: job.id },
+      e,
+    );
+    try {
+      await service.from("statements").update({
+        status: "failed",
+        failure_reason: "Generation failed. Try creating the statement again.",
+      }).eq("id", job.id).eq("status", "generating");
+    } catch {
+      // best effort
+    }
+    return false;
+  }
+}
+
+export async function runStatementJobsTick(): Promise<
+  StatementJobsTickSummary
+> {
+  if (process.env.FINANCIAL_STATEMENTS_ENABLED !== "true") {
+    return { picked: 0, finalized: 0, failed: 0, disabled: true };
+  }
+  const service = supabaseServer();
+  const cutoff = new Date(Date.now() - STATEMENT_JOB_MIN_AGE_MS).toISOString();
+
+  const { data, error } = await service
+    .from("statements")
+    .select(
+      "id, workspace_id, created_by, statement_type, scope, account_ids, filters, period_start, period_end, timezone",
+    )
+    .eq("status", "generating")
+    .lt("created_at", cutoff)
+    .order("created_at", { ascending: true })
+    .limit(STATEMENT_JOB_BATCH);
+
+  if (error) {
+    console.error("runStatementJobsTick: list failed:", error.message);
+    return { picked: 0, finalized: 0, failed: 0 };
+  }
+
+  const jobs = (data ?? []) as StatementJobRow[];
+  let finalized = 0;
+  let failed = 0;
+  for (const job of jobs) {
+    if (await finalizeStatementJob(service, job)) finalized += 1;
+    else failed += 1;
+  }
+  return { picked: jobs.length, finalized, failed };
 }
 
 type StoredStatement = {

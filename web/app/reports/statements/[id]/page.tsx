@@ -4,6 +4,7 @@ import { EmptyState } from "../../../../components/EmptyState";
 import { StatementsTabs } from "../../../../components/StatementsTabs";
 import { StatementStatusBadge } from "../../../../components/StatementStatusBadge";
 import { StatementActions } from "../../../../components/StatementActions";
+import { StatementAutoRefresh } from "../../../../components/StatementAutoRefresh";
 import { isFinancialStatementsEnabled } from "../../../../lib/financial-statements";
 import {
   getActiveWorkspace,
@@ -97,6 +98,17 @@ export default async function StatementDetailPage(
           description={statement.failure_reason ??
             "An unexpected error occurred."}
         />
+      )}
+
+      {(statement.status === "preparing" ||
+        statement.status === "generating") && (
+        <>
+          <StatementAutoRefresh active />
+          <EmptyState
+            title="Preparing your statement…"
+            description="This one is large, so it's being generated in the background. This page will update automatically when it's ready."
+          />
+        </>
       )}
 
       <StatementActions

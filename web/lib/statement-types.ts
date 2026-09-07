@@ -42,6 +42,8 @@ export type StatementRequest = {
   sourceIds: string[];
   filters?: StatementFilters;
   clientToken: string;
+  /** Force queued generation regardless of size (the worker fills it in). */
+  async?: boolean;
 };
 
 export type StatementPreviewRow = {

@@ -260,7 +260,38 @@ export type StatementRecordInput = {
   now: Date;
 };
 
-export type StatementRecord = {
+/** The computed financial columns, derived once from a math result. Shared by the sync insert and the async worker's "flip to ready" update. */
+export type StatementFinancialFields = {
+  currency: string;
+  opening_balance_minor: number | null;
+  closing_balance_minor: number | null;
+  total_credit_minor: number;
+  total_debit_minor: number;
+  total_fees_minor: number;
+  transaction_count: number;
+  per_currency: StatementCurrencyTotals[] | null;
+  reconciles: boolean | null;
+};
+
+export function buildStatementFinancials(
+  math: StatementMathResult,
+  currencyHint: string,
+): StatementFinancialFields {
+  const t = math.totals;
+  return {
+    currency: math.currency ?? currencyHint ?? "RWF",
+    opening_balance_minor: t?.openingBalanceMinor ?? null,
+    closing_balance_minor: t?.closingBalanceMinor ?? null,
+    total_credit_minor: t?.totalCreditsMinor ?? 0,
+    total_debit_minor: t?.totalDebitsMinor ?? 0,
+    total_fees_minor: t?.totalFeesMinor ?? 0,
+    transaction_count: math.rows.length,
+    per_currency: math.mixedCurrency ? math.perCurrency : null,
+    reconciles: t?.reconciles ?? null,
+  };
+}
+
+export type StatementRecord = StatementFinancialFields & {
   statement_id: string;
   workspace_id: string;
   created_by: string;
@@ -271,28 +302,20 @@ export type StatementRecord = {
   period_start: string;
   period_end: string;
   timezone: string;
-  currency: string;
-  opening_balance_minor: number | null;
-  closing_balance_minor: number | null;
-  total_credit_minor: number;
-  total_debit_minor: number;
-  total_fees_minor: number;
-  transaction_count: number;
-  per_currency: StatementCurrencyTotals[] | null;
   source_metadata: unknown;
   coverage_metadata: unknown;
-  reconciles: boolean | null;
-  status: "ready";
+  status: "ready" | "generating";
   supersedes_id: string | null;
   client_token: string;
-  generated_at: string;
+  generated_at: string | null;
 };
 
-/** The single `statements` row to insert (service role). */
-export function buildStatementRecord(
-  input: StatementRecordInput,
-): StatementRecord {
-  const t = input.math.totals;
+function baseRecord(
+  input: Omit<
+    StatementRecordInput,
+    "math" | "sourceMetadata" | "coverageMetadata" | "now"
+  >,
+) {
   return {
     statement_id: input.statementPublicId,
     workspace_id: input.workspaceId,
@@ -304,20 +327,46 @@ export function buildStatementRecord(
     period_start: input.periodStartUtc.toISOString(),
     period_end: input.periodEndUtc.toISOString(),
     timezone: input.timezone,
-    currency: input.math.currency ?? input.currencyHint ?? "RWF",
-    opening_balance_minor: t?.openingBalanceMinor ?? null,
-    closing_balance_minor: t?.closingBalanceMinor ?? null,
-    total_credit_minor: t?.totalCreditsMinor ?? 0,
-    total_debit_minor: t?.totalDebitsMinor ?? 0,
-    total_fees_minor: t?.totalFeesMinor ?? 0,
-    transaction_count: input.math.rows.length,
-    per_currency: input.math.mixedCurrency ? input.math.perCurrency : null,
-    source_metadata: input.sourceMetadata,
-    coverage_metadata: input.coverageMetadata,
-    reconciles: t?.reconciles ?? null,
-    status: "ready",
     supersedes_id: input.supersedesId,
     client_token: input.clientToken,
+  };
+}
+
+/** A finalized (status='ready') `statements` row to insert (service role). */
+export function buildStatementRecord(
+  input: StatementRecordInput,
+): StatementRecord {
+  return {
+    ...baseRecord(input),
+    ...buildStatementFinancials(input.math, input.currencyHint),
+    source_metadata: input.sourceMetadata,
+    coverage_metadata: input.coverageMetadata,
+    status: "ready",
     generated_at: input.now.toISOString(),
+  };
+}
+
+/** A pending (status='generating') stub, finalized later by the statement-jobs worker. */
+export function buildPendingStatementRecord(
+  input: Omit<
+    StatementRecordInput,
+    "math" | "sourceMetadata" | "coverageMetadata" | "now"
+  >,
+): StatementRecord {
+  return {
+    ...baseRecord(input),
+    currency: input.currencyHint || "RWF",
+    opening_balance_minor: null,
+    closing_balance_minor: null,
+    total_credit_minor: 0,
+    total_debit_minor: 0,
+    total_fees_minor: 0,
+    transaction_count: 0,
+    per_currency: null,
+    reconciles: null,
+    source_metadata: {},
+    coverage_metadata: {},
+    status: "generating",
+    generated_at: null,
   };
 }

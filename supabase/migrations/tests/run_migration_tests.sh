@@ -2499,6 +2499,26 @@ else
   fail "Statements RLS: a client UPDATE against a statements row was not blocked"
 fi
 
+# The async worker flips a status='generating' stub to 'ready' - service
+# role only. (authenticated UPDATE is denied above; this is the positive
+# control that the worker's write path itself is not blocked.)
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.statements
+    (id, statement_id, workspace_id, created_by, period_start, period_end, timezone, status)
+  values
+    ('00000000-0000-0000-0000-0000000000f9', 'OL-ST-20260907-GGGGGG', '$WORKSPACE_A', '$USER_A', '2026-08-01T00:00:00Z', '2026-09-01T00:00:00Z', 'Africa/Kigali', 'generating');
+  update public.statements set status = 'ready', total_credit_minor = 42, generated_at = now()
+    where id = '00000000-0000-0000-0000-0000000000f9' and status = 'generating';
+" >/dev/null
+STMT_JOB_READY="$(psql -d pfe_rls -t -A -c "select count(*) from public.statements where id = '00000000-0000-0000-0000-0000000000f9' and status = 'ready' and total_credit_minor = 42;")"
+if [ "$STMT_JOB_READY" = "1" ]; then
+  pass "Statements: the statement-jobs worker (service role) flips a 'generating' stub to 'ready'"
+else
+  fail "Statements: service_role could not finalize a 'generating' statement"
+fi
+psql -d pfe_rls -c "set role service_role; delete from public.statements where id = '00000000-0000-0000-0000-0000000000f9';" >/dev/null
+
 # No authenticated INSERT on statement_transactions (frozen snapshot rows).
 if as_user "$USER_A" "insert into public.statement_transactions (statement_id, occurred_at, direction, sort_index) values ('00000000-0000-0000-0000-0000000000fb', now(), 'out', 99);" >/dev/null 2>$ARTIFACT_DIR/pfe_stmt_child_insert.log; then
   fail "Statements RLS: authenticated inserted a statement_transactions row - snapshot is forgeable"
