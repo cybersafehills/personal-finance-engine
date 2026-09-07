@@ -165,3 +165,24 @@ select cron.unschedule('statement-jobs-tick');
 ```
 Leaves the helper function and all statement data untouched; nothing
 generates automatically again until the file is re-run.
+
+## Integrations export worker (`activate_integration_export_worker.sql`)
+
+Separate file, same shape: one tick (`integration-export-jobs-tick`,
+`*/10 * * * *`) that POSTs `/api/cron/run-export-jobs`, reusing
+`call_report_cron_route()` and the `report_cron_secret` Vault entry.
+
+The route runs `export_jobs` left `queued` above the 20 000-row inline
+threshold, re-claims jobs stuck `processing` past a 15-minute lease, and
+purges the stored file (not the history row) of exports older than 7 days.
+It checks no `INTEGRATIONS_*` flag — with the Export Center off no jobs are
+created, so the tick is a harmless no-op that only runs the purge.
+**Not required for GA**: small exports run inline; activate this before
+advertising large exports. See `docs/integrations-rollout-runbook.md` §4.
+
+Rollback:
+```sql
+select cron.unschedule('integration-export-jobs-tick');
+```
+Leaves the helper function and all export data untouched; large exports
+queue again with no worker, small ones still run inline.
