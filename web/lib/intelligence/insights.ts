@@ -1,5 +1,6 @@
 import "server-only";
 
+import { cache } from "react";
 import {
   getActiveWorkspaceId,
   getCurrentBalance,
@@ -114,7 +115,15 @@ async function fetchDueBills(): Promise<DueBill[]> {
   }));
 }
 
-export async function getIntelligenceInsights(): Promise<IntelligenceInsights> {
+/**
+ * React `cache()`-wrapped so app/layout.tsx (for the glimpse banner) and
+ * app/page.tsx (for the Home card) share one computation per request.
+ */
+export const getIntelligenceInsights: () => Promise<IntelligenceInsights> = cache(
+  _getIntelligenceInsights,
+);
+
+async function _getIntelligenceInsights(): Promise<IntelligenceInsights> {
   const workspaceId = await getActiveWorkspaceId();
 
   if (!isIntelligenceEnabled(workspaceId)) {

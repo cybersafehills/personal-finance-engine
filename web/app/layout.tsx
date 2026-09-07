@@ -24,6 +24,12 @@ import {
   isBusinessSurfacesEnabled,
   resolveExperienceMode,
 } from "../lib/experience-mode/gate";
+import {
+  getIntelligenceInsights,
+  isIntelligenceEnabled,
+} from "../lib/intelligence/insights";
+import { summariseInsights } from "../lib/intelligence/summary";
+import { noteInsightChange } from "./actions/insight-glimpse";
 import "./globals.css";
 
 // One <link rel="apple-touch-startup-image"> per iPhone family. Without
@@ -139,6 +145,19 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   const businessSurfacesEnabled = Boolean(user) &&
     isBusinessSurfacesEnabled(activeWorkspaceId);
 
+  // Insight glimpse (ADR 0014): when the forecast picture moved, show a
+  // one-line banner on any page for ~30s and log it to Notifications.
+  // note_insight_change() de-dupes + rate-limits; it returns true only on
+  // the render that actually enqueued a notification. getIntelligenceInsights
+  // is React-cache()'d, so Home does not recompute it.
+  let insightGlimpse: string | null = null;
+  if (user && activeWorkspaceId && isIntelligenceEnabled(activeWorkspaceId)) {
+    const g = summariseInsights(await getIntelligenceInsights());
+    if (g && await noteInsightChange(activeWorkspaceId, g)) {
+      insightGlimpse = g.headline;
+    }
+  }
+
   return (
     <html lang="en" className={`${GeistSans.variable} h-full antialiased`}>
       <body className="min-h-full bg-background font-sans text-text-primary">
@@ -168,6 +187,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           experienceMode={experienceMode}
           businessSurfacesEnabled={businessSurfacesEnabled}
           inboxBadgeCount={uiPreferences.showInboxBadge ? inboxBadgeCount : 0}
+          insightGlimpse={insightGlimpse}
         >
           {children}
         </AppShell>
