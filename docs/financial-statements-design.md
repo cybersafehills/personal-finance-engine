@@ -219,10 +219,15 @@ Absence of visible gaps is never presented as proof of completeness.
 - Set `FINANCIAL_STATEMENTS_ENABLED=true` per Vercel environment. Everything is inert while unset:
   the routes 404, `/verify` 404s, the tab is hidden, the workers no-op, nothing queries the tables.
   Optional: `STATEMENT_ASYNC_THRESHOLD` (default 8000).
-- The three cron routes (`run-statement-jobs`, `run-statement-schedules`, and the existing
-  `generate-reports` pattern) are **not scheduled** — they exist for a later, explicitly-approved
-  rollout step and are authed by `REPORT_CRON_SECRET`. Async generation is unreachable until one is
-  wired; synchronous generation needs none of them.
+- The two cron routes (`run-statement-jobs`, `run-statement-schedules`) are authed by
+  `REPORT_CRON_SECRET` and are wired for pg_cron via
+  `supabase/scheduling/activate_statement_workers.sql` — a manually-applied file (like
+  `activate_report_scheduler.sql`; kept out of `supabase/migrations/` because pg_cron/pg_net can't
+  run in the CI Postgres). It schedules `statement-schedules-tick` (`*/15`) and `statement-jobs-tick`
+  (`*/5`). **Until that file is run by hand in the Supabase SQL editor, neither tick fires** — so
+  scheduled statements don't auto-generate and a queued (async-threshold) statement stays
+  `generating`. Synchronous generation needs none of this. Both ticks also hard-check
+  `FINANCIAL_STATEMENTS_ENABLED`, so activating the cron before the flag is flipped is harmless.
 - Rollback = unset the flag. Generated statements, packs and schedules remain but are unreachable.
 
 ## Test coverage
