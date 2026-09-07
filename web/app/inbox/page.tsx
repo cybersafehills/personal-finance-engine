@@ -2,8 +2,15 @@ import Link from "next/link";
 import { PageHeader } from "../../components/PageHeader";
 import { NotificationList } from "../../components/NotificationList";
 import { InboxList } from "../../components/InboxList";
+import { AttentionItemsCard } from "../../components/AttentionItemsCard";
+import { InboxBadgeToggle } from "../../components/InboxBadgeToggle";
 import { getFinancialInbox } from "../../lib/financial-inbox";
-import { getAuthUserId, getNotifications } from "../../lib/queries";
+import {
+  getAttentionItems,
+  getAuthUserId,
+  getNotifications,
+  getUiPreferences,
+} from "../../lib/queries";
 
 export const dynamic = "force-dynamic";
 
@@ -21,11 +28,14 @@ export const dynamic = "force-dynamic";
 const RECENT_NOTIFICATIONS_LIMIT = 8;
 
 export default async function FinancialInboxPage() {
-  const [inbox, notifications, currentUserId] = await Promise.all([
-    getFinancialInbox(),
-    getNotifications(RECENT_NOTIFICATIONS_LIMIT),
-    getAuthUserId(),
-  ]);
+  const [inbox, notifications, currentUserId, attentionItems, uiPreferences] =
+    await Promise.all([
+      getFinancialInbox(),
+      getNotifications(RECENT_NOTIFICATIONS_LIMIT),
+      getAuthUserId(),
+      getAttentionItems(),
+      getUiPreferences(),
+    ]);
 
   return (
     <div>
@@ -35,6 +45,12 @@ export default async function FinancialInboxPage() {
         backHref="/"
         backLabel="Home"
       />
+
+      {attentionItems.length > 0 && (
+        <div className="mb-6">
+          <AttentionItemsCard items={attentionItems} showOpenInboxLink={false} />
+        </div>
+      )}
 
       {notifications.length > 0 && (
         <section className="mb-6" aria-labelledby="inbox-notifications">
@@ -80,6 +96,10 @@ export default async function FinancialInboxPage() {
       )}
 
       <InboxList items={inbox.items} currentUserId={currentUserId} />
+
+      <div className="mt-8">
+        <InboxBadgeToggle enabled={uiPreferences.showInboxBadge} />
+      </div>
     </div>
   );
 }
