@@ -34,6 +34,11 @@ downstream of the existing `reports` experience surface.
 | PR11 | Scheduled statements (`statement_schedules`, migration `20261213000000`) + `run-statement-schedules` worker | **done** |
 | PR12 | Public verification page `/verify/<token>` + PDF QR (migration `20261214000000`) | **done** |
 | PR13 | Deterministic natural-language request parsing (`lib/statement-nl.ts`) | **done** |
+| PR14 | Public verification **API** endpoint `/api/verify/<token>` (JSON; shared rate limiter) | **done** |
+| PR15 | Weekly / quarterly schedule cadences (migration `20261215000000`) | **done** |
+| PR16 | Scheduled-statement email delivery — link-only, no figures (migration `20261216000000`) | **done** |
+| PR17 | Participant (household member) + tag filters | **done** |
+| PR18 | `transaction_tags` schema (migration `20261217000000`) + tagging UI on `/transactions/[id]` | **done** |
 
 ## Where each piece lives
 
@@ -154,35 +159,51 @@ authoritative provider ledger. Documents therefore always carry:
 
 Absence of visible gaps is never presented as proof of completeness.
 
-## Extension points that were subsequently built (PR7–PR13)
+## Extension points that were subsequently built (PR7–PR18)
 
 - **`statement.generate` capability** (§25) — PR7. **Category + merchant filters** (§24) — PR8.
 - **Async / queued generation** (§27) — PR9: a `status='generating'` stub + the
   `run-statement-jobs` worker. **Financial Packs** (§32) — PR10 (`statement_packs`, synchronous ZIP).
 - **Scheduled statements** (§30) — PR11 (`statement_schedules` + `run-statement-schedules`; the
-  generated statement lands in history — email/notification delivery still deferred).
+  generated statement lands in history). **Weekly / quarterly cadences** — PR15
+  (`statement_schedules.cadence` / `day_of_week`, migration `20261215000000`;
+  `nextScheduledRunUtc` / `scheduledStatementRange` in `statement-period.ts`).
+- **Scheduled-statement email delivery** — PR16 (migration `20261216000000`:
+  `statement_schedules.delivery_email`, `statements.notify_email` / `notified_at`). The jobs worker,
+  after a statement flips to `ready`, sends **one link-only email** via
+  `sendScheduledStatementEmail` (`lib/emails.ts`) — no balances, descriptions or account
+  identifiers, ever — and stamps `notified_at`. Non-fatal on failure.
 - **Public verification + QR** (§20/§21) — PR12: `/verify/<token>`, an unguessable token per
   statement, a PDF QR, per-IP rate limiting, and RLS is *not* a token bypass. Revocation via
-  `verification_revoked_at`.
+  `verification_revoked_at`. **Verification API** — PR14: `/api/verify/<token>` returns the same
+  identity + integrity JSON the page shows, flag-gated, `no-store`, sharing `verifyRateLimited`.
 - **Natural-language requests** (§31) — PR13: `lib/statement-nl.ts`, a *deterministic* parser
   feeding the structured form — no AI, no effect on calculations.
+- **Participant + tag filters** (§24) — PR17 / PR18. `filters.participantUserId` scopes to one
+  household member's `transactions.attributed_user_id` (household spaces only, via
+  `getSpaceMemberDirectory`); `filters.tag` scopes to a `transaction_tags.tag` (inner join). Both
+  force `scope='filtered'` and render in the "Applied filters" banner
+  (`"One member's transactions"` / `"Tag: <tag>"`) — the participant filter never names the member
+  in the document. **`transaction_tags`** (migration `20261217000000`) is a member-managed label
+  row (`lib/transaction-tags.ts`, `TransactionTags` on `/transactions/[id]`), **not** snapshot
+  data — re-tagging never mutates an already-generated statement.
 
 ## Still deferred
 
-- **Scheduled-statement email / notification delivery** — the schedule only "saves to OneLedger"
-  today (§30).
-- **Tag / participant filters** (§24) — need a `transaction_tags` schema (none exists) and the
-  member directory in the flow UI; only direction / category / merchant shipped.
-- **A public verification API endpoint** beyond the HTML page; **weekly/quarterly schedule
-  cadences** (monthly only); **provider-original-document management** — ingestion of uploaded
-  provider statements is a separate existing feature (`lib/statement-import.ts`).
+- **Provider-original-document management** — storing and surfacing the *uploaded* PDF/CSV a
+  provider issued, alongside the OneLedger-generated document. Ingestion of uploaded provider
+  statements into the ledger is a separate existing feature (`lib/statement-import.ts`); this engine
+  only emits OneLedger-generated documents.
+- **In-app notification (bell) on scheduled-statement completion** — only the optional email and the
+  history row exist today.
 
 ## Deployment
 
-- Migrations `20261210000000` … `20261214000000` apply via `deploy-supabase.yml` on a green `main`:
+- Migrations `20261210000000` … `20261217000000` apply via `deploy-supabase.yml` on a green `main`:
   `statements` / `statement_transactions` / `statement_artifacts` + private `statement-artifacts`
-  bucket; the `statement.generate` capability; `statement_packs`; `statement_schedules`;
-  `statements.verification_token` / `verification_revoked_at`.
+  bucket; the `statement.generate` capability; `statement_packs`; `statement_schedules` (+ `cadence`
+  / `day_of_week` / `delivery_email`); `statements.verification_token` / `verification_revoked_at` /
+  `notify_email` / `notified_at`; `transaction_tags`.
 - Set `FINANCIAL_STATEMENTS_ENABLED=true` per Vercel environment. Everything is inert while unset:
   the routes 404, `/verify` 404s, the tab is hidden, the workers no-op, nothing queries the tables.
   Optional: `STATEMENT_ASYNC_THRESHOLD` (default 8000).

@@ -297,6 +297,8 @@ export type StatementFormOptions =
     timezone: string;
     /** Household co-members, for the "attributed to" filter. Empty for personal / org spaces. */
     participants: StatementParticipantOption[];
+    /** Distinct tags in use in this workspace, for the tag-filter suggestions. */
+    tags: string[];
   }
   | { ok: false; kind: StatementErrorKind; message: string };
 
@@ -343,7 +345,10 @@ export async function getStatementFormOptions(): Promise<StatementFormOptions> {
     }));
   }
 
-  return { ok: true, sources, timezone, participants };
+  const { getWorkspaceTags } = await import("./transaction-tags");
+  const tags = await getWorkspaceTags(ctx.workspace.id);
+
+  return { ok: true, sources, timezone, participants, tags };
 }
 
 // ---------------------------------------------------------------------------
@@ -514,7 +519,9 @@ function normalizeFilters(
     ...(input?.participantUserId?.trim()
       ? { participantUserId: input.participantUserId.trim() }
       : {}),
-    ...(input?.tag?.trim() ? { tag: input.tag.trim() } : {}),
+    ...(input?.tag?.trim()
+      ? { tag: input.tag.trim().replace(/\s+/g, " ").toLowerCase() }
+      : {}),
   };
 }
 

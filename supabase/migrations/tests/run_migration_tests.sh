@@ -674,7 +674,9 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # member SELECT+DELETE) - 126 tables, 125 with RLS.
 # Scheduled Statements PR11 (20261213000000) adds statement_schedules (RLS,
 # member CRUD) - 127 tables, 126 with RLS.
-if [ "$TABLE_COUNT" = "127" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Transaction Tags PR18 (20261217000000) adds transaction_tags (RLS,
+# member select + insert + delete) - 128 tables, 127 with RLS.
+if [ "$TABLE_COUNT" = "128" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -806,10 +808,13 @@ AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from inform
 # Scheduled Statements PR11 (20261213000000) adds statement_schedules
 # (select, insert, update, delete = 4) - a member-managed config row like
 # report_preferences. 157 + 4 = 161.
-if [ "$AUTHENTICATED_GRANT_COUNT" = "161" ]; then
-  pass "authenticated holds exactly the 161 table grants expected, no more"
+# Transaction Tags PR18 (20261217000000) adds transaction_tags (select,
+# insert, delete = 3) for authenticated - a member-managed label row, no
+# update (a tag is added or removed). 161 + 3 = 164.
+if [ "$AUTHENTICATED_GRANT_COUNT" = "164" ]; then
+  pass "authenticated holds exactly the 164 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 161 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 164 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -2709,6 +2714,38 @@ else
   fail "Schedules RLS: cross-tenant leak (sees=$SCHED_B_SEES still=$SCHED_STILL)"
 fi
 as_user "$USER_A" "delete from public.statement_schedules where id = '$SCHED_A';" >/dev/null
+
+# --- Transaction tags (20261217000000) -----------------------------------
+# USER_A tags their own workspace's transaction ...d3 (created above).
+TAG_A="$(as_user "$USER_A" "insert into public.transaction_tags (transaction_id, workspace_id, tag, created_by) values ('00000000-0000-0000-0000-0000000000d3', '$WORKSPACE_A', 'reimbursable', '$USER_A') returning id;")"
+if [ -n "$TAG_A" ]; then
+  pass "Tags: a member tags their own workspace's transaction"
+else
+  fail "Tags: member could not tag their own transaction"
+fi
+# The char_length CHECK rejects an over-long label.
+if psql -d pfe_rls -c "set role service_role; insert into public.transaction_tags (transaction_id, workspace_id, tag) values ('00000000-0000-0000-0000-0000000000d3', '$WORKSPACE_A', repeat('x', 41));" >/dev/null 2>$ARTIFACT_DIR/pfe_tag_len.log; then
+  fail "Tags: the tag length CHECK accepted a 41-char label"
+else
+  pass "Tags: the tag length CHECK rejects an over-long label"
+fi
+rm -f $ARTIFACT_DIR/pfe_tag_len.log
+# The insert policy blocks tagging a transaction in another tenant's workspace.
+if as_user "$USER_A" "insert into public.transaction_tags (transaction_id, workspace_id, tag, created_by) values ('00000000-0000-0000-0000-0000000000c3', '$WORKSPACE_B', 'x', '$USER_A');" >/dev/null 2>$ARTIFACT_DIR/pfe_tag_x.log; then
+  fail "Tags: a member tagged a transaction in another tenant's workspace"
+else
+  pass "Tags: the insert policy blocks another tenant's workspace"
+fi
+rm -f $ARTIFACT_DIR/pfe_tag_x.log
+TAG_B_SEES="$(as_user "$USER_B" "select count(*) from public.transaction_tags where id = '$TAG_A';")"
+as_user "$USER_B" "delete from public.transaction_tags where id = '$TAG_A';" >/dev/null 2>&1 || true
+TAG_STILL="$(psql -d pfe_rls -t -A -c "select count(*) from public.transaction_tags where id = '$TAG_A';")"
+if [ "$TAG_B_SEES" = "0" ] && [ "$TAG_STILL" = "1" ]; then
+  pass "Tags RLS: another tenant cannot see or delete a tag"
+else
+  fail "Tags RLS: cross-tenant leak (sees=$TAG_B_SEES still=$TAG_STILL)"
+fi
+as_user "$USER_A" "delete from public.transaction_tags where id = '$TAG_A';" >/dev/null
 
 # ===========================================================================
 # Phase M: USSD directory. Non-admin visibility is limited to published

@@ -42,11 +42,13 @@ export function GenerateStatementFlow({
   defaultTimezone,
   categories = [],
   participants = [],
+  tags = [],
 }: {
   sources: SourceOption[];
   defaultTimezone: string;
   categories?: string[];
   participants?: ParticipantOption[];
+  tags?: string[];
 }) {
   const router = useRouter();
 
@@ -66,6 +68,7 @@ export function GenerateStatementFlow({
   const [category, setCategory] = useState("");
   const [merchant, setMerchant] = useState("");
   const [participant, setParticipant] = useState("");
+  const [tag, setTag] = useState("");
   const [timezone, setTimezone] = useState(defaultTimezone);
   const [showCustomize, setShowCustomize] = useState(false);
 
@@ -99,14 +102,17 @@ export function GenerateStatementFlow({
       fromDateKey: preset === "custom" ? fromDate : undefined,
       toDateKey: preset === "custom" ? toDate : undefined,
       sourceIds: sourceMode === "one" && sourceId ? [sourceId] : [],
-      filters: direction || category.trim() || merchant.trim() || participant
-        ? {
-          ...(direction ? { direction } : {}),
-          ...(category.trim() ? { category: category.trim() } : {}),
-          ...(merchant.trim() ? { merchant: merchant.trim() } : {}),
-          ...(participant ? { participantUserId: participant } : {}),
-        }
-        : undefined,
+      filters:
+        direction || category.trim() || merchant.trim() || participant ||
+          tag.trim()
+          ? {
+            ...(direction ? { direction } : {}),
+            ...(category.trim() ? { category: category.trim() } : {}),
+            ...(merchant.trim() ? { merchant: merchant.trim() } : {}),
+            ...(participant ? { participantUserId: participant } : {}),
+            ...(tag.trim() ? { tag: tag.trim() } : {}),
+          }
+          : undefined,
       clientToken,
     };
   }
@@ -414,6 +420,21 @@ export function GenerateStatementFlow({
                   maxLength={80}
                   className={inputClass}
                 />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="font-medium text-text-primary">Tag</span>
+                <input
+                  type="text"
+                  list="statement-tag-options"
+                  value={tag}
+                  onChange={(e) => onEdit(setTag)(e.target.value)}
+                  placeholder="Any tag"
+                  maxLength={40}
+                  className={inputClass}
+                />
+                <datalist id="statement-tag-options">
+                  {tags.map((t) => <option key={t} value={t} />)}
+                </datalist>
               </label>
               {participants.length > 0 && (
                 <label className="flex flex-col gap-1">

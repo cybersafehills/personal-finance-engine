@@ -62,3 +62,27 @@ export async function setTransactionAttribution(
   revalidatePath("/transactions/review");
   return { ok: true };
 }
+
+// --- Transaction tags (migration 20261217000000) -----------------------
+
+export async function addTransactionTagAction(
+  transactionId: string,
+  tag: string,
+): Promise<AttributionActionResult> {
+  const { addTransactionTag } = await import("../../../lib/transaction-tags");
+  const result = await addTransactionTag(transactionId, tag);
+  if (result.ok) revalidatePath(`/transactions/${transactionId}`);
+  return result;
+}
+
+export async function removeTransactionTagAction(
+  transactionId: string,
+  tag: string,
+): Promise<AttributionActionResult> {
+  const { removeTransactionTag } = await import(
+    "../../../lib/transaction-tags"
+  );
+  const result = await removeTransactionTag(transactionId, tag);
+  if (result.ok) revalidatePath(`/transactions/${transactionId}`);
+  return result;
+}
