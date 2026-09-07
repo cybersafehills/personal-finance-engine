@@ -136,3 +136,32 @@ Two independent switches, by design:
 
 Rollback: `select cron.unschedule('account-deletion-tick');` (leaves the
 helper function and pending requests untouched).
+
+## Statement workers (`activate_statement_workers.sql`)
+
+Separate file, same shape: the Financial Documents Engine's two
+background ticks, both reusing `call_report_cron_route()` and the
+`report_cron_secret` Vault entry.
+
+- `statement-schedules-tick` (`*/15 * * * *`) → `/api/cron/run-statement-schedules`
+  — enqueues a `status='generating'` stub per due `statement_schedules`
+  row and advances its `next_run_at`.
+- `statement-jobs-tick` (`*/5 * * * *`) → `/api/cron/run-statement-jobs`
+  — finalizes those stubs (and any from `createStatement`'s
+  async-threshold path): computes + renders the immutable snapshot,
+  flips to `ready`, sends the optional link-only "ready" email.
+
+Both ticks hard-check `FINANCIAL_STATEMENTS_ENABLED === "true"` and return
+`{"disabled": true}` otherwise, so running `activate_statement_workers.sql`
+before or after the flag is flipped is equally safe — they no-op until
+Statements is live. Idempotent at any frequency: schedules advance
+`next_run_at` per row per tick; job finalize wipes each stub's children
+and the flip is conditional on `status` still being `generating`.
+
+Rollback:
+```sql
+select cron.unschedule('statement-schedules-tick');
+select cron.unschedule('statement-jobs-tick');
+```
+Leaves the helper function and all statement data untouched; nothing
+generates automatically again until the file is re-run.
