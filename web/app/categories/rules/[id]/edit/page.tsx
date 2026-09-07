@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import {
   getCategorizationPolicyById,
+  getCategorySuggestions,
   getMyFinancialSources,
 } from "../../../../../lib/queries";
 import { financialSourceOptions } from "../../../../../lib/financial-source-options";
@@ -13,9 +14,10 @@ export default async function EditCategorizationRulePage({
   params,
 }: PageProps<"/categories/rules/[id]/edit">) {
   const { id } = await params;
-  const [policy, sources] = await Promise.all([
+  const [policy, sources, categorySuggestions] = await Promise.all([
     getCategorizationPolicyById(id),
     getMyFinancialSources(),
+    getCategorySuggestions(),
   ]);
 
   if (!policy) {
@@ -33,6 +35,7 @@ export default async function EditCategorizationRulePage({
         mode="edit"
         policy={policy}
         sources={financialSourceOptions(sources)}
+        categorySuggestions={categorySuggestions}
       />
     </div>
   );

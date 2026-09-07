@@ -9,7 +9,13 @@ import {
 import { ReviewQueueItem } from "./ReviewQueueItem";
 import type { TransactionRow } from "../lib/queries";
 
-export function ReviewQueueList({ transactions }: { transactions: TransactionRow[] }) {
+export function ReviewQueueList({
+  transactions,
+  categorySuggestions = [],
+}: {
+  transactions: TransactionRow[];
+  categorySuggestions?: string[];
+}) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -84,6 +90,7 @@ export function ReviewQueueList({ transactions }: { transactions: TransactionRow
           transaction={t}
           selected={selected.has(t.id)}
           onToggleSelect={toggleSelect}
+          categorySuggestions={categorySuggestions}
         />
       ))}
     </div>

@@ -23,7 +23,13 @@ function nowLocalDatetimeValue(): string {
   return now.toISOString().slice(0, 16);
 }
 
-export function ManualTransactionForm({ accounts }: { accounts: AccountRow[] }) {
+export function ManualTransactionForm({
+  accounts,
+  categorySuggestions = [],
+}: {
+  accounts: AccountRow[];
+  categorySuggestions?: string[];
+}) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -169,8 +175,16 @@ export function ManualTransactionForm({ accounts }: { accounts: AccountRow[] }) 
           value={category}
           onChange={(e) => setCategory(e.target.value)}
           placeholder="e.g. Groceries"
+          list={categorySuggestions.length > 0 ? "manual-txn-category-suggestions" : undefined}
           className="min-h-11 rounded-control border border-border-strong bg-background px-3 py-2 text-sm text-text-primary"
         />
+        {categorySuggestions.length > 0 && (
+          <datalist id="manual-txn-category-suggestions">
+            {categorySuggestions.map((name) => (
+              <option key={name} value={name} />
+            ))}
+          </datalist>
+        )}
       </label>
 
       <label className="flex flex-col gap-1 text-sm">

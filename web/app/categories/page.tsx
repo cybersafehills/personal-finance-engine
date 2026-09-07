@@ -33,6 +33,7 @@ export default async function CategoriesPage() {
         <SpaceCategoriesPanel
           categories={spaceCategories.categories}
           canManage={spaceCategories.canManage}
+          scope={spaceCategories.scope}
         />
       )}
 

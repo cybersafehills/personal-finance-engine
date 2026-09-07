@@ -663,19 +663,22 @@ export type SpaceCategory = {
 
 export type SpaceCategoryManagement = {
   workspaceId: string;
+  scope: "personal" | "space";
   canManage: boolean;
   categories: SpaceCategory[];
 };
 
 /**
- * The active Space's category vocabulary + whether the caller can edit
- * it. Returns null for a Personal Space (no shared vocabulary there).
+ * The active workspace's category vocabulary + whether the caller can
+ * edit it. Available on every workspace - a Personal one included, where
+ * the owner manages their own list. `scope` lets the UI word it
+ * ("Your categories" vs "This Space's categories").
  */
 export async function getSpaceCategoryManagement(
   includeArchived = false,
 ): Promise<SpaceCategoryManagement | null> {
   const workspace = await getActiveWorkspace();
-  if (!workspace || workspace.kind === "personal") return null;
+  if (!workspace) return null;
 
   const supabase = await supabaseSession();
   let query = supabase
@@ -693,6 +696,7 @@ export async function getSpaceCategoryManagement(
 
   return {
     workspaceId: workspace.id,
+    scope: workspace.kind === "personal" ? "personal" : "space",
     canManage: workspace.role === "owner" || workspace.role === "admin",
     categories: (
       (data ?? []) as unknown as Array<{
@@ -1204,7 +1208,7 @@ export async function getCategoryMappings(): Promise<CategoryMappingRow[]> {
 
   const supabase = await supabaseSession();
 
-  const [txnsResult, mappingsResult] = await Promise.all([
+  const [txnsResult, mappingsResult, vocabResult] = await Promise.all([
     supabase
       .from("transactions")
       .select("category, principal_effect_rwf, fee_effect_rwf")
@@ -1217,6 +1221,14 @@ export async function getCategoryMappings(): Promise<CategoryMappingRow[]> {
       .select("category, allocation_type")
       .eq("workspace_id", workspaceId)
       .is("effective_until", null),
+    // Non-archived vocabulary labels for this workspace so a freshly
+    // created category shows up here (with zero spend) and can be mapped
+    // to an allocation before any transaction uses it.
+    supabase
+      .from("workspace_categories")
+      .select("label")
+      .eq("workspace_id", workspaceId)
+      .eq("is_archived", false),
   ]);
 
   if (txnsResult.error) {
@@ -1225,6 +1237,9 @@ export async function getCategoryMappings(): Promise<CategoryMappingRow[]> {
   }
   if (mappingsResult.error) {
     console.error("getCategoryMappings mappings failed:", mappingsResult.error.message);
+  }
+  if (vocabResult.error) {
+    console.error("getCategoryMappings vocabulary failed:", vocabResult.error.message);
   }
 
   const mappingByCategory = new Map<string, AllocationType>();
@@ -1238,6 +1253,15 @@ export async function getCategoryMappings(): Promise<CategoryMappingRow[]> {
     const effect = Math.abs(Number(row.principal_effect_rwf) + Number(row.fee_effect_rwf));
     const existing = totals.get(category) ?? { total: 0, count: 0 };
     totals.set(category, { total: existing.total + effect, count: existing.count + 1 });
+  }
+
+  // Vocabulary labels with no spend yet - and any category that only
+  // exists as a mapping row - still need a row so they can be (re)mapped.
+  for (const row of (vocabResult.data ?? []) as Array<{ label: string }>) {
+    if (!totals.has(row.label)) totals.set(row.label, { total: 0, count: 0 });
+  }
+  for (const category of mappingByCategory.keys()) {
+    if (!totals.has(category)) totals.set(category, { total: 0, count: 0 });
   }
 
   return Array.from(totals.entries())
