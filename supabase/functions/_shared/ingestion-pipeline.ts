@@ -113,6 +113,8 @@ export type PipelineDeps = {
     workspaceId: string;
     direction: ParsedTransaction["direction"];
     amountRwf: number;
+    feeRwf: number;
+    transactionType: ParsedTransaction["transaction_type"];
     counterpartyName: string | null;
     occurredAt: string;
     financialSourceId: string | null;
@@ -305,6 +307,8 @@ export async function normalizeInboundMessage(
     workspaceId: resolvedWorkspaceId,
     direction: parsed.direction,
     amountRwf: parsed.amount_rwf,
+    feeRwf: parsed.fee_rwf,
+    transactionType: parsed.transaction_type,
     counterpartyName: parsed.counterparty_name,
     occurredAt: parsed.occurred_at,
     financialSourceId: resolvedFinancialSourceId,
