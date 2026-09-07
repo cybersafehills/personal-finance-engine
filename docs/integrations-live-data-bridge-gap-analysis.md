@@ -58,7 +58,7 @@ and §98 ("Is any functionality duplicated?").
 | **Public API write endpoints (POST/PATCH)** | **Missing (deferred by design)** |
 | **Live spreadsheet sync (Sheets / Excel-365 OAuth)** | **Missing (stubs only)** |
 | **E2E test coverage of the Integrations flows** | **Missing** |
-| **Production rollout (flags are unset)** | **Not started** |
+| **Production rollout (flags are unset)** | **Runbook shipped (PR #164); operator activation pending** |
 
 ---
 
@@ -185,7 +185,7 @@ Success §97) · P2 (materially incomplete) · P3 (polish / nice-to-have) · —
 | G3 | **Downloadable register templates** (Daily Sales, Expense, Invoice, Cashbook) + "download a blank template". | 13 | Static XLSX/CSV generators via the existing `workbook.ts` builders + a `/integrations/imports/templates` picker. Small. |
 | G4 | **"Connect existing business records" onboarding** — multi-sheet workbook analyzer. | 41 | Extend `parseXlsx` (already returns all sheets) + `profileTabularData` to classify every sheet, present candidate tables with counts, route each to an import batch. |
 | G5 | **E2E + integration test coverage** for the Integrations flows. | 82, 83, 84, 86 | At minimum: upload→map→preview→commit→see txn→history happy path; cross-tenant + bad-key negatives; a fixture corpus (§83). |
-| G6 | **Production rollout** — every `INTEGRATIONS_*` flag is unset. | 55, 88, 90, 97 | Not code: an activation runbook + flag sequence + staging regression pass. Cheapest P1 by far. |
+| ~~G6~~ | ~~**Production rollout** — every `INTEGRATIONS_*` flag is unset.~~ **Runbook DONE** — [`integrations-rollout-runbook.md`](integrations-rollout-runbook.md) + [`activate_integration_export_worker.sql`](../supabase/scheduling/activate_integration_export_worker.sql), shipped as docs-only PR #164 (branch `docs/integrations-rollout-runbook`). Remaining is operator execution (flip flags per the staged sequence, run the smoke test + regression pass), not an engineering task. | 55, 88, 90, 97 | Was the cheapest P1. |
 
 ### P2 — materially incomplete
 
@@ -233,10 +233,12 @@ flags; nothing here reshapes the core.
 
 **Track A — turn on what exists (do first, ~1 PR + ops)**
 
-1. **PR A1 — Rollout runbook & staging activation (G6).** Doc + flag sequence
-   (`INTEGRATIONS_ENABLED` → import/export → allowlist beta), staging
-   regression pass (§88), migration verification. No app code. Unblocks §97
-   steps 2–3 for the transaction happy path immediately.
+1. ~~**PR A1 — Rollout runbook & staging activation (G6).**~~ **DONE — PR #164**
+   (docs-only). `integrations-rollout-runbook.md` (flag sequence
+   `INTEGRATIONS_ENABLED` → import/export → allowlist beta → GA, prerequisite
+   verification SQL, §97 smoke test, §88 regression pass, rollback) +
+   `activate_integration_export_worker.sql`. Operator executes the runbook to
+   unblock §97 steps 2–3 for the transaction happy path.
 
 **Track B — Definition-of-Success gaps (core value)**
 
