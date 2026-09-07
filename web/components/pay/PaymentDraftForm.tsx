@@ -55,7 +55,15 @@ export function PaymentDraftForm({
   budgets: Budget[];
   trustedRecipients: TrustedRecipient[];
   recentRecipients: RecentRecipient[];
-  defaults: { accountId?: string; budgetId?: string; recipientId?: string };
+  defaults: {
+    accountId?: string;
+    budgetId?: string;
+    recipientId?: string;
+    recipientName?: string;
+    msisdn?: string;
+    merchantCode?: string;
+    billingReference?: string;
+  };
 }) {
   const router = useRouter();
   // One key per mounted form, so a double-submit dedupes into a single
@@ -67,11 +75,11 @@ export function PaymentDraftForm({
 
   const [accountId, setAccountId] = useState(defaults.accountId ?? accounts[0]?.id ?? "");
   const [recipientId, setRecipientId] = useState(defaults.recipientId ?? "");
-  const [recipientName, setRecipientName] = useState("");
-  const [msisdn, setMsisdn] = useState("");
-  const [merchantCode, setMerchantCode] = useState("");
+  const [recipientName, setRecipientName] = useState(defaults.recipientName ?? "");
+  const [msisdn, setMsisdn] = useState(defaults.msisdn ?? "");
+  const [merchantCode, setMerchantCode] = useState(defaults.merchantCode ?? "");
   const [meterNumber, setMeterNumber] = useState("");
-  const [billingReference, setBillingReference] = useState("");
+  const [billingReference, setBillingReference] = useState(defaults.billingReference ?? "");
   const [governmentReference, setGovernmentReference] = useState("");
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");

@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import {
+  getActiveWorkspaceId,
   getAuthUserId,
   getCategoryHistory,
   getCategorySuggestions,
@@ -13,6 +14,7 @@ import { formatFullDateTime, formatRwf } from "../../../lib/format";
 import { displayName } from "../../../lib/display-name";
 import { isSupportedCurrency } from "../../../lib/money";
 import { getPaymentLinkForTransaction } from "../../../lib/pay/intents";
+import { isAssistedPayEnabled } from "../../../lib/pay/gate";
 import { messages } from "../../../lib/ussd/messages";
 import Link from "next/link";
 import { MoneyAmount } from "../../../components/MoneyAmount";
@@ -93,6 +95,34 @@ export default async function TransactionDetailPage({
 
   const isFailed = transaction.status !== "success";
 
+  // "Pay <name> again" - only when assisted Pay is on for the active
+  // workspace and the transaction carries a reusable send target
+  // (a phone number or a merchant/bill reference). Prefills the Pay draft.
+  const payAgainTarget: { type: string; param: string } | null = (() => {
+    const ref = transaction.counterparty_reference?.trim();
+    if (!ref) return null;
+    switch (transaction.transaction_type) {
+      case "send_money":
+        return { type: "pay_person", param: `msisdn=${encodeURIComponent(ref)}` };
+      case "airtime":
+        return { type: "buy_airtime", param: `msisdn=${encodeURIComponent(ref)}` };
+      case "merchant_payment":
+        return { type: "pay_merchant", param: `merchant=${encodeURIComponent(ref)}` };
+      case "bill_payment":
+        return { type: "pay_bill", param: `ref=${encodeURIComponent(ref)}` };
+      default:
+        return null;
+    }
+  })();
+  const payAgainHref =
+    payAgainTarget && isAssistedPayEnabled(await getActiveWorkspaceId())
+      ? `/pay/new/${payAgainTarget.type}?${payAgainTarget.param}${
+          transaction.counterparty_name
+            ? `&name=${encodeURIComponent(transaction.counterparty_name)}`
+            : ""
+        }`
+      : null;
+
   return (
     <div className="flex flex-col gap-4">
       <section className="rounded-card border border-border-subtle bg-surface px-6 py-7 text-center">
@@ -115,6 +145,18 @@ export default async function TransactionDetailPage({
           </div>
         )}
       </section>
+
+      {payAgainHref && (
+        <Link
+          href={payAgainHref}
+          className="flex min-h-11 items-center justify-center rounded-control bg-accent px-4 py-2.5 text-sm font-medium text-accent-foreground"
+        >
+          Pay {transaction.counterparty_name
+            ? displayName(transaction)
+            : "this recipient"}{" "}
+          again
+        </Link>
+      )}
 
       {paymentLink && (
         <section className="rounded-card border border-border-subtle bg-surface p-3 text-sm">

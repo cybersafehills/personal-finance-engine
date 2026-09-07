@@ -82,6 +82,11 @@ export default async function NewPaymentPage({
           accountId: typeof sp.account === "string" ? sp.account : undefined,
           budgetId: typeof sp.budget === "string" ? sp.budget : undefined,
           recipientId: typeof sp.recipient === "string" ? sp.recipient : undefined,
+          // "Pay again" deep link from a transaction's detail page.
+          recipientName: typeof sp.name === "string" ? sp.name : undefined,
+          msisdn: typeof sp.msisdn === "string" ? sp.msisdn : undefined,
+          merchantCode: typeof sp.merchant === "string" ? sp.merchant : undefined,
+          billingReference: typeof sp.ref === "string" ? sp.ref : undefined,
         }}
       />
     </div>
