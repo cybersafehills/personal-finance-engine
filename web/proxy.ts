@@ -42,6 +42,13 @@ const PUBLIC_PATHS = [
   // URL in the OL Shortcuts Play Console listing). Must resolve for a
   // logged-out visitor and for Google's review crawler.
   "/legal",
+  // Public statement-verification page (/verify/<token>) and its JSON API
+  // (/api/verify/<token>). An accountant or lender who received a statement
+  // PDF scans its QR and confirms the document's identity + integrity
+  // without a OneLedger account. Shows no transaction data. Both 404 when
+  // FINANCIAL_STATEMENTS_ENABLED is unset and are per-IP rate-limited.
+  "/verify",
+  "/api/verify",
 ];
 
 // Of those, only these should redirect an already-signed-in user away -

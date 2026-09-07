@@ -22,6 +22,11 @@ import { Badge } from "../../../components/Badge";
 import { CategoryCorrectionForm } from "../../../components/CategoryCorrectionForm";
 import { TransactionSplitForm } from "../../../components/TransactionSplitForm";
 import { TransactionAttributionPanel } from "../../../components/TransactionAttributionPanel";
+import { TransactionTags } from "../../../components/TransactionTags";
+import {
+  getTransactionTags,
+  getWorkspaceTags,
+} from "../../../lib/transaction-tags";
 import { TransactionDuplicateSection } from "../../../components/TransactionDuplicateSection";
 
 export const dynamic = "force-dynamic";
@@ -66,6 +71,14 @@ export default async function TransactionDetailPage({
 
   const duplicateContext = await getTransactionDuplicateContext(id);
   const spaceContext = await getTransactionSpaceContext(id);
+
+  const [transactionTags, activeWorkspaceId] = await Promise.all([
+    getTransactionTags(id),
+    getActiveWorkspaceId(),
+  ]);
+  const workspaceTagSuggestions = activeWorkspaceId
+    ? await getWorkspaceTags(activeWorkspaceId)
+    : [];
   const isHousehold = spaceContext?.workspaceKind === "household";
   const [selfUserId, spaceMembers] = isHousehold
     ? await Promise.all([
@@ -316,6 +329,24 @@ export default async function TransactionDetailPage({
             </ul>
           </div>
         )}
+      </section>
+
+      <section
+        aria-label="Tags"
+        className="rounded-card border border-border-subtle bg-surface p-4"
+      >
+        <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+          Tags
+        </p>
+        <p className="mt-1 text-sm text-text-muted">
+          Free-form labels for your own filtering. Tagging a transaction
+          never changes an already-generated statement.
+        </p>
+        <TransactionTags
+          transactionId={transaction.id}
+          tags={transactionTags}
+          suggestions={workspaceTagSuggestions}
+        />
       </section>
 
       {isHousehold && spaceContext && (

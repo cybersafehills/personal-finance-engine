@@ -75,6 +75,9 @@ export default defineConfig({
       BILLS_EXTRACTION_ENABLED: "true",
       AI_PROVIDER: "mock",
       REPORT_CRON_SECRET: "e2e-bills-cron-secret",
+      // Financial Statements: opens /reports/statements + its actions for
+      // statements.spec.ts. Inert for every other spec.
+      FINANCIAL_STATEMENTS_ENABLED: "true",
     },
   },
 

@@ -666,7 +666,20 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # 120 with RLS.
 # Insight notifications (20261209000000) adds user_insight_state (RLS
 # enabled, SELECT-own for authenticated) - 122 tables, 121 with RLS.
-if [ "$TABLE_COUNT" = "122" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Financial Statements PR1 (20261210000000) adds statements,
+# statement_transactions and statement_artifacts (all RLS enabled;
+# statement_artifacts has zero anon/authenticated grants, like
+# report_artifacts) - 125 tables, 124 with RLS.
+# Statement Packs PR10 (20261212000000) adds statement_packs (RLS enabled,
+# member SELECT+DELETE) - 126 tables, 125 with RLS.
+# Scheduled Statements PR11 (20261213000000) adds statement_schedules (RLS,
+# member CRUD) - 127 tables, 126 with RLS.
+# Transaction Tags PR18 (20261217000000) adds transaction_tags (RLS,
+# member select + insert + delete) - 128 tables, 127 with RLS.
+# Provider Statements PR19 (20261218000000) adds provider_statements (RLS
+# enabled, member SELECT only; upload/delete are service-role) - 129
+# tables, 128 with RLS.
+if [ "$TABLE_COUNT" = "129" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -788,10 +801,26 @@ AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from inform
 # Insight notifications (20261209000000) adds user_insight_state with a
 # SELECT-only grant for authenticated (writes via note_insight_change /
 # service-role only). 151 + 1 = 152.
-if [ "$AUTHENTICATED_GRANT_COUNT" = "152" ]; then
-  pass "authenticated holds exactly the 152 table grants expected, no more"
+# Financial Statements PR1 (20261210000000) adds statements (select, delete
+# = 2) and statement_transactions (select = 1) for authenticated; the
+# snapshot is written by lib/statement-generation.ts via the service role,
+# so there is no authenticated insert/update. statement_artifacts gets zero
+# authenticated grants (like report_artifacts). 152 + 3 = 155.
+# Statement Packs PR10 (20261212000000) adds statement_packs (select, delete
+# = 2) for authenticated; the ZIP is built by the service role. 155 + 2 = 157.
+# Scheduled Statements PR11 (20261213000000) adds statement_schedules
+# (select, insert, update, delete = 4) - a member-managed config row like
+# report_preferences. 157 + 4 = 161.
+# Transaction Tags PR18 (20261217000000) adds transaction_tags (select,
+# insert, delete = 3) for authenticated - a member-managed label row, no
+# update (a tag is added or removed). 161 + 3 = 164.
+# Provider Statements PR19 (20261218000000) adds provider_statements with a
+# SELECT-only grant for authenticated (upload + delete run service-role in
+# lib/provider-statements.ts). 164 + 1 = 165.
+if [ "$AUTHENTICATED_GRANT_COUNT" = "165" ]; then
+  pass "authenticated holds exactly the 165 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 152 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 165 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -2430,6 +2459,329 @@ else
 fi
 
 # ===========================================================================
+# Financial Statements (20261210000000): the generated snapshot must be
+# readable by a workspace member, invisible to other tenants, and
+# UN-WRITABLE from the client (no authenticated INSERT/UPDATE - the
+# service role writes it after lib/statement-generation.ts verifies
+# membership). statement_artifacts has zero authenticated access, like
+# report_artifacts. Reuses pfe_rls (USER_A/WORKSPACE_A, USER_B/WORKSPACE_B).
+# ===========================================================================
+echo "=== Financial Statements: snapshot immutability + tenant isolation ==="
+
+STMT_SV_USER="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('stmt-viewer@example.com') returning id;" | head -1)"
+
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  -- A statement in each workspace, plus a child row and an artifact for A's.
+  insert into public.statements
+    (id, statement_id, workspace_id, created_by, period_start, period_end, timezone, total_credit_minor, transaction_count)
+  values
+    ('00000000-0000-0000-0000-0000000000fb', 'OL-ST-20260907-AAAAAA', '$WORKSPACE_A', '$USER_A', '2026-08-01T00:00:00Z', '2026-09-01T00:00:00Z', 'Africa/Kigali', 10000, 1),
+    ('00000000-0000-0000-0000-0000000000fc', 'OL-ST-20260907-BBBBBB', '$WORKSPACE_B', '$USER_B', '2026-08-01T00:00:00Z', '2026-09-01T00:00:00Z', 'Africa/Kigali', 500, 1),
+    ('00000000-0000-0000-0000-0000000000fd', 'OL-ST-20260907-CCCCCC', '$WORKSPACE_A', '$USER_A', '2026-08-01T00:00:00Z', '2026-09-01T00:00:00Z', 'Africa/Kigali', 0, 1);
+  insert into public.statement_transactions
+    (id, statement_id, transaction_id, occurred_at, direction, sort_index)
+  values
+    ('00000000-0000-0000-0000-00000000fb01', '00000000-0000-0000-0000-0000000000fb', '00000000-0000-0000-0000-0000000000d3', now(), 'out', 0),
+    ('00000000-0000-0000-0000-00000000fd01', '00000000-0000-0000-0000-0000000000fd', '00000000-0000-0000-0000-0000000000d3', now(), 'out', 0);
+  insert into public.statement_artifacts (id, statement_id, storage_path, byte_size, checksum)
+  values ('00000000-0000-0000-0000-0000000000fe', '00000000-0000-0000-0000-0000000000fb', 'statements/fb.pdf', 2048, 'deadbeef');
+  -- Give STMT_SV_USER a viewer seat in WORKSPACE_A.
+  insert into public.workspace_memberships (workspace_id, user_id, role, status, joined_at)
+  values ('$WORKSPACE_A', '$STMT_SV_USER', 'viewer', 'active', now());
+" >/dev/null
+
+# Member reads own workspace's statement + child; cannot see the other tenant's.
+STMT_OWN="$(as_user "$USER_A" "select count(*) from public.statements where id = '00000000-0000-0000-0000-0000000000fb';")"
+STMT_OTHER="$(as_user "$USER_A" "select count(*) from public.statements where id = '00000000-0000-0000-0000-0000000000fc';")"
+STMT_TXN_OWN="$(as_user "$USER_A" "select count(*) from public.statement_transactions where statement_id = '00000000-0000-0000-0000-0000000000fb';")"
+STMT_TXN_OTHER="$(as_user "$USER_A" "select count(*) from public.statement_transactions where statement_id = '00000000-0000-0000-0000-0000000000fc';")"
+if [ "$STMT_OWN" = "1" ] && [ "$STMT_OTHER" = "0" ] && [ "$STMT_TXN_OWN" = "1" ] && [ "$STMT_TXN_OTHER" = "0" ]; then
+  pass "Statements RLS: a member reads their workspace's statement + rows, never another tenant's"
+else
+  fail "Statements RLS: cross-tenant read (own=$STMT_OWN other=$STMT_OTHER txn_own=$STMT_TXN_OWN txn_other=$STMT_TXN_OTHER)"
+fi
+
+# No authenticated INSERT on statements (deny-by-default: the snapshot is service-role-written).
+if as_user "$USER_A" "insert into public.statements (statement_id, workspace_id, created_by, period_start, period_end, timezone) values ('OL-ST-20260907-DDDDDD', '$WORKSPACE_A', '$USER_A', '2026-08-01T00:00:00Z', '2026-09-01T00:00:00Z', 'Africa/Kigali');" >/dev/null 2>$ARTIFACT_DIR/pfe_stmt_insert.log; then
+  fail "Statements RLS: authenticated forged a statements row - snapshot is not immutable"
+else
+  pass "Statements RLS: authenticated cannot INSERT a statements row (no grant/policy)"
+fi
+rm -f $ARTIFACT_DIR/pfe_stmt_insert.log
+
+# No authenticated UPDATE on statements (a finalized statement never changes).
+as_user "$USER_A" "update public.statements set total_credit_minor = 999999 where id = '00000000-0000-0000-0000-0000000000fb';" >/dev/null 2>&1 || true
+STMT_UNCHANGED="$(psql -d pfe_rls -t -A -c "select count(*) from public.statements where id = '00000000-0000-0000-0000-0000000000fb' and total_credit_minor = 10000;")"
+if [ "$STMT_UNCHANGED" = "1" ]; then
+  pass "Statements RLS: authenticated cannot UPDATE a statements row"
+else
+  fail "Statements RLS: a client UPDATE against a statements row was not blocked"
+fi
+
+# The async worker flips a status='generating' stub to 'ready' - service
+# role only. (authenticated UPDATE is denied above; this is the positive
+# control that the worker's write path itself is not blocked.)
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.statements
+    (id, statement_id, workspace_id, created_by, period_start, period_end, timezone, status)
+  values
+    ('00000000-0000-0000-0000-0000000000f9', 'OL-ST-20260907-GGGGGG', '$WORKSPACE_A', '$USER_A', '2026-08-01T00:00:00Z', '2026-09-01T00:00:00Z', 'Africa/Kigali', 'generating');
+  update public.statements set status = 'ready', total_credit_minor = 42, generated_at = now()
+    where id = '00000000-0000-0000-0000-0000000000f9' and status = 'generating';
+" >/dev/null
+STMT_JOB_READY="$(psql -d pfe_rls -t -A -c "select count(*) from public.statements where id = '00000000-0000-0000-0000-0000000000f9' and status = 'ready' and total_credit_minor = 42;")"
+if [ "$STMT_JOB_READY" = "1" ]; then
+  pass "Statements: the statement-jobs worker (service role) flips a 'generating' stub to 'ready'"
+else
+  fail "Statements: service_role could not finalize a 'generating' statement"
+fi
+psql -d pfe_rls -c "set role service_role; delete from public.statements where id = '00000000-0000-0000-0000-0000000000f9';" >/dev/null
+
+# No authenticated INSERT on statement_transactions (frozen snapshot rows).
+if as_user "$USER_A" "insert into public.statement_transactions (statement_id, occurred_at, direction, sort_index) values ('00000000-0000-0000-0000-0000000000fb', now(), 'out', 99);" >/dev/null 2>$ARTIFACT_DIR/pfe_stmt_child_insert.log; then
+  fail "Statements RLS: authenticated inserted a statement_transactions row - snapshot is forgeable"
+else
+  pass "Statements RLS: authenticated cannot INSERT a statement_transactions row"
+fi
+rm -f $ARTIFACT_DIR/pfe_stmt_child_insert.log
+
+# statement_artifacts: zero authenticated access, exactly like report_artifacts.
+if as_user "$USER_A" "select count(*) from public.statement_artifacts where id = '00000000-0000-0000-0000-0000000000fe';" >/dev/null 2>$ARTIFACT_DIR/pfe_stmt_art_read.log; then
+  fail "Statements RLS: authenticated could query statement_artifacts - should have no grant at all"
+else
+  pass "Statements RLS: authenticated cannot query statement_artifacts (no grant at all)"
+fi
+rm -f $ARTIFACT_DIR/pfe_stmt_art_read.log
+
+# statement_artifacts.format accepts pdf + csv, rejects anything else.
+if psql -d pfe_rls -c "set role service_role; insert into public.statement_artifacts (statement_id, format, storage_path, byte_size, checksum) values ('00000000-0000-0000-0000-0000000000fb', 'csv', 'statements/fb.csv', 64, 'c0ffee');" >/dev/null 2>$ARTIFACT_DIR/pfe_stmt_csv.log; then
+  pass "Statements: statement_artifacts accepts a csv artifact alongside pdf"
+else
+  fail "Statements: statement_artifacts rejected a valid csv artifact"
+fi
+rm -f $ARTIFACT_DIR/pfe_stmt_csv.log
+if psql -d pfe_rls -c "set role service_role; insert into public.statement_artifacts (statement_id, format, storage_path, byte_size, checksum) values ('00000000-0000-0000-0000-0000000000fb', 'docx', 'x', 1, 'x');" >/dev/null 2>$ARTIFACT_DIR/pfe_stmt_fmt.log; then
+  fail "Statements: statement_artifacts.format CHECK accepted an unknown format"
+else
+  pass "Statements: statement_artifacts.format CHECK rejects an unknown format"
+fi
+rm -f $ARTIFACT_DIR/pfe_stmt_fmt.log
+
+# A viewer sees statements (select policy is any member) but cannot delete one.
+SV_SEES="$(as_user "$STMT_SV_USER" "select count(*) from public.statements where id = '00000000-0000-0000-0000-0000000000fd';")"
+as_user "$STMT_SV_USER" "delete from public.statements where id = '00000000-0000-0000-0000-0000000000fd';" >/dev/null 2>&1 || true
+SV_DELETE_BLOCKED="$(psql -d pfe_rls -t -A -c "select count(*) from public.statements where id = '00000000-0000-0000-0000-0000000000fd';")"
+if [ "$SV_SEES" = "1" ] && [ "$SV_DELETE_BLOCKED" = "1" ]; then
+  pass "Statements RLS: a viewer can read a statement but cannot delete one (delete needs 'member')"
+else
+  fail "Statements RLS: viewer delete gate wrong (sees=$SV_SEES still_there=$SV_DELETE_BLOCKED)"
+fi
+
+# Another tenant cannot delete this workspace's statement.
+as_user "$USER_B" "delete from public.statements where id = '00000000-0000-0000-0000-0000000000fd';" >/dev/null 2>&1 || true
+CROSS_DELETE_BLOCKED="$(psql -d pfe_rls -t -A -c "select count(*) from public.statements where id = '00000000-0000-0000-0000-0000000000fd';")"
+if [ "$CROSS_DELETE_BLOCKED" = "1" ]; then
+  pass "Statements RLS: another tenant cannot delete this workspace's statement"
+else
+  fail "Statements RLS: cross-tenant delete of a statement was not blocked"
+fi
+
+# A member CAN delete their own workspace's statement; the child rows cascade.
+as_user "$USER_A" "delete from public.statements where id = '00000000-0000-0000-0000-0000000000fd';" >/dev/null
+STMT_GONE="$(psql -d pfe_rls -t -A -c "select count(*) from public.statements where id = '00000000-0000-0000-0000-0000000000fd';")"
+CHILD_GONE="$(psql -d pfe_rls -t -A -c "select count(*) from public.statement_transactions where id = '00000000-0000-0000-0000-00000000fd01';")"
+if [ "$STMT_GONE" = "0" ] && [ "$CHILD_GONE" = "0" ]; then
+  pass "Statements RLS: a member deletes their own statement and statement_transactions cascade"
+else
+  fail "Statements RLS: member delete/cascade failed (statement=$STMT_GONE child=$CHILD_GONE)"
+fi
+
+# statement_id CHECK rejects a malformed id (service role, so RLS is not the gate here).
+if psql -d pfe_rls -c "set role service_role; insert into public.statements (statement_id, workspace_id, created_by, period_start, period_end, timezone) values ('not-a-valid-id', '$WORKSPACE_A', '$USER_A', '2026-08-01T00:00:00Z', '2026-09-01T00:00:00Z', 'Africa/Kigali');" >/dev/null 2>$ARTIFACT_DIR/pfe_stmt_idcheck.log; then
+  fail "Statements: the statement_id format CHECK accepted a malformed id"
+else
+  pass "Statements: the statement_id format CHECK rejects a malformed id"
+fi
+rm -f $ARTIFACT_DIR/pfe_stmt_idcheck.log
+
+# UNIQUE (workspace_id, client_token) enforces idempotency.
+if psql -d pfe_rls -c "
+  set role service_role;
+  insert into public.statements (statement_id, workspace_id, created_by, period_start, period_end, timezone, client_token)
+  values ('OL-ST-20260907-EEEEEE', '$WORKSPACE_A', '$USER_A', '2026-08-01T00:00:00Z', '2026-09-01T00:00:00Z', 'Africa/Kigali', '11111111-1111-1111-1111-111111111111');
+  insert into public.statements (statement_id, workspace_id, created_by, period_start, period_end, timezone, client_token)
+  values ('OL-ST-20260907-FFFFFF', '$WORKSPACE_A', '$USER_A', '2026-08-01T00:00:00Z', '2026-09-01T00:00:00Z', 'Africa/Kigali', '11111111-1111-1111-1111-111111111111');
+" >/dev/null 2>$ARTIFACT_DIR/pfe_stmt_token.log; then
+  fail "Statements: a second row reused an idempotency token (workspace_id, client_token) not unique"
+else
+  pass "Statements: UNIQUE (workspace_id, client_token) blocks a duplicate idempotency token"
+fi
+rm -f $ARTIFACT_DIR/pfe_stmt_token.log
+
+# --- Statement verification token (20261214000000) -------------------
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  update public.statements set verification_token = 'ABCDEFGH1234567890ABCDEFGH123456' where id = '00000000-0000-0000-0000-0000000000fb';
+" >/dev/null
+VERIFY_LOOKUP="$(psql -d pfe_rls -t -A -c "set role service_role; select statement_id from public.statements where verification_token = 'ABCDEFGH1234567890ABCDEFGH123456';" | tail -1)"
+if [ "$VERIFY_LOOKUP" = "OL-ST-20260907-AAAAAA" ]; then
+  pass "Verification: a token resolves to its statement (service role read)"
+else
+  fail "Verification: token lookup wrong (got '$VERIFY_LOOKUP')"
+fi
+if psql -d pfe_rls -c "set role service_role; update public.statements set verification_token = 'ABCDEFGH1234567890ABCDEFGH123456' where id = '00000000-0000-0000-0000-0000000000fc';" >/dev/null 2>$ARTIFACT_DIR/pfe_verify_dup.log; then
+  fail "Verification: the unique index allowed a duplicate token"
+else
+  pass "Verification: statements_verification_token_key blocks a duplicate token"
+fi
+rm -f $ARTIFACT_DIR/pfe_verify_dup.log
+# authenticated still cannot read another tenant's statement even with a token.
+VERIFY_XTENANT="$(as_user "$USER_B" "select count(*) from public.statements where verification_token = 'ABCDEFGH1234567890ABCDEFGH123456';")"
+if [ "$VERIFY_XTENANT" = "0" ]; then
+  pass "Verification: RLS still hides the row from another tenant (token is not a bypass)"
+else
+  fail "Verification: another tenant read a statement by token - RLS bypass"
+fi
+psql -d pfe_rls -c "set role service_role; update public.statements set verification_token = null where id = '00000000-0000-0000-0000-0000000000fb';" >/dev/null
+
+# service_role is unaffected by all of the above.
+STMT_SVC="$(psql -d pfe_rls -t -A -c "set role service_role; select count(*) from public.statements where id in ('00000000-0000-0000-0000-0000000000fb', '00000000-0000-0000-0000-0000000000fc');" | tail -1)"
+if [ "$STMT_SVC" = "2" ]; then
+  pass "Statements RLS: service_role sees every workspace's statements, unaffected by RLS"
+else
+  fail "Statements RLS: service_role could not see both statements (got $STMT_SVC)"
+fi
+
+# --- Financial Packs (20261212000000) --------------------------------
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.statement_packs (id, pack_id, workspace_id, created_by, statement_ids, item_count, status)
+  values
+    ('00000000-0000-0000-0000-0000000000f7', 'OL-PK-20260907-AAAAAA', '$WORKSPACE_A', '$USER_A', array['00000000-0000-0000-0000-0000000000fb']::uuid[], 1, 'ready'),
+    ('00000000-0000-0000-0000-0000000000f6', 'OL-PK-20260907-BBBBBB', '$WORKSPACE_B', '$USER_B', array['00000000-0000-0000-0000-0000000000fc']::uuid[], 1, 'ready');
+" >/dev/null
+PACK_OWN="$(as_user "$USER_A" "select count(*) from public.statement_packs where id = '00000000-0000-0000-0000-0000000000f7';")"
+PACK_OTHER="$(as_user "$USER_A" "select count(*) from public.statement_packs where id = '00000000-0000-0000-0000-0000000000f6';")"
+if [ "$PACK_OWN" = "1" ] && [ "$PACK_OTHER" = "0" ]; then
+  pass "Packs RLS: a member sees their workspace's pack, never another tenant's"
+else
+  fail "Packs RLS: cross-tenant read (own=$PACK_OWN other=$PACK_OTHER)"
+fi
+if as_user "$USER_A" "insert into public.statement_packs (pack_id, workspace_id, created_by, statement_ids) values ('OL-PK-20260907-CCCCCC', '$WORKSPACE_A', '$USER_A', array['00000000-0000-0000-0000-0000000000fb']::uuid[]);" >/dev/null 2>$ARTIFACT_DIR/pfe_pack_ins.log; then
+  fail "Packs RLS: authenticated forged a statement_packs row"
+else
+  pass "Packs RLS: authenticated cannot INSERT a statement_packs row"
+fi
+rm -f $ARTIFACT_DIR/pfe_pack_ins.log
+as_user "$USER_B" "delete from public.statement_packs where id = '00000000-0000-0000-0000-0000000000f7';" >/dev/null 2>&1 || true
+PACK_CROSS_DEL="$(psql -d pfe_rls -t -A -c "select count(*) from public.statement_packs where id = '00000000-0000-0000-0000-0000000000f7';")"
+as_user "$USER_A" "delete from public.statement_packs where id = '00000000-0000-0000-0000-0000000000f7';" >/dev/null
+PACK_OWN_DEL="$(psql -d pfe_rls -t -A -c "select count(*) from public.statement_packs where id = '00000000-0000-0000-0000-0000000000f7';")"
+if [ "$PACK_CROSS_DEL" = "1" ] && [ "$PACK_OWN_DEL" = "0" ]; then
+  pass "Packs RLS: another tenant cannot delete a pack; a member deletes their own"
+else
+  fail "Packs RLS: delete gate wrong (cross=$PACK_CROSS_DEL own_after=$PACK_OWN_DEL)"
+fi
+if psql -d pfe_rls -c "set role service_role; insert into public.statement_packs (pack_id, workspace_id, created_by, statement_ids) values ('not-a-pack-id', '$WORKSPACE_A', '$USER_A', array['00000000-0000-0000-0000-0000000000fb']::uuid[]);" >/dev/null 2>$ARTIFACT_DIR/pfe_pack_fmt.log; then
+  fail "Packs: the pack_id format CHECK accepted a malformed id"
+else
+  pass "Packs: the pack_id format CHECK rejects a malformed id"
+fi
+rm -f $ARTIFACT_DIR/pfe_pack_fmt.log
+
+# --- Scheduled statements (20261213000000) ---------------------------
+SCHED_A="$(as_user "$USER_A" "insert into public.statement_schedules (workspace_id, created_by, timezone, next_run_at, cadence, day_of_week) values ('$WORKSPACE_A', '$USER_A', 'Africa/Kigali', now() + interval '1 day', 'weekly', 1) returning id;")"
+if [ -n "$SCHED_A" ]; then
+  pass "Schedules: a member creates a weekly schedule in their own workspace (20261215000000 cadence)"
+else
+  fail "Schedules: member could not create a schedule"
+fi
+if psql -d pfe_rls -c "set role service_role; insert into public.statement_schedules (workspace_id, created_by, timezone, next_run_at, cadence) values ('$WORKSPACE_A', '$USER_A', 'UTC', now(), 'fortnightly');" >/dev/null 2>$ARTIFACT_DIR/pfe_sched_cad.log; then
+  fail "Schedules: the cadence CHECK accepted an unknown value"
+else
+  pass "Schedules: the cadence CHECK rejects an unknown value"
+fi
+rm -f $ARTIFACT_DIR/pfe_sched_cad.log
+# created_by must be the caller; another workspace is off-limits.
+if as_user "$USER_A" "insert into public.statement_schedules (workspace_id, created_by, timezone, next_run_at) values ('$WORKSPACE_B', '$USER_A', 'UTC', now());" >/dev/null 2>$ARTIFACT_DIR/pfe_sched_x.log; then
+  fail "Schedules: a member created a schedule in another tenant's workspace"
+else
+  pass "Schedules: the insert policy blocks another tenant's workspace"
+fi
+rm -f $ARTIFACT_DIR/pfe_sched_x.log
+SCHED_B_SEES="$(as_user "$USER_B" "select count(*) from public.statement_schedules where id = '$SCHED_A';")"
+as_user "$USER_B" "delete from public.statement_schedules where id = '$SCHED_A';" >/dev/null 2>&1 || true
+SCHED_STILL="$(psql -d pfe_rls -t -A -c "select count(*) from public.statement_schedules where id = '$SCHED_A';")"
+if [ "$SCHED_B_SEES" = "0" ] && [ "$SCHED_STILL" = "1" ]; then
+  pass "Schedules RLS: another tenant cannot see or delete a schedule"
+else
+  fail "Schedules RLS: cross-tenant leak (sees=$SCHED_B_SEES still=$SCHED_STILL)"
+fi
+as_user "$USER_A" "delete from public.statement_schedules where id = '$SCHED_A';" >/dev/null
+
+# --- Transaction tags (20261217000000) -----------------------------------
+# USER_A tags their own workspace's transaction ...d3 (created above).
+TAG_A="$(as_user "$USER_A" "insert into public.transaction_tags (transaction_id, workspace_id, tag, created_by) values ('00000000-0000-0000-0000-0000000000d3', '$WORKSPACE_A', 'reimbursable', '$USER_A') returning id;")"
+if [ -n "$TAG_A" ]; then
+  pass "Tags: a member tags their own workspace's transaction"
+else
+  fail "Tags: member could not tag their own transaction"
+fi
+# The char_length CHECK rejects an over-long label.
+if psql -d pfe_rls -c "set role service_role; insert into public.transaction_tags (transaction_id, workspace_id, tag) values ('00000000-0000-0000-0000-0000000000d3', '$WORKSPACE_A', repeat('x', 41));" >/dev/null 2>$ARTIFACT_DIR/pfe_tag_len.log; then
+  fail "Tags: the tag length CHECK accepted a 41-char label"
+else
+  pass "Tags: the tag length CHECK rejects an over-long label"
+fi
+rm -f $ARTIFACT_DIR/pfe_tag_len.log
+# The insert policy blocks tagging a transaction in another tenant's workspace.
+if as_user "$USER_A" "insert into public.transaction_tags (transaction_id, workspace_id, tag, created_by) values ('00000000-0000-0000-0000-0000000000c3', '$WORKSPACE_B', 'x', '$USER_A');" >/dev/null 2>$ARTIFACT_DIR/pfe_tag_x.log; then
+  fail "Tags: a member tagged a transaction in another tenant's workspace"
+else
+  pass "Tags: the insert policy blocks another tenant's workspace"
+fi
+rm -f $ARTIFACT_DIR/pfe_tag_x.log
+TAG_B_SEES="$(as_user "$USER_B" "select count(*) from public.transaction_tags where id = '$TAG_A';")"
+as_user "$USER_B" "delete from public.transaction_tags where id = '$TAG_A';" >/dev/null 2>&1 || true
+TAG_STILL="$(psql -d pfe_rls -t -A -c "select count(*) from public.transaction_tags where id = '$TAG_A';")"
+if [ "$TAG_B_SEES" = "0" ] && [ "$TAG_STILL" = "1" ]; then
+  pass "Tags RLS: another tenant cannot see or delete a tag"
+else
+  fail "Tags RLS: cross-tenant leak (sees=$TAG_B_SEES still=$TAG_STILL)"
+fi
+as_user "$USER_A" "delete from public.transaction_tags where id = '$TAG_A';" >/dev/null
+
+# --- Provider statements (20261218000000) -------------------------------
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.provider_statements
+    (id, workspace_id, uploaded_by, provider, original_filename, storage_path, byte_size, file_sha256)
+  values ('00000000-0000-0000-0000-0000000000e7', '$WORKSPACE_A', '$USER_A', 'MTN MoMo', 'aug.pdf', 'ws/$WORKSPACE_A/e7.pdf', 1024, '$(printf 'a%.0s' {1..64})');
+" >/dev/null
+PROV_A_SEES="$(as_user "$USER_A" "select count(*) from public.provider_statements where id = '00000000-0000-0000-0000-0000000000e7';")"
+PROV_B_SEES="$(as_user "$USER_B" "select count(*) from public.provider_statements where id = '00000000-0000-0000-0000-0000000000e7';")"
+if [ "$PROV_A_SEES" = "1" ] && [ "$PROV_B_SEES" = "0" ]; then
+  pass "Provider statements RLS: a member sees their workspace's upload, another tenant does not"
+else
+  fail "Provider statements RLS: visibility wrong (A=$PROV_A_SEES B=$PROV_B_SEES)"
+fi
+if as_user "$USER_A" "insert into public.provider_statements (workspace_id, provider, original_filename, storage_path, byte_size, file_sha256) values ('$WORKSPACE_A', 'x', 'x.pdf', 'p', 1, '$(printf 'a%.0s' {1..64})');" >/dev/null 2>$ARTIFACT_DIR/pfe_prov_ins.log; then
+  fail "Provider statements: authenticated inserted a row directly (upload must be service-role only)"
+else
+  pass "Provider statements: authenticated has no INSERT (upload is service-role only)"
+fi
+rm -f $ARTIFACT_DIR/pfe_prov_ins.log
+if psql -d pfe_rls -c "set role service_role; insert into public.provider_statements (workspace_id, provider, original_filename, storage_path, byte_size, file_sha256) values ('$WORKSPACE_A', 'x', 'x.pdf', 'p', 1, 'not-a-hash');" >/dev/null 2>$ARTIFACT_DIR/pfe_prov_sha.log; then
+  fail "Provider statements: the file_sha256 CHECK accepted a malformed hash"
+else
+  pass "Provider statements: the file_sha256 CHECK rejects a malformed hash"
+fi
+rm -f $ARTIFACT_DIR/pfe_prov_sha.log
+psql -d pfe_rls -c "set role service_role; delete from public.provider_statements where id = '00000000-0000-0000-0000-0000000000e7';" >/dev/null
+
+# ===========================================================================
 # Phase M: USSD directory. Non-admin visibility is limited to published
 # rows; the admin RPCs are is_platform_admin()-gated; the publication
 # state machine rejects illegal jumps; the report insert is rate-limited;
@@ -3226,6 +3578,21 @@ if [ "$R_MEMBER_BUDGET_REVOKED" = "f" ]; then
   pass "Phase R: revoke_space_capability removes the grant"
 else
   fail "Phase R: capability still held after revoke (got $R_MEMBER_BUDGET_REVOKED)"
+fi
+
+# --- statement.generate capability (20261211000000) -------------------
+# R_MEMBER_USER was suspended earlier in this block; re-activate so we test
+# the member-role default, not the suspension.
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; update public.workspace_memberships set status = 'active' where workspace_id = '$R_MATRIX_HH' and user_id = '$R_MEMBER_USER';" >/dev/null
+SG_MEMBER="$(as_user "$R_MEMBER_USER" "select public.has_space_capability('$R_MATRIX_HH', 'statement.generate');")"
+SG_VIEWER_BEFORE="$(as_user "$R_VIEWER_USER" "select public.has_space_capability('$R_MATRIX_HH', 'statement.generate');")"
+SG_PERSONAL_OWNER="$(as_user "$USER_A" "select public.has_space_capability('$WORKSPACE_A', 'statement.generate');")"
+as_user "$USER_A" "select public.grant_space_capability('$R_MATRIX_HH', '$R_VIEWER_USER', 'statement.generate');" >/dev/null
+SG_VIEWER_AFTER="$(as_user "$R_VIEWER_USER" "select public.has_space_capability('$R_MATRIX_HH', 'statement.generate');")"
+if [ "$SG_MEMBER" = "t" ] && [ "$SG_VIEWER_BEFORE" = "f" ] && [ "$SG_VIEWER_AFTER" = "t" ] && [ "$SG_PERSONAL_OWNER" = "t" ]; then
+  pass "Statements: statement.generate - member by role, viewer only by explicit grant, personal owner yes"
+else
+  fail "Statements: statement.generate capability wrong (member=$SG_MEMBER viewer_before=$SG_VIEWER_BEFORE viewer_after=$SG_VIEWER_AFTER personal_owner=$SG_PERSONAL_OWNER)"
 fi
 
 # --- audit vs activity visibility -----------------------------------

@@ -3,15 +3,19 @@ import { getReportRuns } from "../../lib/queries";
 import { PageHeader } from "../../components/PageHeader";
 import { EmptyState } from "../../components/EmptyState";
 import { ReportStatusBadge } from "../../components/ReportStatusBadge";
+import { StatementsTabs } from "../../components/StatementsTabs";
+import { isFinancialStatementsEnabled } from "../../lib/financial-statements";
 import { formatZonedDate, formatZonedDateTime } from "../../lib/format";
 
 export const dynamic = "force-dynamic";
 
 export default async function ReportsPage() {
   const reports = await getReportRuns();
+  const statementsEnabled = isFinancialStatementsEnabled();
 
   return (
     <div>
+      {statementsEnabled && <StatementsTabs />}
       <PageHeader
         title="Reports"
         subtitle="Your daily financial reports"

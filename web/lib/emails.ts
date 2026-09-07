@@ -113,7 +113,9 @@ async function send(
     return { ok: true, providerMessageId: data?.id ?? null };
   } catch (error) {
     console.error(`Failed sending "${subject}" to ${to}:`, error);
-    const code = error instanceof Error && error.name ? error.name : "send_failed";
+    const code = error instanceof Error && error.name
+      ? error.name
+      : "send_failed";
     logSend(subject, to, "failed", { code });
     audit("failed", { errorCode: code });
     return { ok: false, errorCode: "send_failed" };
@@ -291,4 +293,48 @@ export async function sendDailyReportEmail(params: {
   return result.ok
     ? { ok: true, providerMessageId: result.providerMessageId }
     : { ok: false, errorCode: result.errorCode };
+}
+
+/**
+ * A scheduled statement is ready — a LINK only, never the document or any
+ * financial figure (master prompt section 26). Sent by the statement-jobs
+ * worker after a scheduled stub flips to 'ready'.
+ */
+export async function sendScheduledStatementEmail(params: {
+  to: string;
+  periodLabel: string;
+  statementUrl: string;
+  workspaceId?: string | null;
+}): Promise<{ ok: boolean }> {
+  const html = `
+    <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:480px;margin:0 auto;color:#111111;">
+      <p style="font-size:15px;">Your scheduled statement is ready.</p>
+      <p style="font-size:14px;color:#333333;">Period: ${params.periodLabel}</p>
+      <p style="margin-top:20px;">
+        <a href="${params.statementUrl}" style="display:inline-block;background:#111111;color:#ffffff;padding:10px 22px;border-radius:8px;text-decoration:none;font-size:14px;font-weight:600;">View statement</a>
+      </p>
+      <p style="margin-top:28px;font-size:12px;color:#999999;">
+        Automated by OneLedger. Manage or remove this schedule under Reports → Statements.
+        No financial details are included in this email.
+      </p>
+    </div>`;
+  const text = [
+    `Your scheduled statement is ready.`,
+    `Period: ${params.periodLabel}`,
+    ``,
+    `View statement: ${params.statementUrl}`,
+    ``,
+    `Manage or remove this schedule under Reports > Statements.`,
+  ].join("\n");
+
+  return await send(
+    params.to,
+    `Your scheduled statement — ${params.periodLabel}`,
+    html,
+    text,
+    {
+      category: "scheduled_statement",
+      workspaceId: params.workspaceId ?? null,
+    },
+  );
 }
