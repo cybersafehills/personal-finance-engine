@@ -2,6 +2,22 @@ import "server-only";
 import { supabaseServer } from "./supabase-server";
 import { isVerificationToken } from "./statement-id";
 
+// Shared best-effort per-IP rate limit for the public /verify page and its
+// JSON API. Resets on deploy; the token's own ~162-bit entropy is the real
+// enumeration defence. 40 requests / minute / IP across both surfaces.
+const VERIFY_HITS = new Map<string, { count: number; resetAt: number }>();
+
+export function verifyRateLimited(ip: string): boolean {
+  const now = Date.now();
+  const rec = VERIFY_HITS.get(ip);
+  if (!rec || now > rec.resetAt) {
+    VERIFY_HITS.set(ip, { count: 1, resetAt: now + 60_000 });
+    return false;
+  }
+  rec.count += 1;
+  return rec.count > 40;
+}
+
 // Public statement verification (master prompt sections 20 / 21). Given an
 // opaque token, return ONLY what confirms the document's identity and
 // integrity - never a balance, transaction, account identifier or holder
