@@ -12,6 +12,14 @@
 export type StatementCoverageFact = {
   /** ISO 8601 instant. */
   occurredAt: string;
+  /**
+   * The account (financial_sources id) this line belongs to. A
+   * consolidated statement interleaves several accounts, each with its
+   * own running balance; the balance-discontinuity check groups by this
+   * so it never compares one account's balance against another's. May be
+   * null for legacy source-less rows.
+   */
+  sourceId?: string | null;
   principalEffectMinor: number;
   feeEffectMinor: number;
   /** Provider-reported balance after this transaction, or null. */
@@ -88,7 +96,11 @@ export type StatementCoverageInput = {
 // own rhythm - keeps quiet, low-activity accounts from being flagged.
 const GAP_MIN_DAYS = 21;
 const GAP_MEDIAN_MULTIPLE = 5;
-const MAX_DISCONTINUITIES_REPORTED = 5;
+// An account needs at least this many balance-bearing rows before a
+// balance mismatch is trustworthy enough to flag - a handful of stray
+// provider balances in an otherwise balance-less account is noise, not a
+// signal.
+const MIN_BALANCE_ROWS_FOR_DISCONTINUITY = 3;
 
 const PROVIDER_NOUNS: Record<string, string> = {
   mtn_momo: "MTN Mobile Money",
@@ -223,27 +235,55 @@ export function deriveCoverageWarnings(
   }
 
   // Balance discontinuities: the provider balance moved by more than the
-  // transaction between two consecutive rows explains.
+  // transaction between two consecutive rows explains. This is only
+  // meaningful WITHIN a single account - a consolidated statement
+  // interleaves several independent running-balance series, so comparing
+  // one account's balance against the next line's (different) account is
+  // nonsense and would flag a "discontinuity" on every account switch.
+  // Group by source, check each group in isolation, and report the whole
+  // statement's discontinuities as ONE summarised note rather than one
+  // identical line per occurrence.
+  const bySource = new Map<string, StatementCoverageFact[]>();
+  for (const f of sorted) {
+    const key = f.sourceId ?? " unsourced";
+    const list = bySource.get(key);
+    if (list) list.push(f);
+    else bySource.set(key, [f]);
+  }
+
   let discontinuities = 0;
-  for (let i = 1; i < sorted.length; i++) {
-    const prev = sorted[i - 1];
-    const curr = sorted[i];
-    if (prev.balanceAfterMinor === null || curr.balanceAfterMinor === null) {
+  let firstDiscontinuityIso: string | null = null;
+  for (const group of bySource.values()) {
+    const withBalanceInGroup = group.filter((f) =>
+      f.balanceAfterMinor !== null
+    );
+    if (withBalanceInGroup.length < MIN_BALANCE_ROWS_FOR_DISCONTINUITY) {
       continue;
     }
-    const expected = prev.balanceAfterMinor +
-      (curr.principalEffectMinor + curr.feeEffectMinor);
-    if (expected !== curr.balanceAfterMinor) {
-      if (discontinuities < MAX_DISCONTINUITIES_REPORTED) {
-        warnings.push({
-          kind: "balance_discontinuity",
-          atIso: curr.occurredAt,
-          detail:
-            "The recorded balance changed by more than this transaction accounts for, which can indicate a transaction OneLedger did not receive.",
-        });
+    for (let i = 1; i < group.length; i++) {
+      const prev = group[i - 1];
+      const curr = group[i];
+      if (prev.balanceAfterMinor === null || curr.balanceAfterMinor === null) {
+        continue;
       }
-      discontinuities++;
+      const expected = prev.balanceAfterMinor +
+        (curr.principalEffectMinor + curr.feeEffectMinor);
+      if (expected !== curr.balanceAfterMinor) {
+        discontinuities++;
+        if (firstDiscontinuityIso === null) {
+          firstDiscontinuityIso = curr.occurredAt;
+        }
+      }
     }
+  }
+  if (discontinuities > 0 && firstDiscontinuityIso !== null) {
+    warnings.push({
+      kind: "balance_discontinuity",
+      atIso: firstDiscontinuityIso,
+      detail: discontinuities === 1
+        ? "At one point the recorded balance moved by more than the transaction on that line explains - a transaction may not have reached OneLedger."
+        : `At ${discontinuities} points the recorded balance moved by more than the transaction on that line explains - some transactions may not have reached OneLedger.`,
+    });
   }
 
   return warnings;
