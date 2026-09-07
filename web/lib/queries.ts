@@ -158,12 +158,32 @@ export async function getRecentTransactions(
   return data ?? [];
 }
 
+export type TransactionListFilters = {
+  limit?: number;
+  offset?: number;
+  category?: string;
+  /** Free text - matched against counterparty name, reference and category. */
+  q?: string;
+  direction?: "in" | "out" | "neutral";
+  currency?: string;
+  /** financial_sources.id (AccountRow.financial_source_id). */
+  sourceId?: string;
+  amountMin?: number;
+  amountMax?: number;
+};
+
 export async function getTransactions(
   {
     limit = 50,
     offset = 0,
     category,
-  }: { limit?: number; offset?: number; category?: string } = {},
+    q,
+    direction,
+    currency,
+    sourceId,
+    amountMin,
+    amountMax,
+  }: TransactionListFilters = {},
 ): Promise<TransactionRow[]> {
   const supabase = await supabaseSession();
   let query = supabase
@@ -180,6 +200,20 @@ export async function getTransactions(
   } else if (category) {
     query = query.eq("category", category);
   }
+
+  const trimmedQ = q?.trim();
+  if (trimmedQ) {
+    // PostgREST OR filter - escape the wildcards/commas a user might type.
+    const safe = trimmedQ.replace(/[%,()]/g, " ");
+    query = query.or(
+      `counterparty_name.ilike.%${safe}%,counterparty_reference.ilike.%${safe}%,category.ilike.%${safe}%`,
+    );
+  }
+  if (direction) query = query.eq("direction", direction);
+  if (currency) query = query.eq("currency", currency);
+  if (sourceId) query = query.eq("financial_source_id", sourceId);
+  if (typeof amountMin === "number") query = query.gte("amount_rwf", amountMin);
+  if (typeof amountMax === "number") query = query.lte("amount_rwf", amountMax);
 
   const { data, error } = await query;
 
