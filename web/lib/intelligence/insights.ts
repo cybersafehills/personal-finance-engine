@@ -26,12 +26,32 @@ import {
 } from "./anomaly";
 
 // Release 6 (Intelligence) - the deterministic-first insight assembler
-// (ADR 0014). Gated by INTELLIGENCE_ENABLED. Everything here is computed
-// from the user's own RLS-scoped ledger; nothing is invented. Each
-// insight carries a `basis` for "Why am I seeing this?".
+// (ADR 0014). Everything here is computed from the user's own RLS-scoped
+// ledger; nothing is invented. Each insight carries a `basis` for
+// "Why am I seeing this?".
+//
+//   INTELLIGENCE_ENABLED    - master switch for the Home dashboard's
+//                             cash-flow forecast + spending-baseline
+//                             surface.
+//   INTELLIGENCE_ALLOWLIST  - optional comma-separated workspace-id
+//                             allowlist for a staged rollout; when unset
+//                             the master switch enables it everywhere.
+//
+// Mirrors isBusinessSurfacesEnabled() in lib/experience-mode/gate.ts.
+// This only decides what is shown - it is never an authorization check.
 
-export function isIntelligenceEnabled(): boolean {
-  return process.env.INTELLIGENCE_ENABLED === "true";
+export function isIntelligenceEnabled(
+  workspaceId?: string | null,
+): boolean {
+  if (process.env.INTELLIGENCE_ENABLED !== "true") return false;
+  const raw = process.env.INTELLIGENCE_ALLOWLIST?.trim();
+  if (!raw) return true;
+  if (!workspaceId) return false;
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .includes(workspaceId);
 }
 
 const HORIZON_DAYS = 30;
@@ -95,7 +115,9 @@ async function fetchDueBills(): Promise<DueBill[]> {
 }
 
 export async function getIntelligenceInsights(): Promise<IntelligenceInsights> {
-  if (!isIntelligenceEnabled()) {
+  const workspaceId = await getActiveWorkspaceId();
+
+  if (!isIntelligenceEnabled(workspaceId)) {
     return {
       enabled: false,
       forecast: null,
@@ -105,7 +127,6 @@ export async function getIntelligenceInsights(): Promise<IntelligenceInsights> {
     };
   }
 
-  const workspaceId = await getActiveWorkspaceId();
   const billsEnabled = isBillsEnabled(workspaceId);
 
   const [balance, transactions, dueBills] = await Promise.all([
