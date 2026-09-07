@@ -101,6 +101,46 @@ function err(
   return { ok: false, kind, message: message ?? MESSAGES[kind] };
 }
 
+type ServiceClient = ReturnType<typeof supabaseServer>;
+
+export type StatementAuditEvent =
+  | "statement.generated"
+  | "statement.regenerated"
+  | "statement.downloaded"
+  | "statement.deleted"
+  | "statement.access_denied";
+
+/**
+ * Append one row to the protected space_audit_events trail (master prompt
+ * section 41). Service-role insert - that table grants authenticated no
+ * INSERT. NON-FATAL by design: an audit-write failure must never block or
+ * fail the user's action. Metadata is deliberately minimal - never a
+ * balance, description, counterparty or reference (section 42).
+ */
+export async function recordStatementAudit(
+  service: ServiceClient,
+  input: {
+    workspaceId: string;
+    actorUserId: string;
+    eventType: StatementAuditEvent;
+    statementUuid: string | null;
+    metadata?: Record<string, unknown>;
+  },
+): Promise<void> {
+  try {
+    await service.from("space_audit_events").insert({
+      workspace_id: input.workspaceId,
+      actor_user_id: input.actorUserId,
+      event_type: input.eventType,
+      resource_type: "statement",
+      resource_id: input.statementUuid,
+      metadata: input.metadata ?? {},
+    });
+  } catch (e) {
+    console.error("recordStatementAudit failed (non-fatal):", e);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Context
 // ---------------------------------------------------------------------------
@@ -121,7 +161,16 @@ async function resolveContext(): Promise<
 
   const workspace = await getActiveWorkspace();
   if (!workspace) return err("no_workspace");
-  if (workspace.role === "viewer") return err("forbidden_role");
+  if (workspace.role === "viewer") {
+    void recordStatementAudit(supabaseServer(), {
+      workspaceId: workspace.id,
+      actorUserId: user.id,
+      eventType: "statement.access_denied",
+      statementUuid: null,
+      metadata: { reason: "forbidden_role" },
+    });
+    return err("forbidden_role");
+  }
 
   return { ok: true, ctx: { session, userId: user.id, workspace } };
 }
@@ -575,17 +624,29 @@ async function persistStatement(
     supersedesId: string | null;
   },
 ): Promise<GenerateOutcome> {
+  const service = supabaseServer();
+
   const res = await assembleStatement(ctx, period, {
     statementType: params.statementType,
     sourceIds: params.requestedSourceIds,
     filters: params.filters,
   });
-  if (!res.ok) return res;
+  if (!res.ok) {
+    if (res.kind === "unauthorized_source") {
+      void recordStatementAudit(service, {
+        workspaceId: ctx.workspace.id,
+        actorUserId: ctx.userId,
+        eventType: "statement.access_denied",
+        statementUuid: null,
+        metadata: { reason: "unauthorized_source" },
+      });
+    }
+    return res;
+  }
   const a = res.assembled;
 
   if (a.rows.length === 0) return err("no_transactions");
 
-  const service = supabaseServer();
   const now = new Date();
 
   const { generateStatementId } = await import("./statement-id");
@@ -675,6 +736,40 @@ async function persistStatement(
       return err("persist_failed");
     }
   }
+
+  // Operational monitoring: a finalized statement whose balances don't
+  // reconcile is generated (flagged, never silently), but the mismatch is
+  // surfaced for review (master prompt section 43).
+  if (a.math.totals?.reconciles === false) {
+    console.warn("[statement.monitor] reconcile_mismatch", {
+      workspaceId: ctx.workspace.id,
+      statementId: publicId,
+      totalCreditsMinor: a.math.totals.totalCreditsMinor,
+      totalDebitsMinor: a.math.totals.totalDebitsMinor,
+      totalFeesMinor: a.math.totals.totalFeesMinor,
+      openingBalanceMinor: a.math.totals.openingBalanceMinor,
+      closingBalanceMinor: a.math.totals.closingBalanceMinor,
+    });
+  }
+
+  await recordStatementAudit(service, {
+    workspaceId: ctx.workspace.id,
+    actorUserId: ctx.userId,
+    eventType: params.supersedesId
+      ? "statement.regenerated"
+      : "statement.generated",
+    statementUuid: parentId,
+    metadata: {
+      statementId: publicId,
+      scope: a.scope,
+      statementType: params.statementType,
+      transactionCount: a.math.rows.length,
+      periodStart: period.periodStartUtc.toISOString(),
+      periodEnd: period.periodEndUtc.toISOString(),
+      reconciles: a.math.totals?.reconciles ?? null,
+      supersedesId: params.supersedesId,
+    },
+  });
 
   return { ok: true, id: parentId, statementId: publicId, deduped: false };
 }
@@ -776,7 +871,16 @@ export async function regenerateStatement(
   // assembleStatement scopes its fact query to ctx.workspace.id. Refuse
   // (generically) a statement that belongs to a different workspace than
   // the one currently selected.
-  if (existing.workspace_id !== ctx.workspace.id) return err("not_found");
+  if (existing.workspace_id !== ctx.workspace.id) {
+    void recordStatementAudit(supabaseServer(), {
+      workspaceId: ctx.workspace.id,
+      actorUserId: ctx.userId,
+      eventType: "statement.access_denied",
+      statementUuid: null,
+      metadata: { reason: "regenerate_cross_workspace" },
+    });
+    return err("not_found");
+  }
 
   const period = reconstructStatementPeriod(
     new Date(existing.period_start),
@@ -815,12 +919,26 @@ export async function deleteStatement(
     .from("statements")
     .delete()
     .eq("id", statementUuid)
-    .select("id");
+    .select("id, workspace_id, statement_id");
 
   if (error) {
     console.error("deleteStatement failed:", error.message);
     return err("persist_failed");
   }
   if (!data || data.length === 0) return err("not_found");
+
+  const deleted = data[0] as {
+    id: string;
+    workspace_id: string;
+    statement_id: string;
+  };
+  await recordStatementAudit(supabaseServer(), {
+    workspaceId: deleted.workspace_id,
+    actorUserId: ctx.userId,
+    eventType: "statement.deleted",
+    statementUuid: deleted.id,
+    metadata: { statementId: deleted.statement_id },
+  });
+
   return { ok: true };
 }

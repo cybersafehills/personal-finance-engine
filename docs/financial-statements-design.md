@@ -26,7 +26,7 @@ downstream of the existing `reports` experience surface.
 | PR3 | Generation + immutable snapshot persistence + authorization + idempotency | **done** |
 | PR4 | PDF + CSV rendering, private storage, signed-URL download, integrity hash | **done** |
 | PR5 | Statements UI: landing, staged generate flow, preview, detail, download, regenerate, delete | **done** |
-| PR6 | `statement.generate` capability + audit + monitoring + help content + regression sweep | planned |
+| PR6 | Audit (`space_audit_events`) + reconcile/render monitoring + in-app help + regression sweep | **done** |
 
 ## Where each piece lives
 
@@ -47,7 +47,9 @@ downstream of the existing `reports` experience surface.
 | Document download route | `web/app/api/reports/statements/[id]/document/route.ts?format=pdf\|csv` — cloned from `web/app/api/reports/[id]/pdf/route.ts` |
 | Read helpers | `web/lib/queries.ts` — `getStatements`, `getStatementDetail` (session/RLS) |
 | Statements UI | `web/app/reports/statements/{page,new/page,[id]/page}.tsx`; components `GenerateStatementFlow`, `StatementActions`, `StatementsTabs`, `StatementStatusBadge`; a "Reports / Statements" tab strip on `/reports` |
-| Help / FAQ content | *(PR6)* |
+| Audit trail | `recordStatementAudit()` in `web/lib/statement-generation.ts` — service-role insert into `space_audit_events` (`resource_type = 'statement'`) for `statement.generated` / `.regenerated` / `.downloaded` / `.deleted` / `.access_denied`; non-fatal; metadata carries no balance / description / counterparty |
+| Monitoring | `console.warn("[statement.monitor] reconcile_mismatch", …)` at generation when `reconciles === false`; `console.warn("[statement.monitor] render_failed", …)` in the document route's render try/catch |
+| In-app help | "About statements" `<details>` on `/reports/statements` — what a statement is, that it is not an official provider statement, why transactions can be missing, Standard vs Detailed |
 
 ## Data model
 
@@ -108,8 +110,17 @@ Mirrors the Reporting engine (Phase J/K):
   as untrusted and escaped per output format (PDF text nodes, CSV via `csv-safe.ts`).
 - **No leakage** — no balances/descriptions/account numbers in URLs, logs, analytics or error
   messages; unauthorized/absent sources return a generic not-found (no existence oracle, §33).
-- **Authorization (PR6)** — a `statement.generate` capability (owner/admin/member) layered in the
-  server action; `space_audit_events` rows for generate / download / delete / access-denied.
+- **Authorization** — the workspace membership + role model *is* the existing permission system
+  (§54: don't invent a parallel RBAC). Generate / regenerate / delete require a non-`viewer` role
+  (`resolveContext`); view / download require workspace membership (RLS `statements_select_member`);
+  delete additionally requires the `member` minimum (RLS `statements_delete_member`). A per-member
+  `statement.generate` capability in `spaces_capability_matrix` is a clean future refinement — the
+  single enforcement point is `resolveContext` — but is **not** built, since the role gate already
+  expresses the intent.
+- **Audit** — `recordStatementAudit()` writes a `space_audit_events` row (owner/admin-readable) for
+  every generate / regenerate / download / delete and for each denied attempt
+  (`forbidden_role`, `unauthorized_source`, cross-workspace regenerate). Non-fatal; the metadata is
+  ids + counts + period only.
 
 ## Financial correctness
 
@@ -149,10 +160,39 @@ Built as clean seams, not implemented in this initiative:
 - **Financial Packs (combined PDF / ZIP)** — `statements`→`statement_artifacts` is already 1-to-many;
   no pack builder (§32).
 - **Advanced filters** (category / merchant / tag / participant) — `scope='filtered'` + `filters
-  jsonb` exist and every filtered document renders an "Applied filters" banner; only
-  Money-In-only / Money-Out-only may land in PR5 (§24).
+  jsonb` exist and every filtered document is marked as filtered; only Money-In-only /
+  Money-Out-only shipped (§24).
+- **`statement.generate` capability** — per-member grant/revoke in `spaces_capability_matrix`; the
+  role gate (`resolveContext`) covers the intent for now (§25).
+- **Verified download / e-tag caching, per-line source column for consolidated statements,
+  account-holder name beyond the creator's profile** — small future polish, not blockers.
 - **Async / queued generation** — `status` enum already has `preparing`/`generating`/`failed`;
   initial release is synchronous with lazy artifact render (§27).
 - **Provider-original-document management** — ingestion of uploaded provider statements already
   exists separately (`lib/statement-import.ts`); this engine only emits OneLedger-generated
   documents (§16).
+
+## Deployment
+
+- Migration `20261210000000_financial_statements.sql` applies via `deploy-supabase.yml` on a green
+  `main` (3 tables + 1 private `statement-artifacts` bucket). No new secrets, no cron.
+- Set `FINANCIAL_STATEMENTS_ENABLED=true` per Vercel environment to light the area up. Everything is
+  inert while unset: the routes 404, the tab is hidden, nothing queries the tables.
+- Rollback = unset the flag. Generated statements and their artifacts remain but are unreachable.
+
+## Test coverage
+
+- `deno test web/lib` — `statement_period` / `statement_id` / `statement_math` / `statement_coverage`
+  / `statement_snapshot` / `statement_document` suites (period presets + validation + DST, id format
+  + rejection sampling, all totals + `reconciles` + running-balance basis + per-currency, coverage
+  gap/discontinuity heuristics, scope resolution + row/record builders, CSV columns + BOM + formula
+  injection + RFC-4180).
+- `supabase/migrations/tests/run_migration_tests.sh` — a member reads their workspace's statement +
+  rows but never another tenant's; authenticated cannot INSERT/UPDATE `statements` or INSERT
+  `statement_transactions`; `statement_artifacts` has zero authenticated access; a viewer reads but
+  cannot delete; another tenant cannot delete; a member delete cascades; the `statement_id` CHECK,
+  the `format` CHECK and `UNIQUE (workspace_id, client_token)` all bite.
+- `e2e/statements.spec.ts` — seed 3 settled transactions → generate a "this month" statement end to
+  end → preview count + counterparty, the Ready detail page, PDF/CSV links, the document route
+  redirects (3xx), the history row, and a `statement.generated` audit row; plus a no-activity custom
+  range that is refused rather than left blank.

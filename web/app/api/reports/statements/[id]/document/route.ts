@@ -13,6 +13,7 @@ import {
   renderStatementPdf,
   STATEMENT_PDF_TEMPLATE_VERSION,
 } from "../../../../../../lib/statement-pdf";
+import { recordStatementAudit } from "../../../../../../lib/statement-generation";
 
 // Download one generated statement as PDF (default) or CSV.
 //
@@ -84,8 +85,13 @@ export async function GET(
     .maybeSingle();
 
   if (existingError) {
-    console.error("statement document: artifact lookup failed", existingError.message);
-    return NextResponse.json({ error: "failed to look up artifact" }, { status: 500 });
+    console.error(
+      "statement document: artifact lookup failed",
+      existingError.message,
+    );
+    return NextResponse.json({ error: "failed to look up artifact" }, {
+      status: 500,
+    });
   }
 
   let storagePath = existing?.storage_path ?? null;
@@ -138,19 +144,35 @@ export async function GET(
       totalDebitsMinor: Number(statement.total_debit_minor),
       totalFeesMinor: Number(statement.total_fees_minor),
       netMovementMinor: Number(statement.total_credit_minor) -
-        Number(statement.total_debit_minor) - Number(statement.total_fees_minor),
+        Number(statement.total_debit_minor) -
+        Number(statement.total_fees_minor),
       transactionCount: Number(statement.transaction_count),
       reconciles: statement.reconciles,
       perCurrency: statement.per_currency ?? null,
-      runningBalanceAvailable: lines.some((l) => l.runningBalanceMinor !== null),
+      runningBalanceAvailable: lines.some((l) =>
+        l.runningBalanceMinor !== null
+      ),
       source: statement.source_metadata,
       coverage: statement.coverage_metadata,
       lines,
     };
 
-    const bytes = format === "csv"
-      ? Buffer.from(buildStatementCsv(data), "utf-8")
-      : await renderStatementPdf(data);
+    let bytes: Buffer;
+    try {
+      bytes = format === "csv"
+        ? Buffer.from(buildStatementCsv(data), "utf-8")
+        : await renderStatementPdf(data);
+    } catch (renderError) {
+      console.error(
+        "[statement.monitor] render_failed",
+        { statementId: statement.statement_id, format },
+        renderError,
+      );
+      return NextResponse.json(
+        { error: "failed to generate document" },
+        { status: 500 },
+      );
+    }
 
     const candidatePath = `statements/${id}.${format}`;
     const contentType = format === "csv" ? "text/csv" : "application/pdf";
@@ -159,25 +181,34 @@ export async function GET(
       .from("statement-artifacts")
       .upload(candidatePath, bytes, { contentType, upsert: false });
 
-    if (uploadError && !uploadError.message.toLowerCase().includes("already exists")) {
+    if (
+      uploadError &&
+      !uploadError.message.toLowerCase().includes("already exists")
+    ) {
       console.error("statement document: upload failed", uploadError.message);
-      return NextResponse.json({ error: "failed to generate document" }, { status: 500 });
+      return NextResponse.json({ error: "failed to generate document" }, {
+        status: 500,
+      });
     }
 
-    const { error: insertError } = await admin.from("statement_artifacts").insert({
-      statement_id: id,
-      format,
-      storage_path: candidatePath,
-      mime_type: contentType,
-      byte_size: bytes.byteLength,
-      checksum: createHash("sha256").update(bytes).digest("hex"),
-      template_version: format === "pdf" ? STATEMENT_PDF_TEMPLATE_VERSION : 1,
-    });
+    const { error: insertError } = await admin.from("statement_artifacts")
+      .insert({
+        statement_id: id,
+        format,
+        storage_path: candidatePath,
+        mime_type: contentType,
+        byte_size: bytes.byteLength,
+        checksum: createHash("sha256").update(bytes).digest("hex"),
+        template_version: format === "pdf" ? STATEMENT_PDF_TEMPLATE_VERSION : 1,
+      });
 
     // A concurrent request already recorded this artifact - fine, the
     // unique (statement_id, format) constraint is exactly that guard.
     if (insertError && insertError.code !== "23505") {
-      console.error("statement document: artifact insert failed", insertError.message);
+      console.error(
+        "statement document: artifact insert failed",
+        insertError.message,
+      );
     }
 
     storagePath = candidatePath;
@@ -186,11 +217,26 @@ export async function GET(
   const filename = `OneLedger-Statement-${statement.statement_id}.${format}`;
   const { data: signed, error: signError } = await admin.storage
     .from("statement-artifacts")
-    .createSignedUrl(storagePath, SIGNED_URL_TTL_SECONDS, { download: filename });
+    .createSignedUrl(storagePath, SIGNED_URL_TTL_SECONDS, {
+      download: filename,
+    });
 
   if (signError || !signed) {
     console.error("statement document: signed URL failed", signError?.message);
-    return NextResponse.json({ error: "failed to create download link" }, { status: 500 });
+    return NextResponse.json({ error: "failed to create download link" }, {
+      status: 500,
+    });
+  }
+
+  const { data: { user } } = await session.auth.getUser();
+  if (user) {
+    await recordStatementAudit(admin, {
+      workspaceId: statement.workspace_id,
+      actorUserId: user.id,
+      eventType: "statement.downloaded",
+      statementUuid: statement.id,
+      metadata: { statementId: statement.statement_id, format },
+    });
   }
 
   return NextResponse.redirect(signed.signedUrl);

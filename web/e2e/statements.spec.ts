@@ -17,6 +17,11 @@ async function wipeStatements() {
   const admin = adminClient();
   const { workspaceId } = await ensureWorkspaceAndAccount(admin);
   await admin.from("statements").delete().eq("workspace_id", workspaceId);
+  await admin
+    .from("space_audit_events")
+    .delete()
+    .eq("workspace_id", workspaceId)
+    .eq("resource_type", "statement");
 }
 
 test.beforeAll(async () => {
@@ -98,6 +103,17 @@ test("generate a statement end to end, then find and download it", async ({ page
   await expect(page).toHaveURL(/\/reports\/statements$/);
   await expect(page.getByText("No statements yet")).toHaveCount(0);
   await expect(page.getByText(/3 transactions/).first()).toBeVisible();
+
+  // The generation is recorded in the protected audit trail.
+  const admin = adminClient();
+  const { workspaceId } = await ensureWorkspaceAndAccount(admin);
+  const { data: audit } = await admin
+    .from("space_audit_events")
+    .select("event_type, resource_type, metadata")
+    .eq("workspace_id", workspaceId)
+    .eq("resource_type", "statement")
+    .eq("event_type", "statement.generated");
+  expect((audit ?? []).length).toBeGreaterThan(0);
 });
 
 test("a custom range with no activity is refused, not left blank", async ({ page }) => {
