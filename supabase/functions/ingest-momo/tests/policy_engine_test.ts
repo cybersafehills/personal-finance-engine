@@ -84,6 +84,12 @@ function policy(overrides: Partial<FakeRow>): FakeRow {
     amount_max_rwf: null,
     time_start: null,
     time_end: null,
+    days_of_week: null,
+    days_of_month: null,
+    transaction_types: null,
+    fee_min_rwf: null,
+    fee_max_rwf: null,
+    amount_round_multiple: null,
     scope_type: "space",
     scope_source_id: null,
     workspace_id: "ws-a",
@@ -96,6 +102,8 @@ const BASE_INPUT = {
   workspaceId: "ws-a",
   direction: "out" as const,
   amountRwf: 1200,
+  feeRwf: 20,
+  transactionType: "send_money",
   counterpartyName: "James KAYIJE",
   occurredAt: "2026-08-25T08:00:00+02:00",
   financialSourceId: "src-a",
@@ -662,4 +670,78 @@ Deno.test("evaluatePolicies: a source-scoped match explains itself as account-sp
     result.explanation,
     'Matched your "Airtel line" policy for this account.',
   );
+});
+
+Deno.test("evaluatePolicies: days_of_week matches only on the listed ISO weekdays", async () => {
+  const supabase = fakeSupabase([
+    policy({
+      id: "p-weekend",
+      match_type: "contains",
+      merchant_pattern: "kayije",
+      days_of_week: [6, 7], // Sat, Sun
+      category: "Weekend",
+      confidence: 1,
+    }),
+  ]);
+
+  // 2026-08-29 is a Saturday; 2026-08-25 is a Tuesday.
+  const saturday = await evaluatePolicies(supabase, {
+    ...BASE_INPUT,
+    occurredAt: "2026-08-29T10:00:00+02:00",
+  });
+  const tuesday = await evaluatePolicies(supabase, {
+    ...BASE_INPUT,
+    occurredAt: "2026-08-25T10:00:00+02:00",
+  });
+
+  assertEquals(saturday.category, "Weekend");
+  assertEquals(tuesday.category, null);
+});
+
+Deno.test("evaluatePolicies: days_of_month, transaction type, fee range and round multiple all gate the match", async () => {
+  const supabase = fakeSupabase([
+    policy({
+      id: "p-rent",
+      days_of_month: [1, 2],
+      transaction_types: ["send_money"],
+      fee_min_rwf: 10,
+      amount_round_multiple: 1000,
+      category: "Rent",
+      confidence: 1,
+    }),
+  ]);
+
+  const match = await evaluatePolicies(supabase, {
+    ...BASE_INPUT,
+    occurredAt: "2026-09-01T09:00:00+02:00",
+    amountRwf: 50000,
+    feeRwf: 100,
+    transactionType: "send_money",
+  });
+  const wrongDay = await evaluatePolicies(supabase, {
+    ...BASE_INPUT,
+    occurredAt: "2026-09-05T09:00:00+02:00",
+    amountRwf: 50000,
+    feeRwf: 100,
+    transactionType: "send_money",
+  });
+  const notRound = await evaluatePolicies(supabase, {
+    ...BASE_INPUT,
+    occurredAt: "2026-09-01T09:00:00+02:00",
+    amountRwf: 50500,
+    feeRwf: 100,
+    transactionType: "send_money",
+  });
+  const wrongType = await evaluatePolicies(supabase, {
+    ...BASE_INPUT,
+    occurredAt: "2026-09-01T09:00:00+02:00",
+    amountRwf: 50000,
+    feeRwf: 100,
+    transactionType: "merchant_payment",
+  });
+
+  assertEquals(match.category, "Rent");
+  assertEquals(wrongDay.category, null);
+  assertEquals(notRound.category, null);
+  assertEquals(wrongType.category, null);
 });

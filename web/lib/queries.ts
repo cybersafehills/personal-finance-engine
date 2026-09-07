@@ -1936,7 +1936,7 @@ export async function getCategoryHistory(
 }
 
 const CATEGORIZATION_POLICY_COLUMNS =
-  "id, name, description, category, subcategory, match_type, merchant_pattern, direction, amount_min_rwf, amount_max_rwf, time_start, time_end, priority, is_active, rule_source, confidence, usage_count, last_used_at, scope_type, scope_source_id";
+  "id, name, description, category, subcategory, match_type, merchant_pattern, direction, amount_min_rwf, amount_max_rwf, time_start, time_end, days_of_week, days_of_month, transaction_types, fee_min_rwf, fee_max_rwf, amount_round_multiple, priority, is_active, rule_source, confidence, usage_count, last_used_at, scope_type, scope_source_id";
 
 export type CategorizationPolicyRow = {
   id: string;
@@ -1951,6 +1951,12 @@ export type CategorizationPolicyRow = {
   amount_max_rwf: number | null;
   time_start: string | null;
   time_end: string | null;
+  days_of_week: number[] | null;
+  days_of_month: number[] | null;
+  transaction_types: string[] | null;
+  fee_min_rwf: number | null;
+  fee_max_rwf: number | null;
+  amount_round_multiple: number | null;
   priority: number;
   is_active: boolean;
   rule_source: string;

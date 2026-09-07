@@ -32,6 +32,34 @@ function parseOptionalAmount(value: string): number | null | undefined {
   return parsed;
 }
 
+/**
+ * Parses a comma/space separated list of integers into a sorted,
+ * de-duplicated array within [min, max]. "" -> null (unconstrained);
+ * undefined signals an invalid entry so the caller can report it.
+ */
+function parseIntList(
+  value: string,
+  min: number,
+  max: number,
+): number[] | null | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parts = trimmed.split(/[\s,]+/).filter(Boolean);
+  const out = new Set<number>();
+  for (const part of parts) {
+    const n = Number(part);
+    if (!Number.isInteger(n) || n < min || n > max) return undefined;
+    out.add(n);
+  }
+  return out.size > 0 ? Array.from(out).sort((a, b) => a - b) : null;
+}
+
+const KNOWN_TRANSACTION_TYPES = new Set([
+  "send_money", "merchant_payment", "money_received", "airtime",
+  "cash_withdrawal", "cash_deposit", "bill_payment", "bank_transfer",
+  "refund", "reversal", "other",
+]);
+
 export type PolicyFormInput = {
   name: string;
   description: string;
@@ -44,6 +72,14 @@ export type PolicyFormInput = {
   amountMax: string;
   timeStart: string; // "" or "HH:MM"
   timeEnd: string;
+  /** Comma list of ISO weekdays 1-7 (Mon-Sun). "" = any day. */
+  daysOfWeek: string;
+  /** Comma list of month days 1-31. "" = any. */
+  daysOfMonth: string;
+  transactionTypes: string[]; // [] = any
+  feeMin: string;
+  feeMax: string;
+  amountRoundMultiple: string; // "" | "100" | "1000"
   priority: string;
   scopeType: string; // "space" | "source"
   scopeSourceId: string; // "" unless scopeType === "source"
@@ -92,12 +128,46 @@ export async function upsertPolicy(
     return { ok: false, error: "Set both a start and an end time, or leave both blank." };
   }
 
+  const daysOfWeek = parseIntList(input.daysOfWeek, 1, 7);
+  if (daysOfWeek === undefined) {
+    return { ok: false, error: "Days of the week must be numbers 1 (Mon) to 7 (Sun)." };
+  }
+  const daysOfMonth = parseIntList(input.daysOfMonth, 1, 31);
+  if (daysOfMonth === undefined) {
+    return { ok: false, error: "Days of the month must be numbers 1 to 31." };
+  }
+
+  const transactionTypes = (input.transactionTypes ?? [])
+    .map((t) => t.trim())
+    .filter(Boolean);
+  if (transactionTypes.some((t) => !KNOWN_TRANSACTION_TYPES.has(t))) {
+    return { ok: false, error: "Unrecognized transaction type." };
+  }
+  const transactionTypesValue = transactionTypes.length > 0 ? transactionTypes : null;
+
+  const feeMin = parseOptionalAmount(input.feeMin);
+  const feeMax = parseOptionalAmount(input.feeMax);
+  if (feeMin === undefined || feeMax === undefined) {
+    return { ok: false, error: "Fees must be whole numbers of RWF, 0 or greater." };
+  }
+  if (feeMin !== null && feeMax !== null && feeMax < feeMin) {
+    return { ok: false, error: "Maximum fee cannot be less than the minimum." };
+  }
+
+  const roundRaw = input.amountRoundMultiple.trim();
+  const amountRoundMultiple = roundRaw === "" ? null : Number(roundRaw);
+  if (amountRoundMultiple !== null && amountRoundMultiple !== 100 && amountRoundMultiple !== 1000) {
+    return { ok: false, error: "Round-number match must be 100 or 1000." };
+  }
+
   const hasCondition = trimmedPattern !== null || direction !== "" ||
-    amountMin !== null || amountMax !== null || timeStart !== null;
+    amountMin !== null || amountMax !== null || timeStart !== null ||
+    daysOfWeek !== null || daysOfMonth !== null || transactionTypesValue !== null ||
+    feeMin !== null || feeMax !== null || amountRoundMultiple !== null;
   if (!hasCondition) {
     return {
       ok: false,
-      error: "Add at least one condition (counterparty, direction, amount range, or time window).",
+      error: "Add at least one condition (counterparty, direction, amount, time, day, type, fee, or round-number).",
     };
   }
 
@@ -136,6 +206,12 @@ export async function upsertPolicy(
     amount_max_rwf: amountMax,
     time_start: timeStart,
     time_end: timeEnd,
+    days_of_week: daysOfWeek,
+    days_of_month: daysOfMonth,
+    transaction_types: transactionTypesValue,
+    fee_min_rwf: feeMin,
+    fee_max_rwf: feeMax,
+    amount_round_multiple: amountRoundMultiple,
     priority: priorityParsed,
     scope_type: scopeType,
     scope_source_id: scopeType === "source" ? scopeSourceId : null,

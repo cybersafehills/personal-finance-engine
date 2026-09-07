@@ -1945,6 +1945,77 @@ else
   fail "Phase F: User B could read $B_SEES_HISTORY of User A's transaction_category_history rows - isolation breach"
 fi
 
+# Extra rule conditions (20261207000000): day-of-week / day-of-month /
+# transaction type / fee range / round-number amount.
+
+# A policy whose only condition is days_of_week satisfies the widened
+# has_condition guard.
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.categorization_policies (workspace_id, category, days_of_week)
+  values ('$WORKSPACE_A', 'Weekend', '{6,7}');
+" >/dev/null 2>$ARTIFACT_DIR/pfe_policy_dow_stderr.log; then
+  pass "Extra conditions: a days_of_week-only policy is accepted"
+else
+  fail "Extra conditions: days_of_week-only policy rejected: $(cat $ARTIFACT_DIR/pfe_policy_dow_stderr.log)"
+fi
+rm -f $ARTIFACT_DIR/pfe_policy_dow_stderr.log
+
+# An out-of-range weekday is rejected by the bounds check.
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.categorization_policies (workspace_id, category, days_of_week)
+  values ('$WORKSPACE_A', 'Bad DOW', '{8}');
+" >/dev/null 2>$ARTIFACT_DIR/pfe_policy_baddow_stderr.log; then
+  fail "Extra conditions: a days_of_week entry of 8 was allowed"
+else
+  pass "Extra conditions: a days_of_week entry outside 1-7 is rejected"
+fi
+rm -f $ARTIFACT_DIR/pfe_policy_baddow_stderr.log
+
+# amount_round_multiple must be 100 or 1000.
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.categorization_policies (workspace_id, category, amount_round_multiple)
+  values ('$WORKSPACE_A', 'Bad Round', 250);
+" >/dev/null 2>$ARTIFACT_DIR/pfe_policy_badround_stderr.log; then
+  fail "Extra conditions: amount_round_multiple of 250 was allowed"
+else
+  pass "Extra conditions: amount_round_multiple outside {100,1000} is rejected"
+fi
+rm -f $ARTIFACT_DIR/pfe_policy_badround_stderr.log
+
+# policy_matches_transaction honours transaction_types + amount_round_multiple.
+ROUND_MATCH="$(psql -d pfe_rls -t -A -c "
+  with p as (
+    select row(pol.*)::public.categorization_policies as r
+    from public.categorization_policies pol
+    where pol.category = 'Weekend' and pol.workspace_id = '$WORKSPACE_A' limit 1
+  ),
+  pol2 as (
+    update public.categorization_policies
+    set transaction_types = '{send_money}', amount_round_multiple = 1000
+    where category = 'Weekend' and workspace_id = '$WORKSPACE_A'
+    returning *
+  )
+  select
+    public.policy_matches_transaction(
+      pol2.*,
+      row(t.*)::public.transactions
+    )
+  from pol2, public.transactions t
+  where t.workspace_id = '$WORKSPACE_A'
+  order by t.occurred_at limit 1;
+" 2>/dev/null || echo "err")"
+# The seeded transaction is a send_money that may or may not be a multiple
+# of 1000 - we only assert the call itself resolves to a boolean (no SQL
+# error from the new clauses), the engine unit tests cover the matching.
+if [ "$ROUND_MATCH" = "t" ] || [ "$ROUND_MATCH" = "f" ]; then
+  pass "Extra conditions: policy_matches_transaction evaluates the new clauses without error"
+else
+  fail "Extra conditions: policy_matches_transaction errored on the new clauses (got '$ROUND_MATCH')"
+fi
+
+# Clean up the one scratch policy this block created.
+psql -d pfe_rls -c "delete from public.categorization_policies where workspace_id = '$WORKSPACE_A' and category = 'Weekend';" >/dev/null 2>&1 || true
+
 # ===========================================================================
 # Phase G: confidence tiers, review queue, and historical backfill. Reuses
 # pfe_rls (USER_A/WORKSPACE_A/account d1). Seeds its own transactions with
