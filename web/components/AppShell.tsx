@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { OneLedgerLogo } from "./brand/OneLedgerLogo";
 import { HomeIcon, InboxIcon, ListIcon, MoreIcon, TargetIcon } from "./icons";
 import { LiveDataSync } from "./LiveDataSync";
+import { InsightGlimpse } from "./InsightGlimpse";
 import { InboxButton } from "./InboxButton";
 import { MoreSheet } from "./MoreSheet";
 import { ProfileMenu } from "./ProfileMenu";
@@ -89,6 +90,7 @@ export function AppShell({
   experienceMode,
   businessSurfacesEnabled,
   inboxBadgeCount,
+  insightGlimpse,
 }: {
   children: React.ReactNode;
   userEmail: string | null;
@@ -107,6 +109,9 @@ export function AppShell({
   /** Count on the header inbox icon (unread notifications + open attention
    *  rows). Already 0 when the caller has the badge preference off. */
   inboxBadgeCount: number;
+  /** One-line insight summary to flash at the top of any page for ~30s,
+   *  or null. Resolved server-side (already de-duped / rate-limited). */
+  insightGlimpse: string | null;
 }) {
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
@@ -140,6 +145,7 @@ export function AppShell({
   const shell = (
     <div className="flex min-h-full flex-col">
       {showChrome && <LiveDataSync workspaceId={activeWorkspaceId} />}
+      {showChrome && <InsightGlimpse headline={insightGlimpse} />}
 
       {/* Unified authenticated header - one definition for every device
           size, so mobile and desktop can never drift into two competing

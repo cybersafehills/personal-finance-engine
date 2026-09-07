@@ -664,7 +664,9 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # Account erasure (20261203000000) adds account_deletion_log (RLS enabled,
 # no policy - service-role only, like raw_financial_events) - 121 tables,
 # 120 with RLS.
-if [ "$TABLE_COUNT" = "121" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Insight notifications (20261209000000) adds user_insight_state (RLS
+# enabled, SELECT-own for authenticated) - 122 tables, 121 with RLS.
+if [ "$TABLE_COUNT" = "122" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -967,10 +969,13 @@ AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_p
 # rename_workspace_category - authenticated-callable, owner/capability-gated
 # (upsert_workspace_category / set_workspace_category_archived are only
 # CREATE OR REPLACEd, grants unchanged). 115 + 1 = 116.
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "116" ]; then
-  pass "authenticated holds EXECUTE on exactly the 116 functions expected, no more"
+# Insight notifications (20261209000000) adds note_insight_change -
+# authenticated-callable, workspace-member-gated (notification_event_catalog
+# is only CREATE OR REPLACEd). 116 + 1 = 117.
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "117" ]; then
+  pass "authenticated holds EXECUTE on exactly the 117 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 116 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 117 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -3645,6 +3650,34 @@ if [ "$T_CATALOG" -ge "8" ] && [ "$T_CATALOG_HAS" = "1" ]; then
 else
   fail "Phase T PR1: notification_event_catalog wrong (count=$T_CATALOG has_budget_exceeded=$T_CATALOG_HAS)"
 fi
+
+# Insight notifications (20261209000000): the new event is registered, and
+# note_insight_change() enqueues once on a signature change then
+# rate-limits a same-window repeat.
+T_INSIGHT_EVENT="$(as_user "$USER_E" "select count(*) from public.notification_event_catalog() where event_key = 'insight.forecast_update' and default_in_app = true and security_notable = false;")"
+if [ "$T_INSIGHT_EVENT" = "1" ]; then
+  pass "Insight notifications: insight.forecast_update is in the catalog (in-app default on, not security-notable)"
+else
+  fail "Insight notifications: insight.forecast_update missing/misconfigured in the catalog (got $T_INSIGHT_EVENT)"
+fi
+
+T_INSIGHT_FIRST="$(as_user "$USER_E" "select public.note_insight_change('$Q_HH', 'sig-1', 'Heads up test', 'body');")"
+T_INSIGHT_SECOND="$(as_user "$USER_E" "select public.note_insight_change('$Q_HH', 'sig-2', 'Different test', 'body');")"
+T_INSIGHT_SAME="$(as_user "$USER_E" "select public.note_insight_change('$Q_HH', 'sig-2', 'Different test', 'body');")"
+T_INSIGHT_NOTIFS="$(psql -d pfe_rls -t -A -c "select count(*) from public.notifications where event_key = 'insight.forecast_update';")"
+if [ "$T_INSIGHT_FIRST" = "t" ] && [ "$T_INSIGHT_SECOND" = "f" ] && [ "$T_INSIGHT_SAME" = "f" ] && [ "$T_INSIGHT_NOTIFS" = "1" ]; then
+  pass "Insight notifications: note_insight_change enqueues once, then rate-limits within the 12h window"
+else
+  fail "Insight notifications: note_insight_change wrong (first=$T_INSIGHT_FIRST second=$T_INSIGHT_SECOND same=$T_INSIGHT_SAME notif_rows=$T_INSIGHT_NOTIFS)"
+fi
+
+# A non-member is refused.
+if as_user "$USER_B" "select public.note_insight_change('$Q_HH', 'sig-x', 'x', 'x');" >/dev/null 2>$ARTIFACT_DIR/pfe_insight_forbidden.log; then
+  fail "Insight notifications: a non-member called note_insight_change"
+else
+  pass "Insight notifications: note_insight_change refuses a non-member"
+fi
+rm -f $ARTIFACT_DIR/pfe_insight_forbidden.log
 
 # ===========================================================================
 # Phase T PR2: budget threshold-crossing state. record_budget_threshold_
