@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import {
+  getActiveWorkspaceId,
   getAttentionItems,
   getCategoryTotals,
   getCurrentBalance,
@@ -46,7 +47,7 @@ export default async function HomePage() {
   if (profileOnboarding?.step === "preferences") redirect("/onboarding/preferences");
 
   const journeyEnabled = isOnboardingJourneyEnabled();
-  const intelligenceEnabled = isIntelligenceEnabled();
+  const intelligenceEnabled = isIntelligenceEnabled(await getActiveWorkspaceId());
 
   const [
     balance,
