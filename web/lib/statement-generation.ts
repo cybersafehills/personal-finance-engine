@@ -7,13 +7,10 @@ import {
   reconstructStatementPeriod,
   type ResolvedStatementPeriod,
   resolveStatementPeriod,
-  type StatementPeriodPreset,
 } from "./statement-period";
 import {
   computeStatementMath,
-  type StatementCurrencyTotals,
   type StatementMathResult,
-  type StatementRunningBalanceBasis,
 } from "./statement-math";
 import {
   buildStatementCoverageMetadata,
@@ -33,6 +30,24 @@ import {
   toCoverageFact,
   toMathFact,
 } from "./statement-snapshot";
+import type {
+  DeleteOutcome,
+  GenerateOutcome,
+  PreviewOutcome,
+  StatementErrorKind,
+  StatementPreview,
+  StatementPreviewRow,
+  StatementRequest,
+} from "./statement-types";
+
+export type {
+  DeleteOutcome,
+  GenerateOutcome,
+  PreviewOutcome,
+  StatementErrorKind,
+  StatementPreview,
+  StatementRequest,
+};
 
 // Statement generation orchestrator (Financial Documents Engine, PR3).
 //
@@ -61,89 +76,6 @@ const CHILD_INSERT_CHUNK = 500;
 
 const TXN_COLUMNS =
   "id, occurred_at, transaction_type, direction, principal_effect_rwf, fee_effect_rwf, balance_after_rwf, currency, counterparty_name, counterparty_reference, category, financial_source_id";
-
-export type StatementErrorKind =
-  | "not_signed_in"
-  | "no_workspace"
-  | "forbidden_role"
-  | "invalid_input"
-  | "invalid_timezone"
-  | "invalid_period"
-  | "no_sources"
-  | "unauthorized_source"
-  | "no_transactions"
-  | "too_large"
-  | "query_failed"
-  | "persist_failed"
-  | "not_found";
-
-export type StatementRequest = {
-  statementType: StatementType;
-  preset: StatementPeriodPreset;
-  timezone: string;
-  fromDateKey?: string;
-  toDateKey?: string;
-  sourceIds: string[];
-  filters?: StatementFilters;
-  clientToken: string;
-};
-
-export type StatementPreviewRow = {
-  occurredAt: string;
-  displayDescription: string;
-  originalDescription: string | null;
-  reference: string | null;
-  direction: "in" | "out" | "neutral";
-  principalEffectMinor: number;
-  feeEffectMinor: number;
-  runningBalanceMinor: number | null;
-  category: string | null;
-};
-
-export type StatementPreview = {
-  statementType: StatementType;
-  scope: StatementScope;
-  period: {
-    label: string;
-    startDateKey: string;
-    endDateKey: string;
-    periodStartIso: string;
-    periodEndIso: string;
-    adjustments: string[];
-  };
-  currency: string;
-  mixedCurrency: boolean;
-  totals:
-    | {
-      openingBalanceMinor: number | null;
-      closingBalanceMinor: number | null;
-      totalCreditsMinor: number;
-      totalDebitsMinor: number;
-      totalFeesMinor: number;
-      netMovementMinor: number;
-      transactionCount: number;
-      reconciles: boolean | null;
-    }
-    | null;
-  perCurrency: StatementCurrencyTotals[];
-  runningBalanceBasis: StatementRunningBalanceBasis;
-  source: StatementSourceMetadata;
-  coverage: StatementCoverageMetadata;
-  sampleRows: StatementPreviewRow[];
-  sampleTruncated: boolean;
-};
-
-export type PreviewOutcome =
-  | { ok: true; preview: StatementPreview }
-  | { ok: false; kind: StatementErrorKind; message: string };
-
-export type GenerateOutcome =
-  | { ok: true; id: string; statementId: string; deduped: boolean }
-  | { ok: false; kind: StatementErrorKind; message: string };
-
-export type DeleteOutcome =
-  | { ok: true }
-  | { ok: false; kind: StatementErrorKind; message: string };
 
 const MESSAGES: Record<StatementErrorKind, string> = {
   not_signed_in: "You are not signed in.",
@@ -267,6 +199,55 @@ async function fetchAuthorizedSources(
   const currencyById = new Map<string, string>();
   for (const r of rows) currencyById.set(r.id, r.currency);
   return { descriptors: rows.map(toDescriptor), currencyById };
+}
+
+export type StatementSourceOption = {
+  id: string;
+  label: string;
+  currency: string;
+};
+
+export type StatementFormOptions =
+  | {
+    ok: true;
+    sources: StatementSourceOption[];
+    /** A curated IANA zone (isValidReportTimezone), for the generate form's default. */
+    timezone: string;
+  }
+  | { ok: false; kind: StatementErrorKind; message: string };
+
+/**
+ * Everything the /reports/statements/new form needs, resolved for the
+ * ACTIVE workspace: the authorized source list (same set createStatement
+ * will accept) and a sane default timezone. A server component calls this.
+ */
+export async function getStatementFormOptions(): Promise<StatementFormOptions> {
+  const ctxRes = await resolveContext();
+  if (!ctxRes.ok) return ctxRes;
+  const { ctx } = ctxRes;
+
+  const { descriptors, currencyById } = await fetchAuthorizedSources(ctx);
+  const sources: StatementSourceOption[] = descriptors.map((d) => ({
+    id: d.id,
+    label: d.maskedIdentifier
+      ? `${d.displayName} · ${d.maskedIdentifier}`
+      : d.displayName,
+    currency: currencyById.get(d.id) ?? "RWF",
+  }));
+
+  const { data: profile } = await ctx.session
+    .from("profiles")
+    .select("timezone")
+    .eq("id", ctx.userId)
+    .maybeSingle();
+  const profileTz = typeof profile?.timezone === "string"
+    ? profile.timezone
+    : "";
+  const timezone = isValidReportTimezone(profileTz)
+    ? profileTz
+    : "Africa/Kigali";
+
+  return { ok: true, sources, timezone };
 }
 
 // ---------------------------------------------------------------------------
@@ -552,6 +533,7 @@ export async function previewStatement(
         endDateKey: period.endDateKey,
         periodStartIso: period.periodStartUtc.toISOString(),
         periodEndIso: period.periodEndUtc.toISOString(),
+        timezone: period.timezone,
         adjustments: period.adjustments,
       },
       currency: a.math.currency ?? a.currencyHint,

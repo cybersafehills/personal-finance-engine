@@ -1,7 +1,7 @@
 import "server-only";
 import { cookies } from "next/headers";
 import { supabaseSession } from "./supabase-session-server";
-import { kigaliDayBoundsUtc, kigaliDateKey } from "./kigali-time";
+import { kigaliDateKey, kigaliDayBoundsUtc } from "./kigali-time";
 import {
   aggregateOutflowsByAllocation,
   ALLOCATION_TYPES,
@@ -14,9 +14,9 @@ import {
 } from "./budget-math";
 import {
   buildCanonicalConnectorReadModel,
-  type ConnectorAdapterCanaryStatus,
   type CanonicalConnectorInstallation,
   type ConnectorAccountRecord,
+  type ConnectorAdapterCanaryStatus,
   type ConnectorInstallationRecord,
   type ConnectorSourceRecord,
   type DeviceCredentialRecord,
@@ -126,7 +126,8 @@ export async function getTodayTotals(): Promise<TodayTotals> {
   let receivedRwf = 0;
 
   for (const row of data ?? []) {
-    const effect = Number(row.principal_effect_rwf) + Number(row.fee_effect_rwf);
+    const effect = Number(row.principal_effect_rwf) +
+      Number(row.fee_effect_rwf);
     if (row.direction === "out") {
       spentRwf += Math.abs(effect);
     } else if (row.direction === "in") {
@@ -369,7 +370,9 @@ export async function getTransactionSpaceContext(
     .maybeSingle();
 
   if (error || !data) {
-    if (error) console.error("getTransactionSpaceContext failed:", error.message);
+    if (error) {
+      console.error("getTransactionSpaceContext failed:", error.message);
+    }
     return null;
   }
 
@@ -422,7 +425,16 @@ export async function getTransactionSpaceContext(
 
 /** Household transactions the caller can see that still need an attribution. */
 export async function getNeedsAttributionTransactions(): Promise<
-  Array<{ id: string; occurredAt: string; amountRwf: number; direction: string; counterpartyName: string | null; workspaceName: string | null }>
+  Array<
+    {
+      id: string;
+      occurredAt: string;
+      amountRwf: number;
+      direction: string;
+      counterpartyName: string | null;
+      workspaceName: string | null;
+    }
+  >
 > {
   const supabase = await supabaseSession();
   const { data, error } = await supabase
@@ -668,7 +680,10 @@ export async function getCategoryTotals(): Promise<CategoryTotal[]> {
       Number(row.principal_effect_rwf) + Number(row.fee_effect_rwf),
     );
     const existing = totals.get(key) ?? { total: 0, count: 0 };
-    totals.set(key, { total: existing.total + effect, count: existing.count + 1 });
+    totals.set(key, {
+      total: existing.total + effect,
+      count: existing.count + 1,
+    });
   }
 
   return Array.from(totals.entries())
@@ -1016,7 +1031,8 @@ export async function getCanonicalConnectorInstallations(): Promise<
     return [];
   }
 
-  const installations = (installationData ?? []) as ConnectorInstallationRecord[];
+  const installations =
+    (installationData ?? []) as ConnectorInstallationRecord[];
   if (installations.length === 0) return [];
   const installationIds = installations.map((installation) => installation.id);
 
@@ -1124,7 +1140,9 @@ export async function getSystemTemplate(): Promise<SystemTemplate | null> {
     .maybeSingle();
 
   if (templateError || !template) {
-    if (templateError) console.error("getSystemTemplate failed:", templateError.message);
+    if (templateError) {
+      console.error("getSystemTemplate failed:", templateError.message);
+    }
     return null;
   }
 
@@ -1135,7 +1153,10 @@ export async function getSystemTemplate(): Promise<SystemTemplate | null> {
     .order("sort_order", { ascending: true });
 
   if (allocationsError) {
-    console.error("getSystemTemplate allocations failed:", allocationsError.message);
+    console.error(
+      "getSystemTemplate allocations failed:",
+      allocationsError.message,
+    );
     return null;
   }
 
@@ -1201,7 +1222,9 @@ export async function getBudgetById(
     .maybeSingle();
 
   if (budgetError || !budget) {
-    if (budgetError) console.error("getBudgetById failed:", budgetError.message);
+    if (budgetError) {
+      console.error("getBudgetById failed:", budgetError.message);
+    }
     return null;
   }
 
@@ -1212,7 +1235,10 @@ export async function getBudgetById(
     .order("sort_order", { ascending: true });
 
   if (allocationsError) {
-    console.error("getBudgetById allocations failed:", allocationsError.message);
+    console.error(
+      "getBudgetById allocations failed:",
+      allocationsError.message,
+    );
     return null;
   }
 
@@ -1266,14 +1292,23 @@ export async function getCategoryMappings(): Promise<CategoryMappingRow[]> {
   ]);
 
   if (txnsResult.error) {
-    console.error("getCategoryMappings transactions failed:", txnsResult.error.message);
+    console.error(
+      "getCategoryMappings transactions failed:",
+      txnsResult.error.message,
+    );
     return [];
   }
   if (mappingsResult.error) {
-    console.error("getCategoryMappings mappings failed:", mappingsResult.error.message);
+    console.error(
+      "getCategoryMappings mappings failed:",
+      mappingsResult.error.message,
+    );
   }
   if (vocabResult.error) {
-    console.error("getCategoryMappings vocabulary failed:", vocabResult.error.message);
+    console.error(
+      "getCategoryMappings vocabulary failed:",
+      vocabResult.error.message,
+    );
   }
 
   const mappingByCategory = new Map<string, AllocationType>();
@@ -1284,9 +1319,14 @@ export async function getCategoryMappings(): Promise<CategoryMappingRow[]> {
   const totals = new Map<string, { total: number; count: number }>();
   for (const row of txnsResult.data ?? []) {
     const category = row.category as string;
-    const effect = Math.abs(Number(row.principal_effect_rwf) + Number(row.fee_effect_rwf));
+    const effect = Math.abs(
+      Number(row.principal_effect_rwf) + Number(row.fee_effect_rwf),
+    );
     const existing = totals.get(category) ?? { total: 0, count: 0 };
-    totals.set(category, { total: existing.total + effect, count: existing.count + 1 });
+    totals.set(category, {
+      total: existing.total + effect,
+      count: existing.count + 1,
+    });
   }
 
   // Vocabulary labels with no spend yet - and any category that only
@@ -1349,7 +1389,8 @@ export async function getUncategorizedOutflowSummary(
   const rows = data ?? [];
   const totalRwf = rows.reduce(
     (sum, row) =>
-      sum + Math.abs(Number(row.principal_effect_rwf) + Number(row.fee_effect_rwf)),
+      sum +
+      Math.abs(Number(row.principal_effect_rwf) + Number(row.fee_effect_rwf)),
     0,
   );
   return { count: rows.length, totalRwf };
@@ -1397,7 +1438,13 @@ export async function getBudgetActuals(
   const { startUtc } = kigaliDayBoundsUtc(budget.period_start);
   const { endUtc } = kigaliDayBoundsUtc(budget.period_end);
 
-  const [outResult, inResult, mappingsResult, transferLinksResult, splitsResult] = await Promise.all([
+  const [
+    outResult,
+    inResult,
+    mappingsResult,
+    transferLinksResult,
+    splitsResult,
+  ] = await Promise.all([
     supabase
       .from("transactions")
       .select("id, category, principal_effect_rwf, fee_effect_rwf, occurred_at")
@@ -1436,22 +1483,50 @@ export async function getBudgetActuals(
       .select("transaction_id, allocation_type, amount_minor"),
   ]);
 
-  if (outResult.error) console.error("getBudgetActuals (out) failed:", outResult.error.message);
-  if (inResult.error) console.error("getBudgetActuals (in) failed:", inResult.error.message);
-  if (mappingsResult.error) console.error("getBudgetActuals (mappings) failed:", mappingsResult.error.message);
-  if (transferLinksResult.error) console.error("getBudgetActuals (transfer links) failed:", transferLinksResult.error.message);
-  if (splitsResult.error) console.error("getBudgetActuals (splits) failed:", splitsResult.error.message);
+  if (outResult.error) {
+    console.error("getBudgetActuals (out) failed:", outResult.error.message);
+  }
+  if (inResult.error) {
+    console.error("getBudgetActuals (in) failed:", inResult.error.message);
+  }
+  if (mappingsResult.error) {
+    console.error(
+      "getBudgetActuals (mappings) failed:",
+      mappingsResult.error.message,
+    );
+  }
+  if (transferLinksResult.error) {
+    console.error(
+      "getBudgetActuals (transfer links) failed:",
+      transferLinksResult.error.message,
+    );
+  }
+  if (splitsResult.error) {
+    console.error(
+      "getBudgetActuals (splits) failed:",
+      splitsResult.error.message,
+    );
+  }
 
   // Confirmed self-transfers move money between the user's own accounts -
   // never expenditure or income (see the master prompt's own rule, and
   // transfer_links' comment in the Phase E migration).
-  const linkedOutIds = new Set((transferLinksResult.data ?? []).map((l) => l.out_transaction_id));
-  const linkedInIds = new Set((transferLinksResult.data ?? []).map((l) => l.in_transaction_id));
-  const outRows = (outResult.data ?? []).filter((row) => !linkedOutIds.has(row.id));
-  const inRows = (inResult.data ?? []).filter((row) => !linkedInIds.has(row.id));
+  const linkedOutIds = new Set(
+    (transferLinksResult.data ?? []).map((l) => l.out_transaction_id),
+  );
+  const linkedInIds = new Set(
+    (transferLinksResult.data ?? []).map((l) => l.in_transaction_id),
+  );
+  const outRows = (outResult.data ?? []).filter((row) =>
+    !linkedOutIds.has(row.id)
+  );
+  const inRows = (inResult.data ?? []).filter((row) =>
+    !linkedInIds.has(row.id)
+  );
 
   const actualIncomeMinor = inRows.reduce(
-    (sum, row) => sum + Number(row.principal_effect_rwf) + Number(row.fee_effect_rwf),
+    (sum, row) =>
+      sum + Number(row.principal_effect_rwf) + Number(row.fee_effect_rwf),
     0,
   );
 
@@ -1463,7 +1538,9 @@ export async function getBudgetActuals(
     outRows.map((row) => ({
       transactionId: row.id,
       category: row.category,
-      effectMinor: BigInt(Math.abs(Number(row.principal_effect_rwf) + Number(row.fee_effect_rwf))),
+      effectMinor: BigInt(
+        Math.abs(Number(row.principal_effect_rwf) + Number(row.fee_effect_rwf)),
+      ),
       occurredAtDateKey: kigaliDateKey(row.occurred_at),
     })),
     (splitsResult.data ?? []).map((row) => ({
@@ -1479,7 +1556,9 @@ export async function getBudgetActuals(
     })),
   );
   const totalsByAllocation = new Map<AllocationType, number>(
-    ALLOCATION_TYPES.map((type) => [type, Number(aggregation.totalsByAllocation[type])]),
+    ALLOCATION_TYPES.map((
+      type,
+    ) => [type, Number(aggregation.totalsByAllocation[type])]),
   );
   const unmappedMinor = Number(aggregation.unmappedMinor);
   const unmappedCount = aggregation.unmappedCount;
@@ -1509,7 +1588,9 @@ export async function getBudgetActuals(
       actualMinor,
       remainingMinor: Number(math.remainingMinor),
       percentConsumed: math.percentConsumed,
-      projectedMinor: math.projectedMinor !== null ? Number(math.projectedMinor) : null,
+      projectedMinor: math.projectedMinor !== null
+        ? Number(math.projectedMinor)
+        : null,
       status: math.status,
     };
   });
@@ -1577,7 +1658,9 @@ const STATUS_SEVERITY: Record<AllocationStatus, number> = {
  * page simply omits the card rather than showing an empty-state box for
  * a legitimate, common state (see master prompt §8.2/§11.2).
  */
-export async function getDashboardBudgetSummary(): Promise<DashboardBudgetSummary | null> {
+export async function getDashboardBudgetSummary(): Promise<
+  DashboardBudgetSummary | null
+> {
   const budgets = await getBudgets();
   const active = budgets.find((b) => b.status === "active");
   if (!active) return null;
@@ -1587,10 +1670,21 @@ export async function getDashboardBudgetSummary(): Promise<DashboardBudgetSummar
 
   const actuals = await getBudgetActuals(withAllocations);
 
-  const totalTargetMinor = actuals.allocations.reduce((sum, a) => sum + a.targetMinor, 0);
-  const totalActualMinor = actuals.allocations.reduce((sum, a) => sum + a.actualMinor, 0);
+  const totalTargetMinor = actuals.allocations.reduce(
+    (sum, a) => sum + a.targetMinor,
+    0,
+  );
+  const totalActualMinor = actuals.allocations.reduce(
+    (sum, a) => sum + a.actualMinor,
+    0,
+  );
   const worstStatus = actuals.allocations.reduce<AllocationStatus>(
-    (worst, a) => (STATUS_SEVERITY[a.status] > STATUS_SEVERITY[worst] ? a.status : worst),
+    (
+      worst,
+      a,
+    ) => (STATUS_SEVERITY[a.status] > STATUS_SEVERITY[worst]
+      ? a.status
+      : worst),
     "insufficient_data",
   );
   const actionableAlertCount = actuals.alerts.filter(
@@ -1608,7 +1702,9 @@ export async function getDashboardBudgetSummary(): Promise<DashboardBudgetSummar
     totalTargetMinor,
     totalActualMinor,
     remainingMinor: totalTargetMinor - totalActualMinor,
-    percentUsed: totalTargetMinor > 0 ? (totalActualMinor / totalTargetMinor) * 100 : null,
+    percentUsed: totalTargetMinor > 0
+      ? (totalActualMinor / totalTargetMinor) * 100
+      : null,
     worstStatus,
     daysRemainingInPeriod,
     periodEnd: withAllocations.period_end,
@@ -1649,16 +1745,20 @@ export type AttentionItem = {
 const STALE_CONNECTION_GRACE_PERIOD_MS = 24 * 60 * 60 * 1000;
 
 export async function getAttentionItems(): Promise<AttentionItem[]> {
-  const [reviewQueueCount, learnedSuggestionCount, budgetSummary, connections] = await Promise.all([
-    getReviewQueueCount(),
-    getLearnedPolicySuggestionCount(),
-    getDashboardBudgetSummary(),
-    getIngestionConnections(),
-  ]);
+  const [reviewQueueCount, learnedSuggestionCount, budgetSummary, connections] =
+    await Promise.all([
+      getReviewQueueCount(),
+      getLearnedPolicySuggestionCount(),
+      getDashboardBudgetSummary(),
+      getIngestionConnections(),
+    ]);
 
   const staleConnectionCount = connections.filter((connection) => {
-    if (connection.status !== "active" || connection.last_used_at !== null) return false;
-    return Date.now() - new Date(connection.created_at).getTime() > STALE_CONNECTION_GRACE_PERIOD_MS;
+    if (connection.status !== "active" || connection.last_used_at !== null) {
+      return false;
+    }
+    return Date.now() - new Date(connection.created_at).getTime() >
+      STALE_CONNECTION_GRACE_PERIOD_MS;
   }).length;
 
   const items: AttentionItem[] = [];
@@ -1666,7 +1766,9 @@ export async function getAttentionItems(): Promise<AttentionItem[]> {
   if (reviewQueueCount > 0) {
     items.push({
       id: "review-queue",
-      label: reviewQueueCount === 1 ? "Transaction needs review" : "Transactions need review",
+      label: reviewQueueCount === 1
+        ? "Transaction needs review"
+        : "Transactions need review",
       count: reviewQueueCount,
       href: "/transactions/review",
     });
@@ -1765,7 +1867,9 @@ export type GoalWithContributions = GoalRow & {
   contributions: GoalContributionRow[];
 };
 
-export async function getGoalById(id: string): Promise<GoalWithContributions | null> {
+export async function getGoalById(
+  id: string,
+): Promise<GoalWithContributions | null> {
   const supabase = await supabaseSession();
   const { data: goal, error: goalError } = await supabase
     .from("financial_goals")
@@ -1780,13 +1884,18 @@ export async function getGoalById(id: string): Promise<GoalWithContributions | n
 
   const { data: contributions, error: contributionsError } = await supabase
     .from("goal_contributions")
-    .select("id, amount_minor, contribution_date, source, transaction_id, created_at")
+    .select(
+      "id, amount_minor, contribution_date, source, transaction_id, created_at",
+    )
     .eq("goal_id", id)
     .order("contribution_date", { ascending: false })
     .order("created_at", { ascending: false });
 
   if (contributionsError) {
-    console.error("getGoalById contributions failed:", contributionsError.message);
+    console.error(
+      "getGoalById contributions failed:",
+      contributionsError.message,
+    );
     return null;
   }
 
@@ -1810,7 +1919,9 @@ export type GoalProgress = {
   projectedCompletionDate: string | null;
 };
 
-export async function getGoalProgress(goalId: string): Promise<GoalProgress | null> {
+export async function getGoalProgress(
+  goalId: string,
+): Promise<GoalProgress | null> {
   const supabase = await supabaseSession();
   const { data, error } = await supabase.rpc("goal_progress", {
     p_goal_id: goalId,
@@ -1835,7 +1946,9 @@ export async function getGoalProgress(goalId: string): Promise<GoalProgress | nu
     currentMinor: row.current_minor,
     pctComplete: Number(row.pct_complete),
     targetDate: row.target_date,
-    monthsToTarget: row.months_to_target === null ? null : Number(row.months_to_target),
+    monthsToTarget: row.months_to_target === null
+      ? null
+      : Number(row.months_to_target),
     requiredMonthlyMinor: row.required_monthly_minor,
     recentMonthlyRateMinor: row.recent_monthly_rate_minor,
     projectedCompletionDate: row.projected_completion_date,
@@ -1975,7 +2088,9 @@ export type CategorizationPolicyRow = {
 // editing a rule outside the workspace the user is currently viewing.
 // Same reasoning budget_category_mappings' actions already use
 // getActiveWorkspaceId() for.
-export async function getCategorizationPolicies(): Promise<CategorizationPolicyRow[]> {
+export async function getCategorizationPolicies(): Promise<
+  CategorizationPolicyRow[]
+> {
   const workspaceId = await getActiveWorkspaceId();
   if (!workspaceId) {
     return [];
@@ -2063,7 +2178,10 @@ export async function getAccountDetail(
     .maybeSingle();
 
   if (accountError) {
-    console.error("getAccountDetail account read failed:", accountError.message);
+    console.error(
+      "getAccountDetail account read failed:",
+      accountError.message,
+    );
     return null;
   }
   if (!accountData) return null;
@@ -2196,26 +2314,34 @@ export type LearnedPolicySuggestion = {
 // in 20260831000000_phase_h_learned_suggestions.sql) - there's no
 // background job in this app, so this always reflects the current state
 // of transaction_category_history, not a stale cached list.
-export async function getLearnedPolicySuggestions(): Promise<LearnedPolicySuggestion[]> {
+export async function getLearnedPolicySuggestions(): Promise<
+  LearnedPolicySuggestion[]
+> {
   const workspaceId = await getActiveWorkspaceId();
   if (!workspaceId) {
     return [];
   }
 
   const supabase = await supabaseSession();
-  const { data, error } = await supabase.rpc("detect_learned_policy_suggestions", {
-    p_workspace_id: workspaceId,
-    p_min_occurrences: 3,
-  });
+  const { data, error } = await supabase.rpc(
+    "detect_learned_policy_suggestions",
+    {
+      p_workspace_id: workspaceId,
+      p_min_occurrences: 3,
+    },
+  );
 
   if (error || !data) {
     console.error("getLearnedPolicySuggestions failed:", error?.message);
     return [];
   }
 
-  const sampleIds = data.flatMap((s: { sample_transaction_ids: string[] }) => s.sample_transaction_ids);
+  const sampleIds = data.flatMap((s: { sample_transaction_ids: string[] }) =>
+    s.sample_transaction_ids
+  );
   const { data: sampleTransactions } = sampleIds.length > 0
-    ? await supabase.from("transactions").select("id, amount_rwf, occurred_at").in("id", sampleIds)
+    ? await supabase.from("transactions").select("id, amount_rwf, occurred_at")
+      .in("id", sampleIds)
     : { data: [] as LearnedPolicySuggestionSample[] };
   const byId = new Map((sampleTransactions ?? []).map((t) => [t.id, t]));
 
@@ -2268,19 +2394,29 @@ export type CategorizationInsights = {
 // this repo's established convention for small aggregate views is a
 // single bounded read plus client-side reduction rather than a new SQL
 // function for every stats page.
-export async function getCategorizationInsights(): Promise<CategorizationInsights> {
+export async function getCategorizationInsights(): Promise<
+  CategorizationInsights
+> {
   const supabase = await supabaseSession();
 
-  const [{ data: transactions, error: txnError }, { data: policies, error: policyError }, {
-    data: historyRows,
-    error: historyError,
-  }] = await Promise.all([
+  const [
+    { data: transactions, error: txnError },
+    { data: policies, error: policyError },
+    {
+      data: historyRows,
+      error: historyError,
+    },
+  ] = await Promise.all([
     supabase.from("transactions").select("category_decision_status"),
-    supabase.from("categorization_policies").select("id, name, category, is_active, usage_count").eq(
+    supabase.from("categorization_policies").select(
+      "id, name, category, is_active, usage_count",
+    ).eq(
       "is_active",
       true,
     ),
-    supabase.from("transaction_category_history").select("transaction_id, actor_type"),
+    supabase.from("transaction_category_history").select(
+      "transaction_id, actor_type",
+    ),
   ]);
 
   if (txnError || policyError || historyError) {
@@ -2299,7 +2435,8 @@ export async function getCategorizationInsights(): Promise<CategorizationInsight
 
   const statusCounts: Record<string, number> = {};
   for (const t of transactions ?? []) {
-    statusCounts[t.category_decision_status] = (statusCounts[t.category_decision_status] ?? 0) + 1;
+    statusCounts[t.category_decision_status] =
+      (statusCounts[t.category_decision_status] ?? 0) + 1;
   }
 
   const unusedPolicies = (policies ?? [])
@@ -2308,14 +2445,16 @@ export async function getCategorizationInsights(): Promise<CategorizationInsight
 
   const actorsByTransaction = new Map<string, Set<string>>();
   for (const row of historyRows ?? []) {
-    const set = actorsByTransaction.get(row.transaction_id) ?? new Set<string>();
+    const set = actorsByTransaction.get(row.transaction_id) ??
+      new Set<string>();
     set.add(row.actor_type);
     actorsByTransaction.set(row.transaction_id, set);
   }
   let autoDecidedCount = 0;
   let correctedCount = 0;
   for (const actors of actorsByTransaction.values()) {
-    const hadAutoDecision = actors.has("ingestion_engine") || actors.has("system");
+    const hadAutoDecision = actors.has("ingestion_engine") ||
+      actors.has("system");
     if (hadAutoDecision) {
       autoDecidedCount += 1;
       if (actors.has("user")) correctedCount += 1;
@@ -2327,7 +2466,9 @@ export async function getCategorizationInsights(): Promise<CategorizationInsight
     statusCounts,
     activePolicyCount: (policies ?? []).length,
     unusedPolicies,
-    correctionRate: autoDecidedCount > 0 ? correctedCount / autoDecidedCount : null,
+    correctionRate: autoDecidedCount > 0
+      ? correctedCount / autoDecidedCount
+      : null,
   };
 }
 
@@ -2340,11 +2481,15 @@ export type BulkCategorizationRun = {
   actorType: string;
 };
 
-export async function getBulkCategorizationRuns(): Promise<BulkCategorizationRun[]> {
+export async function getBulkCategorizationRuns(): Promise<
+  BulkCategorizationRun[]
+> {
   const supabase = await supabaseSession();
   const { data, error } = await supabase
     .from("transaction_category_history")
-    .select("bulk_operation_id, policy_id, actor_type, created_at, categorization_policies(name, category)")
+    .select(
+      "bulk_operation_id, policy_id, actor_type, created_at, categorization_policies(name, category)",
+    )
     .not("bulk_operation_id", "is", null)
     .order("created_at", { ascending: false });
 
@@ -2365,7 +2510,9 @@ export async function getBulkCategorizationRuns(): Promise<BulkCategorizationRun
       | { name: string | null; category: string }
       | { name: string | null; category: string }[]
       | null;
-    const policy = Array.isArray(policyRelation) ? policyRelation[0] : policyRelation;
+    const policy = Array.isArray(policyRelation)
+      ? policyRelation[0]
+      : policyRelation;
     runs.set(key, {
       bulkOperationId: key,
       policyId: row.policy_id,
@@ -2443,7 +2590,12 @@ export async function getUserWorkspaces(): Promise<WorkspaceSummary[]> {
       | null;
     if (!workspace) return [];
     return [
-      { id: workspace.id, name: workspace.name, kind: workspace.kind, role: row.role },
+      {
+        id: workspace.id,
+        name: workspace.name,
+        kind: workspace.kind,
+        role: row.role,
+      },
     ] as WorkspaceSummary[];
   });
 }
@@ -2573,7 +2725,9 @@ export async function getSourceIngestEmails(): Promise<Record<string, string>> {
 
   const domain = process.env.INBOUND_EMAIL_DOMAIN?.trim() || "in.oneledger.me";
   const out: Record<string, string> = {};
-  for (const row of (data ?? []) as { id: string; ingest_email_token: string }[]) {
+  for (
+    const row of (data ?? []) as { id: string; ingest_email_token: string }[]
+  ) {
     out[row.id] = `u+${row.ingest_email_token}@${domain}`;
   }
   return out;
@@ -2586,7 +2740,8 @@ export async function getSourceIngestEmails(): Promise<Record<string, string>> {
 export async function getShareableHouseholds(): Promise<WorkspaceSummary[]> {
   const workspaces = await getUserWorkspaces();
   return workspaces.filter(
-    (workspace) => workspace.kind === "household" && workspace.role !== "viewer",
+    (workspace) =>
+      workspace.kind === "household" && workspace.role !== "viewer",
   );
 }
 
@@ -2692,7 +2847,9 @@ export async function getNotifications(limit = 50): Promise<NotificationRow[]> {
   }));
 }
 
-export async function getNotificationSettings(): Promise<NotificationSettings | null> {
+export async function getNotificationSettings(): Promise<
+  NotificationSettings | null
+> {
   const workspace = await getActiveWorkspace();
   if (!workspace || workspace.kind === "personal") return null;
 
@@ -2712,11 +2869,13 @@ export async function getNotificationSettings(): Promise<NotificationSettings | 
   ]);
 
   const prefMap = new Map<string, boolean>();
-  for (const p of (prefs ?? []) as unknown as Array<{
-    event_key: string;
-    channel: string;
-    enabled: boolean;
-  }>) {
+  for (
+    const p of (prefs ?? []) as unknown as Array<{
+      event_key: string;
+      channel: string;
+      enabled: boolean;
+    }>
+  ) {
     prefMap.set(`${p.event_key}:${p.channel}`, p.enabled);
   }
 
@@ -2767,7 +2926,9 @@ export type HouseholdSpendBreakdown = {
   buckets: HouseholdSpendBucket[];
 };
 
-export async function getHouseholdSpendingBreakdown(): Promise<HouseholdSpendBreakdown | null> {
+export async function getHouseholdSpendingBreakdown(): Promise<
+  HouseholdSpendBreakdown | null
+> {
   const workspace = await getActiveWorkspace();
   if (!workspace || workspace.kind !== "household") return null;
 
@@ -2776,10 +2937,9 @@ export async function getHouseholdSpendingBreakdown(): Promise<HouseholdSpendBre
   const year = Number(yearStr);
   const month = Number(monthStr); // 1-12
   const monthStartKey = `${monthKey}-01`;
-  const nextMonthStartKey =
-    month === 12
-      ? `${year + 1}-01-01`
-      : `${year}-${String(month + 1).padStart(2, "0")}-01`;
+  const nextMonthStartKey = month === 12
+    ? `${year + 1}-01-01`
+    : `${year}-${String(month + 1).padStart(2, "0")}-01`;
 
   const startUtc = kigaliDayBoundsUtc(monthStartKey).startUtc.toISOString();
   const endUtc = kigaliDayBoundsUtc(nextMonthStartKey).startUtc.toISOString();
@@ -2824,9 +2984,9 @@ export async function getHouseholdSpendingBreakdown(): Promise<HouseholdSpendBre
   const splitIds: string[] = [];
   for (const r of rows) {
     if (r.attribution_type === "shared") add("shared", effectOf(r));
-    else if (r.attribution_type === "member" && r.attributed_user_id)
+    else if (r.attribution_type === "member" && r.attributed_user_id) {
       add(r.attributed_user_id, effectOf(r));
-    else if (r.attribution_type === "split") splitIds.push(r.id);
+    } else if (r.attribution_type === "split") splitIds.push(r.id);
     else add("unassigned", effectOf(r));
   }
 
@@ -2836,11 +2996,13 @@ export async function getHouseholdSpendingBreakdown(): Promise<HouseholdSpendBre
       .select("transaction_id, user_id, share_bps")
       .in("transaction_id", splitIds);
     const byTxn = new Map<string, Array<{ userId: string; bps: number }>>();
-    for (const s of (splitRows ?? []) as unknown as Array<{
-      transaction_id: string;
-      user_id: string;
-      share_bps: number;
-    }>) {
+    for (
+      const s of (splitRows ?? []) as unknown as Array<{
+        transaction_id: string;
+        user_id: string;
+        share_bps: number;
+      }>
+    ) {
       const list = byTxn.get(s.transaction_id) ?? [];
       list.push({ userId: s.user_id, bps: s.share_bps });
       byTxn.set(s.transaction_id, list);
@@ -2853,7 +3015,9 @@ export async function getHouseholdSpendingBreakdown(): Promise<HouseholdSpendBre
         add("unassigned", effect);
         continue;
       }
-      for (const p of parts) add(p.userId, Math.round((effect * p.bps) / 10000));
+      for (const p of parts) {
+        add(p.userId, Math.round((effect * p.bps) / 10000));
+      }
     }
   }
 
@@ -2867,14 +3031,15 @@ export async function getHouseholdSpendingBreakdown(): Promise<HouseholdSpendBre
     .filter(([, minor]) => minor > 0)
     .map(([key, amountMinor]) => ({
       key,
-      label:
-        key === "shared"
-          ? "Shared"
-          : key === "unassigned"
-            ? "Unassigned"
-            : nameOf(key),
+      label: key === "shared"
+        ? "Shared"
+        : key === "unassigned"
+        ? "Unassigned"
+        : nameOf(key),
       amountMinor,
-      percent: totalMinor > 0 ? Math.round((amountMinor / totalMinor) * 100) : 0,
+      percent: totalMinor > 0
+        ? Math.round((amountMinor / totalMinor) * 100)
+        : 0,
     }))
     .sort((a, b) => {
       if (a.key === "shared") return -1;
@@ -3057,11 +3222,15 @@ export type ReportRunDetail = ReportRunSummary & {
   error_message: string | null;
 };
 
-export async function getReportRunById(id: string): Promise<ReportRunDetail | null> {
+export async function getReportRunById(
+  id: string,
+): Promise<ReportRunDetail | null> {
   const supabase = await supabaseSession();
   const { data, error } = await supabase
     .from("report_runs")
-    .select(`${REPORT_RUN_SUMMARY_COLUMNS}, report_payload, ai_payload, error_message`)
+    .select(
+      `${REPORT_RUN_SUMMARY_COLUMNS}, report_payload, ai_payload, error_message`,
+    )
     .eq("id", id)
     .maybeSingle();
 
@@ -3098,7 +3267,9 @@ const REPORT_PREFERENCES_COLUMNS =
   "id, timezone, daily_report_enabled, generation_time, delivery_time, email_enabled, delivery_email, include_ai_analysis, alert_large_transaction_rwf, alert_high_daily_spend_rwf, alert_elevated_fees_rwf, alert_low_balance_rwf, alert_sustained_negative_cashflow_days, alert_uncategorized_percent";
 
 /** The caller's own report preferences in their active workspace, or null if they've never set any (defaults are then whatever the settings form itself shows, never silently assumed enabled - see report_preferences' own migration comment on opt-in defaults). */
-export async function getReportPreferences(): Promise<ReportPreferencesRow | null> {
+export async function getReportPreferences(): Promise<
+  ReportPreferencesRow | null
+> {
   const supabase = await supabaseSession();
   const {
     data: { user },
@@ -3222,14 +3393,18 @@ export type ProfileOnboarding = {
   step: ProfileOnboardingStep;
 };
 
-export async function getProfileOnboarding(): Promise<ProfileOnboarding | null> {
+export async function getProfileOnboarding(): Promise<
+  ProfileOnboarding | null
+> {
   const supabase = await supabaseSession();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
   const { data, error } = await supabase
     .from("profiles")
-    .select("first_name, last_name, country_code, preferred_currency, timezone, locale, onboarding_step")
+    .select(
+      "first_name, last_name, country_code, preferred_currency, timezone, locale, onboarding_step",
+    )
     .eq("id", user.id)
     .maybeSingle();
 
@@ -3320,9 +3495,11 @@ export async function getOnboardingState(): Promise<OnboardingSnapshot> {
   const state = deriveOnboardingState({
     emailConfirmed: Boolean(user?.email_confirmed_at),
     accountCount: accounts.filter((a) => a.is_active && !a.archived_at).length,
-    activeConnectionCount:
-      connections.filter((c) => c.status === "active").length,
-    liveConnectionCount: connections.filter((c) => c.last_used_at != null).length,
+    activeConnectionCount: connections.filter((c) =>
+      c.status === "active"
+    ).length,
+    liveConnectionCount:
+      connections.filter((c) => c.last_used_at != null).length,
   });
 
   const dismissed = Boolean(prefsRes.data?.onboarding_dismissed);
@@ -3332,5 +3509,158 @@ export async function getOnboardingState(): Promise<OnboardingSnapshot> {
     enabled: true,
     dismissed,
     showNudge: !dismissed && !state.complete,
+  };
+}
+
+// ===========================================================================
+// Financial Statements (Financial Documents Engine). Read-only, session-
+// scoped (RLS on `statements` / `statement_transactions`). Generation,
+// authorization and the immutable snapshot live in lib/statement-
+// generation.ts; the download route in app/api/reports/statements/[id].
+// ===========================================================================
+
+export type StatementStatus = "preparing" | "generating" | "ready" | "failed";
+export type StatementTypeName = "standard" | "detailed";
+export type StatementScopeName = "single_account" | "all_accounts" | "filtered";
+
+export type StatementSummary = {
+  id: string;
+  statement_id: string;
+  statement_type: StatementTypeName;
+  scope: StatementScopeName;
+  status: StatementStatus;
+  period_start: string;
+  period_end: string;
+  timezone: string;
+  currency: string;
+  transaction_count: number;
+  supersedes_id: string | null;
+  generated_at: string | null;
+  created_at: string;
+};
+
+const STATEMENT_SUMMARY_COLUMNS =
+  "id, statement_id, statement_type, scope, status, period_start, period_end, timezone, currency, transaction_count, supersedes_id, generated_at, created_at";
+
+export async function getStatements(limit = 50): Promise<StatementSummary[]> {
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("statements")
+    .select(STATEMENT_SUMMARY_COLUMNS)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) {
+    console.error("getStatements failed:", error.message);
+    return [];
+  }
+  return (data ?? []) as StatementSummary[];
+}
+
+export type StatementLine = {
+  occurred_at: string;
+  display_description: string | null;
+  original_description: string | null;
+  reference: string | null;
+  direction: "in" | "out" | "neutral";
+  principal_effect_minor: number | null;
+  fee_effect_minor: number | null;
+  running_balance_minor: number | null;
+  category: string | null;
+};
+
+export type StatementSourceMeta = {
+  summaryLabel?: string;
+  sources?: {
+    id: string;
+    displayName: string;
+    maskedIdentifier: string | null;
+    dataSourceLabel: string;
+  }[];
+};
+
+export type StatementCoverageMeta = {
+  complete?: boolean;
+  statementLabel?: string;
+  warnings?: { kind: string; detail: string }[];
+  filtered?: boolean;
+  filterSummary?: string | null;
+};
+
+export type StatementPerCurrency = {
+  currency: string;
+  openingBalanceMinor: number | null;
+  closingBalanceMinor: number | null;
+  totalCreditsMinor: number;
+  totalDebitsMinor: number;
+  totalFeesMinor: number;
+  netMovementMinor: number;
+  transactionCount: number;
+  reconciles: boolean | null;
+};
+
+export type StatementDetail = {
+  id: string;
+  statement_id: string;
+  statement_type: StatementTypeName;
+  scope: StatementScopeName;
+  status: StatementStatus;
+  failure_reason: string | null;
+  account_ids: string[];
+  filters: { direction?: "in" | "out" } | null;
+  period_start: string;
+  period_end: string;
+  timezone: string;
+  currency: string;
+  opening_balance_minor: number | null;
+  closing_balance_minor: number | null;
+  total_credit_minor: number;
+  total_debit_minor: number;
+  total_fees_minor: number;
+  transaction_count: number;
+  per_currency: StatementPerCurrency[] | null;
+  source_metadata: StatementSourceMeta;
+  coverage_metadata: StatementCoverageMeta;
+  reconciles: boolean | null;
+  supersedes_id: string | null;
+  generated_at: string | null;
+  created_at: string;
+  /** First rows only - the full ledger is in the downloadable document. */
+  sampleLines: StatementLine[];
+  sampleTruncated: boolean;
+};
+
+export async function getStatementDetail(
+  id: string,
+  sampleSize = 15,
+): Promise<StatementDetail | null> {
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("statements")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) {
+    console.error("getStatementDetail failed:", error.message);
+    return null;
+  }
+  if (!data) return null;
+
+  const { data: lines } = await supabase
+    .from("statement_transactions")
+    .select(
+      "occurred_at, display_description, original_description, reference, direction, principal_effect_minor, fee_effect_minor, running_balance_minor, category",
+    )
+    .eq("statement_id", id)
+    .order("sort_index", { ascending: true })
+    .limit(sampleSize + 1);
+
+  const rows = (lines ?? []) as StatementLine[];
+  return {
+    ...(data as unknown as Omit<
+      StatementDetail,
+      "sampleLines" | "sampleTruncated"
+    >),
+    sampleLines: rows.slice(0, sampleSize),
+    sampleTruncated: rows.length > sampleSize,
   };
 }

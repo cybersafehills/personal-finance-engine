@@ -130,16 +130,21 @@ export function toDisplayFields(
 
 export type ScopeResolution =
   | { ok: true; scope: StatementScope; sourceIds: string[] }
-  | { ok: false; kind: "no_sources" | "unauthorized_source" };
+  | { ok: false; kind: "unauthorized_source" };
 
 /**
  * Turn a client's requested source ids into the concrete scope + source
  * list, or reject. `authorizedIds` is the set the caller may generate a
  * statement for in the active workspace (resolved server-side from
- * ownership / source_space_links). An empty request means "every
- * authorized account". Any requested id outside the authorized set is
- * rejected generically - no signal about whether it exists (master prompt
- * section 33).
+ * ownership / source_space_links).
+ *
+ * An EXPLICIT request must be a subset of the authorized set; anything
+ * outside it is rejected generically - no signal about whether it exists
+ * (master prompt section 33). An EMPTY request means "everything in this
+ * workspace the caller can see": it resolves to `all_accounts` with the
+ * authorized ids (possibly none - the fact query is then simply
+ * unrestricted and RLS is the boundary; a workspace with only legacy
+ * source-less transactions still works).
  */
 export function resolveStatementScope(
   requestedIds: string[],
@@ -151,7 +156,6 @@ export function resolveStatementScope(
 
   let sourceIds: string[];
   if (requested.length === 0) {
-    if (authorized.size === 0) return { ok: false, kind: "no_sources" };
     sourceIds = Array.from(authorized);
   } else {
     if (!requested.every((id) => authorized.has(id))) {

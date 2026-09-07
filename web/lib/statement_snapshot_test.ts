@@ -97,10 +97,11 @@ Deno.test("resolveStatementScope: empty request means every authorized account",
   assertEquals(r.sourceIds.sort(), ["a", "b"]);
 });
 
-Deno.test("resolveStatementScope: nothing authorized is rejected", () => {
+Deno.test("resolveStatementScope: an empty request with nothing enumerable still resolves to all_accounts", () => {
   const r = resolveStatementScope([], [], undefined);
-  assert(!r.ok);
-  assertEquals(r.kind, "no_sources");
+  assert(r.ok);
+  assertEquals(r.scope, "all_accounts");
+  assertEquals(r.sourceIds, []);
 });
 
 Deno.test("resolveStatementScope: one authorized source -> single_account", () => {

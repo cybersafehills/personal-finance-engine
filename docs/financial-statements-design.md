@@ -22,10 +22,10 @@ downstream of the existing `reports` experience surface.
 | Phase | Scope | State |
 |---|---|---|
 | PR1 | Schema foundation + flag + this doc | **done** |
-| PR2 | Pure engine: period presets, statement id, calculation, coverage | planned |
-| PR3 | Generation + immutable snapshot persistence + authorization + idempotency | planned |
-| PR4 | PDF + CSV rendering, private storage, signed-URL download, integrity hash | planned |
-| PR5 | Statements UI: landing, staged generate flow, preview, detail, download, regenerate, delete | planned |
+| PR2 | Pure engine: period presets, statement id, calculation, coverage | **done** |
+| PR3 | Generation + immutable snapshot persistence + authorization + idempotency | **done** |
+| PR4 | PDF + CSV rendering, private storage, signed-URL download, integrity hash | **done** |
+| PR5 | Statements UI: landing, staged generate flow, preview, detail, download, regenerate, delete | **done** |
 | PR6 | `statement.generate` capability + audit + monitoring + help content + regression sweep | planned |
 
 ## Where each piece lives
@@ -38,12 +38,15 @@ downstream of the existing `reports` experience surface.
 | Public statement id | `web/lib/statement-id.ts` *(PR2)* — `OL-ST-YYYYMMDD-XXXXXX`, 6 Crockford-base32 chars |
 | Deterministic calculation | `web/lib/statement-math.ts` *(PR2)* — opening/closing/credits/debits/fees/net/count/running balances/`reconciles`/per-currency; zero-import, `deno test` |
 | Source & coverage disclosure | `web/lib/statement-coverage.ts` *(PR2)* |
-| Generation + snapshot (service role, after explicit membership check) | `web/lib/statement-generation.ts` *(PR3)* |
-| Server actions | `web/app/actions/statements.ts` *(PR3)* — `previewStatement`, `createStatement`, `deleteStatement`, `regenerateStatement` |
-| PDF renderer | `web/lib/statement-pdf.tsx` *(PR4)* — `@react-pdf/renderer`, new document family (not `report-pdf.tsx`) |
-| CSV renderer | `web/lib/statement-csv.ts` *(PR4)* — via `web/lib/integrations/export/csv-safe.ts` (formula-injection safe) |
-| Metadata + document download routes | `web/app/api/reports/statements/[id]/route.ts`, `.../[id]/document/route.ts?format=pdf\|csv` *(PR4)* — cloned from `web/app/api/reports/[id]/pdf/route.ts` |
-| Statements UI | `web/app/reports/statements/**` *(PR5)* |
+| Generation + snapshot (service role, after explicit membership check) | `web/lib/statement-generation.ts` — plus `getStatementFormOptions()` for the new-statement form |
+| Shared request/outcome contracts | `web/lib/statement-types.ts` — no `server-only`, safe to import from the client flow |
+| Pure snapshot shaping | `web/lib/statement-snapshot.ts` — scope resolution, row/record builders |
+| Server actions | `web/app/reports/statements/actions.ts` — `previewStatementAction`, `createStatementAction`, `regenerateStatementAction`, `deleteStatementAction` (each re-checks the flag) |
+| Render model + CSV | `web/lib/statement-document.ts` — `StatementDocData`, `buildStatementCsv`, amount/date formatters (deno-tested) |
+| PDF renderer | `web/lib/statement-pdf.tsx` — `@react-pdf/renderer`, new document family (not `report-pdf.tsx`) |
+| Document download route | `web/app/api/reports/statements/[id]/document/route.ts?format=pdf\|csv` — cloned from `web/app/api/reports/[id]/pdf/route.ts` |
+| Read helpers | `web/lib/queries.ts` — `getStatements`, `getStatementDetail` (session/RLS) |
+| Statements UI | `web/app/reports/statements/{page,new/page,[id]/page}.tsx`; components `GenerateStatementFlow`, `StatementActions`, `StatementsTabs`, `StatementStatusBadge`; a "Reports / Statements" tab strip on `/reports` |
 | Help / FAQ content | *(PR6)* |
 
 ## Data model
