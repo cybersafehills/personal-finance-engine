@@ -785,10 +785,13 @@ AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from inform
 # Account deletion request (20261201000000) adds account_deletion_requests
 # with a SELECT-only grant for authenticated (writes service-role only).
 # 149 + 1 = 150.
-if [ "$AUTHENTICATED_GRANT_COUNT" = "151" ]; then
-  pass "authenticated holds exactly the 151 table grants expected, no more"
+# Insight notifications (20261209000000) adds user_insight_state with a
+# SELECT-only grant for authenticated (writes via note_insight_change /
+# service-role only). 151 + 1 = 152.
+if [ "$AUTHENTICATED_GRANT_COUNT" = "152" ]; then
+  pass "authenticated holds exactly the 152 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 151 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 152 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.

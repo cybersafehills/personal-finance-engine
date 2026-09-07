@@ -45,6 +45,31 @@ as $$
   ) as c(event_key, label, default_in_app, default_email, security_notable);
 $$;
 
+-- notification_default_enabled() keeps its own hardcoded in_app list
+-- (inlined so should_notify() needs no nested EXECUTE grant). It must
+-- learn the new event too, or should_notify() returns false and
+-- enqueue_notification() writes nothing.
+create or replace function public.notification_default_enabled(
+  p_event_key text,
+  p_channel text
+)
+returns boolean
+language sql
+immutable
+as $$
+  select case
+    when public.notification_event_is_security_notable(p_event_key) then true
+    when p_channel = 'in_app' then p_event_key in (
+      'transaction.large', 'budget.threshold_90', 'budget.exceeded',
+      'goal.contribution', 'insight.forecast_update'
+    )
+    when p_channel = 'email' then p_event_key in (
+      'budget.exceeded', 'report.weekly', 'report.monthly'
+    )
+    else false
+  end;
+$$;
+
 -- ---------------------------------------------------------------------------
 -- 2. Per (user, workspace) last-seen insight state - global de-dupe (not
 --    per-device) + the 12h rate-limit clock.
