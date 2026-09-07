@@ -3664,3 +3664,29 @@ export async function getStatementDetail(
     sampleTruncated: rows.length > sampleSize,
   };
 }
+
+export type StatementPackSummary = {
+  id: string;
+  pack_id: string;
+  title: string | null;
+  item_count: number;
+  status: "generating" | "ready" | "failed";
+  byte_size: number | null;
+  created_at: string;
+};
+
+export async function getStatementPacks(
+  limit = 20,
+): Promise<StatementPackSummary[]> {
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("statement_packs")
+    .select("id, pack_id, title, item_count, status, byte_size, created_at")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) {
+    console.error("getStatementPacks failed:", error.message);
+    return [];
+  }
+  return (data ?? []) as StatementPackSummary[];
+}

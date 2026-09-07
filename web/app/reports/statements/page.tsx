@@ -4,8 +4,14 @@ import { PageHeader } from "../../../components/PageHeader";
 import { EmptyState } from "../../../components/EmptyState";
 import { StatementsTabs } from "../../../components/StatementsTabs";
 import { StatementStatusBadge } from "../../../components/StatementStatusBadge";
+import { CreatePackForm } from "../../../components/CreatePackForm";
+import { StatementPackDelete } from "../../../components/StatementPackDelete";
 import { isFinancialStatementsEnabled } from "../../../lib/financial-statements";
-import { getStatements, type StatementScopeName } from "../../../lib/queries";
+import {
+  getStatementPacks,
+  getStatements,
+  type StatementScopeName,
+} from "../../../lib/queries";
 import { reconstructStatementPeriod } from "../../../lib/statement-period";
 import { formatZonedDateTime } from "../../../lib/format";
 
@@ -29,7 +35,20 @@ const generateCta = (
 export default async function StatementsPage() {
   if (!isFinancialStatementsEnabled()) notFound();
 
-  const statements = await getStatements();
+  const [statements, packs] = await Promise.all([
+    getStatements(),
+    getStatementPacks(),
+  ]);
+  const readyStatements = statements
+    .filter((s) => s.status === "ready")
+    .map((s) => {
+      const period = reconstructStatementPeriod(
+        new Date(s.period_start),
+        new Date(s.period_end),
+        s.timezone,
+      );
+      return { id: s.id, label: `${period.label} · ${s.statement_id}` };
+    });
 
   return (
     <div>
@@ -96,6 +115,46 @@ export default async function StatementsPage() {
         )}
 
       <details className="mt-6 rounded-card border border-border-subtle bg-surface p-4 text-sm">
+        <summary className="cursor-pointer font-medium text-text-primary">
+          Financial packs
+          <span className="ml-2 font-normal text-text-muted">
+            bundle several statements into one ZIP
+          </span>
+        </summary>
+        <div className="mt-3 flex flex-col gap-4">
+          {packs.length > 0 && (
+            <ul className="flex flex-col gap-2">
+              {packs.map((p) => (
+                <li
+                  key={p.id}
+                  className="flex flex-wrap items-center gap-2 rounded-control border border-border-subtle bg-background px-3 py-2 text-sm"
+                >
+                  <span className="font-medium text-text-primary">
+                    {p.title || p.pack_id}
+                  </span>
+                  <span className="text-xs text-text-muted">
+                    {p.item_count}{" "}
+                    {p.item_count === 1 ? "statement" : "statements"}
+                    {p.status !== "ready" ? ` · ${p.status}` : ""}
+                  </span>
+                  {p.status === "ready" && (
+                    <a
+                      href={`/api/reports/statements/packs/${p.id}`}
+                      className="ml-auto text-xs font-medium text-accent"
+                    >
+                      Download ZIP
+                    </a>
+                  )}
+                  <StatementPackDelete packUuid={p.id} />
+                </li>
+              ))}
+            </ul>
+          )}
+          <CreatePackForm statements={readyStatements} />
+        </div>
+      </details>
+
+      <details className="mt-4 rounded-card border border-border-subtle bg-surface p-4 text-sm">
         <summary className="cursor-pointer font-medium text-text-primary">
           About statements
         </summary>

@@ -57,3 +57,31 @@ export async function deleteStatementAction(
   if (result.ok) revalidatePath("/reports/statements");
   return result;
 }
+
+export async function createStatementPackAction(
+  statementIds: string[],
+  title: string,
+): Promise<
+  | { ok: true; id: string; packId: string }
+  | { ok: false; error: string }
+> {
+  if (!isFinancialStatementsEnabled()) {
+    return { ok: false, error: "Statements aren't available right now." };
+  }
+  const { createStatementPack } = await import("../../../lib/statement-pack");
+  const result = await createStatementPack({ statementIds, title });
+  if (result.ok) revalidatePath("/reports/statements");
+  return result;
+}
+
+export async function deleteStatementPackAction(
+  packUuid: string,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isFinancialStatementsEnabled()) {
+    return { ok: false, error: "Statements aren't available right now." };
+  }
+  const { deleteStatementPack } = await import("../../../lib/statement-pack");
+  const result = await deleteStatementPack(packUuid);
+  if (result.ok) revalidatePath("/reports/statements");
+  return result;
+}

@@ -78,3 +78,18 @@ export function generateStatementId(
 export function isStatementId(value: string): boolean {
   return STATEMENT_ID_PATTERN.test(value);
 }
+
+// A Financial Pack's public id: OL-PK-YYYYMMDD-XXXXXX, same alphabet.
+export const STATEMENT_PACK_ID_PATTERN = /^OL-PK-\d{8}-[0-9A-HJ-NP-Z]{6}$/;
+
+export function generateStatementPackId(
+  opts: { now?: Date; randomBytes?: RandomBytes } = {},
+): string {
+  return `OL-PK-${statementIdDatePart(opts.now)}-${
+    randomStatementSuffix(opts.randomBytes)
+  }`;
+}
+
+export function isStatementPackId(value: string): boolean {
+  return STATEMENT_PACK_ID_PATTERN.test(value);
+}

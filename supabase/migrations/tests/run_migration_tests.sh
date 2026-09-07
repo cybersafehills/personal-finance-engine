@@ -670,7 +670,9 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # statement_transactions and statement_artifacts (all RLS enabled;
 # statement_artifacts has zero anon/authenticated grants, like
 # report_artifacts) - 125 tables, 124 with RLS.
-if [ "$TABLE_COUNT" = "125" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Statement Packs PR10 (20261212000000) adds statement_packs (RLS enabled,
+# member SELECT+DELETE) - 126 tables, 125 with RLS.
+if [ "$TABLE_COUNT" = "126" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -797,10 +799,12 @@ AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from inform
 # snapshot is written by lib/statement-generation.ts via the service role,
 # so there is no authenticated insert/update. statement_artifacts gets zero
 # authenticated grants (like report_artifacts). 152 + 3 = 155.
-if [ "$AUTHENTICATED_GRANT_COUNT" = "155" ]; then
-  pass "authenticated holds exactly the 155 table grants expected, no more"
+# Statement Packs PR10 (20261212000000) adds statement_packs (select, delete
+# = 2) for authenticated; the ZIP is built by the service role. 155 + 2 = 157.
+if [ "$AUTHENTICATED_GRANT_COUNT" = "157" ]; then
+  pass "authenticated holds exactly the 157 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 155 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 157 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -2607,6 +2611,43 @@ if [ "$STMT_SVC" = "2" ]; then
 else
   fail "Statements RLS: service_role could not see both statements (got $STMT_SVC)"
 fi
+
+# --- Financial Packs (20261212000000) --------------------------------
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.statement_packs (id, pack_id, workspace_id, created_by, statement_ids, item_count, status)
+  values
+    ('00000000-0000-0000-0000-0000000000f7', 'OL-PK-20260907-AAAAAA', '$WORKSPACE_A', '$USER_A', array['00000000-0000-0000-0000-0000000000fb']::uuid[], 1, 'ready'),
+    ('00000000-0000-0000-0000-0000000000f6', 'OL-PK-20260907-BBBBBB', '$WORKSPACE_B', '$USER_B', array['00000000-0000-0000-0000-0000000000fc']::uuid[], 1, 'ready');
+" >/dev/null
+PACK_OWN="$(as_user "$USER_A" "select count(*) from public.statement_packs where id = '00000000-0000-0000-0000-0000000000f7';")"
+PACK_OTHER="$(as_user "$USER_A" "select count(*) from public.statement_packs where id = '00000000-0000-0000-0000-0000000000f6';")"
+if [ "$PACK_OWN" = "1" ] && [ "$PACK_OTHER" = "0" ]; then
+  pass "Packs RLS: a member sees their workspace's pack, never another tenant's"
+else
+  fail "Packs RLS: cross-tenant read (own=$PACK_OWN other=$PACK_OTHER)"
+fi
+if as_user "$USER_A" "insert into public.statement_packs (pack_id, workspace_id, created_by, statement_ids) values ('OL-PK-20260907-CCCCCC', '$WORKSPACE_A', '$USER_A', array['00000000-0000-0000-0000-0000000000fb']::uuid[]);" >/dev/null 2>$ARTIFACT_DIR/pfe_pack_ins.log; then
+  fail "Packs RLS: authenticated forged a statement_packs row"
+else
+  pass "Packs RLS: authenticated cannot INSERT a statement_packs row"
+fi
+rm -f $ARTIFACT_DIR/pfe_pack_ins.log
+as_user "$USER_B" "delete from public.statement_packs where id = '00000000-0000-0000-0000-0000000000f7';" >/dev/null 2>&1 || true
+PACK_CROSS_DEL="$(psql -d pfe_rls -t -A -c "select count(*) from public.statement_packs where id = '00000000-0000-0000-0000-0000000000f7';")"
+as_user "$USER_A" "delete from public.statement_packs where id = '00000000-0000-0000-0000-0000000000f7';" >/dev/null
+PACK_OWN_DEL="$(psql -d pfe_rls -t -A -c "select count(*) from public.statement_packs where id = '00000000-0000-0000-0000-0000000000f7';")"
+if [ "$PACK_CROSS_DEL" = "1" ] && [ "$PACK_OWN_DEL" = "0" ]; then
+  pass "Packs RLS: another tenant cannot delete a pack; a member deletes their own"
+else
+  fail "Packs RLS: delete gate wrong (cross=$PACK_CROSS_DEL own_after=$PACK_OWN_DEL)"
+fi
+if psql -d pfe_rls -c "set role service_role; insert into public.statement_packs (pack_id, workspace_id, created_by, statement_ids) values ('not-a-pack-id', '$WORKSPACE_A', '$USER_A', array['00000000-0000-0000-0000-0000000000fb']::uuid[]);" >/dev/null 2>$ARTIFACT_DIR/pfe_pack_fmt.log; then
+  fail "Packs: the pack_id format CHECK accepted a malformed id"
+else
+  pass "Packs: the pack_id format CHECK rejects a malformed id"
+fi
+rm -f $ARTIFACT_DIR/pfe_pack_fmt.log
 
 # ===========================================================================
 # Phase M: USSD directory. Non-admin visibility is limited to published
