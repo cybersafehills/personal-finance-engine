@@ -2439,6 +2439,142 @@ else
 fi
 
 # ===========================================================================
+# Financial Statements (20261210000000): the generated snapshot must be
+# readable by a workspace member, invisible to other tenants, and
+# UN-WRITABLE from the client (no authenticated INSERT/UPDATE - the
+# service role writes it after lib/statement-generation.ts verifies
+# membership). statement_artifacts has zero authenticated access, like
+# report_artifacts. Reuses pfe_rls (USER_A/WORKSPACE_A, USER_B/WORKSPACE_B).
+# ===========================================================================
+echo "=== Financial Statements: snapshot immutability + tenant isolation ==="
+
+STMT_SV_USER="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('stmt-viewer@example.com') returning id;" | head -1)"
+
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  -- A statement in each workspace, plus a child row and an artifact for A's.
+  insert into public.statements
+    (id, statement_id, workspace_id, created_by, period_start, period_end, timezone, total_credit_minor, transaction_count)
+  values
+    ('00000000-0000-0000-0000-0000000000fb', 'OL-ST-20260907-AAAAAA', '$WORKSPACE_A', '$USER_A', '2026-08-01T00:00:00Z', '2026-09-01T00:00:00Z', 'Africa/Kigali', 10000, 1),
+    ('00000000-0000-0000-0000-0000000000fc', 'OL-ST-20260907-BBBBBB', '$WORKSPACE_B', '$USER_B', '2026-08-01T00:00:00Z', '2026-09-01T00:00:00Z', 'Africa/Kigali', 500, 1),
+    ('00000000-0000-0000-0000-0000000000fd', 'OL-ST-20260907-CCCCCC', '$WORKSPACE_A', '$USER_A', '2026-08-01T00:00:00Z', '2026-09-01T00:00:00Z', 'Africa/Kigali', 0, 1);
+  insert into public.statement_transactions
+    (id, statement_id, transaction_id, occurred_at, direction, sort_index)
+  values
+    ('00000000-0000-0000-0000-00000000fb01', '00000000-0000-0000-0000-0000000000fb', '00000000-0000-0000-0000-0000000000d3', now(), 'out', 0),
+    ('00000000-0000-0000-0000-00000000fd01', '00000000-0000-0000-0000-0000000000fd', '00000000-0000-0000-0000-0000000000d3', now(), 'out', 0);
+  insert into public.statement_artifacts (id, statement_id, storage_path, byte_size, checksum)
+  values ('00000000-0000-0000-0000-0000000000fe', '00000000-0000-0000-0000-0000000000fb', 'statements/fb.pdf', 2048, 'deadbeef');
+  -- Give STMT_SV_USER a viewer seat in WORKSPACE_A.
+  insert into public.workspace_memberships (workspace_id, user_id, role, status, joined_at)
+  values ('$WORKSPACE_A', '$STMT_SV_USER', 'viewer', 'active', now());
+" >/dev/null
+
+# Member reads own workspace's statement + child; cannot see the other tenant's.
+STMT_OWN="$(as_user "$USER_A" "select count(*) from public.statements where id = '00000000-0000-0000-0000-0000000000fb';")"
+STMT_OTHER="$(as_user "$USER_A" "select count(*) from public.statements where id = '00000000-0000-0000-0000-0000000000fc';")"
+STMT_TXN_OWN="$(as_user "$USER_A" "select count(*) from public.statement_transactions where statement_id = '00000000-0000-0000-0000-0000000000fb';")"
+STMT_TXN_OTHER="$(as_user "$USER_A" "select count(*) from public.statement_transactions where statement_id = '00000000-0000-0000-0000-0000000000fc';")"
+if [ "$STMT_OWN" = "1" ] && [ "$STMT_OTHER" = "0" ] && [ "$STMT_TXN_OWN" = "1" ] && [ "$STMT_TXN_OTHER" = "0" ]; then
+  pass "Statements RLS: a member reads their workspace's statement + rows, never another tenant's"
+else
+  fail "Statements RLS: cross-tenant read (own=$STMT_OWN other=$STMT_OTHER txn_own=$STMT_TXN_OWN txn_other=$STMT_TXN_OTHER)"
+fi
+
+# No authenticated INSERT on statements (deny-by-default: the snapshot is service-role-written).
+if as_user "$USER_A" "insert into public.statements (statement_id, workspace_id, created_by, period_start, period_end, timezone) values ('OL-ST-20260907-DDDDDD', '$WORKSPACE_A', '$USER_A', '2026-08-01T00:00:00Z', '2026-09-01T00:00:00Z', 'Africa/Kigali');" >/dev/null 2>$ARTIFACT_DIR/pfe_stmt_insert.log; then
+  fail "Statements RLS: authenticated forged a statements row - snapshot is not immutable"
+else
+  pass "Statements RLS: authenticated cannot INSERT a statements row (no grant/policy)"
+fi
+rm -f $ARTIFACT_DIR/pfe_stmt_insert.log
+
+# No authenticated UPDATE on statements (a finalized statement never changes).
+as_user "$USER_A" "update public.statements set total_credit_minor = 999999 where id = '00000000-0000-0000-0000-0000000000fb';" >/dev/null 2>&1 || true
+STMT_UNCHANGED="$(psql -d pfe_rls -t -A -c "select count(*) from public.statements where id = '00000000-0000-0000-0000-0000000000fb' and total_credit_minor = 10000;")"
+if [ "$STMT_UNCHANGED" = "1" ]; then
+  pass "Statements RLS: authenticated cannot UPDATE a statements row"
+else
+  fail "Statements RLS: a client UPDATE against a statements row was not blocked"
+fi
+
+# No authenticated INSERT on statement_transactions (frozen snapshot rows).
+if as_user "$USER_A" "insert into public.statement_transactions (statement_id, occurred_at, direction, sort_index) values ('00000000-0000-0000-0000-0000000000fb', now(), 'out', 99);" >/dev/null 2>$ARTIFACT_DIR/pfe_stmt_child_insert.log; then
+  fail "Statements RLS: authenticated inserted a statement_transactions row - snapshot is forgeable"
+else
+  pass "Statements RLS: authenticated cannot INSERT a statement_transactions row"
+fi
+rm -f $ARTIFACT_DIR/pfe_stmt_child_insert.log
+
+# statement_artifacts: zero authenticated access, exactly like report_artifacts.
+if as_user "$USER_A" "select count(*) from public.statement_artifacts where id = '00000000-0000-0000-0000-0000000000fe';" >/dev/null 2>$ARTIFACT_DIR/pfe_stmt_art_read.log; then
+  fail "Statements RLS: authenticated could query statement_artifacts - should have no grant at all"
+else
+  pass "Statements RLS: authenticated cannot query statement_artifacts (no grant at all)"
+fi
+rm -f $ARTIFACT_DIR/pfe_stmt_art_read.log
+
+# A viewer sees statements (select policy is any member) but cannot delete one.
+SV_SEES="$(as_user "$STMT_SV_USER" "select count(*) from public.statements where id = '00000000-0000-0000-0000-0000000000fd';")"
+as_user "$STMT_SV_USER" "delete from public.statements where id = '00000000-0000-0000-0000-0000000000fd';" >/dev/null 2>&1 || true
+SV_DELETE_BLOCKED="$(psql -d pfe_rls -t -A -c "select count(*) from public.statements where id = '00000000-0000-0000-0000-0000000000fd';")"
+if [ "$SV_SEES" = "1" ] && [ "$SV_DELETE_BLOCKED" = "1" ]; then
+  pass "Statements RLS: a viewer can read a statement but cannot delete one (delete needs 'member')"
+else
+  fail "Statements RLS: viewer delete gate wrong (sees=$SV_SEES still_there=$SV_DELETE_BLOCKED)"
+fi
+
+# Another tenant cannot delete this workspace's statement.
+as_user "$USER_B" "delete from public.statements where id = '00000000-0000-0000-0000-0000000000fd';" >/dev/null 2>&1 || true
+CROSS_DELETE_BLOCKED="$(psql -d pfe_rls -t -A -c "select count(*) from public.statements where id = '00000000-0000-0000-0000-0000000000fd';")"
+if [ "$CROSS_DELETE_BLOCKED" = "1" ]; then
+  pass "Statements RLS: another tenant cannot delete this workspace's statement"
+else
+  fail "Statements RLS: cross-tenant delete of a statement was not blocked"
+fi
+
+# A member CAN delete their own workspace's statement; the child rows cascade.
+as_user "$USER_A" "delete from public.statements where id = '00000000-0000-0000-0000-0000000000fd';" >/dev/null
+STMT_GONE="$(psql -d pfe_rls -t -A -c "select count(*) from public.statements where id = '00000000-0000-0000-0000-0000000000fd';")"
+CHILD_GONE="$(psql -d pfe_rls -t -A -c "select count(*) from public.statement_transactions where id = '00000000-0000-0000-0000-00000000fd01';")"
+if [ "$STMT_GONE" = "0" ] && [ "$CHILD_GONE" = "0" ]; then
+  pass "Statements RLS: a member deletes their own statement and statement_transactions cascade"
+else
+  fail "Statements RLS: member delete/cascade failed (statement=$STMT_GONE child=$CHILD_GONE)"
+fi
+
+# statement_id CHECK rejects a malformed id (service role, so RLS is not the gate here).
+if psql -d pfe_rls -c "set role service_role; insert into public.statements (statement_id, workspace_id, created_by, period_start, period_end, timezone) values ('not-a-valid-id', '$WORKSPACE_A', '$USER_A', '2026-08-01T00:00:00Z', '2026-09-01T00:00:00Z', 'Africa/Kigali');" >/dev/null 2>$ARTIFACT_DIR/pfe_stmt_idcheck.log; then
+  fail "Statements: the statement_id format CHECK accepted a malformed id"
+else
+  pass "Statements: the statement_id format CHECK rejects a malformed id"
+fi
+rm -f $ARTIFACT_DIR/pfe_stmt_idcheck.log
+
+# UNIQUE (workspace_id, client_token) enforces idempotency.
+if psql -d pfe_rls -c "
+  set role service_role;
+  insert into public.statements (statement_id, workspace_id, created_by, period_start, period_end, timezone, client_token)
+  values ('OL-ST-20260907-EEEEEE', '$WORKSPACE_A', '$USER_A', '2026-08-01T00:00:00Z', '2026-09-01T00:00:00Z', 'Africa/Kigali', '11111111-1111-1111-1111-111111111111');
+  insert into public.statements (statement_id, workspace_id, created_by, period_start, period_end, timezone, client_token)
+  values ('OL-ST-20260907-FFFFFF', '$WORKSPACE_A', '$USER_A', '2026-08-01T00:00:00Z', '2026-09-01T00:00:00Z', 'Africa/Kigali', '11111111-1111-1111-1111-111111111111');
+" >/dev/null 2>$ARTIFACT_DIR/pfe_stmt_token.log; then
+  fail "Statements: a second row reused an idempotency token (workspace_id, client_token) not unique"
+else
+  pass "Statements: UNIQUE (workspace_id, client_token) blocks a duplicate idempotency token"
+fi
+rm -f $ARTIFACT_DIR/pfe_stmt_token.log
+
+# service_role is unaffected by all of the above.
+STMT_SVC="$(psql -d pfe_rls -t -A -c "set role service_role; select count(*) from public.statements where id in ('00000000-0000-0000-0000-0000000000fb', '00000000-0000-0000-0000-0000000000fc');" | tail -1)"
+if [ "$STMT_SVC" = "2" ]; then
+  pass "Statements RLS: service_role sees every workspace's statements, unaffected by RLS"
+else
+  fail "Statements RLS: service_role could not see both statements (got $STMT_SVC)"
+fi
+
+# ===========================================================================
 # Phase M: USSD directory. Non-admin visibility is limited to published
 # rows; the admin RPCs are is_platform_admin()-gated; the publication
 # state machine rejects illegal jumps; the report insert is rate-limited;

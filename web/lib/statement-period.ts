@@ -113,10 +113,43 @@ export function formatStatementDayLabel(dateKey: string): string {
   });
 }
 
-function periodLabel(startDateKey: string, endDateKey: string): string {
+export function statementPeriodLabel(
+  startDateKey: string,
+  endDateKey: string,
+): string {
   return `${formatStatementDayLabel(startDateKey)} – ${
     formatStatementDayLabel(endDateKey)
   }`;
+}
+
+/**
+ * Rebuild a ResolvedStatementPeriod from stored instants + timezone (a
+ * statements row's period_start / period_end / timezone) - used when
+ * regenerating an existing statement, where the original request has
+ * already been validated and only the label / date keys need recomputing.
+ * The end instant is exclusive, so the inclusive last day is the local
+ * date of the instant one millisecond before it.
+ */
+export function reconstructStatementPeriod(
+  periodStartUtc: Date,
+  periodEndUtc: Date,
+  timezone: string,
+): ResolvedStatementPeriod {
+  const startDateKey = zonedDateKey(periodStartUtc, timezone);
+  const endDateKey = zonedDateKey(
+    new Date(periodEndUtc.getTime() - 1),
+    timezone,
+  );
+  return {
+    preset: "custom",
+    timezone,
+    periodStartUtc,
+    periodEndUtc,
+    startDateKey,
+    endDateKey,
+    label: statementPeriodLabel(startDateKey, endDateKey),
+    adjustments: [],
+  };
 }
 
 /**
@@ -241,7 +274,7 @@ export function resolveStatementPeriod(
       periodEndUtc,
       startDateKey,
       endDateKey,
-      label: periodLabel(startDateKey, endDateKey),
+      label: statementPeriodLabel(startDateKey, endDateKey),
       adjustments,
     },
   };

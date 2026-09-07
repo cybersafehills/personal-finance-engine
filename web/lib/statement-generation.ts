@@ -1,0 +1,844 @@
+import "server-only";
+import { supabaseSession } from "./supabase-session-server";
+import { supabaseServer } from "./supabase-server";
+import { getActiveWorkspace, type WorkspaceSummary } from "./queries";
+import { isValidReportTimezone } from "./timezones";
+import {
+  reconstructStatementPeriod,
+  type ResolvedStatementPeriod,
+  resolveStatementPeriod,
+  type StatementPeriodPreset,
+} from "./statement-period";
+import {
+  computeStatementMath,
+  type StatementCurrencyTotals,
+  type StatementMathResult,
+  type StatementRunningBalanceBasis,
+} from "./statement-math";
+import {
+  buildStatementCoverageMetadata,
+  type StatementCoverageMetadata,
+  type StatementSourceDescriptor,
+  type StatementSourceMetadata,
+} from "./statement-coverage";
+import {
+  buildStatementRecord,
+  buildStatementTransactionRows,
+  type LedgerTxnRow,
+  MAX_STATEMENT_TRANSACTIONS,
+  resolveStatementScope,
+  type StatementFilters,
+  type StatementScope,
+  type StatementType,
+  toCoverageFact,
+  toMathFact,
+} from "./statement-snapshot";
+
+// Statement generation orchestrator (Financial Documents Engine, PR3).
+//
+// Authorization model (mirrors report-generation.ts's reasoning, inverted
+// for a user-initiated action):
+//   * The caller's session client (RLS) is used for every READ - the
+//     active-workspace check, source authorization, the transaction facts
+//     and the opening/closing balances. RLS on `transactions` /
+//     `financial_sources` is the real per-row boundary, including
+//     household per-source visibility, so nothing here re-implements it.
+//   * The service-role client is used ONLY to write the immutable snapshot
+//     (`statements` + `statement_transactions`), because those tables
+//     grant the client no INSERT at all (migration 20261210000000) - a
+//     finalized statement must be un-forgeable and un-editable from the
+//     browser. Every service-role write is explicitly scoped to the
+//     workspace id already verified through the session client above.
+//   * The document artifacts + storage (PR4) and the `statement.generate`
+//     capability + audit events (PR6) layer on top of this.
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const FACT_PAGE_SIZE = 1000;
+const MAX_REQUESTED_SOURCES = 100;
+const PREVIEW_SAMPLE_ROWS = 8;
+const CHILD_INSERT_CHUNK = 500;
+
+const TXN_COLUMNS =
+  "id, occurred_at, transaction_type, direction, principal_effect_rwf, fee_effect_rwf, balance_after_rwf, currency, counterparty_name, counterparty_reference, category, financial_source_id";
+
+export type StatementErrorKind =
+  | "not_signed_in"
+  | "no_workspace"
+  | "forbidden_role"
+  | "invalid_input"
+  | "invalid_timezone"
+  | "invalid_period"
+  | "no_sources"
+  | "unauthorized_source"
+  | "no_transactions"
+  | "too_large"
+  | "query_failed"
+  | "persist_failed"
+  | "not_found";
+
+export type StatementRequest = {
+  statementType: StatementType;
+  preset: StatementPeriodPreset;
+  timezone: string;
+  fromDateKey?: string;
+  toDateKey?: string;
+  sourceIds: string[];
+  filters?: StatementFilters;
+  clientToken: string;
+};
+
+export type StatementPreviewRow = {
+  occurredAt: string;
+  displayDescription: string;
+  originalDescription: string | null;
+  reference: string | null;
+  direction: "in" | "out" | "neutral";
+  principalEffectMinor: number;
+  feeEffectMinor: number;
+  runningBalanceMinor: number | null;
+  category: string | null;
+};
+
+export type StatementPreview = {
+  statementType: StatementType;
+  scope: StatementScope;
+  period: {
+    label: string;
+    startDateKey: string;
+    endDateKey: string;
+    periodStartIso: string;
+    periodEndIso: string;
+    adjustments: string[];
+  };
+  currency: string;
+  mixedCurrency: boolean;
+  totals:
+    | {
+      openingBalanceMinor: number | null;
+      closingBalanceMinor: number | null;
+      totalCreditsMinor: number;
+      totalDebitsMinor: number;
+      totalFeesMinor: number;
+      netMovementMinor: number;
+      transactionCount: number;
+      reconciles: boolean | null;
+    }
+    | null;
+  perCurrency: StatementCurrencyTotals[];
+  runningBalanceBasis: StatementRunningBalanceBasis;
+  source: StatementSourceMetadata;
+  coverage: StatementCoverageMetadata;
+  sampleRows: StatementPreviewRow[];
+  sampleTruncated: boolean;
+};
+
+export type PreviewOutcome =
+  | { ok: true; preview: StatementPreview }
+  | { ok: false; kind: StatementErrorKind; message: string };
+
+export type GenerateOutcome =
+  | { ok: true; id: string; statementId: string; deduped: boolean }
+  | { ok: false; kind: StatementErrorKind; message: string };
+
+export type DeleteOutcome =
+  | { ok: true }
+  | { ok: false; kind: StatementErrorKind; message: string };
+
+const MESSAGES: Record<StatementErrorKind, string> = {
+  not_signed_in: "You are not signed in.",
+  no_workspace: "We couldn't determine your workspace.",
+  forbidden_role: "Viewers can't generate statements in this space.",
+  invalid_input: "That request wasn't valid.",
+  invalid_timezone: "Unrecognized timezone.",
+  invalid_period: "That statement period wasn't valid.",
+  no_sources: "There are no accounts to generate a statement for.",
+  unauthorized_source: "One or more selected accounts aren't available.",
+  no_transactions: "No transactions were found for this account and period.",
+  too_large:
+    "This period has too many transactions for a single statement. Choose a shorter range.",
+  query_failed: "We couldn't read your transactions just now.",
+  persist_failed: "We couldn't save the statement. Please try again.",
+  not_found: "That statement no longer exists.",
+};
+
+function err(
+  kind: StatementErrorKind,
+  message?: string,
+): { ok: false; kind: StatementErrorKind; message: string } {
+  return { ok: false, kind, message: message ?? MESSAGES[kind] };
+}
+
+// ---------------------------------------------------------------------------
+// Context
+// ---------------------------------------------------------------------------
+
+type Context = {
+  session: Awaited<ReturnType<typeof supabaseSession>>;
+  userId: string;
+  workspace: WorkspaceSummary;
+};
+
+async function resolveContext(): Promise<
+  | { ok: true; ctx: Context }
+  | { ok: false; kind: StatementErrorKind; message: string }
+> {
+  const session = await supabaseSession();
+  const { data: { user } } = await session.auth.getUser();
+  if (!user) return err("not_signed_in");
+
+  const workspace = await getActiveWorkspace();
+  if (!workspace) return err("no_workspace");
+  if (workspace.role === "viewer") return err("forbidden_role");
+
+  return { ok: true, ctx: { session, userId: user.id, workspace } };
+}
+
+// ---------------------------------------------------------------------------
+// Source authorization
+// ---------------------------------------------------------------------------
+
+type SourceRow = {
+  id: string;
+  display_name: string;
+  provider: string;
+  source_type: string;
+  currency: string;
+  masked_identifier: string | null;
+};
+
+function toDescriptor(row: SourceRow): StatementSourceDescriptor {
+  return {
+    id: row.id,
+    provider: row.provider,
+    sourceType: row.source_type,
+    displayName: row.display_name,
+    maskedIdentifier: row.masked_identifier,
+  };
+}
+
+/**
+ * The financial sources the caller may generate a statement for in the
+ * active workspace. Personal workspace: sources they own. Household /
+ * organization workspace: sources actively linked into that workspace
+ * (source_space_links). RLS on financial_sources still filters to what
+ * the caller can see either way.
+ */
+async function fetchAuthorizedSources(
+  ctx: Context,
+): Promise<
+  {
+    descriptors: StatementSourceDescriptor[];
+    currencyById: Map<string, string>;
+  }
+> {
+  const cols =
+    "id, display_name, provider, source_type, currency, masked_identifier";
+
+  let rows: SourceRow[] = [];
+  if (ctx.workspace.kind === "personal") {
+    const { data } = await ctx.session
+      .from("financial_sources")
+      .select(cols)
+      .eq("owner_user_id", ctx.userId);
+    rows = (data ?? []) as SourceRow[];
+  } else {
+    const { data: links } = await ctx.session
+      .from("source_space_links")
+      .select("financial_source_id")
+      .eq("workspace_id", ctx.workspace.id)
+      .eq("status", "active");
+    const ids = Array.from(
+      new Set(
+        ((links ?? []) as { financial_source_id: string }[]).map((l) =>
+          l.financial_source_id
+        ),
+      ),
+    );
+    if (ids.length > 0) {
+      const { data } = await ctx.session
+        .from("financial_sources")
+        .select(cols)
+        .in("id", ids);
+      rows = (data ?? []) as SourceRow[];
+    }
+  }
+
+  const currencyById = new Map<string, string>();
+  for (const r of rows) currencyById.set(r.id, r.currency);
+  return { descriptors: rows.map(toDescriptor), currencyById };
+}
+
+// ---------------------------------------------------------------------------
+// Fact + balance queries (session client / RLS)
+// ---------------------------------------------------------------------------
+
+async function fetchFacts(
+  ctx: Context,
+  period: ResolvedStatementPeriod,
+  opts: {
+    sourceIds: string[];
+    restrictToSources: boolean;
+    direction?: "in" | "out";
+  },
+): Promise<
+  { ok: true; rows: LedgerTxnRow[] } | { ok: false; kind: StatementErrorKind }
+> {
+  const rows: LedgerTxnRow[] = [];
+  let offset = 0;
+
+  while (true) {
+    let q = ctx.session
+      .from("transactions")
+      .select(TXN_COLUMNS)
+      .eq("workspace_id", ctx.workspace.id)
+      .eq("settlement_state", "settled")
+      .neq("dedupe_state", "merged")
+      .gte("occurred_at", period.periodStartUtc.toISOString())
+      .lt("occurred_at", period.periodEndUtc.toISOString())
+      .order("occurred_at", { ascending: true })
+      .order("created_at", { ascending: true })
+      .range(offset, offset + FACT_PAGE_SIZE - 1);
+
+    if (opts.restrictToSources) {
+      q = q.in("financial_source_id", opts.sourceIds);
+    }
+    if (opts.direction) {
+      q = q.eq("direction", opts.direction);
+    }
+
+    const { data, error } = await q;
+    if (error) {
+      console.error("fetchFacts failed:", error.message);
+      return { ok: false, kind: "query_failed" };
+    }
+    const page = (data ?? []) as LedgerTxnRow[];
+    rows.push(...page);
+    if (page.length < FACT_PAGE_SIZE) break;
+    offset += FACT_PAGE_SIZE;
+    if (rows.length > MAX_STATEMENT_TRANSACTIONS) {
+      return { ok: false, kind: "too_large" };
+    }
+  }
+
+  return { ok: true, rows };
+}
+
+/** The provider-reported balance immediately before `instant` for one source, or null. */
+async function fetchBalanceBefore(
+  ctx: Context,
+  instant: Date,
+  sourceId: string,
+): Promise<number | null> {
+  const { data, error } = await ctx.session
+    .from("transactions")
+    .select("balance_after_rwf")
+    .eq("workspace_id", ctx.workspace.id)
+    .eq("settlement_state", "settled")
+    .neq("dedupe_state", "merged")
+    .eq("financial_source_id", sourceId)
+    .not("balance_after_rwf", "is", null)
+    .lt("occurred_at", instant.toISOString())
+    .order("occurred_at", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error || !data || data.balance_after_rwf === null) return null;
+  const n = Number(data.balance_after_rwf);
+  return Number.isFinite(n) ? n : null;
+}
+
+// ---------------------------------------------------------------------------
+// Assembly (shared by preview + persist)
+// ---------------------------------------------------------------------------
+
+type Assembled = {
+  scope: StatementScope;
+  sourceIds: string[];
+  currencyHint: string;
+  filters: StatementFilters;
+  math: StatementMathResult;
+  source: StatementSourceMetadata;
+  coverage: StatementCoverageMetadata;
+  rows: LedgerTxnRow[];
+  rowsById: Map<string, LedgerTxnRow>;
+};
+
+async function assembleStatement(
+  ctx: Context,
+  period: ResolvedStatementPeriod,
+  req: {
+    statementType: StatementType;
+    sourceIds: string[];
+    filters?: StatementFilters;
+  },
+): Promise<
+  | { ok: true; assembled: Assembled }
+  | { ok: false; kind: StatementErrorKind; message: string }
+> {
+  const filters: StatementFilters = req.filters?.direction
+    ? { direction: req.filters.direction }
+    : {};
+
+  const { descriptors, currencyById } = await fetchAuthorizedSources(ctx);
+  const scopeRes = resolveStatementScope(
+    req.sourceIds,
+    descriptors.map((d) => d.id),
+    filters,
+  );
+  if (!scopeRes.ok) return err(scopeRes.kind);
+
+  const { scope, sourceIds } = scopeRes;
+  const restrictToSources = req.sourceIds.length > 0;
+
+  const scopedDescriptors = descriptors.filter((d) => sourceIds.includes(d.id));
+  const scopedCurrencies = Array.from(
+    new Set(
+      sourceIds.map((id) => currencyById.get(id)).filter((c): c is string =>
+        !!c
+      ),
+    ),
+  );
+  const currencyHint = scopedCurrencies.length === 1
+    ? scopedCurrencies[0]
+    : "RWF";
+
+  const factsRes = await fetchFacts(ctx, period, {
+    sourceIds,
+    restrictToSources,
+    direction: filters.direction,
+  });
+  if (!factsRes.ok) return err(factsRes.kind);
+  const rows = factsRes.rows;
+
+  // Opening / closing balances are only well-defined for a single source.
+  let openingBalanceMinor: number | null = null;
+  let closingBalanceMinor: number | null = null;
+  if (sourceIds.length === 1) {
+    openingBalanceMinor = await fetchBalanceBefore(
+      ctx,
+      period.periodStartUtc,
+      sourceIds[0],
+    );
+    closingBalanceMinor = await fetchBalanceBefore(
+      ctx,
+      period.periodEndUtc,
+      sourceIds[0],
+    );
+  }
+
+  const math = computeStatementMath(rows.map(toMathFact), {
+    openingBalanceMinor,
+    closingBalanceMinor,
+    currency: currencyHint,
+  });
+
+  const { source, coverage } = buildStatementCoverageMetadata({
+    facts: rows.map(toCoverageFact),
+    sources: scopedDescriptors,
+    filters: filters.direction ? { direction: filters.direction } : undefined,
+  });
+
+  const rowsById = new Map(rows.map((r) => [r.id, r]));
+
+  return {
+    ok: true,
+    assembled: {
+      scope,
+      sourceIds,
+      currencyHint,
+      filters,
+      math,
+      source,
+      coverage,
+      rows,
+      rowsById,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Input validation
+// ---------------------------------------------------------------------------
+
+function validateRequestShape(
+  req: StatementRequest,
+): { ok: true } | { ok: false; kind: StatementErrorKind; message: string } {
+  if (req.statementType !== "standard" && req.statementType !== "detailed") {
+    return err("invalid_input", "Unknown statement type.");
+  }
+  if (!UUID_RE.test(req.clientToken)) {
+    return err("invalid_input", "Missing or malformed request token.");
+  }
+  if (
+    !Array.isArray(req.sourceIds) ||
+    req.sourceIds.length > MAX_REQUESTED_SOURCES
+  ) {
+    return err("invalid_input", "Too many accounts selected.");
+  }
+  if (
+    !req.sourceIds.every((id) => typeof id === "string" && UUID_RE.test(id))
+  ) {
+    return err("invalid_input", "An account reference was malformed.");
+  }
+  if (
+    req.filters?.direction &&
+    req.filters.direction !== "in" &&
+    req.filters.direction !== "out"
+  ) {
+    return err("invalid_input", "Unknown filter.");
+  }
+  if (!isValidReportTimezone(req.timezone)) {
+    return err("invalid_timezone");
+  }
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Preview
+// ---------------------------------------------------------------------------
+
+export async function previewStatement(
+  req: StatementRequest,
+): Promise<PreviewOutcome> {
+  const shape = validateRequestShape(req);
+  if (!shape.ok) return shape;
+
+  const ctxRes = await resolveContext();
+  if (!ctxRes.ok) return ctxRes;
+  const { ctx } = ctxRes;
+
+  const periodRes = resolveStatementPeriod({
+    preset: req.preset,
+    timezone: req.timezone,
+    fromDateKey: req.fromDateKey,
+    toDateKey: req.toDateKey,
+    now: new Date(),
+  });
+  if (!periodRes.ok) return err("invalid_period", periodRes.error);
+  const period = periodRes.period;
+
+  const res = await assembleStatement(ctx, period, req);
+  if (!res.ok) return res;
+  const a = res.assembled;
+
+  const childRows = buildStatementTransactionRows(a.math, a.rowsById, {
+    statementUuid: "",
+    statementType: req.statementType,
+  });
+  const sampleRows: StatementPreviewRow[] = childRows
+    .slice(0, PREVIEW_SAMPLE_ROWS)
+    .map((r) => ({
+      occurredAt: r.occurred_at,
+      displayDescription: r.display_description,
+      originalDescription: r.original_description,
+      reference: r.reference,
+      direction: r.direction,
+      principalEffectMinor: r.principal_effect_minor,
+      feeEffectMinor: r.fee_effect_minor,
+      runningBalanceMinor: r.running_balance_minor,
+      category: r.category,
+    }));
+
+  return {
+    ok: true,
+    preview: {
+      statementType: req.statementType,
+      scope: a.scope,
+      period: {
+        label: period.label,
+        startDateKey: period.startDateKey,
+        endDateKey: period.endDateKey,
+        periodStartIso: period.periodStartUtc.toISOString(),
+        periodEndIso: period.periodEndUtc.toISOString(),
+        adjustments: period.adjustments,
+      },
+      currency: a.math.currency ?? a.currencyHint,
+      mixedCurrency: a.math.mixedCurrency,
+      totals: a.math.totals
+        ? {
+          openingBalanceMinor: a.math.totals.openingBalanceMinor,
+          closingBalanceMinor: a.math.totals.closingBalanceMinor,
+          totalCreditsMinor: a.math.totals.totalCreditsMinor,
+          totalDebitsMinor: a.math.totals.totalDebitsMinor,
+          totalFeesMinor: a.math.totals.totalFeesMinor,
+          netMovementMinor: a.math.totals.netMovementMinor,
+          transactionCount: a.math.totals.transactionCount,
+          reconciles: a.math.totals.reconciles,
+        }
+        : null,
+      perCurrency: a.math.perCurrency,
+      runningBalanceBasis: a.math.runningBalanceBasis,
+      source: a.source,
+      coverage: a.coverage,
+      sampleRows,
+      sampleTruncated: a.math.rows.length > PREVIEW_SAMPLE_ROWS,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Persist
+// ---------------------------------------------------------------------------
+
+async function persistStatement(
+  ctx: Context,
+  period: ResolvedStatementPeriod,
+  params: {
+    statementType: StatementType;
+    requestedSourceIds: string[];
+    filters?: StatementFilters;
+    clientToken: string;
+    supersedesId: string | null;
+  },
+): Promise<GenerateOutcome> {
+  const res = await assembleStatement(ctx, period, {
+    statementType: params.statementType,
+    sourceIds: params.requestedSourceIds,
+    filters: params.filters,
+  });
+  if (!res.ok) return res;
+  const a = res.assembled;
+
+  if (a.rows.length === 0) return err("no_transactions");
+
+  const service = supabaseServer();
+  const now = new Date();
+
+  const { generateStatementId } = await import("./statement-id");
+
+  // Insert the parent row, retrying once on the astronomically unlikely
+  // public-id collision.
+  let parentId = "";
+  let publicId = "";
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const candidate = generateStatementId({ now });
+    const record = buildStatementRecord({
+      statementPublicId: candidate,
+      workspaceId: ctx.workspace.id,
+      createdBy: ctx.userId,
+      statementType: params.statementType,
+      scope: a.scope,
+      accountIds: a.sourceIds,
+      filters: a.filters,
+      periodStartUtc: period.periodStartUtc,
+      periodEndUtc: period.periodEndUtc,
+      timezone: period.timezone,
+      currencyHint: a.currencyHint,
+      math: a.math,
+      sourceMetadata: a.source,
+      coverageMetadata: a.coverage,
+      supersedesId: params.supersedesId,
+      clientToken: params.clientToken,
+      now,
+    });
+
+    const { data, error } = await service
+      .from("statements")
+      .insert(record)
+      .select("id, statement_id")
+      .single();
+
+    if (!error && data) {
+      parentId = data.id;
+      publicId = data.statement_id;
+      break;
+    }
+
+    if (error?.code === "23505") {
+      const msg = error.message.toLowerCase();
+      if (msg.includes("client_token")) {
+        // A concurrent request with the same idempotency token won.
+        const { data: existing } = await service
+          .from("statements")
+          .select("id, statement_id")
+          .eq("workspace_id", ctx.workspace.id)
+          .eq("client_token", params.clientToken)
+          .maybeSingle();
+        if (existing) {
+          return {
+            ok: true,
+            id: existing.id,
+            statementId: existing.statement_id,
+            deduped: true,
+          };
+        }
+      }
+      if (msg.includes("statement_id") && attempt === 0) {
+        continue; // regenerate the public id and retry once
+      }
+    }
+
+    console.error("persistStatement: parent insert failed:", error?.message);
+    return err("persist_failed");
+  }
+
+  if (!parentId) return err("persist_failed");
+
+  // Frozen per-row snapshot.
+  const childRows = buildStatementTransactionRows(a.math, a.rowsById, {
+    statementUuid: parentId,
+    statementType: params.statementType,
+  });
+
+  for (let i = 0; i < childRows.length; i += CHILD_INSERT_CHUNK) {
+    const chunk = childRows.slice(i, i + CHILD_INSERT_CHUNK);
+    const { error } = await service.from("statement_transactions").insert(
+      chunk,
+    );
+    if (error) {
+      console.error("persistStatement: child insert failed:", error.message);
+      await service.from("statements").delete().eq("id", parentId);
+      return err("persist_failed");
+    }
+  }
+
+  return { ok: true, id: parentId, statementId: publicId, deduped: false };
+}
+
+// ---------------------------------------------------------------------------
+// Public: create / regenerate / delete
+// ---------------------------------------------------------------------------
+
+export async function createStatement(
+  req: StatementRequest,
+): Promise<GenerateOutcome> {
+  const shape = validateRequestShape(req);
+  if (!shape.ok) return shape;
+
+  const ctxRes = await resolveContext();
+  if (!ctxRes.ok) return ctxRes;
+  const { ctx } = ctxRes;
+
+  const periodRes = resolveStatementPeriod({
+    preset: req.preset,
+    timezone: req.timezone,
+    fromDateKey: req.fromDateKey,
+    toDateKey: req.toDateKey,
+    now: new Date(),
+  });
+  if (!periodRes.ok) return err("invalid_period", periodRes.error);
+
+  // Idempotency: a repeated submit with the same token returns the row it
+  // already created rather than a second one.
+  const service = supabaseServer();
+  const { data: existing } = await service
+    .from("statements")
+    .select("id, statement_id")
+    .eq("workspace_id", ctx.workspace.id)
+    .eq("client_token", req.clientToken)
+    .maybeSingle();
+  if (existing) {
+    return {
+      ok: true,
+      id: existing.id,
+      statementId: existing.statement_id,
+      deduped: true,
+    };
+  }
+
+  return persistStatement(ctx, periodRes.period, {
+    statementType: req.statementType,
+    requestedSourceIds: req.sourceIds,
+    filters: req.filters,
+    clientToken: req.clientToken,
+    supersedesId: null,
+  });
+}
+
+type StoredStatement = {
+  id: string;
+  workspace_id: string;
+  statement_type: StatementType;
+  scope: StatementScope;
+  account_ids: string[];
+  filters: StatementFilters | null;
+  period_start: string;
+  period_end: string;
+  timezone: string;
+};
+
+/**
+ * Generate a fresh statement for the same account(s) and period as an
+ * existing one, linked via supersedes_id. The original row is never
+ * touched (master prompt section 18). The stored period is already
+ * validated, so it is used directly rather than re-resolved from a preset.
+ */
+export async function regenerateStatement(
+  statementUuid: string,
+): Promise<GenerateOutcome> {
+  if (!UUID_RE.test(statementUuid)) return err("invalid_input");
+
+  const ctxRes = await resolveContext();
+  if (!ctxRes.ok) return ctxRes;
+  const { ctx } = ctxRes;
+
+  const { data, error } = await ctx.session
+    .from("statements")
+    .select(
+      "id, workspace_id, statement_type, scope, account_ids, filters, period_start, period_end, timezone",
+    )
+    .eq("id", statementUuid)
+    .maybeSingle();
+
+  if (error) {
+    console.error("regenerateStatement: lookup failed:", error.message);
+    return err("query_failed");
+  }
+  if (!data) return err("not_found");
+  const existing = data as StoredStatement;
+
+  // RLS already proved the caller is a member of the statement's
+  // workspace, but a regeneration must run against the ACTIVE workspace -
+  // assembleStatement scopes its fact query to ctx.workspace.id. Refuse
+  // (generically) a statement that belongs to a different workspace than
+  // the one currently selected.
+  if (existing.workspace_id !== ctx.workspace.id) return err("not_found");
+
+  const period = reconstructStatementPeriod(
+    new Date(existing.period_start),
+    new Date(existing.period_end),
+    existing.timezone,
+  );
+
+  return persistStatement(ctx, period, {
+    statementType: existing.statement_type,
+    // Re-scopes to the stored account_ids. For an original "all_accounts"
+    // run this now applies an explicit source filter, so a regenerated
+    // statement may omit any legacy transactions that carried no
+    // financial_source_id - a shrinking edge (ingestion has assigned a
+    // source per transaction since the pairing auto-enroll migration).
+    requestedSourceIds: existing.account_ids ?? [],
+    filters: existing.filters?.direction
+      ? { direction: existing.filters.direction }
+      : undefined,
+    clientToken: crypto.randomUUID(),
+    supersedesId: existing.id,
+  });
+}
+
+export async function deleteStatement(
+  statementUuid: string,
+): Promise<DeleteOutcome> {
+  if (!UUID_RE.test(statementUuid)) return err("invalid_input");
+
+  const ctxRes = await resolveContext();
+  if (!ctxRes.ok) return ctxRes;
+  const { ctx } = ctxRes;
+
+  // RLS (statements_delete_member) enforces workspace membership + the
+  // 'member' minimum role; cascade removes statement_transactions.
+  const { data, error } = await ctx.session
+    .from("statements")
+    .delete()
+    .eq("id", statementUuid)
+    .select("id");
+
+  if (error) {
+    console.error("deleteStatement failed:", error.message);
+    return err("persist_failed");
+  }
+  if (!data || data.length === 0) return err("not_found");
+  return { ok: true };
+}
