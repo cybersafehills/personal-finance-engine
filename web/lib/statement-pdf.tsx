@@ -23,6 +23,16 @@ function verifyUrl(token: string): string | null {
   return base ? `${base}/verify/${token}` : null;
 }
 
+// OneLedger brand palette. Navy + blue are sampled verbatim from the
+// approved brand artwork (docs/ONELEDGER_BRAND_ASSETS.md); the light-blue
+// tints are derived washes used only as background fills, never as the
+// mark's ink. These are the single source of colour for this document -
+// every accent below refers back to one of them.
+const BRAND_NAVY = "#07143a";
+const BRAND_BLUE = "#0050f4";
+const BRAND_BLUE_TINT = "#eef3ff"; // zebra / panel wash
+const BRAND_BLUE_TINT_STRONG = "#dbe6ff"; // highlighted closing-balance row
+
 /** A small QR block for the verification URL, drawn as react-pdf primitives (no image decoding). */
 function VerifyQr({ url, size = 66 }: { url: string; size?: number }) {
   const matrix = qrMatrix(url);
@@ -39,7 +49,7 @@ function VerifyQr({ url, size = 66 }: { url: string; size?: number }) {
                 y={y}
                 width={1}
                 height={1}
-                fill="#111111"
+                fill={BRAND_NAVY}
               />
             )
             : null
@@ -61,37 +71,61 @@ function VerifyQr({ url, size = 66 }: { url: string; size?: number }) {
 // so an adversarial counterparty name / reference cannot inject anything;
 // it can only ever be text (master prompt section 44).
 
-const TEMPLATE_VERSION = 1;
+const TEMPLATE_VERSION = 2;
 
 const styles = StyleSheet.create({
   page: {
-    paddingTop: 40,
+    paddingTop: 44,
     paddingBottom: 54,
     paddingHorizontal: 36,
     fontSize: 9,
     fontFamily: "Helvetica",
     color: "#111111",
   },
+  // Thin navy rule across the very top of every page, with a short blue
+  // segment at the right - a flat echo of the brand mark (navy field,
+  // blue corner), not a recreation of the logo itself.
+  topAccent: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 5,
+    backgroundColor: BRAND_NAVY,
+    flexDirection: "row",
+    justifyContent: "flex-end",
+  },
+  topAccentBlue: { width: 48, height: 5, backgroundColor: BRAND_BLUE },
   runningHeader: {
     position: "absolute",
-    top: 16,
+    top: 18,
     left: 36,
     right: 36,
     flexDirection: "row",
     justifyContent: "space-between",
     fontSize: 7,
-    color: "#999999",
+    color: "#8b93a6",
   },
-  brand: { fontSize: 10, color: "#555555", marginBottom: 2 },
-  title: { fontSize: 18, fontWeight: 700, marginBottom: 2 },
+  brand: {
+    fontSize: 11,
+    color: BRAND_NAVY,
+    fontWeight: 700,
+    letterSpacing: 0.3,
+    marginBottom: 2,
+  },
+  title: { fontSize: 18, fontWeight: 700, marginBottom: 2, color: BRAND_NAVY },
   subtitle: { fontSize: 9, color: "#666666", marginBottom: 14 },
   sectionTitle: {
     fontSize: 10,
     fontWeight: 700,
     marginTop: 14,
     marginBottom: 5,
+    paddingBottom: 3,
     textTransform: "uppercase",
     letterSpacing: 0.5,
+    color: BRAND_NAVY,
+    borderBottomWidth: 1.5,
+    borderBottomColor: BRAND_BLUE,
   },
   infoRow: { flexDirection: "row", paddingVertical: 1.5 },
   infoLabel: { width: 130, color: "#666666" },
@@ -100,18 +134,26 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     paddingVertical: 2.5,
+    paddingHorizontal: 4,
     borderBottomWidth: 0.5,
     borderBottomColor: "#e5e5e5",
   },
+  summaryRowHighlight: {
+    backgroundColor: BRAND_BLUE_TINT_STRONG,
+    borderBottomColor: BRAND_BLUE,
+  },
   summaryLabel: { color: "#666666" },
+  summaryLabelHighlight: { color: BRAND_NAVY },
   summaryValueBold: { fontWeight: 700 },
+  summaryValueHighlight: { fontWeight: 700, color: BRAND_NAVY },
   note: { fontSize: 8, color: "#8a6d00", marginTop: 4 },
   coverageNote: { fontSize: 8, color: "#666666", marginTop: 2 },
   tableHeaderRow: {
     flexDirection: "row",
-    borderBottomWidth: 1,
-    borderBottomColor: "#111111",
-    paddingVertical: 3,
+    backgroundColor: BRAND_NAVY,
+    color: "#ffffff",
+    paddingVertical: 4,
+    paddingHorizontal: 4,
     marginTop: 6,
     fontSize: 8,
     fontWeight: 700,
@@ -119,15 +161,18 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: "row",
     borderBottomWidth: 0.5,
-    borderBottomColor: "#ececec",
+    borderBottomColor: "#e4e9f2",
     paddingVertical: 2.5,
+    paddingHorizontal: 4,
     fontSize: 8,
   },
+  rowAlt: { backgroundColor: BRAND_BLUE_TINT },
   cellDate: { width: 58 },
   cellDesc: { flex: 1, paddingRight: 4 },
   cellRef: { width: 76, color: "#555555" },
   cellCat: { width: 58, color: "#555555" },
   cellNum: { width: 62, textAlign: "right" },
+  cellBalance: { width: 62, textAlign: "right", color: BRAND_NAVY },
   cellCur: { width: 34, textAlign: "right", color: "#555555" },
   original: { fontSize: 7, color: "#888888" },
   disclaimer: {
@@ -144,9 +189,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     fontSize: 7,
-    color: "#999999",
-    borderTopWidth: 0.5,
-    borderTopColor: "#e5e5e5",
+    color: "#8b93a6",
+    borderTopWidth: 1,
+    borderTopColor: BRAND_BLUE,
     paddingTop: 5,
   },
 });
@@ -161,16 +206,33 @@ function Info({ label, value }: { label: string; value: string }) {
 }
 
 function Summary(
-  { label, value, bold = false }: {
+  { label, value, bold = false, highlight = false }: {
     label: string;
     value: string;
     bold?: boolean;
+    highlight?: boolean;
   },
 ) {
   return (
-    <View style={styles.summaryRow}>
-      <Text style={styles.summaryLabel}>{label}</Text>
-      <Text style={bold ? styles.summaryValueBold : undefined}>{value}</Text>
+    <View
+      style={highlight
+        ? [styles.summaryRow, styles.summaryRowHighlight]
+        : styles.summaryRow}
+    >
+      <Text
+        style={highlight ? styles.summaryLabelHighlight : styles.summaryLabel}
+      >
+        {label}
+      </Text>
+      <Text
+        style={highlight
+          ? styles.summaryValueHighlight
+          : bold
+          ? styles.summaryValueBold
+          : undefined}
+      >
+        {value}
+      </Text>
     </View>
   );
 }
@@ -180,24 +242,32 @@ function amount(minor: number | null, currency: string): string {
 }
 
 function TableHeader({ mixed }: { mixed: boolean }) {
+  // Cells reuse the width styles but force white text so the coloured
+  // (#555) Reference / Cur. styles don't bleed through on the navy band.
+  const h = { color: "#ffffff" };
+  // Not `fixed`: a fixed element repeats on *every* page, including the
+  // trailing page that only carries the disclaimer / QR, where a floating
+  // navy band with no table under it looked broken. The running header
+  // ("Statement <id>") already orients the reader on later pages.
   return (
-    <View style={styles.tableHeaderRow} fixed>
-      <Text style={styles.cellDate}>Date</Text>
-      <Text style={styles.cellDesc}>Description</Text>
-      <Text style={styles.cellRef}>Reference</Text>
-      <Text style={styles.cellNum}>Money In</Text>
-      <Text style={styles.cellNum}>Money Out</Text>
-      <Text style={styles.cellNum}>Balance</Text>
-      {mixed ? <Text style={styles.cellCur}>Cur.</Text> : null}
+    <View style={styles.tableHeaderRow}>
+      <Text style={[styles.cellDate, h]}>Date</Text>
+      <Text style={[styles.cellDesc, h]}>Description</Text>
+      <Text style={[styles.cellRef, h]}>Reference</Text>
+      <Text style={[styles.cellNum, h]}>Money In</Text>
+      <Text style={[styles.cellNum, h]}>Money Out</Text>
+      <Text style={[styles.cellNum, h]}>Balance</Text>
+      {mixed ? <Text style={[styles.cellCur, h]}>Cur.</Text> : null}
     </View>
   );
 }
 
 function TxnRow(
-  { line, data, mixed }: {
+  { line, data, mixed, index }: {
     line: StatementDocLine;
     data: StatementDocData;
     mixed: boolean;
+    index: number;
   },
 ) {
   const inValue = line.direction === "in"
@@ -207,7 +277,10 @@ function TxnRow(
     ? formatStatementAmount(line.principalEffectMinor, data.currency)
     : "";
   return (
-    <View style={styles.row} wrap={false}>
+    <View
+      style={index % 2 === 1 ? [styles.row, styles.rowAlt] : styles.row}
+      wrap={false}
+    >
       <Text style={styles.cellDate}>
         {statementDateKey(line.occurredAt, data.timezone)}
       </Text>
@@ -223,7 +296,7 @@ function TxnRow(
       <Text style={styles.cellRef}>{line.reference ?? ""}</Text>
       <Text style={styles.cellNum}>{inValue}</Text>
       <Text style={styles.cellNum}>{outValue}</Text>
-      <Text style={styles.cellNum}>
+      <Text style={styles.cellBalance}>
         {line.runningBalanceMinor === null
           ? "—"
           : formatStatementAmount(line.runningBalanceMinor, data.currency)}
@@ -250,6 +323,9 @@ function StatementDocument({ data }: { data: StatementDocData }) {
       author="OneLedger"
     >
       <Page size="A4" style={styles.page} wrap>
+        <View style={styles.topAccent} fixed>
+          <View style={styles.topAccentBlue} />
+        </View>
         <View style={styles.runningHeader} fixed>
           <Text>OneLedger</Text>
           <Text>Statement {data.statementId}</Text>
@@ -307,6 +383,7 @@ function StatementDocument({ data }: { data: StatementDocData }) {
                 label={`${c.currency} — closing balance`}
                 value={amount(c.closingBalanceMinor, c.currency)}
                 bold
+                highlight
               />
             </View>
           ))
@@ -348,6 +425,7 @@ function StatementDocument({ data }: { data: StatementDocData }) {
                 label="Closing balance"
                 value={amount(data.closingBalanceMinor, data.currency)}
                 bold
+                highlight
               />
             </>
           )}
@@ -377,6 +455,7 @@ function StatementDocument({ data }: { data: StatementDocData }) {
                   line={line}
                   data={data}
                   mixed={mixed}
+                  index={i}
                 />
               ))}
             </>
