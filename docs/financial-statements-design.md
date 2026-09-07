@@ -27,6 +27,13 @@ downstream of the existing `reports` experience surface.
 | PR4 | PDF + CSV rendering, private storage, signed-URL download, integrity hash | **done** |
 | PR5 | Statements UI: landing, staged generate flow, preview, detail, download, regenerate, delete | **done** |
 | PR6 | Audit (`space_audit_events`) + reconcile/render monitoring + in-app help + regression sweep | **done** |
+| PR7 | Per-member `statement.generate` capability (migration `20261211000000`) | **done** |
+| PR8 | Category + merchant filters | **done** |
+| PR9 | Queued (async) generation for large statements — `status='generating'` stub + `run-statement-jobs` worker | **done** |
+| PR10 | Financial Packs — ZIP bundle of statements (`statement_packs`, migration `20261212000000`) | **done** |
+| PR11 | Scheduled statements (`statement_schedules`, migration `20261213000000`) + `run-statement-schedules` worker | **done** |
+| PR12 | Public verification page `/verify/<token>` + PDF QR (migration `20261214000000`) | **done** |
+| PR13 | Deterministic natural-language request parsing (`lib/statement-nl.ts`) | **done** |
 
 ## Where each piece lives
 
@@ -147,38 +154,43 @@ authoritative provider ledger. Documents therefore always carry:
 
 Absence of visible gaps is never presented as proof of completeness.
 
-## Deferred — extension points
+## Extension points that were subsequently built (PR7–PR13)
 
-Built as clean seams, not implemented in this initiative:
+- **`statement.generate` capability** (§25) — PR7. **Category + merchant filters** (§24) — PR8.
+- **Async / queued generation** (§27) — PR9: a `status='generating'` stub + the
+  `run-statement-jobs` worker. **Financial Packs** (§32) — PR10 (`statement_packs`, synchronous ZIP).
+- **Scheduled statements** (§30) — PR11 (`statement_schedules` + `run-statement-schedules`; the
+  generated statement lands in history — email/notification delivery still deferred).
+- **Public verification + QR** (§20/§21) — PR12: `/verify/<token>`, an unguessable token per
+  statement, a PDF QR, per-IP rate limiting, and RLS is *not* a token bypass. Revocation via
+  `verification_revoked_at`.
+- **Natural-language requests** (§31) — PR13: `lib/statement-nl.ts`, a *deterministic* parser
+  feeding the structured form — no AI, no effect on calculations.
 
-- **QR verification page / public `/verify/:token`** — PDF footer leaves a slot; no public endpoint,
-  no public metadata (§20/§21).
-- **Scheduled statements** — `createStatement` takes structured params and is callable outside the
-  UI; no cron wiring (§30).
-- **Natural-language generation** — the API stays structured + deterministic; AI may later map
-  language → params but never computes totals (§31).
-- **Financial Packs (combined PDF / ZIP)** — `statements`→`statement_artifacts` is already 1-to-many;
-  no pack builder (§32).
-- **Advanced filters** (category / merchant / tag / participant) — `scope='filtered'` + `filters
-  jsonb` exist and every filtered document is marked as filtered; only Money-In-only /
-  Money-Out-only shipped (§24).
-- **`statement.generate` capability** — per-member grant/revoke in `spaces_capability_matrix`; the
-  role gate (`resolveContext`) covers the intent for now (§25).
-- **Verified download / e-tag caching, per-line source column for consolidated statements,
-  account-holder name beyond the creator's profile** — small future polish, not blockers.
-- **Async / queued generation** — `status` enum already has `preparing`/`generating`/`failed`;
-  initial release is synchronous with lazy artifact render (§27).
-- **Provider-original-document management** — ingestion of uploaded provider statements already
-  exists separately (`lib/statement-import.ts`); this engine only emits OneLedger-generated
-  documents (§16).
+## Still deferred
+
+- **Scheduled-statement email / notification delivery** — the schedule only "saves to OneLedger"
+  today (§30).
+- **Tag / participant filters** (§24) — need a `transaction_tags` schema (none exists) and the
+  member directory in the flow UI; only direction / category / merchant shipped.
+- **A public verification API endpoint** beyond the HTML page; **weekly/quarterly schedule
+  cadences** (monthly only); **provider-original-document management** — ingestion of uploaded
+  provider statements is a separate existing feature (`lib/statement-import.ts`).
 
 ## Deployment
 
-- Migration `20261210000000_financial_statements.sql` applies via `deploy-supabase.yml` on a green
-  `main` (3 tables + 1 private `statement-artifacts` bucket). No new secrets, no cron.
-- Set `FINANCIAL_STATEMENTS_ENABLED=true` per Vercel environment to light the area up. Everything is
-  inert while unset: the routes 404, the tab is hidden, nothing queries the tables.
-- Rollback = unset the flag. Generated statements and their artifacts remain but are unreachable.
+- Migrations `20261210000000` … `20261214000000` apply via `deploy-supabase.yml` on a green `main`:
+  `statements` / `statement_transactions` / `statement_artifacts` + private `statement-artifacts`
+  bucket; the `statement.generate` capability; `statement_packs`; `statement_schedules`;
+  `statements.verification_token` / `verification_revoked_at`.
+- Set `FINANCIAL_STATEMENTS_ENABLED=true` per Vercel environment. Everything is inert while unset:
+  the routes 404, `/verify` 404s, the tab is hidden, the workers no-op, nothing queries the tables.
+  Optional: `STATEMENT_ASYNC_THRESHOLD` (default 8000).
+- The three cron routes (`run-statement-jobs`, `run-statement-schedules`, and the existing
+  `generate-reports` pattern) are **not scheduled** — they exist for a later, explicitly-approved
+  rollout step and are authed by `REPORT_CRON_SECRET`. Async generation is unreachable until one is
+  wired; synchronous generation needs none of them.
+- Rollback = unset the flag. Generated statements, packs and schedules remain but are unreachable.
 
 ## Test coverage
 
