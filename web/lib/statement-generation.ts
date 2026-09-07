@@ -21,6 +21,7 @@ import {
 import {
   buildStatementRecord,
   buildStatementTransactionRows,
+  hasStatementFilter,
   type LedgerTxnRow,
   MAX_STATEMENT_TRANSACTIONS,
   resolveStatementScope,
@@ -320,6 +321,8 @@ async function fetchFacts(
     sourceIds: string[];
     restrictToSources: boolean;
     direction?: "in" | "out";
+    category?: string;
+    merchant?: string;
   },
 ): Promise<
   { ok: true; rows: LedgerTxnRow[] } | { ok: false; kind: StatementErrorKind }
@@ -345,6 +348,16 @@ async function fetchFacts(
     }
     if (opts.direction) {
       q = q.eq("direction", opts.direction);
+    }
+    if (opts.category) {
+      q = opts.category === "Uncategorized"
+        ? q.is("category", null)
+        : q.eq("category", opts.category);
+    }
+    if (opts.merchant) {
+      // Escape PostgREST ilike wildcards / the pattern separators.
+      const safe = opts.merchant.replace(/[%,()\\]/g, " ").trim();
+      if (safe) q = q.ilike("counterparty_name", `%${safe}%`);
     }
 
     const { data, error } = await q;
@@ -417,9 +430,15 @@ async function assembleStatement(
   | { ok: true; assembled: Assembled }
   | { ok: false; kind: StatementErrorKind; message: string }
 > {
-  const filters: StatementFilters = req.filters?.direction
-    ? { direction: req.filters.direction }
-    : {};
+  const filters: StatementFilters = {
+    ...(req.filters?.direction ? { direction: req.filters.direction } : {}),
+    ...(req.filters?.category?.trim()
+      ? { category: req.filters.category.trim() }
+      : {}),
+    ...(req.filters?.merchant?.trim()
+      ? { merchant: req.filters.merchant.trim() }
+      : {}),
+  };
 
   const { descriptors, currencyById } = await fetchAuthorizedSources(ctx);
   const scopeRes = resolveStatementScope(
@@ -448,6 +467,8 @@ async function assembleStatement(
     sourceIds,
     restrictToSources,
     direction: filters.direction,
+    category: filters.category,
+    merchant: filters.merchant,
   });
   if (!factsRes.ok) return err(factsRes.kind);
   const rows = factsRes.rows;
@@ -477,7 +498,7 @@ async function assembleStatement(
   const { source, coverage } = buildStatementCoverageMetadata({
     facts: rows.map(toCoverageFact),
     sources: scopedDescriptors,
-    filters: filters.direction ? { direction: filters.direction } : undefined,
+    filters: hasStatementFilter(filters) ? filters : undefined,
   });
 
   const rowsById = new Map(rows.map((r) => [r.id, r]));
@@ -528,6 +549,12 @@ function validateRequestShape(
     req.filters.direction !== "out"
   ) {
     return err("invalid_input", "Unknown filter.");
+  }
+  if (
+    (req.filters?.category && req.filters.category.length > 80) ||
+    (req.filters?.merchant && req.filters.merchant.length > 80)
+  ) {
+    return err("invalid_input", "A filter value is too long.");
   }
   if (!isValidReportTimezone(req.timezone)) {
     return err("invalid_timezone");
@@ -906,9 +933,7 @@ export async function regenerateStatement(
     // financial_source_id - a shrinking edge (ingestion has assigned a
     // source per transaction since the pairing auto-enroll migration).
     requestedSourceIds: existing.account_ids ?? [],
-    filters: existing.filters?.direction
-      ? { direction: existing.filters.direction }
-      : undefined,
+    filters: existing.filters ?? undefined,
     clientToken: crypto.randomUUID(),
     supersedesId: existing.id,
   });

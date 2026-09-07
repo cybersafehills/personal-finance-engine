@@ -19,7 +19,20 @@ export const MAX_STATEMENT_TRANSACTIONS = 50_000;
 export type StatementType = "standard" | "detailed";
 export type StatementScope = "single_account" | "all_accounts" | "filtered";
 export type StatementDirectionFilter = "in" | "out";
-export type StatementFilters = { direction?: StatementDirectionFilter };
+export type StatementFilters = {
+  direction?: StatementDirectionFilter;
+  /** Exact category label; the literal "Uncategorized" means "no category set". */
+  category?: string;
+  /** Case-insensitive substring of the counterparty / merchant name. */
+  merchant?: string;
+};
+
+/** True when any scope-narrowing filter is set (the document is then marked "filtered"). */
+export function hasStatementFilter(
+  filters: StatementFilters | undefined,
+): boolean {
+  return !!(filters?.direction || filters?.category || filters?.merchant);
+}
 
 /** The transactions columns lib/statement-generation.ts selects for a statement. */
 export type LedgerTxnRow = {
@@ -164,7 +177,7 @@ export function resolveStatementScope(
     sourceIds = requested;
   }
 
-  const scope: StatementScope = filters?.direction
+  const scope: StatementScope = hasStatementFilter(filters)
     ? "filtered"
     : sourceIds.length === 1
     ? "single_account"

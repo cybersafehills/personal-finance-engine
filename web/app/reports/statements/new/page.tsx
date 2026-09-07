@@ -5,13 +5,17 @@ import { StatementsTabs } from "../../../../components/StatementsTabs";
 import { GenerateStatementFlow } from "../../../../components/GenerateStatementFlow";
 import { isFinancialStatementsEnabled } from "../../../../lib/financial-statements";
 import { getStatementFormOptions } from "../../../../lib/statement-generation";
+import { getCategorySuggestions } from "../../../../lib/queries";
 
 export const dynamic = "force-dynamic";
 
 export default async function NewStatementPage() {
   if (!isFinancialStatementsEnabled()) notFound();
 
-  const options = await getStatementFormOptions();
+  const [options, categories] = await Promise.all([
+    getStatementFormOptions(),
+    getCategorySuggestions(),
+  ]);
 
   return (
     <div>
@@ -36,6 +40,7 @@ export default async function NewStatementPage() {
           <GenerateStatementFlow
             sources={options.sources}
             defaultTimezone={options.timezone}
+            categories={categories}
           />
         )}
     </div>

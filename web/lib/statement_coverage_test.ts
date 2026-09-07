@@ -234,7 +234,20 @@ Deno.test("buildStatementCoverageMetadata: a filter is always surfaced", () => {
     filters: { direction: "out" },
   });
   assertEquals(coverage.filtered, true);
-  assertEquals(coverage.filterSummary, "Money Out transactions only");
+  assertEquals(coverage.filterSummary, "Money Out only");
+});
+
+Deno.test("buildStatementCoverageMetadata: compound filters are joined", () => {
+  const { coverage } = buildStatementCoverageMetadata({
+    facts: [],
+    sources: [source({ id: "s1" })],
+    filters: { direction: "out", category: "Rent", merchant: "MTN" },
+  });
+  assertEquals(coverage.filtered, true);
+  assertEquals(
+    coverage.filterSummary,
+    'Money Out only · Category: Rent · Merchant matches "MTN"',
+  );
 });
 
 Deno.test("buildStatementCoverageMetadata: a detected gap makes it not complete", () => {

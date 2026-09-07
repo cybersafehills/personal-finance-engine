@@ -38,9 +38,11 @@ function newToken(): string {
 export function GenerateStatementFlow({
   sources,
   defaultTimezone,
+  categories = [],
 }: {
   sources: SourceOption[];
   defaultTimezone: string;
+  categories?: string[];
 }) {
   const router = useRouter();
 
@@ -57,6 +59,8 @@ export function GenerateStatementFlow({
     "standard",
   );
   const [direction, setDirection] = useState<"" | "in" | "out">("");
+  const [category, setCategory] = useState("");
+  const [merchant, setMerchant] = useState("");
   const [timezone, setTimezone] = useState(defaultTimezone);
   const [showCustomize, setShowCustomize] = useState(false);
 
@@ -88,7 +92,13 @@ export function GenerateStatementFlow({
       fromDateKey: preset === "custom" ? fromDate : undefined,
       toDateKey: preset === "custom" ? toDate : undefined,
       sourceIds: sourceMode === "one" && sourceId ? [sourceId] : [],
-      filters: direction ? { direction } : undefined,
+      filters: direction || category.trim() || merchant.trim()
+        ? {
+          ...(direction ? { direction } : {}),
+          ...(category.trim() ? { category: category.trim() } : {}),
+          ...(merchant.trim() ? { merchant: merchant.trim() } : {}),
+        }
+        : undefined,
       clientToken,
     };
   }
@@ -303,6 +313,32 @@ export function GenerateStatementFlow({
                   <option value="in">Money in only</option>
                   <option value="out">Money out only</option>
                 </select>
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="font-medium text-text-primary">Category</span>
+                <input
+                  type="text"
+                  list="statement-category-options"
+                  value={category}
+                  onChange={(e) => onEdit(setCategory)(e.target.value)}
+                  placeholder="Any category"
+                  maxLength={80}
+                  className={inputClass}
+                />
+                <datalist id="statement-category-options">
+                  {categories.map((c) => <option key={c} value={c} />)}
+                </datalist>
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="font-medium text-text-primary">Merchant</span>
+                <input
+                  type="text"
+                  value={merchant}
+                  onChange={(e) => onEdit(setMerchant)(e.target.value)}
+                  placeholder="Any counterparty (partial match)"
+                  maxLength={80}
+                  className={inputClass}
+                />
               </label>
               <label className="flex flex-col gap-1">
                 <span className="font-medium text-text-primary">Timezone</span>

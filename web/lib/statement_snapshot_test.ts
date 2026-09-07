@@ -129,6 +129,17 @@ Deno.test("resolveStatementScope: a filter forces the 'filtered' scope", () => {
   assertEquals(r.scope, "filtered");
 });
 
+Deno.test("resolveStatementScope: a category or merchant filter also forces 'filtered'", () => {
+  const cat = resolveStatementScope(["a"], ["a"], { category: "Rent" });
+  assert(cat.ok);
+  assertEquals(cat.scope, "filtered");
+  const merch = resolveStatementScope(["a", "b"], ["a", "b"], {
+    merchant: "MTN",
+  });
+  assert(merch.ok);
+  assertEquals(merch.scope, "filtered");
+});
+
 Deno.test("resolveStatementScope: duplicate requested ids are collapsed", () => {
   const r = resolveStatementScope(["a", "a"], ["a"], undefined);
   assert(r.ok);

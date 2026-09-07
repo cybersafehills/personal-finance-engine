@@ -74,7 +74,11 @@ export type StatementCoverageInput = {
   facts: StatementCoverageFact[];
   sources: StatementSourceDescriptor[];
   /** Scope-narrowing filters applied to the statement, if any. */
-  filters?: { direction?: "in" | "out" };
+  filters?: {
+    direction?: "in" | "out";
+    category?: string;
+    merchant?: string;
+  };
 };
 
 // An interior gap between two consecutive transactions is only flagged
@@ -160,9 +164,12 @@ function median(values: number[]): number {
 function filterSummaryText(
   filters: StatementCoverageInput["filters"],
 ): string | null {
-  if (filters?.direction === "out") return "Money Out transactions only";
-  if (filters?.direction === "in") return "Money In transactions only";
-  return null;
+  const parts: string[] = [];
+  if (filters?.direction === "out") parts.push("Money Out only");
+  else if (filters?.direction === "in") parts.push("Money In only");
+  if (filters?.category) parts.push(`Category: ${filters.category}`);
+  if (filters?.merchant) parts.push(`Merchant matches "${filters.merchant}"`);
+  return parts.length > 0 ? parts.join(" · ") : null;
 }
 
 export function deriveCoverageWarnings(
