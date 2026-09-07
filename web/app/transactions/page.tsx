@@ -1,20 +1,59 @@
 import Link from "next/link";
-import { getReviewQueueCount, getTransactions } from "../../lib/queries";
+import { getAccounts, getReviewQueueCount, getTransactions } from "../../lib/queries";
 import { TransactionList } from "../../components/TransactionList";
+import { TransactionSearchBar } from "../../components/TransactionSearchBar";
 import { PageHeader } from "../../components/PageHeader";
 
 export const dynamic = "force-dynamic";
 
+function parseAmount(value: string | string[] | undefined): number | undefined {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : undefined;
+}
+
 export default async function TransactionsPage({
   searchParams,
 }: PageProps<"/transactions">) {
-  const { category } = await searchParams;
-  const categoryFilter = typeof category === "string" ? category : undefined;
+  const sp = await searchParams;
+  const str = (v: string | string[] | undefined) =>
+    typeof v === "string" && v.trim() ? v.trim() : undefined;
 
-  const [transactions, reviewQueueCount] = await Promise.all([
-    getTransactions({ limit: 100, category: categoryFilter }),
+  const categoryFilter = str(sp.category);
+  const q = str(sp.q);
+  const direction = ((): "in" | "out" | "neutral" | undefined => {
+    const d = str(sp.direction);
+    return d === "in" || d === "out" || d === "neutral" ? d : undefined;
+  })();
+  const currency = str(sp.currency);
+  const sourceId = str(sp.account);
+  const amountMin = parseAmount(sp.min);
+  const amountMax = parseAmount(sp.max);
+
+  const [transactions, reviewQueueCount, accounts] = await Promise.all([
+    getTransactions({
+      limit: 100,
+      category: categoryFilter,
+      q,
+      direction,
+      currency,
+      sourceId,
+      amountMin,
+      amountMax,
+    }),
     getReviewQueueCount(),
+    getAccounts(),
   ]);
+
+  const accountOptions = accounts
+    .filter((a) => a.financial_source_id)
+    .map((a) => ({ sourceId: a.financial_source_id as string, label: a.name }));
+  const currencies = Array.from(new Set(accounts.map((a) => a.currency))).sort();
+
+  const hasSearch = Boolean(
+    q || direction || currency || sourceId ||
+      amountMin !== undefined || amountMax !== undefined,
+  );
 
   return (
     <div>
@@ -51,12 +90,25 @@ export default async function TransactionsPage({
           </div>
         }
       />
+
+      <TransactionSearchBar accounts={accountOptions} currencies={currencies} />
+
+      {hasSearch && (
+        <p className="mb-3 text-sm text-text-muted">
+          {transactions.length === 100
+            ? "Showing the first 100 matches"
+            : `${transactions.length} match${transactions.length === 1 ? "" : "es"}`}
+        </p>
+      )}
+
       <TransactionList
         transactions={transactions}
         emptyTitle={
-          categoryFilter
-            ? `No transactions in ${categoryFilter}`
-            : "No transactions yet"
+          hasSearch
+            ? "No transactions match your search"
+            : categoryFilter
+              ? `No transactions in ${categoryFilter}`
+              : "No transactions yet"
         }
       />
     </div>
