@@ -1,0 +1,155 @@
+# OneLedger Financial Documents Engine — Statements
+
+A **Statement** is a factual, period-scoped, per-account (or consolidated) record of financial
+activity, generated **from** the OneLedger ledger and rendered as an immutable **PDF** (primary) or
+**CSV** (secondary). It is built for accountants, lenders, employers, auditors and visa/documentation
+processes: reproducible, traceable, financially correct, with clear source attribution.
+
+Statements are the first family in a broader **Financial Documents Engine**. The engine deliberately
+leaves clean extension points (see [Deferred](#deferred--extension-points)) for further document
+types without a rewrite, but does not build speculative machinery now.
+
+> **Statements are not Reports.** `/reports` produces an *analytical* daily summary — trends,
+> category breakdowns, budget health, forecasts. A Statement makes **no interpretation**: it lists
+> what happened, in order, with correct totals. This distinction is kept sharp in navigation, UI
+> copy, API names and schema even though the routes nest under `/reports/statements`.
+
+Everything ships dark behind `FINANCIAL_STATEMENTS_ENABLED` (`web/lib/financial-statements.ts`),
+downstream of the existing `reports` experience surface.
+
+## Status
+
+| Phase | Scope | State |
+|---|---|---|
+| PR1 | Schema foundation + flag + this doc | **done** |
+| PR2 | Pure engine: period presets, statement id, calculation, coverage | planned |
+| PR3 | Generation + immutable snapshot persistence + authorization + idempotency | planned |
+| PR4 | PDF + CSV rendering, private storage, signed-URL download, integrity hash | planned |
+| PR5 | Statements UI: landing, staged generate flow, preview, detail, download, regenerate, delete | planned |
+| PR6 | `statement.generate` capability + audit + monitoring + help content + regression sweep | planned |
+
+## Where each piece lives
+
+| Concern | Location |
+|---|---|
+| Schema, RLS, private bucket | `supabase/migrations/20261210000000_financial_statements.sql` |
+| Runtime flag | `web/lib/financial-statements.ts` — `isFinancialStatementsEnabled()` |
+| Period / timezone presets | `web/lib/statement-period.ts` *(PR2)* — built on `web/lib/report-period.ts` primitives (`localMidnightUtc`, `shiftDateKey`, `zonedDateKey`); never the Kigali fixed-offset shortcut |
+| Public statement id | `web/lib/statement-id.ts` *(PR2)* — `OL-ST-YYYYMMDD-XXXXXX`, 6 Crockford-base32 chars |
+| Deterministic calculation | `web/lib/statement-math.ts` *(PR2)* — opening/closing/credits/debits/fees/net/count/running balances/`reconciles`/per-currency; zero-import, `deno test` |
+| Source & coverage disclosure | `web/lib/statement-coverage.ts` *(PR2)* |
+| Generation + snapshot (service role, after explicit membership check) | `web/lib/statement-generation.ts` *(PR3)* |
+| Server actions | `web/app/actions/statements.ts` *(PR3)* — `previewStatement`, `createStatement`, `deleteStatement`, `regenerateStatement` |
+| PDF renderer | `web/lib/statement-pdf.tsx` *(PR4)* — `@react-pdf/renderer`, new document family (not `report-pdf.tsx`) |
+| CSV renderer | `web/lib/statement-csv.ts` *(PR4)* — via `web/lib/integrations/export/csv-safe.ts` (formula-injection safe) |
+| Metadata + document download routes | `web/app/api/reports/statements/[id]/route.ts`, `.../[id]/document/route.ts?format=pdf\|csv` *(PR4)* — cloned from `web/app/api/reports/[id]/pdf/route.ts` |
+| Statements UI | `web/app/reports/statements/**` *(PR5)* |
+| Help / FAQ content | *(PR6)* |
+
+## Data model
+
+Three additive tables + one private Storage bucket (`statement-artifacts`). Full column comments live
+in the migration.
+
+```
+statements                      one generated (or generating) statement
+  ├─ statement_transactions      frozen per-row snapshot (the document's line items)
+  └─ statement_artifacts         rendered PDF/CSV metadata: storage_path, sha256 checksum, byte_size
+```
+
+- **`statements`** — params (`statement_type` standard|detailed, `scope` single_account|all_accounts|filtered,
+  `account_ids uuid[]`, `filters jsonb`, `period_start/period_end/timezone`, `currency`), computed
+  totals (`opening/closing_balance_minor` nullable = *unavailable, never zero*, `total_credit/debit/fees_minor`,
+  `transaction_count`, `per_currency jsonb`), disclosure (`source_metadata`, `coverage_metadata`),
+  `reconciles boolean` (null = uncheckable, false = checked-and-failed → flagged + logged),
+  `status`, `supersedes_id`, `client_token`, `statement_id` (public id, format-checked).
+- **`statement_transactions`** — a **copy** of every rendered field (both `display_description` and
+  verbatim `original_description`, `reference`, `direction`, `principal_effect_minor`,
+  `fee_effect_minor`, `running_balance_minor`, `category`, `sort_index`). `transaction_id` kept for
+  traceability with `ON DELETE SET NULL`.
+- **`statement_artifacts`** — mirrors `report_artifacts` exactly, incl. `unique (statement_id, format)`
+  and **zero anon/authenticated grants**.
+
+### Immutability / snapshot strategy
+
+A generated statement must re-download **byte-identical** later even after the underlying ledger
+changes (master prompt §17/§18). Chosen approach: a **junction table with frozen display fields**
+(not a re-run query, not one JSON blob):
+
+- reproducible after the source `transactions` row is edited, recategorised or erased;
+- one bounded join to render the table;
+- storage bounded by `transaction_count`;
+- `transaction_id … ON DELETE SET NULL` keeps the frozen line through a Right-to-Erasure run.
+
+`status = 'ready'` and the row are written in one transaction; `authenticated` has **no
+INSERT/UPDATE** — the snapshot is un-forgeable and un-editable from the client. "Generate updated
+version" creates a **new** row (`supersedes_id` → the old one); the old row is never touched.
+
+## Security posture
+
+Mirrors the Reporting engine (Phase J/K):
+
+- **Snapshot writes** — `statement-generation.ts` runs `is_workspace_member` / active-workspace
+  resolution explicitly, then writes via the **service-role** client. Explicit workspace scoping in
+  trusted server code *is* the boundary (same as `report-generation.ts`).
+- **Reads** — `authenticated` gets `SELECT` on `statements` / `statement_transactions` via
+  `is_workspace_member(workspace_id)` RLS, and `DELETE` on `statements` (min role `member`).
+- **Household per-source visibility** — applied at snapshot build time via `withSourceVisibility` /
+  `visible_source_ids_for_user` (reused from `report-generation.ts`), so a member's statement only
+  ever contains rows they may see.
+- **Documents** — private `statement-artifacts` bucket, `public = false`, no `storage.objects`
+  policy for anon/authenticated. The download route verifies ownership through the `statements` RLS
+  first, then issues a **300 s signed URL**; the file is never a stable public URL. sha256 of the
+  exact bytes is stored as the integrity fingerprint (§20).
+- **Untrusted input** — every provider description / reference / counterparty / category is treated
+  as untrusted and escaped per output format (PDF text nodes, CSV via `csv-safe.ts`).
+- **No leakage** — no balances/descriptions/account numbers in URLs, logs, analytics or error
+  messages; unauthorized/absent sources return a generic not-found (no existence oracle, §33).
+- **Authorization (PR6)** — a `statement.generate` capability (owner/admin/member) layered in the
+  server action; `space_audit_events` rows for generate / download / delete / access-denied.
+
+## Financial correctness
+
+- Totals come only from `statement-math.ts` (deterministic, unit-tested), never the render layer.
+- Only `settlement_state = 'settled'`, `dedupe_state <> 'merged'` rows count — same filter as
+  `report-generation.ts`.
+- `balance_after_rwf` is provider-reported and frequently `NULL`; opening/closing/running balances
+  are shown only when genuinely derivable, otherwise a dash — **never fabricated** (§14/§15).
+- `opening + credits − debits − fees == closing` is asserted when all are known; a mismatch still
+  generates the document but flags it and logs the discrepancy for monitoring (§43).
+- Currency: RWF-first, zero-decimal. A mixed-currency consolidated statement reports **per
+  currency** and never sums or auto-converts across currencies (§23).
+
+## Coverage & honesty
+
+A OneLedger statement may be built from SMS/notification capture, imports, or manual entry — not an
+authoritative provider ledger. Documents therefore always carry:
+
+- a **data-source** line ("MTN MoMo notifications captured by OneLedger", etc.);
+- a **coverage** statement ("Complete for available OneLedger records") plus any detected-gap
+  warnings (large `occurred_at` jumps, `balance_after_rwf` discontinuities);
+- a footer disclaimer: *generated by OneLedger from records available to the account holder; not an
+  official statement issued by the originating financial provider* (§16/§47).
+
+Absence of visible gaps is never presented as proof of completeness.
+
+## Deferred — extension points
+
+Built as clean seams, not implemented in this initiative:
+
+- **QR verification page / public `/verify/:token`** — PDF footer leaves a slot; no public endpoint,
+  no public metadata (§20/§21).
+- **Scheduled statements** — `createStatement` takes structured params and is callable outside the
+  UI; no cron wiring (§30).
+- **Natural-language generation** — the API stays structured + deterministic; AI may later map
+  language → params but never computes totals (§31).
+- **Financial Packs (combined PDF / ZIP)** — `statements`→`statement_artifacts` is already 1-to-many;
+  no pack builder (§32).
+- **Advanced filters** (category / merchant / tag / participant) — `scope='filtered'` + `filters
+  jsonb` exist and every filtered document renders an "Applied filters" banner; only
+  Money-In-only / Money-Out-only may land in PR5 (§24).
+- **Async / queued generation** — `status` enum already has `preparing`/`generating`/`failed`;
+  initial release is synchronous with lazy artifact render (§27).
+- **Provider-original-document management** — ingestion of uploaded provider statements already
+  exists separately (`lib/statement-import.ts`); this engine only emits OneLedger-generated
+  documents (§16).

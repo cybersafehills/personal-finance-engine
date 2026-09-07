@@ -666,7 +666,11 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # 120 with RLS.
 # Insight notifications (20261209000000) adds user_insight_state (RLS
 # enabled, SELECT-own for authenticated) - 122 tables, 121 with RLS.
-if [ "$TABLE_COUNT" = "122" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Financial Statements PR1 (20261210000000) adds statements,
+# statement_transactions and statement_artifacts (all RLS enabled;
+# statement_artifacts has zero anon/authenticated grants, like
+# report_artifacts) - 125 tables, 124 with RLS.
+if [ "$TABLE_COUNT" = "125" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -788,10 +792,15 @@ AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from inform
 # Insight notifications (20261209000000) adds user_insight_state with a
 # SELECT-only grant for authenticated (writes via note_insight_change /
 # service-role only). 151 + 1 = 152.
-if [ "$AUTHENTICATED_GRANT_COUNT" = "152" ]; then
-  pass "authenticated holds exactly the 152 table grants expected, no more"
+# Financial Statements PR1 (20261210000000) adds statements (select, delete
+# = 2) and statement_transactions (select = 1) for authenticated; the
+# snapshot is written by lib/statement-generation.ts via the service role,
+# so there is no authenticated insert/update. statement_artifacts gets zero
+# authenticated grants (like report_artifacts). 152 + 3 = 155.
+if [ "$AUTHENTICATED_GRANT_COUNT" = "155" ]; then
+  pass "authenticated holds exactly the 155 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 152 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 155 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
