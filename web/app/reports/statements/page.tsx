@@ -179,7 +179,9 @@ export default async function StatementsPage() {
                   id: s.id,
                   statement_type: s.statement_type,
                   account_ids: s.account_ids,
+                  cadence: s.cadence,
                   day_of_month: s.day_of_month,
+                  day_of_week: s.day_of_week,
                   next_run_at: s.next_run_at,
                 }))}
               />

@@ -8,13 +8,26 @@ import {
 } from "../app/reports/statements/actions";
 
 type SourceOption = { id: string; label: string };
+type Cadence = "weekly" | "monthly" | "quarterly";
 type Schedule = {
   id: string;
   statement_type: "standard" | "detailed";
   account_ids: string[];
+  cadence: Cadence;
   day_of_month: number;
+  day_of_week: number | null;
   next_run_at: string;
 };
+
+const DOW = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+];
 
 const inputClass =
   "min-h-11 rounded-control border border-border-subtle bg-surface px-3 text-base text-text-primary";
@@ -34,7 +47,9 @@ export function StatementScheduleForm({
   const [statementType, setStatementType] = useState<"standard" | "detailed">(
     "standard",
   );
+  const [cadence, setCadence] = useState<Cadence>("monthly");
   const [dayOfMonth, setDayOfMonth] = useState(1);
+  const [dayOfWeek, setDayOfWeek] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [saving, startSave] = useTransition();
   const [deleting, startDelete] = useTransition();
@@ -45,7 +60,9 @@ export function StatementScheduleForm({
       const result = await saveStatementScheduleAction({
         statementType,
         sourceIds: sourceMode === "one" && sourceId ? [sourceId] : [],
+        cadence,
         dayOfMonth,
+        dayOfWeek: cadence === "weekly" ? dayOfWeek : null,
         timezone: defaultTimezone,
       });
       if (result.ok) router.refresh();
@@ -72,11 +89,18 @@ export function StatementScheduleForm({
               className="flex flex-wrap items-center gap-2 rounded-control border border-border-subtle bg-background px-3 py-2"
             >
               <span className="text-text-primary">
-                Last month&apos;s{" "}
+                {s.cadence === "weekly"
+                  ? `Last week's `
+                  : s.cadence === "quarterly"
+                  ? `Last quarter's `
+                  : `Last month's `}
                 {s.statement_type === "detailed" ? "detailed " : ""}statement,
                 {" "}
                 {s.account_ids.length === 1 ? "one account" : "all accounts"},
-                on day {s.day_of_month}
+                {" "}
+                {s.cadence === "weekly"
+                  ? `every ${DOW[s.day_of_week ?? 1]}`
+                  : `on day ${s.day_of_month}`}
               </span>
               <span className="text-xs text-text-muted">
                 next {new Date(s.next_run_at).toISOString().slice(0, 10)}
@@ -154,22 +178,56 @@ export function StatementScheduleForm({
         </label>
 
         <label className="flex flex-wrap items-center gap-2">
-          <span className="font-medium text-text-primary">Day of month</span>
+          <span className="font-medium text-text-primary">Frequency</span>
           <select
-            value={dayOfMonth}
-            onChange={(e) => setDayOfMonth(Number(e.target.value))}
+            value={cadence}
+            onChange={(e) => setCadence(e.target.value as Cadence)}
             className={inputClass}
           >
-            {Array.from({ length: 28 }, (_, i) => i + 1).map((d) => (
-              <option key={d} value={d}>{d}</option>
-            ))}
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+            <option value="quarterly">Quarterly</option>
           </select>
         </label>
 
+        {cadence === "weekly"
+          ? (
+            <label className="flex flex-wrap items-center gap-2">
+              <span className="font-medium text-text-primary">Day of week</span>
+              <select
+                value={dayOfWeek}
+                onChange={(e) => setDayOfWeek(Number(e.target.value))}
+                className={inputClass}
+              >
+                {DOW.map((d, i) => <option key={d} value={i}>{d}</option>)}
+              </select>
+            </label>
+          )
+          : (
+            <label className="flex flex-wrap items-center gap-2">
+              <span className="font-medium text-text-primary">
+                Day of month
+              </span>
+              <select
+                value={dayOfMonth}
+                onChange={(e) => setDayOfMonth(Number(e.target.value))}
+                className={inputClass}
+              >
+                {Array.from({ length: 28 }, (_, i) => i + 1).map((d) => (
+                  <option key={d} value={d}>{d}</option>
+                ))}
+              </select>
+            </label>
+          )}
+
         <p className="text-xs text-text-muted">
-          On day {dayOfMonth}{" "}
-          of every month, last month&apos;s statement is generated and appears
-          in your history.
+          {cadence === "weekly"
+            ? `Every ${DOW[dayOfWeek]}, last week's statement`
+            : cadence === "quarterly"
+            ? `On day ${dayOfMonth} of each quarter, last quarter's statement`
+            : `On day ${dayOfMonth} of every month, last month's statement`}
+          {" "}
+          is generated and appears in your history.
         </p>
 
         <div>

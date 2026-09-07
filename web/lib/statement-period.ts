@@ -122,6 +122,12 @@ export function statementPeriodLabel(
   }`;
 }
 
+export type ScheduleCadence = "weekly" | "monthly" | "quarterly";
+
+function lastDayOfMonthNum(year: number, month: number): number {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
 /**
  * The next occurrence of local `dayOfMonth` at local midnight in
  * `timezone`, strictly after `from`, as a UTC instant. `dayOfMonth` must
@@ -138,6 +144,99 @@ export function nextMonthlyRunUtc(
   const candidate = localMidnightUtc(thisMonthKey, timezone);
   if (candidate.getTime() > from.getTime()) return candidate;
   return localMidnightUtc(addMonthsToDateKey(thisMonthKey, 1), timezone);
+}
+
+/** Next local `dayOfWeek` (0 = Sunday … 6 = Saturday) at local midnight, strictly after `from`. */
+export function nextWeeklyRunUtc(
+  dayOfWeek: number,
+  timezone: string,
+  from: Date,
+): Date {
+  const todayKey = zonedDateKey(from, timezone);
+  const [y, m, d] = todayKey.split("-").map(Number);
+  const todayDow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+  const delta = (dayOfWeek - todayDow + 7) % 7;
+  let candidate = localMidnightUtc(shiftDateKey(todayKey, delta), timezone);
+  if (candidate.getTime() <= from.getTime()) {
+    candidate = localMidnightUtc(shiftDateKey(todayKey, delta + 7), timezone);
+  }
+  return candidate;
+}
+
+/** Next `dayOfMonth` of a quarter-start month (Jan/Apr/Jul/Oct) at local midnight, strictly after `from`. */
+export function nextQuarterlyRunUtc(
+  dayOfMonth: number,
+  timezone: string,
+  from: Date,
+): Date {
+  const [y, m] = zonedDateKey(from, timezone).split("-").map(Number);
+  for (let addYears = 0; addYears < 2; addYears++) {
+    for (const qm of [1, 4, 7, 10]) {
+      if (addYears === 0 && qm < m) continue;
+      const cand = localMidnightUtc(
+        `${y + addYears}-${pad2(qm)}-${pad2(dayOfMonth)}`,
+        timezone,
+      );
+      if (cand.getTime() > from.getTime()) return cand;
+    }
+  }
+  return localMidnightUtc(`${y + 1}-01-${pad2(dayOfMonth)}`, timezone);
+}
+
+export function nextScheduledRunUtc(
+  cadence: ScheduleCadence,
+  opts: { dayOfMonth: number; dayOfWeek: number | null },
+  timezone: string,
+  from: Date,
+): Date {
+  if (cadence === "weekly") {
+    return nextWeeklyRunUtc(opts.dayOfWeek ?? 1, timezone, from);
+  }
+  if (cadence === "quarterly") {
+    return nextQuarterlyRunUtc(opts.dayOfMonth, timezone, from);
+  }
+  return nextMonthlyRunUtc(opts.dayOfMonth, timezone, from);
+}
+
+/**
+ * The period a scheduled statement covers when it fires at `runInstant`:
+ * monthly -> last calendar month; weekly -> the 7 days ending the day
+ * before the run; quarterly -> the previous calendar quarter.
+ */
+export function scheduledStatementRange(
+  cadence: ScheduleCadence,
+  runInstant: Date,
+  timezone: string,
+): { preset: StatementPeriodPreset; fromDateKey?: string; toDateKey?: string } {
+  if (cadence === "monthly") return { preset: "last_month" };
+
+  const runKey = zonedDateKey(runInstant, timezone);
+  if (cadence === "weekly") {
+    return {
+      preset: "custom",
+      fromDateKey: shiftDateKey(runKey, -7),
+      toDateKey: shiftDateKey(runKey, -1),
+    };
+  }
+
+  // quarterly: the calendar quarter before the run's own quarter.
+  const [y, m] = runKey.split("-").map(Number);
+  const runQ = Math.floor((m - 1) / 3);
+  let py = y;
+  let pq = runQ - 1;
+  if (pq < 0) {
+    pq = 3;
+    py -= 1;
+  }
+  const startMonth = pq * 3 + 1;
+  const endMonth = startMonth + 2;
+  return {
+    preset: "custom",
+    fromDateKey: `${py}-${pad2(startMonth)}-01`,
+    toDateKey: `${py}-${pad2(endMonth)}-${
+      pad2(lastDayOfMonthNum(py, endMonth))
+    }`,
+  };
 }
 
 /**

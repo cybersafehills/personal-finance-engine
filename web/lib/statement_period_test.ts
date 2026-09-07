@@ -195,3 +195,84 @@ Deno.test("negative-offset zone: this_month start resolves to the right UTC inst
   // 1 March 2026 is still EST (UTC-5); DST starts 8 March.
   assertEquals(p.periodStartUtc.toISOString(), "2026-03-01T05:00:00.000Z");
 });
+
+import {
+  nextQuarterlyRunUtc,
+  nextScheduledRunUtc,
+  nextWeeklyRunUtc,
+  scheduledStatementRange,
+} from "./statement-period.ts";
+
+Deno.test("nextWeeklyRunUtc: next Monday, strictly after now", () => {
+  // 2026-09-07 is a Monday. from at 09:00 UTC -> next Monday is 2026-09-14.
+  const d = nextWeeklyRunUtc(1, "UTC", new Date("2026-09-07T09:00:00Z"));
+  assertEquals(d.toISOString(), "2026-09-14T00:00:00.000Z");
+  // asking for Wednesday from that same Monday -> 2026-09-09.
+  const w = nextWeeklyRunUtc(3, "UTC", new Date("2026-09-07T09:00:00Z"));
+  assertEquals(w.toISOString(), "2026-09-09T00:00:00.000Z");
+});
+
+Deno.test("nextQuarterlyRunUtc: next quarter-start month on the given day", () => {
+  // from 2026-09-07 -> next quarter start is October; day 5 -> 2026-10-05.
+  const d = nextQuarterlyRunUtc(5, "UTC", new Date("2026-09-07T00:00:00Z"));
+  assertEquals(d.toISOString(), "2026-10-05T00:00:00.000Z");
+  // from 2026-11-01 -> next is 2027-01-05.
+  const j = nextQuarterlyRunUtc(5, "UTC", new Date("2026-11-01T00:00:00Z"));
+  assertEquals(j.toISOString(), "2027-01-05T00:00:00.000Z");
+});
+
+Deno.test("scheduledStatementRange: weekly = 7 days ending the day before the run", () => {
+  const r = scheduledStatementRange(
+    "weekly",
+    new Date("2026-09-14T00:00:00Z"),
+    "UTC",
+  );
+  assertEquals(r.preset, "custom");
+  assertEquals(r.fromDateKey, "2026-09-07");
+  assertEquals(r.toDateKey, "2026-09-13");
+});
+
+Deno.test("scheduledStatementRange: quarterly = the previous calendar quarter", () => {
+  // run in October (Q4) -> covers Q3 (Jul–Sep).
+  const r = scheduledStatementRange(
+    "quarterly",
+    new Date("2026-10-05T00:00:00Z"),
+    "UTC",
+  );
+  assertEquals(r.fromDateKey, "2026-07-01");
+  assertEquals(r.toDateKey, "2026-09-30");
+  // run in January -> covers the prior year's Q4.
+  const r2 = scheduledStatementRange(
+    "quarterly",
+    new Date("2027-01-05T00:00:00Z"),
+    "UTC",
+  );
+  assertEquals(r2.fromDateKey, "2026-10-01");
+  assertEquals(r2.toDateKey, "2026-12-31");
+});
+
+Deno.test("scheduledStatementRange: monthly delegates to the last_month preset", () => {
+  assertEquals(
+    scheduledStatementRange("monthly", new Date(), "UTC").preset,
+    "last_month",
+  );
+});
+
+Deno.test("nextScheduledRunUtc dispatches by cadence", () => {
+  const from = new Date("2026-09-07T09:00:00Z");
+  assertEquals(
+    nextScheduledRunUtc("weekly", { dayOfMonth: 1, dayOfWeek: 1 }, "UTC", from)
+      .toISOString(),
+    "2026-09-14T00:00:00.000Z",
+  );
+  assertEquals(
+    nextScheduledRunUtc(
+      "monthly",
+      { dayOfMonth: 1, dayOfWeek: null },
+      "UTC",
+      from,
+    )
+      .toISOString(),
+    "2026-10-01T00:00:00.000Z",
+  );
+});

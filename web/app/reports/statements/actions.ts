@@ -89,7 +89,9 @@ export async function deleteStatementPackAction(
 export async function saveStatementScheduleAction(input: {
   statementType: "standard" | "detailed";
   sourceIds: string[];
+  cadence: "weekly" | "monthly" | "quarterly";
   dayOfMonth: number;
+  dayOfWeek?: number | null;
   timezone: string;
 }): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   if (!isFinancialStatementsEnabled()) {

@@ -2681,12 +2681,18 @@ fi
 rm -f $ARTIFACT_DIR/pfe_pack_fmt.log
 
 # --- Scheduled statements (20261213000000) ---------------------------
-SCHED_A="$(as_user "$USER_A" "insert into public.statement_schedules (workspace_id, created_by, timezone, next_run_at) values ('$WORKSPACE_A', '$USER_A', 'Africa/Kigali', now() + interval '1 day') returning id;")"
+SCHED_A="$(as_user "$USER_A" "insert into public.statement_schedules (workspace_id, created_by, timezone, next_run_at, cadence, day_of_week) values ('$WORKSPACE_A', '$USER_A', 'Africa/Kigali', now() + interval '1 day', 'weekly', 1) returning id;")"
 if [ -n "$SCHED_A" ]; then
-  pass "Schedules: a member creates a schedule in their own workspace"
+  pass "Schedules: a member creates a weekly schedule in their own workspace (20261215000000 cadence)"
 else
   fail "Schedules: member could not create a schedule"
 fi
+if psql -d pfe_rls -c "set role service_role; insert into public.statement_schedules (workspace_id, created_by, timezone, next_run_at, cadence) values ('$WORKSPACE_A', '$USER_A', 'UTC', now(), 'fortnightly');" >/dev/null 2>$ARTIFACT_DIR/pfe_sched_cad.log; then
+  fail "Schedules: the cadence CHECK accepted an unknown value"
+else
+  pass "Schedules: the cadence CHECK rejects an unknown value"
+fi
+rm -f $ARTIFACT_DIR/pfe_sched_cad.log
 # created_by must be the caller; another workspace is off-limits.
 if as_user "$USER_A" "insert into public.statement_schedules (workspace_id, created_by, timezone, next_run_at) values ('$WORKSPACE_B', '$USER_A', 'UTC', now());" >/dev/null 2>$ARTIFACT_DIR/pfe_sched_x.log; then
   fail "Schedules: a member created a schedule in another tenant's workspace"

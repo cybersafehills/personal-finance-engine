@@ -3,7 +3,12 @@ import { supabaseSession } from "./supabase-session-server";
 import { supabaseServer } from "./supabase-server";
 import { getActiveWorkspace } from "./queries";
 import { isValidReportTimezone } from "./timezones";
-import { nextMonthlyRunUtc, resolveStatementPeriod } from "./statement-period";
+import {
+  nextScheduledRunUtc,
+  resolveStatementPeriod,
+  type ScheduleCadence,
+  scheduledStatementRange,
+} from "./statement-period";
 import {
   buildPendingStatementRecord,
   resolveStatementScope,
@@ -30,7 +35,9 @@ export type StatementScheduleRow = {
   statement_type: "standard" | "detailed";
   account_ids: string[];
   filters: StatementFilters | null;
+  cadence: ScheduleCadence;
   day_of_month: number;
+  day_of_week: number | null;
   timezone: string;
   enabled: boolean;
   last_run_at: string | null;
@@ -43,7 +50,7 @@ export async function getStatementSchedules(): Promise<StatementScheduleRow[]> {
   const { data, error } = await supabase
     .from("statement_schedules")
     .select(
-      "id, statement_type, account_ids, filters, day_of_month, timezone, enabled, last_run_at, next_run_at, created_at",
+      "id, statement_type, account_ids, filters, cadence, day_of_month, day_of_week, timezone, enabled, last_run_at, next_run_at, created_at",
     )
     .order("created_at", { ascending: false });
   if (error) {
@@ -60,7 +67,9 @@ export type SaveScheduleOutcome =
 export async function saveStatementSchedule(input: {
   statementType: "standard" | "detailed";
   sourceIds: string[];
+  cadence: ScheduleCadence;
   dayOfMonth: number;
+  dayOfWeek?: number | null;
   timezone: string;
 }): Promise<SaveScheduleOutcome> {
   if (
@@ -68,7 +77,15 @@ export async function saveStatementSchedule(input: {
   ) {
     return { ok: false, error: "Unknown statement type." };
   }
-  if (
+  if (!["weekly", "monthly", "quarterly"].includes(input.cadence)) {
+    return { ok: false, error: "Unknown cadence." };
+  }
+  const dayOfWeek = input.cadence === "weekly" ? (input.dayOfWeek ?? -1) : null;
+  if (input.cadence === "weekly") {
+    if (!Number.isInteger(dayOfWeek) || dayOfWeek! < 0 || dayOfWeek! > 6) {
+      return { ok: false, error: "Choose a day of the week." };
+    }
+  } else if (
     !Number.isInteger(input.dayOfMonth) ||
     input.dayOfMonth < 1 || input.dayOfMonth > 28
   ) {
@@ -105,8 +122,9 @@ export async function saveStatementSchedule(input: {
     };
   }
 
-  const nextRun = nextMonthlyRunUtc(
-    input.dayOfMonth,
+  const nextRun = nextScheduledRunUtc(
+    input.cadence,
+    { dayOfMonth: input.dayOfMonth, dayOfWeek },
     input.timezone,
     new Date(),
   );
@@ -118,7 +136,9 @@ export async function saveStatementSchedule(input: {
       created_by: user.id,
       statement_type: input.statementType,
       account_ids: ids,
-      day_of_month: input.dayOfMonth,
+      cadence: input.cadence,
+      day_of_month: input.cadence === "weekly" ? 1 : input.dayOfMonth,
+      day_of_week: dayOfWeek,
       timezone: input.timezone,
       enabled: true,
       next_run_at: nextRun.toISOString(),
@@ -168,7 +188,9 @@ type DueSchedule = {
   statement_type: "standard" | "detailed";
   account_ids: string[] | null;
   filters: StatementFilters | null;
+  cadence: ScheduleCadence;
   day_of_month: number;
+  day_of_week: number | null;
   timezone: string;
 };
 
@@ -177,8 +199,15 @@ async function enqueueScheduledStatement(
   schedule: DueSchedule,
   now: Date,
 ): Promise<boolean> {
+  const range = scheduledStatementRange(
+    schedule.cadence,
+    now,
+    schedule.timezone,
+  );
   const periodRes = resolveStatementPeriod({
-    preset: "last_month",
+    preset: range.preset,
+    fromDateKey: range.fromDateKey,
+    toDateKey: range.toDateKey,
     timezone: schedule.timezone,
     now,
   });
@@ -261,7 +290,7 @@ export async function runStatementScheduleTick(
   const { data, error } = await service
     .from("statement_schedules")
     .select(
-      "id, workspace_id, created_by, statement_type, account_ids, filters, day_of_month, timezone",
+      "id, workspace_id, created_by, statement_type, account_ids, filters, cadence, day_of_month, day_of_week, timezone",
     )
     .eq("enabled", true)
     .lte("next_run_at", now.toISOString())
@@ -283,12 +312,15 @@ export async function runStatementScheduleTick(
       .from("statement_schedules")
       .update({
         last_run_at: now.toISOString(),
-        next_run_at: nextMonthlyRunUtc(
-          schedule.day_of_month,
+        next_run_at: nextScheduledRunUtc(
+          schedule.cadence,
+          {
+            dayOfMonth: schedule.day_of_month,
+            dayOfWeek: schedule.day_of_week,
+          },
           schedule.timezone,
           now,
-        )
-          .toISOString(),
+        ).toISOString(),
       })
       .eq("id", schedule.id);
   }
