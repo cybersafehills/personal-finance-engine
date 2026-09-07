@@ -38,6 +38,10 @@ const PUBLIC_PATHS = [
   // needs no OneLedger session — the OneLedger Capture Shortcut redeems
   // the code. Renders 404 when DEVICE_PAIRING_V2 is unset.
   "/pair",
+  // Public legal pages (e.g. /legal/android-privacy — the "Privacy policy"
+  // URL in the OL Shortcuts Play Console listing). Must resolve for a
+  // logged-out visitor and for Google's review crawler.
+  "/legal",
 ];
 
 // Of those, only these should redirect an already-signed-in user away -

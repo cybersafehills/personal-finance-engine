@@ -1,6 +1,6 @@
 # OneLedger Shortcuts — Privacy Policy
 
-_Draft. Host this at a stable public URL (e.g. `https://oneledger.me/legal/shortcuts-privacy`) and use that URL in the Play Console. Review with counsel before publishing. Last updated: 2026-09-05._
+_Published at **`https://oneledger.me/legal/android-privacy`** (`web/app/legal/android-privacy/page.tsx`) — that is the URL to use in the Play Console "Privacy policy" field. This markdown file is the source of truth for the wording; keep the page in step with it. Review with counsel before a production release. Last updated: 2026-09-05._
 
 **OneLedger Shortcuts** ("the app", package `me.oneledger.companion`) is a
 companion to the OneLedger personal-finance service. It exists to do one thing:

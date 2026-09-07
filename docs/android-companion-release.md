@@ -140,8 +140,10 @@ Answer text to use:
 
 ### 3.3 Other Play Console items
 
-- **Privacy policy URL** — host `docs/android-companion-privacy-policy.md` at a
-  stable public URL (e.g. a page on `oneledger.me`). Required field.
+- **Privacy policy URL** — `https://oneledger.me/legal/android-privacy` (served
+  by `web/app/legal/android-privacy/page.tsx`, public via `/legal` in
+  `web/proxy.ts` PUBLIC_PATHS). Required field. Wording tracks
+  `docs/android-companion-privacy-policy.md`.
 - **App access** — provide test credentials + note that full function needs a
   OneLedger account and a paired connection; reviewers can exercise pairing with
   the `op:"test"` handshake.
