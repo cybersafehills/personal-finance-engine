@@ -2,7 +2,6 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import {
   getActiveWorkspaceId,
-  getAttentionItems,
   getCategoryTotals,
   getCurrentBalance,
   getDashboardBudgetSummary,
@@ -30,7 +29,6 @@ import {
 } from "../components/FirstRunCards";
 import { SummaryMetric } from "../components/SummaryMetric";
 import { BudgetStatusCard } from "../components/BudgetStatusCard";
-import { AttentionItemsCard } from "../components/AttentionItemsCard";
 import { DashboardTransactionItem } from "../components/DashboardTransactionItem";
 import { HouseholdSpendingCard } from "../components/HouseholdSpendingCard";
 import { EmptyState } from "../components/EmptyState";
@@ -54,7 +52,6 @@ export default async function HomePage() {
     today,
     recentTransactions,
     budgetSummary,
-    attentionItems,
     householdSpending,
     onboarding,
     journey,
@@ -65,7 +62,6 @@ export default async function HomePage() {
     getTodayTotals(),
     getRecentTransactions(RECENT_TRANSACTIONS_LIMIT),
     getDashboardBudgetSummary(),
-    getAttentionItems(),
     getHouseholdSpendingBreakdown(),
     getOnboardingState(),
     journeyEnabled ? getOnboardingJourney() : Promise.resolve(null),
@@ -101,7 +97,7 @@ export default async function HomePage() {
   // column, per master prompt §10's "do not leave the majority of the
   // desktop viewport unused without a design reason" - an empty right
   // column here has no design reason, it's just nothing to show yet.
-  const hasSecondaryColumn = Boolean(budgetSummary) || attentionItems.length > 0;
+  const hasSecondaryColumn = Boolean(budgetSummary);
   const mainColumnSpan = hasSecondaryColumn ? "lg:col-span-2" : "lg:col-span-3";
 
   return (
@@ -179,12 +175,6 @@ export default async function HomePage() {
             worstStatus={budgetSummary.worstStatus}
             daysRemainingInPeriod={budgetSummary.daysRemainingInPeriod}
           />
-        </div>
-      )}
-
-      {attentionItems.length > 0 && (
-        <div className="lg:col-start-3 lg:row-start-2">
-          <AttentionItemsCard items={attentionItems} />
         </div>
       )}
 

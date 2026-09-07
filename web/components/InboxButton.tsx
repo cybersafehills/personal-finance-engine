@@ -2,21 +2,18 @@ import Link from "next/link";
 import { InboxIcon } from "./icons";
 
 /**
- * Header entry point to /inbox. Also carries the unread-notifications
- * badge - Inbox and Notifications used to be two separate header icons
- * (InboxButton + NotificationBell); they're merged into this one button
- * so there's a single "things that need your attention" entry point.
- * /inbox itself now renders a "Notifications" section (see
- * app/inbox/page.tsx) alongside its existing financial-inbox workflow
- * items, so the badge here always points somewhere that shows what it's
- * counting. The count is fetched once in the root layout and refreshed
- * when a mark-read action revalidates the layout (see
- * app/notifications/actions.ts's revalidateNotificationRoutes).
+ * Header entry point to /inbox. Carries the inbox count badge - unread
+ * notifications plus the open "Needs attention" summary rows, which now
+ * live inside /inbox rather than on Home. `count` arrives already 0 when
+ * the caller has the badge preference off (ui_preferences.show_inbox_badge,
+ * togglable in /inbox and /settings/notifications). The count refreshes
+ * whenever the root layout re-runs - a mark-read action or any
+ * LiveDataSync-triggered router.refresh().
  */
-export function InboxButton({ unreadCount = 0 }: { unreadCount?: number }) {
-  const label = unreadCount > 0
-    ? `Financial Inbox, ${unreadCount} unread notification${unreadCount === 1 ? "" : "s"}`
-    : "Financial Inbox";
+export function InboxButton({ count = 0 }: { count?: number }) {
+  const label = count > 0
+    ? `Inbox, ${count} item${count === 1 ? "" : "s"} need your attention`
+    : "Inbox";
 
   return (
     <Link
@@ -27,9 +24,9 @@ export function InboxButton({ unreadCount = 0 }: { unreadCount?: number }) {
       className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-text-secondary transition-colors hover:bg-background hover:text-text-primary focus-visible:bg-background"
     >
       <InboxIcon className="h-5 w-5" />
-      {unreadCount > 0 && (
-        <span className="absolute right-1.5 top-1.5 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold leading-none text-accent-foreground">
-          {unreadCount > 99 ? "99+" : unreadCount}
+      {count > 0 && (
+        <span className="absolute right-1.5 top-1.5 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-notification-badge px-1 text-[10px] font-semibold leading-none text-white">
+          {count > 99 ? "99+" : count}
         </span>
       )}
     </Link>

@@ -10,7 +10,15 @@ import type { AttentionItem } from "../lib/queries";
  * same as the budget status card, rather than showing a "nothing needs
  * attention" empty state that would just be noise on every quiet day.
  */
-export function AttentionItemsCard({ items }: { items: AttentionItem[] }) {
+export function AttentionItemsCard({
+  items,
+  showOpenInboxLink = true,
+}: {
+  items: AttentionItem[];
+  /** The card links to /inbox by default; set false when it is rendered
+   *  inside /inbox itself. */
+  showOpenInboxLink?: boolean;
+}) {
   if (items.length === 0) return null;
 
   return (
@@ -19,13 +27,15 @@ export function AttentionItemsCard({ items }: { items: AttentionItem[] }) {
         <h2 className="text-xs font-semibold uppercase tracking-wide text-text-muted">
           Needs attention
         </h2>
-        <Link
-          href="/inbox"
-          prefetch={false}
-          className="text-xs font-medium text-accent hover:underline"
-        >
-          Open inbox
-        </Link>
+        {showOpenInboxLink && (
+          <Link
+            href="/inbox"
+            prefetch={false}
+            className="text-xs font-medium text-accent hover:underline"
+          >
+            Open inbox
+          </Link>
+        )}
       </div>
       <div className="flex flex-col divide-y divide-border-subtle">
         {items.map((item) => (

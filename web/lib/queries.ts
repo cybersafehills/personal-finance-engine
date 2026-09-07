@@ -3132,12 +3132,14 @@ export async function getReportPreferences(): Promise<ReportPreferencesRow | nul
 export type UiPreferencesRow = {
   hideBalance: boolean;
   privacyMode: boolean;
+  /** Whether the header inbox icon shows its count badge (20261208000000). */
+  showInboxBadge: boolean;
 };
 
 // nav_order is no longer read - the primary nav is a fixed journey now
 // (lib/navigation.ts). The column stays in the table until a deliberate
 // drop migration.
-const UI_PREFERENCES_COLUMNS = "hide_balance, privacy_mode";
+const UI_PREFERENCES_COLUMNS = "hide_balance, privacy_mode, show_inbox_badge";
 
 /**
  * The caller's own shell/navigation/privacy preferences in their active
@@ -3152,6 +3154,7 @@ export async function getUiPreferences(): Promise<UiPreferencesRow> {
   const fallback: UiPreferencesRow = {
     hideBalance: false,
     privacyMode: false,
+    showInboxBadge: true,
   };
 
   const supabase = await supabaseSession();
@@ -3179,7 +3182,23 @@ export async function getUiPreferences(): Promise<UiPreferencesRow> {
   return {
     hideBalance: data.hide_balance,
     privacyMode: data.privacy_mode,
+    showInboxBadge: data.show_inbox_badge ?? true,
   };
+}
+
+/**
+ * The count on the header inbox icon: unread notifications plus the
+ * open "needs attention" summary rows (getAttentionItems). Those two are
+ * the concise "what needs me" surfaces; getFinancialInbox().total is
+ * shown on the Inbox page itself and is deliberately not folded in here
+ * (it re-counts the review queue that getAttentionItems already covers).
+ */
+export async function getInboxBadgeCount(): Promise<number> {
+  const [unread, attention] = await Promise.all([
+    getUnreadNotificationCount(),
+    getAttentionItems(),
+  ]);
+  return unread + attention.length;
 }
 
 // ===========================================================================

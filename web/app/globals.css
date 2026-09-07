@@ -30,6 +30,11 @@
      restrained - this is a "not done yet" tint, not an error state. */
   --needs-map-bg: #fdf1f0;
   --needs-map-border: #ecd0cd;
+  /* The one place this app uses red: a notification count badge. It reads
+     as convention there ("you have N waiting"), not as the alarm the
+     "spending is never red" rule guards against. A muted brick, not a
+     fire-engine red. */
+  --notification-badge: #c0392b;
 
   /* One restrained accent for navigation/focus/primary actions. */
   --accent: #33509e;
@@ -67,6 +72,7 @@
   --color-attention-bg: var(--attention-bg);
   --color-needs-map-bg: var(--needs-map-bg);
   --color-needs-map-border: var(--needs-map-border);
+  --color-notification-badge: var(--notification-badge);
 
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);

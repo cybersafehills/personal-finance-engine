@@ -10,8 +10,8 @@ import { BrandSplashScreen, SPLASH_CRITICAL_CSS } from "../components/brand/Bran
 import { supabaseSession } from "../lib/supabase-session-server";
 import {
   getActiveWorkspaceId,
+  getInboxBadgeCount,
   getUiPreferences,
-  getUnreadNotificationCount,
   getUserWorkspaces,
 } from "../lib/queries";
 import {
@@ -102,13 +102,13 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   // privacy preference on the very first server-rendered paint, so there
   // is no client-side fetch and no flash of an unmasked balance or a
   // default nav order before the real one loads (§6.4/§11.1).
-  const [workspaces, activeWorkspaceId, uiPreferences, unreadNotificationCount] =
+  const [workspaces, activeWorkspaceId, uiPreferences, inboxBadgeCount] =
     user
       ? await Promise.all([
         getUserWorkspaces(),
         getActiveWorkspaceId(),
         getUiPreferences(),
-        getUnreadNotificationCount(),
+        getInboxBadgeCount(),
       ])
       : [
         [],
@@ -116,6 +116,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
         {
           hideBalance: false,
           privacyMode: false,
+          showInboxBadge: true,
         },
         0,
       ];
@@ -166,7 +167,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           integrationsEnabled={integrationsEnabled}
           experienceMode={experienceMode}
           businessSurfacesEnabled={businessSurfacesEnabled}
-          unreadNotificationCount={unreadNotificationCount}
+          inboxBadgeCount={uiPreferences.showInboxBadge ? inboxBadgeCount : 0}
         >
           {children}
         </AppShell>

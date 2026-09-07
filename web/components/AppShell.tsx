@@ -88,7 +88,7 @@ export function AppShell({
   integrationsEnabled,
   experienceMode,
   businessSurfacesEnabled,
-  unreadNotificationCount,
+  inboxBadgeCount,
 }: {
   children: React.ReactNode;
   userEmail: string | null;
@@ -104,7 +104,9 @@ export function AppShell({
   experienceMode: ExperienceMode;
   /** Whether the dark-by-default Business-only surfaces are switched on. */
   businessSurfacesEnabled: boolean;
-  unreadNotificationCount: number;
+  /** Count on the header inbox icon (unread notifications + open attention
+   *  rows). Already 0 when the caller has the badge preference off. */
+  inboxBadgeCount: number;
 }) {
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
@@ -202,7 +204,7 @@ export function AppShell({
 
             <div className="flex shrink-0 items-center gap-1.5">
               {payEnabled && <PayTrigger variant="desktop" />}
-              <InboxButton unreadCount={unreadNotificationCount} />
+              <InboxButton count={inboxBadgeCount} />
               <ReportsButton />
               <ProfileMenu
                 userEmail={userEmail}
