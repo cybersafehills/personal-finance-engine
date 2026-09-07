@@ -919,6 +919,8 @@ Deno.serve(async (req: Request) => {
       workspaceId: resolvedWorkspaceId,
       direction: parsed.direction,
       amountRwf: parsed.amount_rwf,
+      feeRwf: parsed.fee_rwf,
+      transactionType: parsed.transaction_type,
       counterpartyName: parsed.counterparty_name,
       occurredAt: parsed.occurred_at,
       financialSourceId: resolvedFinancialSourceId,

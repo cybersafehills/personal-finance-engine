@@ -20,6 +20,31 @@ const DIRECTION_OPTIONS = [
   { value: "neutral", label: "Neutral" },
 ] as const;
 
+// ISO day-of-week: 1 = Monday … 7 = Sunday (matches the DB / engine).
+const WEEKDAYS = [
+  { value: 1, label: "Mon" },
+  { value: 2, label: "Tue" },
+  { value: 3, label: "Wed" },
+  { value: 4, label: "Thu" },
+  { value: 5, label: "Fri" },
+  { value: 6, label: "Sat" },
+  { value: 7, label: "Sun" },
+] as const;
+
+const TRANSACTION_TYPE_OPTIONS = [
+  { value: "send_money", label: "Send money" },
+  { value: "merchant_payment", label: "Merchant payment" },
+  { value: "money_received", label: "Money received" },
+  { value: "airtime", label: "Airtime" },
+  { value: "cash_withdrawal", label: "Cash withdrawal" },
+  { value: "cash_deposit", label: "Cash deposit" },
+  { value: "bill_payment", label: "Bill payment" },
+  { value: "bank_transfer", label: "Bank transfer" },
+  { value: "refund", label: "Refund" },
+  { value: "reversal", label: "Reversal" },
+  { value: "other", label: "Other" },
+] as const;
+
 const INPUT_CLASS =
   "min-h-11 rounded-control border border-border-strong bg-background px-3 py-2 text-sm text-text-primary";
 
@@ -54,6 +79,18 @@ export function PolicyForm(
   const [amountMax, setAmountMax] = useState(policy?.amount_max_rwf?.toString() ?? "");
   const [timeStart, setTimeStart] = useState(policy?.time_start?.slice(0, 5) ?? "");
   const [timeEnd, setTimeEnd] = useState(policy?.time_end?.slice(0, 5) ?? "");
+  const [daysOfWeek, setDaysOfWeek] = useState<number[]>(policy?.days_of_week ?? []);
+  const [daysOfMonth, setDaysOfMonth] = useState(
+    policy?.days_of_month?.join(", ") ?? "",
+  );
+  const [transactionTypes, setTransactionTypes] = useState<string[]>(
+    policy?.transaction_types ?? [],
+  );
+  const [feeMin, setFeeMin] = useState(policy?.fee_min_rwf?.toString() ?? "");
+  const [feeMax, setFeeMax] = useState(policy?.fee_max_rwf?.toString() ?? "");
+  const [amountRoundMultiple, setAmountRoundMultiple] = useState(
+    policy?.amount_round_multiple?.toString() ?? "",
+  );
   const [priority, setPriority] = useState(policy?.priority?.toString() ?? "100");
   const [scopeType, setScopeType] = useState<"space" | "source">(
     policy?.scope_type ?? "space",
@@ -79,6 +116,12 @@ export function PolicyForm(
           amountMax,
           timeStart,
           timeEnd,
+          daysOfWeek: daysOfWeek.join(","),
+          daysOfMonth,
+          transactionTypes,
+          feeMin,
+          feeMax,
+          amountRoundMultiple,
           priority,
           scopeType,
           scopeSourceId,
@@ -285,6 +328,123 @@ export function PolicyForm(
           />
         </label>
       </div>
+
+      <div>
+        <span className="text-sm font-medium text-text-secondary">Days of the week (optional)</span>
+        <div className="mt-1 flex flex-wrap gap-1.5">
+          {WEEKDAYS.map((d) => {
+            const on = daysOfWeek.includes(d.value);
+            return (
+              <button
+                key={d.value}
+                type="button"
+                aria-pressed={on}
+                onClick={() =>
+                  setDaysOfWeek((prev) =>
+                    prev.includes(d.value)
+                      ? prev.filter((x) => x !== d.value)
+                      : [...prev, d.value].sort((a, b) => a - b),
+                  )
+                }
+                className={`min-h-9 rounded-control px-3 text-sm font-medium transition-colors ${
+                  on
+                    ? "bg-accent text-accent-foreground"
+                    : "border border-border-strong text-text-secondary"
+                }`}
+              >
+                {d.label}
+              </button>
+            );
+          })}
+        </div>
+        <span className="mt-1 block text-xs text-text-muted">
+          Leave all unselected to match any day.
+        </span>
+      </div>
+
+      <label className="flex flex-col gap-1 text-sm">
+        <span className="font-medium text-text-secondary">Days of the month (optional)</span>
+        <input
+          type="text"
+          inputMode="numeric"
+          value={daysOfMonth}
+          onChange={(e) => setDaysOfMonth(e.target.value)}
+          placeholder="e.g. 1, 15, 28"
+          className={INPUT_CLASS}
+        />
+      </label>
+
+      <fieldset className="flex flex-col gap-1 text-sm">
+        <legend className="font-medium text-text-secondary">
+          Transaction type (optional)
+        </legend>
+        <div className="mt-1 flex flex-wrap gap-1.5">
+          {TRANSACTION_TYPE_OPTIONS.map((o) => {
+            const on = transactionTypes.includes(o.value);
+            return (
+              <button
+                key={o.value}
+                type="button"
+                aria-pressed={on}
+                onClick={() =>
+                  setTransactionTypes((prev) =>
+                    prev.includes(o.value)
+                      ? prev.filter((x) => x !== o.value)
+                      : [...prev, o.value],
+                  )
+                }
+                className={`min-h-9 rounded-control px-3 text-xs font-medium transition-colors ${
+                  on
+                    ? "bg-accent text-accent-foreground"
+                    : "border border-border-strong text-text-secondary"
+                }`}
+              >
+                {o.label}
+              </button>
+            );
+          })}
+        </div>
+      </fieldset>
+
+      <div className="grid grid-cols-2 gap-3">
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-text-secondary">Min fee (RWF, optional)</span>
+          <input
+            type="text"
+            inputMode="numeric"
+            value={feeMin}
+            onChange={(e) => setFeeMin(e.target.value)}
+            className={INPUT_CLASS}
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-text-secondary">Max fee (RWF, optional)</span>
+          <input
+            type="text"
+            inputMode="numeric"
+            value={feeMax}
+            onChange={(e) => setFeeMax(e.target.value)}
+            className={INPUT_CLASS}
+          />
+        </label>
+      </div>
+
+      <label className="flex flex-col gap-1 text-sm">
+        <span className="font-medium text-text-secondary">Round-number amount (optional)</span>
+        <select
+          value={amountRoundMultiple}
+          onChange={(e) => setAmountRoundMultiple(e.target.value)}
+          className={INPUT_CLASS}
+        >
+          <option value="">Off</option>
+          <option value="100">Exact multiples of 100</option>
+          <option value="1000">Exact multiples of 1,000</option>
+        </select>
+        <span className="text-xs text-text-muted">
+          Matches only amounts with no remainder — often a personal transfer
+          rather than a merchant bill.
+        </span>
+      </label>
 
       <label className="flex flex-col gap-1 text-sm">
         <span className="font-medium text-text-secondary">Priority</span>

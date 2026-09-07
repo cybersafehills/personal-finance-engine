@@ -40,6 +40,8 @@ export type EvaluatePoliciesInput = {
   workspaceId: string;
   direction: TransactionDirection;
   amountRwf: number;
+  feeRwf: number;
+  transactionType: string;
   counterpartyName: string | null;
   /** ISO 8601 timestamp with a local offset, as produced by the parser (e.g. Kigali's +02:00). */
   occurredAt: string;
@@ -128,6 +130,70 @@ function localTimeOfDay(occurredAt: string): string | null {
   return match ? match[1] : null;
 }
 
+/**
+ * ISO day-of-week (1=Mon … 7=Sun) and day-of-month for an ISO timestamp
+ * that carries its own local offset - parsed from the string's own
+ * date/offset parts so it stays in the transaction's local calendar day,
+ * matching policy_matches_transaction()'s `at time zone <ws tz>`.
+ */
+function localDayInfo(
+  occurredAt: string,
+): { isoDow: number; dayOfMonth: number } | null {
+  const m = occurredAt.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}:\d{2}:\d{2})/);
+  if (!m) return null;
+  const [, y, mo, d] = m;
+  const dt = new Date(Date.UTC(Number(y), Number(mo) - 1, Number(d)));
+  if (Number.isNaN(dt.getTime())) return null;
+  const jsDow = dt.getUTCDay(); // 0=Sun … 6=Sat
+  return { isoDow: jsDow === 0 ? 7 : jsDow, dayOfMonth: Number(d) };
+}
+
+function matchesDaysOfWeek(
+  rule: CategorizationPolicyRow,
+  occurredAt: string,
+): boolean {
+  if (rule.days_of_week === null || rule.days_of_week.length === 0) return true;
+  const info = localDayInfo(occurredAt);
+  if (!info) return false;
+  return rule.days_of_week.includes(info.isoDow);
+}
+
+function matchesDaysOfMonth(
+  rule: CategorizationPolicyRow,
+  occurredAt: string,
+): boolean {
+  if (rule.days_of_month === null || rule.days_of_month.length === 0) {
+    return true;
+  }
+  const info = localDayInfo(occurredAt);
+  if (!info) return false;
+  return rule.days_of_month.includes(info.dayOfMonth);
+}
+
+function matchesTransactionType(
+  rule: CategorizationPolicyRow,
+  transactionType: string,
+): boolean {
+  if (rule.transaction_types === null || rule.transaction_types.length === 0) {
+    return true;
+  }
+  return rule.transaction_types.includes(transactionType);
+}
+
+function matchesFee(rule: CategorizationPolicyRow, feeRwf: number): boolean {
+  if (rule.fee_min_rwf !== null && feeRwf < rule.fee_min_rwf) return false;
+  if (rule.fee_max_rwf !== null && feeRwf > rule.fee_max_rwf) return false;
+  return true;
+}
+
+function matchesRoundMultiple(
+  rule: CategorizationPolicyRow,
+  amountRwf: number,
+): boolean {
+  return rule.amount_round_multiple === null ||
+    amountRwf % rule.amount_round_multiple === 0;
+}
+
 function matchesTimeWindow(
   rule: CategorizationPolicyRow,
   occurredAt: string,
@@ -161,8 +227,18 @@ function conditionCount(rule: CategorizationPolicyRow): number {
   if (rule.amount_min_rwf !== null) count += 1;
   if (rule.amount_max_rwf !== null) count += 1;
   if (rule.time_start !== null) count += 1;
+  if (rule.days_of_week !== null && rule.days_of_week.length > 0) count += 1;
+  if (rule.days_of_month !== null && rule.days_of_month.length > 0) count += 1;
+  if (rule.transaction_types !== null && rule.transaction_types.length > 0) {
+    count += 1;
+  }
+  if (rule.fee_min_rwf !== null) count += 1;
+  if (rule.fee_max_rwf !== null) count += 1;
+  if (rule.amount_round_multiple !== null) count += 1;
   return count;
 }
+
+const ISO_DOW_NAMES = ["", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 function describeConditions(
   rule: CategorizationPolicyRow,
@@ -186,6 +262,29 @@ function describeConditions(
   }
   if (rule.time_start && rule.time_end) {
     clauses.push(`time between ${rule.time_start} and ${rule.time_end}`);
+  }
+  if (rule.days_of_week && rule.days_of_week.length > 0) {
+    clauses.push(
+      `on ${rule.days_of_week.map((d) => ISO_DOW_NAMES[d] ?? d).join("/")}`,
+    );
+  }
+  if (rule.days_of_month && rule.days_of_month.length > 0) {
+    clauses.push(`on day ${rule.days_of_month.join("/")} of the month`);
+  }
+  if (rule.transaction_types && rule.transaction_types.length > 0) {
+    clauses.push(`type is ${rule.transaction_types.join(" or ")}`);
+  }
+  if (rule.fee_min_rwf !== null || rule.fee_max_rwf !== null) {
+    const min = rule.fee_min_rwf ?? 0;
+    const max = rule.fee_max_rwf;
+    clauses.push(
+      max !== null
+        ? `fee between ${min} and ${max} RWF`
+        : `fee at least ${min} RWF`,
+    );
+  }
+  if (rule.amount_round_multiple !== null) {
+    clauses.push(`amount is a multiple of ${rule.amount_round_multiple}`);
   }
   return clauses.join(", ");
 }
@@ -273,6 +372,12 @@ export async function evaluatePolicies(
         amount_max_rwf,
         time_start,
         time_end,
+        days_of_week,
+        days_of_month,
+        transaction_types,
+        fee_min_rwf,
+        fee_max_rwf,
+        amount_round_multiple,
         scope_type,
         scope_source_id
       `,
@@ -292,7 +397,12 @@ export async function evaluatePolicies(
       matchesCounterparty(rule, input.counterpartyName) &&
       matchesDirection(rule, input.direction) &&
       matchesAmount(rule, input.amountRwf) &&
-      matchesTimeWindow(rule, input.occurredAt)
+      matchesTimeWindow(rule, input.occurredAt) &&
+      matchesDaysOfWeek(rule, input.occurredAt) &&
+      matchesDaysOfMonth(rule, input.occurredAt) &&
+      matchesTransactionType(rule, input.transactionType) &&
+      matchesFee(rule, input.feeRwf) &&
+      matchesRoundMultiple(rule, input.amountRwf)
     );
 
   if (candidates.length === 0) {

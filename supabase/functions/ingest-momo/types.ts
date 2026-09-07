@@ -74,6 +74,13 @@ export type CategorizationPolicyRow = {
   amount_max_rwf: number | null;
   time_start: string | null;
   time_end: string | null;
+  /** 20261207000000: extra conditions. Null = not constrained. */
+  days_of_week: number[] | null;
+  days_of_month: number[] | null;
+  transaction_types: string[] | null;
+  fee_min_rwf: number | null;
+  fee_max_rwf: number | null;
+  amount_round_multiple: number | null;
   /** Phase U PR6: 'space' (workspace-wide, default) or 'source' (only its scope_source_id). */
   scope_type: "space" | "source" | string;
   scope_source_id: string | null;
