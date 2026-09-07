@@ -6,11 +6,13 @@ import { AttentionItemsCard } from "../../components/AttentionItemsCard";
 import { InboxBadgeToggle } from "../../components/InboxBadgeToggle";
 import { getFinancialInbox } from "../../lib/financial-inbox";
 import {
+  getActiveWorkspaceId,
   getAttentionItems,
   getAuthUserId,
   getNotifications,
   getUiPreferences,
 } from "../../lib/queries";
+import { isIntelligenceEnabled } from "../../lib/intelligence/insights";
 
 export const dynamic = "force-dynamic";
 
@@ -28,14 +30,22 @@ export const dynamic = "force-dynamic";
 const RECENT_NOTIFICATIONS_LIMIT = 8;
 
 export default async function FinancialInboxPage() {
-  const [inbox, notifications, currentUserId, attentionItems, uiPreferences] =
-    await Promise.all([
-      getFinancialInbox(),
-      getNotifications(RECENT_NOTIFICATIONS_LIMIT),
-      getAuthUserId(),
-      getAttentionItems(),
-      getUiPreferences(),
-    ]);
+  const [
+    inbox,
+    notifications,
+    currentUserId,
+    attentionItems,
+    uiPreferences,
+    workspaceId,
+  ] = await Promise.all([
+    getFinancialInbox(),
+    getNotifications(RECENT_NOTIFICATIONS_LIMIT),
+    getAuthUserId(),
+    getAttentionItems(),
+    getUiPreferences(),
+    getActiveWorkspaceId(),
+  ]);
+  const forecastEnabled = isIntelligenceEnabled(workspaceId);
 
   return (
     <div>
@@ -50,6 +60,24 @@ export default async function FinancialInboxPage() {
         <div className="mb-6">
           <AttentionItemsCard items={attentionItems} showOpenInboxLink={false} />
         </div>
+      )}
+
+      {forecastEnabled && (
+        <Link
+          href="/inbox/forecast"
+          prefetch={false}
+          className="mb-6 flex items-center justify-between gap-3 rounded-card border border-border-subtle bg-surface p-4 transition-colors hover:bg-background"
+        >
+          <span className="flex flex-col gap-0.5">
+            <span className="text-sm font-medium text-text-primary">
+              Cash-flow forecast
+            </span>
+            <span className="text-xs text-text-muted">
+              Your 30-day outlook, recurring payments and spending baseline
+            </span>
+          </span>
+          <span className="shrink-0 text-sm font-medium text-accent">→</span>
+        </Link>
       )}
 
       {notifications.length > 0 && (
