@@ -16,6 +16,7 @@ import {
   formatStatementSignedAmount,
   statementDateKey,
 } from "../lib/statement-document";
+import { parseStatementQuery } from "../lib/statement-nl";
 
 type SourceOption = { id: string; label: string; currency: string };
 
@@ -64,6 +65,8 @@ export function GenerateStatementFlow({
   const [timezone, setTimezone] = useState(defaultTimezone);
   const [showCustomize, setShowCustomize] = useState(false);
 
+  const [nlText, setNlText] = useState("");
+  const [nlSummary, setNlSummary] = useState<string | null>(null);
   const [preview, setPreview] = useState<StatementPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [noTransactions, setNoTransactions] = useState(false);
@@ -101,6 +104,43 @@ export function GenerateStatementFlow({
         : undefined,
       clientToken,
     };
+  }
+
+  function applyDescription() {
+    const parsed = parseStatementQuery(nlText);
+    if (parsed.empty) {
+      setNlSummary(
+        "Couldn't pick anything out of that — set the fields below.",
+      );
+      return;
+    }
+    setPreview(null);
+    setNoTransactions(false);
+    setToken(null);
+    setError(null);
+
+    if (parsed.statementType) setStatementType(parsed.statementType);
+    if (parsed.filters?.direction) setDirection(parsed.filters.direction);
+    if (parsed.preset) setPreset(parsed.preset);
+    if (parsed.fromDateKey) setFromDate(parsed.fromDateKey);
+    if (parsed.toDateKey) setToDate(parsed.toDateKey);
+    if (parsed.filters?.direction || parsed.preset === "custom") {
+      setShowCustomize(true);
+    }
+    if (parsed.sourceHint !== undefined) {
+      if (parsed.sourceHint === "") {
+        setSourceMode("all");
+      } else {
+        const hit = sources.find((s) =>
+          s.label.toLowerCase().includes(parsed.sourceHint!)
+        );
+        if (hit) {
+          setSourceMode("one");
+          setSourceId(hit.id);
+        }
+      }
+    }
+    setNlSummary(`Understood: ${parsed.understood.join(" · ")}. Review below.`);
   }
 
   function validateLocal(): string | null {
@@ -165,6 +205,36 @@ export function GenerateStatementFlow({
       )}
 
       <div className="flex flex-col gap-5 rounded-card border border-border-subtle bg-surface p-4">
+        {/* Describe it (optional) */}
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-text-primary">
+            Describe it{" "}
+            <span className="font-normal text-text-muted">
+              (optional — we&apos;ll fill the fields below)
+            </span>
+          </span>
+          <div className="flex flex-wrap gap-2">
+            <input
+              type="text"
+              value={nlText}
+              onChange={(e) => setNlText(e.target.value)}
+              placeholder="e.g. my detailed MTN statement for last month, money out only"
+              className={`${inputClass} flex-1`}
+            />
+            <button
+              type="button"
+              onClick={applyDescription}
+              disabled={!nlText.trim()}
+              className="min-h-11 rounded-control border border-border-subtle bg-background px-4 text-sm font-medium text-text-primary disabled:opacity-50"
+            >
+              Fill in
+            </button>
+          </div>
+          {nlSummary && (
+            <span className="text-xs text-text-muted">{nlSummary}</span>
+          )}
+        </label>
+
         {/* Account */}
         <fieldset className="flex flex-col gap-2 text-sm">
           <legend className="mb-1 font-semibold text-text-primary">
