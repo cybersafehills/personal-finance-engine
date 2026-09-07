@@ -98,6 +98,10 @@ export function toMathFact(row: LedgerTxnRow): StatementTransactionFact {
 export function toCoverageFact(row: LedgerTxnRow): StatementCoverageFact {
   return {
     occurredAt: row.occurred_at,
+    // Which account this line belongs to - the balance-discontinuity
+    // heuristic is only meaningful within one account's own running
+    // balance, never across a consolidated statement's interleaved series.
+    sourceId: row.financial_source_id,
     principalEffectMinor: toMinor(row.principal_effect_rwf),
     feeEffectMinor: toMinor(row.fee_effect_rwf),
     balanceAfterMinor: row.balance_after_rwf === null

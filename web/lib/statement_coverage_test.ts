@@ -184,7 +184,7 @@ Deno.test("deriveCoverageWarnings: a balance that jumps more than the transactio
   );
 });
 
-Deno.test("deriveCoverageWarnings: discontinuity reports are capped", () => {
+Deno.test("deriveCoverageWarnings: many discontinuities collapse into one summarised note", () => {
   const facts: StatementCoverageFact[] = [];
   for (let i = 0; i < 20; i++) {
     facts.push({
@@ -197,7 +197,118 @@ Deno.test("deriveCoverageWarnings: discontinuity reports are capped", () => {
   const disc = deriveCoverageWarnings(facts).filter((w) =>
     w.kind === "balance_discontinuity"
   );
-  assert(disc.length <= 5);
+  assertEquals(disc.length, 1);
+  assert(/At \d+ points/.test(disc[0].detail));
+});
+
+Deno.test("deriveCoverageWarnings: a consolidated statement does not flag account switches as discontinuities", () => {
+  // Two accounts, interleaved by time; each account's own balance series
+  // reconciles perfectly. The old cross-account check flagged every A->B
+  // switch as a discontinuity.
+  const facts: StatementCoverageFact[] = [
+    {
+      occurredAt: "2026-08-01T00:00:00.000Z",
+      sourceId: "A",
+      principalEffectMinor: -100,
+      feeEffectMinor: 0,
+      balanceAfterMinor: 900,
+    },
+    {
+      occurredAt: "2026-08-01T06:00:00.000Z",
+      sourceId: "B",
+      principalEffectMinor: -50,
+      feeEffectMinor: 0,
+      balanceAfterMinor: 5_000,
+    },
+    {
+      occurredAt: "2026-08-02T00:00:00.000Z",
+      sourceId: "A",
+      principalEffectMinor: -100,
+      feeEffectMinor: 0,
+      balanceAfterMinor: 800,
+    },
+    {
+      occurredAt: "2026-08-02T06:00:00.000Z",
+      sourceId: "B",
+      principalEffectMinor: -50,
+      feeEffectMinor: 0,
+      balanceAfterMinor: 4_950,
+    },
+    {
+      occurredAt: "2026-08-03T00:00:00.000Z",
+      sourceId: "A",
+      principalEffectMinor: 200,
+      feeEffectMinor: 0,
+      balanceAfterMinor: 1_000,
+    },
+    {
+      occurredAt: "2026-08-03T06:00:00.000Z",
+      sourceId: "B",
+      principalEffectMinor: -50,
+      feeEffectMinor: 0,
+      balanceAfterMinor: 4_900,
+    },
+  ];
+  const disc = deriveCoverageWarnings(facts).filter((w) =>
+    w.kind === "balance_discontinuity"
+  );
+  assertEquals(disc.length, 0);
+});
+
+Deno.test("deriveCoverageWarnings: a real discontinuity inside one account of a consolidated statement is still flagged", () => {
+  const facts: StatementCoverageFact[] = [
+    {
+      occurredAt: "2026-08-01T00:00:00.000Z",
+      sourceId: "A",
+      principalEffectMinor: -100,
+      feeEffectMinor: 0,
+      balanceAfterMinor: 900,
+    },
+    {
+      occurredAt: "2026-08-01T06:00:00.000Z",
+      sourceId: "B",
+      principalEffectMinor: -50,
+      feeEffectMinor: 0,
+      balanceAfterMinor: 5_000,
+    },
+    // A: expected 900 + (-100) = 800, recorded 400 -> discontinuity
+    {
+      occurredAt: "2026-08-02T00:00:00.000Z",
+      sourceId: "A",
+      principalEffectMinor: -100,
+      feeEffectMinor: 0,
+      balanceAfterMinor: 400,
+    },
+    {
+      occurredAt: "2026-08-02T06:00:00.000Z",
+      sourceId: "B",
+      principalEffectMinor: -50,
+      feeEffectMinor: 0,
+      balanceAfterMinor: 4_950,
+    },
+    {
+      occurredAt: "2026-08-03T00:00:00.000Z",
+      sourceId: "A",
+      principalEffectMinor: -100,
+      feeEffectMinor: 0,
+      balanceAfterMinor: 300,
+    },
+    {
+      occurredAt: "2026-08-03T06:00:00.000Z",
+      sourceId: "B",
+      principalEffectMinor: -50,
+      feeEffectMinor: 0,
+      balanceAfterMinor: 4_900,
+    },
+  ];
+  const disc = deriveCoverageWarnings(facts).filter((w) =>
+    w.kind === "balance_discontinuity"
+  );
+  assertEquals(disc.length, 1);
+  assertEquals(
+    disc[0].kind === "balance_discontinuity" ? disc[0].atIso : "",
+    "2026-08-02T00:00:00.000Z",
+  );
 });
 
 Deno.test("buildStatementCoverageMetadata: complete wording and no filter", () => {
