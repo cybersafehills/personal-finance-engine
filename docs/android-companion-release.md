@@ -92,14 +92,51 @@ cd android
 
 `android/app/build.gradle.kts` → `defaultConfig` → bump `versionCode` (integer,
 every upload must be higher) and `versionName` (human, e.g. `1.0.1`). Firebase
-rejects a re-upload of the same `versionCode`.
+rejects a re-upload of the same `versionCode`; so does Play, per track.
+
+The `distribute` job also builds `:app:bundleRelease` (signed with the same
+upload key) and publishes it as the workflow artifact **`ol-shortcuts-release-aab`**
+— that `.aab` is what you upload to the Play Console (§3.0). Firebase App
+Distribution still gets the APK.
 
 ---
 
-## 3. Play Store — prerequisites (do later, they run on Google's clock)
+## 3. Play Store
 
-Not needed for tester distribution, but start early because two of these get
-**reviewed by Google** and can take days.
+### 3.0 First internal-testing release — linear steps
+
+Internal testing is the fast lane: **exempt from the target-API-level
+requirement** and from pre-launch policy review (including the §3.1
+notification-access declaration — that one only gates *production*). Up to 100
+testers, live minutes after upload.
+
+1. **Register** a Google Play Console developer account
+   (<https://play.google.com/console>, US$25 one-time). New accounts now go
+   through identity verification that can take a few days — start this first.
+2. **Create app** → name `OL Shortcuts`, app (not game), free, default
+   language. Accept the declarations.
+3. **Testing → Internal testing → Testers** → add a tester list (your email
+   first) — or reuse a Google Group.
+4. **Testing → Internal testing → Create new release.**
+   - Prompted to **enroll in Play App Signing** → accept the default (Google
+     generates the app signing key). The `.aab` you upload carries the
+     **upload** certificate; no key export needed.
+   - Upload **`ol-shortcuts-release-aab`** (from the latest green Android
+     Companion CI run on `main`).
+   - Release name auto-fills from `versionName (versionCode)`; paste the commit
+     summary as release notes.
+5. Fill the **App content** items in §3.2–§3.3 (Play blocks rollout until Data
+   safety, content rating, target audience, privacy policy, and ads are all
+   answered — even for internal testing).
+6. **Save → Review release → Start rollout to Internal testing.**
+7. **Copy the opt-in URL** (Testers tab). Each tester opens it once on the
+   device, taps *Become a tester*, then installs **OL Shortcuts** from the
+   Play Store like any app — no "unknown sources" toggle, no App Tester.
+
+### Prerequisites for the reviewed tracks (closed testing → production)
+
+Not needed for internal testing, but two of these get **reviewed by Google**
+and can take days — start early.
 
 ### 3.1 Notification Access — Permissions Declaration (the slow one)
 
@@ -152,9 +189,15 @@ Answer text to use:
 - **Store listing** — short description, full description, one feature graphic
   (1024×500), ≥ 2 phone screenshots (pairing screen + connected screen), the
   app icon (already an adaptive icon in `res/mipmap-anydpi-v26`).
-- **App signing** — enroll in **Play App Signing**; upload the step-1 keystore
-  as the *upload key*. Google holds the actual app-signing key.
-- First release track: **Internal testing** → then **Closed testing** → open/prod.
+- **App signing** — enroll in **Play App Signing** (done during the first
+  release, §3.0 step 4). Google holds the app-signing key; the CI keystore
+  (step 1) is only the *upload* key, and Play reads its certificate straight
+  from the uploaded `.aab` — no separate key export.
+- **Target API level** — internal testing is exempt, but Closed/Production
+  require targeting the current `targetSdk` Google mandates (API 35+ as of
+  2025). The app is on `targetSdk = 34`; bumping it (and `compileSdk`, which
+  needs AGP ≥ 8.6) is a prerequisite for leaving the internal track.
+- Release-track order: **Internal testing** → **Closed testing** → open/prod.
 
 ---
 
