@@ -161,13 +161,23 @@ async function resolveContext(): Promise<
 
   const workspace = await getActiveWorkspace();
   if (!workspace) return err("no_workspace");
-  if (workspace.role === "viewer") {
+
+  // Authorization: the `statement.generate` capability (migration
+  // 20261211000000). Personal owner + household/org owner/admin/member
+  // hold it by role; a viewer only via an explicit
+  // space_member_capability_grants row. has_space_capability is
+  // SECURITY DEFINER and composes both.
+  const { data: canGenerate, error: capError } = await session.rpc(
+    "has_space_capability",
+    { p_workspace_id: workspace.id, p_capability: "statement.generate" },
+  );
+  if (capError || canGenerate !== true) {
     void recordStatementAudit(supabaseServer(), {
       workspaceId: workspace.id,
       actorUserId: user.id,
       eventType: "statement.access_denied",
       statementUuid: null,
-      metadata: { reason: "forbidden_role" },
+      metadata: { reason: "missing_capability" },
     });
     return err("forbidden_role");
   }

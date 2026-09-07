@@ -3387,6 +3387,21 @@ else
   fail "Phase R: capability still held after revoke (got $R_MEMBER_BUDGET_REVOKED)"
 fi
 
+# --- statement.generate capability (20261211000000) -------------------
+# R_MEMBER_USER was suspended earlier in this block; re-activate so we test
+# the member-role default, not the suspension.
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; update public.workspace_memberships set status = 'active' where workspace_id = '$R_MATRIX_HH' and user_id = '$R_MEMBER_USER';" >/dev/null
+SG_MEMBER="$(as_user "$R_MEMBER_USER" "select public.has_space_capability('$R_MATRIX_HH', 'statement.generate');")"
+SG_VIEWER_BEFORE="$(as_user "$R_VIEWER_USER" "select public.has_space_capability('$R_MATRIX_HH', 'statement.generate');")"
+SG_PERSONAL_OWNER="$(as_user "$USER_A" "select public.has_space_capability('$WORKSPACE_A', 'statement.generate');")"
+as_user "$USER_A" "select public.grant_space_capability('$R_MATRIX_HH', '$R_VIEWER_USER', 'statement.generate');" >/dev/null
+SG_VIEWER_AFTER="$(as_user "$R_VIEWER_USER" "select public.has_space_capability('$R_MATRIX_HH', 'statement.generate');")"
+if [ "$SG_MEMBER" = "t" ] && [ "$SG_VIEWER_BEFORE" = "f" ] && [ "$SG_VIEWER_AFTER" = "t" ] && [ "$SG_PERSONAL_OWNER" = "t" ]; then
+  pass "Statements: statement.generate - member by role, viewer only by explicit grant, personal owner yes"
+else
+  fail "Statements: statement.generate capability wrong (member=$SG_MEMBER viewer_before=$SG_VIEWER_BEFORE viewer_after=$SG_VIEWER_AFTER personal_owner=$SG_PERSONAL_OWNER)"
+fi
+
 # --- audit vs activity visibility -----------------------------------
 
 R_AUDIT_MEMBER="$(as_user "$USER_B" "select count(*) from public.space_audit_events where workspace_id = '$Q_HH';")"
