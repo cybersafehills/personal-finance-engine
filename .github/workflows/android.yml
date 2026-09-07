@@ -141,8 +141,25 @@ jobs:
           # Distribution plugin does not reliably read the FIREBASE_APP_ID /
           # GOOGLE_APPLICATION_CREDENTIALS env vars when there is no
           # google-services.json ("> Missing app id").
-          ./gradlew :app:assembleRelease :app:appDistributionUploadRelease \
+          #
+          # bundleRelease is built in the same invocation so the Play Store
+          # artifact is signed with the same upload key. It is not sent to
+          # Firebase (App Distribution takes the APK); it is published as a
+          # workflow artifact below for a manual first upload to the Play
+          # Console internal-testing track. See docs/android-companion-release.md §3.
+          ./gradlew :app:assembleRelease :app:bundleRelease :app:appDistributionUploadRelease \
             --appId="$(printf '%s' "$FIREBASE_APP_ID" | tr -d '[:space:]')" \
             --serviceCredentialsFile="$GOOGLE_APPLICATION_CREDENTIALS" \
             --artifactPath=app/build/outputs/apk/release/app-release.apk \
             --releaseNotesFile="$RUNNER_TEMP/release-notes.txt"
+
+      # The signed Android App Bundle for Google Play. Download it from the
+      # run's "Artifacts" section and upload it in Play Console → Testing →
+      # Internal testing → Create new release. Retained 90 days; every main
+      # push that bumps versionCode produces a fresh one.
+      - name: Upload signed AAB (for Play Console)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ol-shortcuts-release-aab
+          path: android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
