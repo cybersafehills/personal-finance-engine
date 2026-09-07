@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { formatSignedRwf } from "../lib/format";
 import { WhyThisInsight } from "./ds/WhyThisInsight";
 import type { IntelligenceInsights } from "../lib/intelligence/insights";
@@ -30,7 +31,18 @@ export function IntelligenceCard({
       aria-label="Insights"
       className="flex flex-col gap-4 rounded-card border border-border-subtle bg-surface p-4"
     >
-      <h2 className="text-sm font-semibold text-text-primary">Insights</h2>
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold text-text-primary">Insights</h2>
+        {forecast && (
+          <Link
+            href="/inbox/forecast"
+            prefetch={false}
+            className="text-xs font-medium text-accent hover:underline"
+          >
+            See the full forecast →
+          </Link>
+        )}
+      </div>
 
       {forecast && (
         <div className="flex flex-col gap-1">
