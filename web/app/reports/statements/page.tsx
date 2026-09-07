@@ -7,7 +7,9 @@ import { StatementStatusBadge } from "../../../components/StatementStatusBadge";
 import { CreatePackForm } from "../../../components/CreatePackForm";
 import { StatementPackDelete } from "../../../components/StatementPackDelete";
 import { StatementScheduleForm } from "../../../components/StatementScheduleForm";
+import { ProviderStatements } from "../../../components/ProviderStatements";
 import { isFinancialStatementsEnabled } from "../../../lib/financial-statements";
+import { getProviderStatements } from "../../../lib/provider-statements";
 import {
   getStatementPacks,
   getStatements,
@@ -38,12 +40,14 @@ const generateCta = (
 export default async function StatementsPage() {
   if (!isFinancialStatementsEnabled()) notFound();
 
-  const [statements, packs, schedules, formOptions] = await Promise.all([
-    getStatements(),
-    getStatementPacks(),
-    getStatementSchedules(),
-    getStatementFormOptions(),
-  ]);
+  const [statements, packs, schedules, formOptions, providerDocs] = await Promise
+    .all([
+      getStatements(),
+      getStatementPacks(),
+      getStatementSchedules(),
+      getStatementFormOptions(),
+      getProviderStatements(),
+    ]);
   const readyStatements = statements
     .filter((s) => s.status === "ready")
     .map((s) => {
@@ -191,6 +195,23 @@ export default async function StatementsPage() {
                 Scheduling isn&apos;t available in this space.
               </p>
             )}
+        </div>
+      </details>
+
+      <details className="mt-4 rounded-card border border-border-subtle bg-surface p-4 text-sm">
+        <summary className="cursor-pointer font-medium text-text-primary">
+          Provider statements
+          <span className="ml-2 font-normal text-text-muted">
+            store the original documents your bank or wallet issued
+          </span>
+        </summary>
+        <div className="mt-3">
+          <ProviderStatements
+            documents={providerDocs}
+            sources={formOptions.ok
+              ? formOptions.sources.map((s) => ({ id: s.id, label: s.label }))
+              : []}
+          />
         </div>
       </details>
 

@@ -676,7 +676,10 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # member CRUD) - 127 tables, 126 with RLS.
 # Transaction Tags PR18 (20261217000000) adds transaction_tags (RLS,
 # member select + insert + delete) - 128 tables, 127 with RLS.
-if [ "$TABLE_COUNT" = "128" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Provider Statements PR19 (20261218000000) adds provider_statements (RLS
+# enabled, member SELECT only; upload/delete are service-role) - 129
+# tables, 128 with RLS.
+if [ "$TABLE_COUNT" = "129" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -811,10 +814,13 @@ AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from inform
 # Transaction Tags PR18 (20261217000000) adds transaction_tags (select,
 # insert, delete = 3) for authenticated - a member-managed label row, no
 # update (a tag is added or removed). 161 + 3 = 164.
-if [ "$AUTHENTICATED_GRANT_COUNT" = "164" ]; then
-  pass "authenticated holds exactly the 164 table grants expected, no more"
+# Provider Statements PR19 (20261218000000) adds provider_statements with a
+# SELECT-only grant for authenticated (upload + delete run service-role in
+# lib/provider-statements.ts). 164 + 1 = 165.
+if [ "$AUTHENTICATED_GRANT_COUNT" = "165" ]; then
+  pass "authenticated holds exactly the 165 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 164 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 165 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -2746,6 +2752,34 @@ else
   fail "Tags RLS: cross-tenant leak (sees=$TAG_B_SEES still=$TAG_STILL)"
 fi
 as_user "$USER_A" "delete from public.transaction_tags where id = '$TAG_A';" >/dev/null
+
+# --- Provider statements (20261218000000) -------------------------------
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  insert into public.provider_statements
+    (id, workspace_id, uploaded_by, provider, original_filename, storage_path, byte_size, file_sha256)
+  values ('00000000-0000-0000-0000-0000000000e7', '$WORKSPACE_A', '$USER_A', 'MTN MoMo', 'aug.pdf', 'ws/$WORKSPACE_A/e7.pdf', 1024, '$(printf 'a%.0s' {1..64})');
+" >/dev/null
+PROV_A_SEES="$(as_user "$USER_A" "select count(*) from public.provider_statements where id = '00000000-0000-0000-0000-0000000000e7';")"
+PROV_B_SEES="$(as_user "$USER_B" "select count(*) from public.provider_statements where id = '00000000-0000-0000-0000-0000000000e7';")"
+if [ "$PROV_A_SEES" = "1" ] && [ "$PROV_B_SEES" = "0" ]; then
+  pass "Provider statements RLS: a member sees their workspace's upload, another tenant does not"
+else
+  fail "Provider statements RLS: visibility wrong (A=$PROV_A_SEES B=$PROV_B_SEES)"
+fi
+if as_user "$USER_A" "insert into public.provider_statements (workspace_id, provider, original_filename, storage_path, byte_size, file_sha256) values ('$WORKSPACE_A', 'x', 'x.pdf', 'p', 1, '$(printf 'a%.0s' {1..64})');" >/dev/null 2>$ARTIFACT_DIR/pfe_prov_ins.log; then
+  fail "Provider statements: authenticated inserted a row directly (upload must be service-role only)"
+else
+  pass "Provider statements: authenticated has no INSERT (upload is service-role only)"
+fi
+rm -f $ARTIFACT_DIR/pfe_prov_ins.log
+if psql -d pfe_rls -c "set role service_role; insert into public.provider_statements (workspace_id, provider, original_filename, storage_path, byte_size, file_sha256) values ('$WORKSPACE_A', 'x', 'x.pdf', 'p', 1, 'not-a-hash');" >/dev/null 2>$ARTIFACT_DIR/pfe_prov_sha.log; then
+  fail "Provider statements: the file_sha256 CHECK accepted a malformed hash"
+else
+  pass "Provider statements: the file_sha256 CHECK rejects a malformed hash"
+fi
+rm -f $ARTIFACT_DIR/pfe_prov_sha.log
+psql -d pfe_rls -c "set role service_role; delete from public.provider_statements where id = '00000000-0000-0000-0000-0000000000e7';" >/dev/null
 
 # ===========================================================================
 # Phase M: USSD directory. Non-admin visibility is limited to published

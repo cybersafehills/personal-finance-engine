@@ -39,6 +39,7 @@ downstream of the existing `reports` experience surface.
 | PR16 | Scheduled-statement email delivery — link-only, no figures (migration `20261216000000`) | **done** |
 | PR17 | Participant (household member) + tag filters | **done** |
 | PR18 | `transaction_tags` schema (migration `20261217000000`) + tagging UI on `/transactions/[id]` | **done** |
+| PR19 | Provider-original-document management — `provider_statements` + private bucket (migration `20261218000000`), upload / list / download / delete on `/reports/statements` | **done** |
 
 ## Where each piece lives
 
@@ -62,6 +63,8 @@ downstream of the existing `reports` experience surface.
 | Audit trail | `recordStatementAudit()` in `web/lib/statement-generation.ts` — service-role insert into `space_audit_events` (`resource_type = 'statement'`) for `statement.generated` / `.regenerated` / `.downloaded` / `.deleted` / `.access_denied`; non-fatal; metadata carries no balance / description / counterparty |
 | Monitoring | `console.warn("[statement.monitor] reconcile_mismatch", …)` at generation when `reconciles === false`; `console.warn("[statement.monitor] render_failed", …)` in the document route's render try/catch |
 | In-app help | "About statements" `<details>` on `/reports/statements` — what a statement is, that it is not an official provider statement, why transactions can be missing, Standard vs Detailed |
+| Transaction tags | `web/lib/transaction-tags.ts` *(PR18)* — `normalizeTag` / `add` / `remove` / `getWorkspaceTags`; `TransactionTags` client component on `/transactions/[id]`; backs `filters.tag` |
+| Provider-original documents | `web/lib/provider-statements.ts` *(PR19)* — upload / list / delete (service-role after membership check); `ProviderStatements` component + "Provider statements" `<details>` on `/reports/statements`; download via `web/app/api/reports/statements/provider/[id]/route.ts` |
 
 ## Data model
 
@@ -159,7 +162,7 @@ authoritative provider ledger. Documents therefore always carry:
 
 Absence of visible gaps is never presented as proof of completeness.
 
-## Extension points that were subsequently built (PR7–PR18)
+## Extension points that were subsequently built (PR7–PR19)
 
 - **`statement.generate` capability** (§25) — PR7. **Category + merchant filters** (§24) — PR8.
 - **Async / queued generation** (§27) — PR9: a `status='generating'` stub + the
@@ -188,22 +191,31 @@ Absence of visible gaps is never presented as proof of completeness.
   row (`lib/transaction-tags.ts`, `TransactionTags` on `/transactions/[id]`), **not** snapshot
   data — re-tagging never mutates an already-generated statement.
 
+- **Provider-original documents** (§16) — PR19: `provider_statements` + a private
+  `provider-statements` bucket (migration `20261218000000`). A member uploads the verbatim PDF/CSV a
+  bank or wallet issued and it is listed on `/reports/statements` next to the generated ones. It is
+  **never parsed** here (ledger ingestion of uploaded statements is a separate feature,
+  `lib/statement-import.ts`) and **never modified** — an evidence record with its own sha256.
+  authenticated has SELECT only; `lib/provider-statements.ts` does upload + delete with the
+  service-role client after `getActiveWorkspace()` confirms an active, non-viewer member, so the row
+  and the stored object never drift. Download is a signed URL from
+  `app/api/reports/statements/provider/[id]`.
+
 ## Still deferred
 
-- **Provider-original-document management** — storing and surfacing the *uploaded* PDF/CSV a
-  provider issued, alongside the OneLedger-generated document. Ingestion of uploaded provider
-  statements into the ledger is a separate existing feature (`lib/statement-import.ts`); this engine
-  only emits OneLedger-generated documents.
 - **In-app notification (bell) on scheduled-statement completion** — only the optional email and the
   history row exist today.
+- **OCR / field extraction from an uploaded provider document** — deliberately out of scope;
+  `provider_statements` is storage + metadata only.
 
 ## Deployment
 
-- Migrations `20261210000000` … `20261217000000` apply via `deploy-supabase.yml` on a green `main`:
+- Migrations `20261210000000` … `20261218000000` apply via `deploy-supabase.yml` on a green `main`:
   `statements` / `statement_transactions` / `statement_artifacts` + private `statement-artifacts`
   bucket; the `statement.generate` capability; `statement_packs`; `statement_schedules` (+ `cadence`
   / `day_of_week` / `delivery_email`); `statements.verification_token` / `verification_revoked_at` /
-  `notify_email` / `notified_at`; `transaction_tags`.
+  `notify_email` / `notified_at`; `transaction_tags`; `provider_statements` + private
+  `provider-statements` bucket.
 - Set `FINANCIAL_STATEMENTS_ENABLED=true` per Vercel environment. Everything is inert while unset:
   the routes 404, `/verify` 404s, the tab is hidden, the workers no-op, nothing queries the tables.
   Optional: `STATEMENT_ASYNC_THRESHOLD` (default 8000).
@@ -224,7 +236,10 @@ Absence of visible gaps is never presented as proof of completeness.
   rows but never another tenant's; authenticated cannot INSERT/UPDATE `statements` or INSERT
   `statement_transactions`; `statement_artifacts` has zero authenticated access; a viewer reads but
   cannot delete; another tenant cannot delete; a member delete cascades; the `statement_id` CHECK,
-  the `format` CHECK and `UNIQUE (workspace_id, client_token)` all bite.
+  the `format` CHECK and `UNIQUE (workspace_id, client_token)` all bite; a member tags their own
+  transaction but not another tenant's and the tag length CHECK bites; a member sees their
+  workspace's `provider_statements` upload but not another tenant's, authenticated has no INSERT
+  (upload is service-role), and the `file_sha256` CHECK rejects a malformed hash.
 - `e2e/statements.spec.ts` — seed 3 settled transactions → generate a "this month" statement end to
   end → preview count + counterparty, the Ready detail page, PDF/CSV links, the document route
   redirects (3xx), the history row, and a `statement.generated` audit row; plus a no-activity custom

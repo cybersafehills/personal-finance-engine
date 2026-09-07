@@ -106,6 +106,34 @@ export async function saveStatementScheduleAction(input: {
   return result;
 }
 
+export async function uploadProviderStatementAction(
+  formData: FormData,
+): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+  if (!isFinancialStatementsEnabled()) {
+    return { ok: false, error: "Statements aren't available right now." };
+  }
+  const { uploadProviderStatement } = await import(
+    "../../../lib/provider-statements"
+  );
+  const result = await uploadProviderStatement(formData);
+  if (result.ok) revalidatePath("/reports/statements");
+  return result;
+}
+
+export async function deleteProviderStatementAction(
+  id: string,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isFinancialStatementsEnabled()) {
+    return { ok: false, error: "Statements aren't available right now." };
+  }
+  const { deleteProviderStatement } = await import(
+    "../../../lib/provider-statements"
+  );
+  const result = await deleteProviderStatement(id);
+  if (result.ok) revalidatePath("/reports/statements");
+  return result;
+}
+
 export async function deleteStatementScheduleAction(
   scheduleId: string,
 ): Promise<{ ok: boolean; error?: string }> {
