@@ -35,6 +35,11 @@
      "spending is never red" rule guards against. A muted brick, not a
      fire-engine red. */
   --notification-badge: #c0392b;
+  /* Maroon, reserved for the lifetime money-flow badge on the
+     Transactions screen - a neutral "here is your history with OneLedger"
+     figure, not a spend/alert signal. Deep enough to read clearly at
+     ~12px on --surface / --background. */
+  --lifetime-flow: #800000;
 
   /* One restrained accent for navigation/focus/primary actions. */
   --accent: #33509e;
@@ -73,6 +78,7 @@
   --color-needs-map-bg: var(--needs-map-bg);
   --color-needs-map-border: var(--needs-map-border);
   --color-notification-badge: var(--notification-badge);
+  --color-lifetime-flow: var(--lifetime-flow);
 
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);

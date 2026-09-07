@@ -138,6 +138,66 @@ export async function getTodayTotals(): Promise<TodayTotals> {
   return { spentRwf, receivedRwf };
 }
 
+export type LifetimeFlowTotals = {
+  /** All settled outgoing principal + fees, every currency folded to RWF,
+   *  no time bound - the total a user has moved *out* through OneLedger. */
+  sentRwf: number;
+  /** All settled incoming principal + fees, folded to RWF - the total
+   *  received and recorded by OneLedger. */
+  receivedRwf: number;
+  /** occurred_at of the earliest counted transaction, or null when there
+   *  are none - lets the UI say "since {month}". */
+  sinceIso: string | null;
+  /** Number of transactions behind the totals. */
+  count: number;
+};
+
+/**
+ * Lifetime money-flow totals for the active workspace: every settled,
+ * non-merged transaction summed by direction, with no date filter. Same
+ * shape and row filter as getTodayTotals()/getCategoryTotals() (RLS
+ * scopes rows to the active workspace); this is the "your history with
+ * OneLedger at a glance" figure shown on the Transactions screen.
+ */
+export async function getLifetimeFlowTotals(): Promise<LifetimeFlowTotals> {
+  const supabase = await supabaseSession();
+
+  const { data, error } = await supabase
+    .from("transactions")
+    .select("direction, principal_effect_rwf, fee_effect_rwf, occurred_at")
+    .eq("settlement_state", "settled")
+    // Phase U: merged duplicates stay as evidence but are never counted.
+    .neq("dedupe_state", "merged");
+
+  if (error) {
+    console.error("getLifetimeFlowTotals failed:", error.message);
+    return { sentRwf: 0, receivedRwf: 0, sinceIso: null, count: 0 };
+  }
+
+  let sentRwf = 0;
+  let receivedRwf = 0;
+  let sinceIso: string | null = null;
+  let count = 0;
+
+  for (const row of data ?? []) {
+    const effect = Number(row.principal_effect_rwf) +
+      Number(row.fee_effect_rwf);
+    if (row.direction === "out") {
+      sentRwf += Math.abs(effect);
+    } else if (row.direction === "in") {
+      receivedRwf += effect;
+    } else {
+      continue;
+    }
+    count += 1;
+    if (!sinceIso || row.occurred_at < sinceIso) {
+      sinceIso = row.occurred_at;
+    }
+  }
+
+  return { sentRwf, receivedRwf, sinceIso, count };
+}
+
 export async function getRecentTransactions(
   limit = 8,
 ): Promise<TransactionRow[]> {
