@@ -85,3 +85,34 @@ export async function deleteStatementPackAction(
   if (result.ok) revalidatePath("/reports/statements");
   return result;
 }
+
+export async function saveStatementScheduleAction(input: {
+  statementType: "standard" | "detailed";
+  sourceIds: string[];
+  dayOfMonth: number;
+  timezone: string;
+}): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+  if (!isFinancialStatementsEnabled()) {
+    return { ok: false, error: "Statements aren't available right now." };
+  }
+  const { saveStatementSchedule } = await import(
+    "../../../lib/statement-schedule"
+  );
+  const result = await saveStatementSchedule(input);
+  if (result.ok) revalidatePath("/reports/statements");
+  return result;
+}
+
+export async function deleteStatementScheduleAction(
+  scheduleId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isFinancialStatementsEnabled()) {
+    return { ok: false, error: "Statements aren't available right now." };
+  }
+  const { deleteStatementSchedule } = await import(
+    "../../../lib/statement-schedule"
+  );
+  const result = await deleteStatementSchedule(scheduleId);
+  if (result.ok) revalidatePath("/reports/statements");
+  return result;
+}

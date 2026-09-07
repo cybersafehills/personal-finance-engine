@@ -672,7 +672,9 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # report_artifacts) - 125 tables, 124 with RLS.
 # Statement Packs PR10 (20261212000000) adds statement_packs (RLS enabled,
 # member SELECT+DELETE) - 126 tables, 125 with RLS.
-if [ "$TABLE_COUNT" = "126" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Scheduled Statements PR11 (20261213000000) adds statement_schedules (RLS,
+# member CRUD) - 127 tables, 126 with RLS.
+if [ "$TABLE_COUNT" = "127" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -801,10 +803,13 @@ AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from inform
 # authenticated grants (like report_artifacts). 152 + 3 = 155.
 # Statement Packs PR10 (20261212000000) adds statement_packs (select, delete
 # = 2) for authenticated; the ZIP is built by the service role. 155 + 2 = 157.
-if [ "$AUTHENTICATED_GRANT_COUNT" = "157" ]; then
-  pass "authenticated holds exactly the 157 table grants expected, no more"
+# Scheduled Statements PR11 (20261213000000) adds statement_schedules
+# (select, insert, update, delete = 4) - a member-managed config row like
+# report_preferences. 157 + 4 = 161.
+if [ "$AUTHENTICATED_GRANT_COUNT" = "161" ]; then
+  pass "authenticated holds exactly the 161 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 157 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 161 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -2648,6 +2653,30 @@ else
   pass "Packs: the pack_id format CHECK rejects a malformed id"
 fi
 rm -f $ARTIFACT_DIR/pfe_pack_fmt.log
+
+# --- Scheduled statements (20261213000000) ---------------------------
+SCHED_A="$(as_user "$USER_A" "insert into public.statement_schedules (workspace_id, created_by, timezone, next_run_at) values ('$WORKSPACE_A', '$USER_A', 'Africa/Kigali', now() + interval '1 day') returning id;")"
+if [ -n "$SCHED_A" ]; then
+  pass "Schedules: a member creates a schedule in their own workspace"
+else
+  fail "Schedules: member could not create a schedule"
+fi
+# created_by must be the caller; another workspace is off-limits.
+if as_user "$USER_A" "insert into public.statement_schedules (workspace_id, created_by, timezone, next_run_at) values ('$WORKSPACE_B', '$USER_A', 'UTC', now());" >/dev/null 2>$ARTIFACT_DIR/pfe_sched_x.log; then
+  fail "Schedules: a member created a schedule in another tenant's workspace"
+else
+  pass "Schedules: the insert policy blocks another tenant's workspace"
+fi
+rm -f $ARTIFACT_DIR/pfe_sched_x.log
+SCHED_B_SEES="$(as_user "$USER_B" "select count(*) from public.statement_schedules where id = '$SCHED_A';")"
+as_user "$USER_B" "delete from public.statement_schedules where id = '$SCHED_A';" >/dev/null 2>&1 || true
+SCHED_STILL="$(psql -d pfe_rls -t -A -c "select count(*) from public.statement_schedules where id = '$SCHED_A';")"
+if [ "$SCHED_B_SEES" = "0" ] && [ "$SCHED_STILL" = "1" ]; then
+  pass "Schedules RLS: another tenant cannot see or delete a schedule"
+else
+  fail "Schedules RLS: cross-tenant leak (sees=$SCHED_B_SEES still=$SCHED_STILL)"
+fi
+as_user "$USER_A" "delete from public.statement_schedules where id = '$SCHED_A';" >/dev/null
 
 # ===========================================================================
 # Phase M: USSD directory. Non-admin visibility is limited to published

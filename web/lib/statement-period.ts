@@ -123,6 +123,24 @@ export function statementPeriodLabel(
 }
 
 /**
+ * The next occurrence of local `dayOfMonth` at local midnight in
+ * `timezone`, strictly after `from`, as a UTC instant. `dayOfMonth` must
+ * be 1-28 (every month has it). Used by the scheduled-statements cron to
+ * compute next_run_at.
+ */
+export function nextMonthlyRunUtc(
+  dayOfMonth: number,
+  timezone: string,
+  from: Date,
+): Date {
+  const [y, m] = zonedDateKey(from, timezone).split("-").map(Number);
+  const thisMonthKey = `${y}-${pad2(m)}-${pad2(dayOfMonth)}`;
+  const candidate = localMidnightUtc(thisMonthKey, timezone);
+  if (candidate.getTime() > from.getTime()) return candidate;
+  return localMidnightUtc(addMonthsToDateKey(thisMonthKey, 1), timezone);
+}
+
+/**
  * Rebuild a ResolvedStatementPeriod from stored instants + timezone (a
  * statements row's period_start / period_end / timezone) - used when
  * regenerating an existing statement, where the original request has

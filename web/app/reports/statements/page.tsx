@@ -6,12 +6,15 @@ import { StatementsTabs } from "../../../components/StatementsTabs";
 import { StatementStatusBadge } from "../../../components/StatementStatusBadge";
 import { CreatePackForm } from "../../../components/CreatePackForm";
 import { StatementPackDelete } from "../../../components/StatementPackDelete";
+import { StatementScheduleForm } from "../../../components/StatementScheduleForm";
 import { isFinancialStatementsEnabled } from "../../../lib/financial-statements";
 import {
   getStatementPacks,
   getStatements,
   type StatementScopeName,
 } from "../../../lib/queries";
+import { getStatementFormOptions } from "../../../lib/statement-generation";
+import { getStatementSchedules } from "../../../lib/statement-schedule";
 import { reconstructStatementPeriod } from "../../../lib/statement-period";
 import { formatZonedDateTime } from "../../../lib/format";
 
@@ -35,9 +38,11 @@ const generateCta = (
 export default async function StatementsPage() {
   if (!isFinancialStatementsEnabled()) notFound();
 
-  const [statements, packs] = await Promise.all([
+  const [statements, packs, schedules, formOptions] = await Promise.all([
     getStatements(),
     getStatementPacks(),
+    getStatementSchedules(),
+    getStatementFormOptions(),
   ]);
   const readyStatements = statements
     .filter((s) => s.status === "ready")
@@ -151,6 +156,39 @@ export default async function StatementsPage() {
             </ul>
           )}
           <CreatePackForm statements={readyStatements} />
+        </div>
+      </details>
+
+      <details className="mt-4 rounded-card border border-border-subtle bg-surface p-4 text-sm">
+        <summary className="cursor-pointer font-medium text-text-primary">
+          Scheduled statements
+          <span className="ml-2 font-normal text-text-muted">
+            generate last month&apos;s statement automatically
+          </span>
+        </summary>
+        <div className="mt-3">
+          {formOptions.ok
+            ? (
+              <StatementScheduleForm
+                sources={formOptions.sources.map((s) => ({
+                  id: s.id,
+                  label: s.label,
+                }))}
+                defaultTimezone={formOptions.timezone}
+                schedules={schedules.map((s) => ({
+                  id: s.id,
+                  statement_type: s.statement_type,
+                  account_ids: s.account_ids,
+                  day_of_month: s.day_of_month,
+                  next_run_at: s.next_run_at,
+                }))}
+              />
+            )
+            : (
+              <p className="text-text-muted">
+                Scheduling isn&apos;t available in this space.
+              </p>
+            )}
         </div>
       </details>
 
