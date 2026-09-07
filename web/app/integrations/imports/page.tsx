@@ -56,19 +56,27 @@ export default async function ImportsPage() {
         backHref="/integrations"
         backLabel="Integrations"
         action={
-          <Link
-            href="/integrations/imports/new"
-            className="inline-flex min-h-11 items-center rounded-control bg-accent px-4 text-sm font-medium text-accent-foreground"
-          >
-            New import
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/integrations/imports/templates"
+              className="inline-flex min-h-11 items-center rounded-control border border-border-subtle bg-surface px-4 text-sm font-medium text-text-primary"
+            >
+              Starter templates
+            </Link>
+            <Link
+              href="/integrations/imports/new"
+              className="inline-flex min-h-11 items-center rounded-control bg-accent px-4 text-sm font-medium text-accent-foreground"
+            >
+              New import
+            </Link>
+          </div>
         }
       />
 
       {batches.length === 0 ? (
         <EmptyState
           title="No imports yet"
-          description="Upload a bank statement or spreadsheet to get started. You’ll map its columns and review duplicates before anything enters your ledger."
+          description="Upload a bank statement or spreadsheet to get started — or grab a starter template, fill it in, and upload it back. You’ll map columns and review duplicates before anything enters your ledger."
         />
       ) : (
         <ul className="flex flex-col gap-2">

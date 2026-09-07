@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { PageHeader } from "../../../../components/PageHeader";
 import { EmptyState } from "../../../../components/EmptyState";
 import { ImportUploadForm } from "../../../../components/ImportUploadForm";
@@ -31,6 +32,17 @@ export default async function NewImportPage() {
         backLabel="Imports"
       />
       <ImportUploadForm />
+
+      <p className="mt-4 text-sm text-text-muted">
+        No file ready?{" "}
+        <Link
+          href="/integrations/imports/templates"
+          className="font-medium text-accent hover:underline"
+        >
+          Download a starter template
+        </Link>{" "}
+        for daily sales, expenses, or a cashbook.
+      </p>
     </div>
   );
 }
