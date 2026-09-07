@@ -145,9 +145,9 @@ export type LifetimeFlowTotals = {
   /** All settled incoming principal + fees, folded to RWF - the total
    *  received and recorded by OneLedger. */
   receivedRwf: number;
-  /** occurred_at of the earliest counted transaction, or null when there
-   *  are none - lets the UI say "since {month}". */
-  sinceIso: string | null;
+  /** auth.users.created_at for the signed-in user - "since your account
+   *  was created on ...". Null only if the user can't be resolved. */
+  accountCreatedIso: string | null;
   /** Number of transactions behind the totals. */
   count: number;
 };
@@ -155,28 +155,33 @@ export type LifetimeFlowTotals = {
 /**
  * Lifetime money-flow totals for the active workspace: every settled,
  * non-merged transaction summed by direction, with no date filter. Same
- * shape and row filter as getTodayTotals()/getCategoryTotals() (RLS
- * scopes rows to the active workspace); this is the "your history with
- * OneLedger at a glance" figure shown on the Transactions screen.
+ * row filter as getTodayTotals()/getCategoryTotals() (RLS scopes rows to
+ * the active workspace); this is the "your history with OneLedger at a
+ * glance" pair of figures shown on the Transactions screen, alongside the
+ * account-creation date.
  */
 export async function getLifetimeFlowTotals(): Promise<LifetimeFlowTotals> {
   const supabase = await supabaseSession();
 
-  const { data, error } = await supabase
-    .from("transactions")
-    .select("direction, principal_effect_rwf, fee_effect_rwf, occurred_at")
-    .eq("settlement_state", "settled")
-    // Phase U: merged duplicates stay as evidence but are never counted.
-    .neq("dedupe_state", "merged");
+  const [{ data, error }, { data: { user } }] = await Promise.all([
+    supabase
+      .from("transactions")
+      .select("direction, principal_effect_rwf, fee_effect_rwf")
+      .eq("settlement_state", "settled")
+      // Phase U: merged duplicates stay as evidence but are never counted.
+      .neq("dedupe_state", "merged"),
+    supabase.auth.getUser(),
+  ]);
+
+  const accountCreatedIso = user?.created_at ?? null;
 
   if (error) {
     console.error("getLifetimeFlowTotals failed:", error.message);
-    return { sentRwf: 0, receivedRwf: 0, sinceIso: null, count: 0 };
+    return { sentRwf: 0, receivedRwf: 0, accountCreatedIso, count: 0 };
   }
 
   let sentRwf = 0;
   let receivedRwf = 0;
-  let sinceIso: string | null = null;
   let count = 0;
 
   for (const row of data ?? []) {
@@ -190,12 +195,9 @@ export async function getLifetimeFlowTotals(): Promise<LifetimeFlowTotals> {
       continue;
     }
     count += 1;
-    if (!sinceIso || row.occurred_at < sinceIso) {
-      sinceIso = row.occurred_at;
-    }
   }
 
-  return { sentRwf, receivedRwf, sinceIso, count };
+  return { sentRwf, receivedRwf, accountCreatedIso, count };
 }
 
 export async function getRecentTransactions(
