@@ -963,10 +963,14 @@ AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_p
 # authenticated-callable and owner-gated. resolve_ingest_email_source,
 # _import_statement_rows and import_statement_rows_for_source are
 # service-role-only (no authenticated grant). 112 + 3 = 115.
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "115" ]; then
-  pass "authenticated holds EXECUTE on exactly the 115 functions expected, no more"
+# Workspace category owner management (20261206000000) adds
+# rename_workspace_category - authenticated-callable, owner/capability-gated
+# (upsert_workspace_category / set_workspace_category_archived are only
+# CREATE OR REPLACEd, grants unchanged). 115 + 1 = 116.
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "116" ]; then
+  pass "authenticated holds EXECUTE on exactly the 116 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 115 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 116 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
