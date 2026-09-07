@@ -2515,6 +2515,20 @@ else
 fi
 rm -f $ARTIFACT_DIR/pfe_stmt_art_read.log
 
+# statement_artifacts.format accepts pdf + csv, rejects anything else.
+if psql -d pfe_rls -c "set role service_role; insert into public.statement_artifacts (statement_id, format, storage_path, byte_size, checksum) values ('00000000-0000-0000-0000-0000000000fb', 'csv', 'statements/fb.csv', 64, 'c0ffee');" >/dev/null 2>$ARTIFACT_DIR/pfe_stmt_csv.log; then
+  pass "Statements: statement_artifacts accepts a csv artifact alongside pdf"
+else
+  fail "Statements: statement_artifacts rejected a valid csv artifact"
+fi
+rm -f $ARTIFACT_DIR/pfe_stmt_csv.log
+if psql -d pfe_rls -c "set role service_role; insert into public.statement_artifacts (statement_id, format, storage_path, byte_size, checksum) values ('00000000-0000-0000-0000-0000000000fb', 'docx', 'x', 1, 'x');" >/dev/null 2>$ARTIFACT_DIR/pfe_stmt_fmt.log; then
+  fail "Statements: statement_artifacts.format CHECK accepted an unknown format"
+else
+  pass "Statements: statement_artifacts.format CHECK rejects an unknown format"
+fi
+rm -f $ARTIFACT_DIR/pfe_stmt_fmt.log
+
 # A viewer sees statements (select policy is any member) but cannot delete one.
 SV_SEES="$(as_user "$STMT_SV_USER" "select count(*) from public.statements where id = '00000000-0000-0000-0000-0000000000fd';")"
 as_user "$STMT_SV_USER" "delete from public.statements where id = '00000000-0000-0000-0000-0000000000fd';" >/dev/null 2>&1 || true
