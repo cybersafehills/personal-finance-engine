@@ -70,6 +70,15 @@ test("generate a statement end to end, then find and download it", async ({ page
   await page.getByRole("link", { name: "Generate statement" }).first().click();
   await expect(page).toHaveURL(/\/reports\/statements\/new$/);
 
+  // Other specs sharing this disposable DB may have left a financial_sources
+  // row, which flips the flow's default to a single account. The seeded
+  // transactions are workspace-scoped and sourceless, so pick "All accounts"
+  // explicitly (the radio only renders when >= 1 source exists).
+  const allAccounts = page.getByRole("radio", {
+    name: "All accounts (consolidated)",
+  });
+  if (await allAccounts.count()) await allAccounts.check();
+
   await page.getByLabel("Statement period").selectOption("this_month");
   await page.getByRole("button", { name: "Preview statement" }).click();
 
@@ -99,7 +108,8 @@ test("generate a statement end to end, then find and download it", async ({ page
   expect(res.status()).toBeGreaterThanOrEqual(300);
   expect(res.status()).toBeLessThan(400);
 
-  await page.getByRole("link", { name: "Statements" }).click();
+  // Both the tab strip and the page-header back link say "Statements".
+  await page.getByRole("link", { name: "Statements" }).first().click();
   await expect(page).toHaveURL(/\/reports\/statements$/);
   await expect(page.getByText("No statements yet")).toHaveCount(0);
   await expect(page.getByText(/3 transactions/).first()).toBeVisible();
@@ -119,8 +129,10 @@ test("generate a statement end to end, then find and download it", async ({ page
 test("a custom range with no activity is refused, not left blank", async ({ page }) => {
   await page.goto("/reports/statements/new");
   await page.getByLabel("Statement period").selectOption("custom");
-  await page.getByLabel("From").fill("2019-01-01");
-  await page.getByLabel("To").fill("2019-01-31");
+  // `exact` so "To" doesn't also match the period <select> now showing
+  // "Custom range…" ("cus-TO-m").
+  await page.getByLabel("From", { exact: true }).fill("2019-01-01");
+  await page.getByLabel("To", { exact: true }).fill("2019-01-31");
   await page.getByRole("button", { name: "Preview statement" }).click();
 
   await expect(
