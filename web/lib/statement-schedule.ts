@@ -13,7 +13,7 @@ import {
   getStatementFormOptions,
   recordStatementAudit,
 } from "./statement-generation";
-import { generateStatementId } from "./statement-id";
+import { generateStatementId, generateVerificationToken } from "./statement-id";
 
 // Scheduled Statements (master prompt section 30). A schedule is a plain
 // config row; members manage their own through RLS. The cron tick
@@ -222,6 +222,7 @@ async function enqueueScheduledStatement(
     currencyHint,
     supersedesId: null,
     clientToken: crypto.randomUUID(),
+    verificationToken: generateVerificationToken(),
   });
 
   const { data, error } = await service

@@ -21,7 +21,7 @@ import {
 export type StatementDocFormat = "pdf" | "csv";
 
 export const STATEMENT_ROW_COLUMNS =
-  "id, statement_id, workspace_id, created_by, statement_type, scope, period_start, period_end, timezone, currency, generated_at, created_at, opening_balance_minor, closing_balance_minor, total_credit_minor, total_debit_minor, total_fees_minor, transaction_count, reconciles, per_currency, source_metadata, coverage_metadata, status";
+  "id, statement_id, workspace_id, created_by, statement_type, scope, period_start, period_end, timezone, currency, generated_at, created_at, opening_balance_minor, closing_balance_minor, total_credit_minor, total_debit_minor, total_fees_minor, transaction_count, reconciles, per_currency, source_metadata, coverage_metadata, status, verification_token";
 
 export const STATEMENT_LINE_COLUMNS =
   "occurred_at, display_description, original_description, reference, direction, principal_effect_minor, fee_effect_minor, running_balance_minor, category, sort_index";
@@ -92,6 +92,7 @@ export async function buildStatementDocData(
     source: statement.source_metadata,
     coverage: statement.coverage_metadata,
     lines,
+    verificationToken: statement.verification_token ?? null,
   };
 }
 

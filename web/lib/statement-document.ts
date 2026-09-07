@@ -50,6 +50,8 @@ export type StatementDocData = {
   source: StatementSourceMetadata;
   coverage: StatementCoverageMetadata;
   lines: StatementDocLine[];
+  /** Opaque token for the public /verify page; drives the PDF's QR + verify line. */
+  verificationToken?: string | null;
 };
 
 const MINOR_PER_MAJOR: Record<string, number> = { RWF: 1 };

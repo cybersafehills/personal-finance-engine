@@ -7,7 +7,11 @@ import {
 import {
   formatStatementId,
   generateStatementId,
+  generateStatementPackId,
+  generateVerificationToken,
   isStatementId,
+  isStatementPackId,
+  isVerificationToken,
   randomStatementSuffix,
   STATEMENT_ID_PATTERN,
   statementIdDatePart,
@@ -93,4 +97,24 @@ Deno.test("generateStatementId with the real RNG always matches the pattern", ()
     const id = generateStatementId();
     assertMatch(id, STATEMENT_ID_PATTERN);
   }
+});
+
+Deno.test("generateVerificationToken: 32 chars from the id alphabet", () => {
+  for (let i = 0; i < 50; i++) {
+    const t = generateVerificationToken();
+    assertMatch(t, /^[0-9A-HJ-NP-Z]{32}$/);
+  }
+  assert(isVerificationToken(generateVerificationToken()));
+  assert(!isVerificationToken("short"));
+  assert(!isVerificationToken("ABCDEFGHIJKLMNOPQRSTUVWXYZ012345I")); // I not allowed
+});
+
+Deno.test("generateStatementPackId: OL-PK- prefix, valid suffix", () => {
+  const id = generateStatementPackId({
+    now: new Date("2026-05-01T00:00:00Z"),
+    randomBytes: () => new Uint8Array([10, 11, 12, 13, 14, 15]),
+  });
+  assertEquals(id, "OL-PK-20260501-ABCDEF");
+  assert(isStatementPackId(id));
+  assert(!isStatementPackId("OL-ST-20260501-ABCDEF"));
 });

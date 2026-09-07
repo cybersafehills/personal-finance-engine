@@ -257,6 +257,8 @@ export type StatementRecordInput = {
   coverageMetadata: unknown;
   supersedesId: string | null;
   clientToken: string;
+  /** Opaque token for the public /verify/<token> page. */
+  verificationToken: string;
   now: Date;
 };
 
@@ -307,6 +309,7 @@ export type StatementRecord = StatementFinancialFields & {
   status: "ready" | "generating";
   supersedes_id: string | null;
   client_token: string;
+  verification_token: string;
   generated_at: string | null;
 };
 
@@ -329,6 +332,7 @@ function baseRecord(
     timezone: input.timezone,
     supersedes_id: input.supersedesId,
     client_token: input.clientToken,
+    verification_token: input.verificationToken,
   };
 }
 

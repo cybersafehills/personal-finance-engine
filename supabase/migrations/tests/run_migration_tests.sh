@@ -2609,6 +2609,32 @@ else
 fi
 rm -f $ARTIFACT_DIR/pfe_stmt_token.log
 
+# --- Statement verification token (20261214000000) -------------------
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  set role service_role;
+  update public.statements set verification_token = 'ABCDEFGH1234567890ABCDEFGH123456' where id = '00000000-0000-0000-0000-0000000000fb';
+" >/dev/null
+VERIFY_LOOKUP="$(psql -d pfe_rls -t -A -c "set role service_role; select statement_id from public.statements where verification_token = 'ABCDEFGH1234567890ABCDEFGH123456';" | tail -1)"
+if [ "$VERIFY_LOOKUP" = "OL-ST-20260907-AAAAAA" ]; then
+  pass "Verification: a token resolves to its statement (service role read)"
+else
+  fail "Verification: token lookup wrong (got '$VERIFY_LOOKUP')"
+fi
+if psql -d pfe_rls -c "set role service_role; update public.statements set verification_token = 'ABCDEFGH1234567890ABCDEFGH123456' where id = '00000000-0000-0000-0000-0000000000fc';" >/dev/null 2>$ARTIFACT_DIR/pfe_verify_dup.log; then
+  fail "Verification: the unique index allowed a duplicate token"
+else
+  pass "Verification: statements_verification_token_key blocks a duplicate token"
+fi
+rm -f $ARTIFACT_DIR/pfe_verify_dup.log
+# authenticated still cannot read another tenant's statement even with a token.
+VERIFY_XTENANT="$(as_user "$USER_B" "select count(*) from public.statements where verification_token = 'ABCDEFGH1234567890ABCDEFGH123456';")"
+if [ "$VERIFY_XTENANT" = "0" ]; then
+  pass "Verification: RLS still hides the row from another tenant (token is not a bypass)"
+else
+  fail "Verification: another tenant read a statement by token - RLS bypass"
+fi
+psql -d pfe_rls -c "set role service_role; update public.statements set verification_token = null where id = '00000000-0000-0000-0000-0000000000fb';" >/dev/null
+
 # service_role is unaffected by all of the above.
 STMT_SVC="$(psql -d pfe_rls -t -A -c "set role service_role; select count(*) from public.statements where id in ('00000000-0000-0000-0000-0000000000fb', '00000000-0000-0000-0000-0000000000fc');" | tail -1)"
 if [ "$STMT_SVC" = "2" ]; then

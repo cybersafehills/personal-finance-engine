@@ -796,7 +796,9 @@ async function persistStatement(
 
   const now = new Date();
 
-  const { generateStatementId } = await import("./statement-id");
+  const { generateStatementId, generateVerificationToken } = await import(
+    "./statement-id"
+  );
 
   // Insert the parent row, retrying once on the astronomically unlikely
   // public-id collision.
@@ -821,6 +823,7 @@ async function persistStatement(
       coverageMetadata: a.coverage,
       supersedesId: params.supersedesId,
       clientToken: params.clientToken,
+      verificationToken: generateVerificationToken(),
       now,
     });
 
@@ -1033,7 +1036,9 @@ async function queueStatement(
     supersedesId: string | null;
   },
 ): Promise<GenerateOutcome> {
-  const { generateStatementId } = await import("./statement-id");
+  const { generateStatementId, generateVerificationToken } = await import(
+    "./statement-id"
+  );
 
   for (let attempt = 0; attempt < 2; attempt++) {
     const record = buildPendingStatementRecord({
@@ -1050,6 +1055,7 @@ async function queueStatement(
       currencyHint: scope.currencyHint,
       supersedesId: params.supersedesId,
       clientToken: params.clientToken,
+      verificationToken: generateVerificationToken(),
     });
 
     const { data, error } = await service

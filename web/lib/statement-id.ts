@@ -93,3 +93,33 @@ export function generateStatementPackId(
 export function isStatementPackId(value: string): boolean {
   return STATEMENT_PACK_ID_PATTERN.test(value);
 }
+
+// Opaque verification token for the public /verify/<token> page: 32
+// crypto-random chars from the same 34-symbol alphabet (~162 bits). Not
+// derivable from the statement id.
+export const VERIFICATION_TOKEN_PATTERN = /^[0-9A-HJ-NP-Z]{32}$/;
+
+export function generateVerificationToken(
+  randomBytes: RandomBytes = defaultRandomBytes,
+): string {
+  const ceiling = 256 - (256 % ID_ALPHABET.length);
+  const out: string[] = [];
+  let safety = 0;
+  while (out.length < 32) {
+    if (safety++ > 2000) {
+      throw new Error(
+        "generateVerificationToken: RNG produced no usable bytes",
+      );
+    }
+    for (const b of randomBytes(32)) {
+      if (out.length >= 32) break;
+      if (b >= ceiling) continue;
+      out.push(ID_ALPHABET[b % ID_ALPHABET.length]);
+    }
+  }
+  return out.join("");
+}
+
+export function isVerificationToken(value: string): boolean {
+  return VERIFICATION_TOKEN_PATTERN.test(value);
+}

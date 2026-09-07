@@ -247,6 +247,7 @@ Deno.test("buildStatementRecord: single currency -> totals set, per_currency nul
     coverageMetadata: { complete: true, warnings: [] },
     supersedesId: null,
     clientToken: "tok-1",
+    verificationToken: "ABCDEFGH1234567890ABCDEFGH123456",
     now: new Date("2026-09-07T09:00:00.000Z"),
   });
 
@@ -297,6 +298,7 @@ Deno.test("buildStatementRecord: mixed currency -> zero top-line totals, per_cur
     coverageMetadata: {},
     supersedesId: null,
     clientToken: "tok-2",
+    verificationToken: "ABCDEFGH1234567890ABCDEFGH123457",
     now: new Date("2026-09-07T09:00:00.000Z"),
   });
 
@@ -349,6 +351,7 @@ Deno.test("buildPendingStatementRecord: a generating stub has zeroed totals and 
     currencyHint: "RWF",
     supersedesId: null,
     clientToken: "tok-async",
+    verificationToken: "ABCDEFGH1234567890ABCDEFGH123458",
   });
   assertEquals(rec.status, "generating");
   assertEquals(rec.generated_at, null);
