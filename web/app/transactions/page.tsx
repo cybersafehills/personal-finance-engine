@@ -1,7 +1,13 @@
 import Link from "next/link";
-import { getAccounts, getReviewQueueCount, getTransactions } from "../../lib/queries";
+import {
+  getAccounts,
+  getLifetimeFlowTotals,
+  getReviewQueueCount,
+  getTransactions,
+} from "../../lib/queries";
 import { TransactionList } from "../../components/TransactionList";
 import { TransactionSearchBar } from "../../components/TransactionSearchBar";
+import { LifetimeFlowBadge } from "../../components/LifetimeFlowBadge";
 import { PageHeader } from "../../components/PageHeader";
 
 export const dynamic = "force-dynamic";
@@ -30,20 +36,22 @@ export default async function TransactionsPage({
   const amountMin = parseAmount(sp.min);
   const amountMax = parseAmount(sp.max);
 
-  const [transactions, reviewQueueCount, accounts] = await Promise.all([
-    getTransactions({
-      limit: 100,
-      category: categoryFilter,
-      q,
-      direction,
-      currency,
-      sourceId,
-      amountMin,
-      amountMax,
-    }),
-    getReviewQueueCount(),
-    getAccounts(),
-  ]);
+  const [transactions, reviewQueueCount, accounts, lifetimeFlow] = await Promise
+    .all([
+      getTransactions({
+        limit: 100,
+        category: categoryFilter,
+        q,
+        direction,
+        currency,
+        sourceId,
+        amountMin,
+        amountMax,
+      }),
+      getReviewQueueCount(),
+      getAccounts(),
+      getLifetimeFlowTotals(),
+    ]);
 
   const accountOptions = accounts
     .filter((a) => a.financial_source_id)
@@ -90,6 +98,8 @@ export default async function TransactionsPage({
           </div>
         }
       />
+
+      <LifetimeFlowBadge totals={lifetimeFlow} />
 
       <TransactionSearchBar accounts={accountOptions} currencies={currencies} />
 
