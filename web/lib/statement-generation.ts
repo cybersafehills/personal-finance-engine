@@ -1138,6 +1138,8 @@ type StatementJobRow = {
   period_start: string;
   period_end: string;
   timezone: string;
+  notify_email: string | null;
+  notified_at: string | null;
 };
 
 async function finalizeStatementJob(
@@ -1232,6 +1234,27 @@ async function finalizeStatementJob(
     }).eq("id", job.id).eq("status", "generating");
     if (upErr) throw new Error(`finalize update: ${upErr.message}`);
 
+    // Scheduled-statement email: a LINK only, once (master prompt s26/s30).
+    if (job.notify_email && !job.notified_at) {
+      try {
+        const base = process.env.SITE_URL?.replace(/\/$/, "");
+        const { sendScheduledStatementEmail } = await import("./emails");
+        await sendScheduledStatementEmail({
+          to: job.notify_email,
+          periodLabel: period.label,
+          statementUrl: base
+            ? `${base}/reports/statements/${job.id}`
+            : `/reports/statements/${job.id}`,
+          workspaceId: job.workspace_id,
+        });
+        await service.from("statements").update({
+          notified_at: new Date().toISOString(),
+        }).eq("id", job.id);
+      } catch (mailErr) {
+        console.error("statement schedule: email failed (non-fatal)", mailErr);
+      }
+    }
+
     if (assembly.math.totals?.reconciles === false) {
       console.warn("[statement.monitor] reconcile_mismatch", {
         workspaceId: job.workspace_id,
@@ -1283,7 +1306,7 @@ export async function runStatementJobsTick(): Promise<
   const { data, error } = await service
     .from("statements")
     .select(
-      "id, workspace_id, created_by, statement_type, scope, account_ids, filters, period_start, period_end, timezone",
+      "id, workspace_id, created_by, statement_type, scope, account_ids, filters, period_start, period_end, timezone, notify_email, notified_at",
     )
     .eq("status", "generating")
     .lt("created_at", cutoff)

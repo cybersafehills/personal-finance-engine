@@ -50,6 +50,7 @@ export function StatementScheduleForm({
   const [cadence, setCadence] = useState<Cadence>("monthly");
   const [dayOfMonth, setDayOfMonth] = useState(1);
   const [dayOfWeek, setDayOfWeek] = useState(1);
+  const [deliveryEmail, setDeliveryEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, startSave] = useTransition();
   const [deleting, startDelete] = useTransition();
@@ -64,6 +65,7 @@ export function StatementScheduleForm({
         dayOfMonth,
         dayOfWeek: cadence === "weekly" ? dayOfWeek : null,
         timezone: defaultTimezone,
+        deliveryEmail: deliveryEmail.trim() || undefined,
       });
       if (result.ok) router.refresh();
       else setError(result.error);
@@ -219,6 +221,22 @@ export function StatementScheduleForm({
               </select>
             </label>
           )}
+
+        <label className="flex flex-col gap-1">
+          <span className="font-medium text-text-primary">
+            Email me a link{" "}
+            <span className="font-normal text-text-muted">
+              (optional — no figures, just a link)
+            </span>
+          </span>
+          <input
+            type="email"
+            value={deliveryEmail}
+            onChange={(e) => setDeliveryEmail(e.target.value)}
+            placeholder="you@example.com"
+            className={inputClass}
+          />
+        </label>
 
         <p className="text-xs text-text-muted">
           {cadence === "weekly"

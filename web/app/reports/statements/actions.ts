@@ -93,6 +93,7 @@ export async function saveStatementScheduleAction(input: {
   dayOfMonth: number;
   dayOfWeek?: number | null;
   timezone: string;
+  deliveryEmail?: string;
 }): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   if (!isFinancialStatementsEnabled()) {
     return { ok: false, error: "Statements aren't available right now." };

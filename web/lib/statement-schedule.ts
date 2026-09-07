@@ -29,6 +29,7 @@ import { generateStatementId, generateVerificationToken } from "./statement-id";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export type StatementScheduleRow = {
   id: string;
@@ -39,6 +40,7 @@ export type StatementScheduleRow = {
   day_of_month: number;
   day_of_week: number | null;
   timezone: string;
+  delivery_email: string | null;
   enabled: boolean;
   last_run_at: string | null;
   next_run_at: string;
@@ -50,7 +52,7 @@ export async function getStatementSchedules(): Promise<StatementScheduleRow[]> {
   const { data, error } = await supabase
     .from("statement_schedules")
     .select(
-      "id, statement_type, account_ids, filters, cadence, day_of_month, day_of_week, timezone, enabled, last_run_at, next_run_at, created_at",
+      "id, statement_type, account_ids, filters, cadence, day_of_month, day_of_week, timezone, delivery_email, enabled, last_run_at, next_run_at, created_at",
     )
     .order("created_at", { ascending: false });
   if (error) {
@@ -71,6 +73,7 @@ export async function saveStatementSchedule(input: {
   dayOfMonth: number;
   dayOfWeek?: number | null;
   timezone: string;
+  deliveryEmail?: string;
 }): Promise<SaveScheduleOutcome> {
   if (
     input.statementType !== "standard" && input.statementType !== "detailed"
@@ -93,6 +96,10 @@ export async function saveStatementSchedule(input: {
   }
   if (!isValidReportTimezone(input.timezone)) {
     return { ok: false, error: "Unrecognized timezone." };
+  }
+  const deliveryEmail = input.deliveryEmail?.trim() || null;
+  if (deliveryEmail && !EMAIL_RE.test(deliveryEmail)) {
+    return { ok: false, error: "Enter a valid delivery email address." };
   }
   const ids = Array.from(new Set((input.sourceIds ?? []).filter(Boolean)));
   if (ids.length > 100 || !ids.every((id) => UUID_RE.test(id))) {
@@ -140,6 +147,7 @@ export async function saveStatementSchedule(input: {
       day_of_month: input.cadence === "weekly" ? 1 : input.dayOfMonth,
       day_of_week: dayOfWeek,
       timezone: input.timezone,
+      delivery_email: deliveryEmail,
       enabled: true,
       next_run_at: nextRun.toISOString(),
     })
@@ -192,6 +200,7 @@ type DueSchedule = {
   day_of_month: number;
   day_of_week: number | null;
   timezone: string;
+  delivery_email: string | null;
 };
 
 async function enqueueScheduledStatement(
@@ -268,6 +277,13 @@ async function enqueueScheduledStatement(
     return false;
   }
 
+  if (schedule.delivery_email) {
+    await service
+      .from("statements")
+      .update({ notify_email: schedule.delivery_email })
+      .eq("id", data.id);
+  }
+
   if (schedule.created_by) {
     await recordStatementAudit(service, {
       workspaceId: schedule.workspace_id,
@@ -290,7 +306,7 @@ export async function runStatementScheduleTick(
   const { data, error } = await service
     .from("statement_schedules")
     .select(
-      "id, workspace_id, created_by, statement_type, account_ids, filters, cadence, day_of_month, day_of_week, timezone",
+      "id, workspace_id, created_by, statement_type, account_ids, filters, cadence, day_of_month, day_of_week, timezone, delivery_email",
     )
     .eq("enabled", true)
     .lte("next_run_at", now.toISOString())
