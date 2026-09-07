@@ -41,6 +41,7 @@ export default async function NewStatementPage() {
             sources={options.sources}
             defaultTimezone={options.timezone}
             categories={categories}
+            participants={options.participants}
           />
         )}
     </div>

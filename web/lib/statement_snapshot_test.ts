@@ -142,6 +142,17 @@ Deno.test("resolveStatementScope: a category or merchant filter also forces 'fil
   assertEquals(merch.scope, "filtered");
 });
 
+Deno.test("resolveStatementScope: a participant or tag filter also forces 'filtered'", () => {
+  const p = resolveStatementScope(["a"], ["a"], {
+    participantUserId: "11111111-1111-4111-8111-111111111111",
+  });
+  assert(p.ok);
+  assertEquals(p.scope, "filtered");
+  const tag = resolveStatementScope(["a"], ["a"], { tag: "reimbursable" });
+  assert(tag.ok);
+  assertEquals(tag.scope, "filtered");
+});
+
 Deno.test("resolveStatementScope: duplicate requested ids are collapsed", () => {
   const r = resolveStatementScope(["a", "a"], ["a"], undefined);
   assert(r.ok);

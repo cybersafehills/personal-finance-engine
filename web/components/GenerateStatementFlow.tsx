@@ -19,6 +19,7 @@ import {
 import { parseStatementQuery } from "../lib/statement-nl";
 
 type SourceOption = { id: string; label: string; currency: string };
+type ParticipantOption = { id: string; label: string };
 
 const PRESETS: { value: StatementRequest["preset"]; label: string }[] = [
   { value: "this_month", label: "This month" },
@@ -40,10 +41,12 @@ export function GenerateStatementFlow({
   sources,
   defaultTimezone,
   categories = [],
+  participants = [],
 }: {
   sources: SourceOption[];
   defaultTimezone: string;
   categories?: string[];
+  participants?: ParticipantOption[];
 }) {
   const router = useRouter();
 
@@ -62,6 +65,7 @@ export function GenerateStatementFlow({
   const [direction, setDirection] = useState<"" | "in" | "out">("");
   const [category, setCategory] = useState("");
   const [merchant, setMerchant] = useState("");
+  const [participant, setParticipant] = useState("");
   const [timezone, setTimezone] = useState(defaultTimezone);
   const [showCustomize, setShowCustomize] = useState(false);
 
@@ -95,11 +99,12 @@ export function GenerateStatementFlow({
       fromDateKey: preset === "custom" ? fromDate : undefined,
       toDateKey: preset === "custom" ? toDate : undefined,
       sourceIds: sourceMode === "one" && sourceId ? [sourceId] : [],
-      filters: direction || category.trim() || merchant.trim()
+      filters: direction || category.trim() || merchant.trim() || participant
         ? {
           ...(direction ? { direction } : {}),
           ...(category.trim() ? { category: category.trim() } : {}),
           ...(merchant.trim() ? { merchant: merchant.trim() } : {}),
+          ...(participant ? { participantUserId: participant } : {}),
         }
         : undefined,
       clientToken,
@@ -410,6 +415,27 @@ export function GenerateStatementFlow({
                   className={inputClass}
                 />
               </label>
+              {participants.length > 0 && (
+                <label className="flex flex-col gap-1">
+                  <span className="font-medium text-text-primary">
+                    Attributed to
+                  </span>
+                  <select
+                    value={participant}
+                    onChange={(e) => onEdit(setParticipant)(e.target.value)}
+                    className={inputClass}
+                  >
+                    <option value="">Everyone in this space</option>
+                    {participants.map((p) => (
+                      <option key={p.id} value={p.id}>{p.label}</option>
+                    ))}
+                  </select>
+                  <span className="text-xs text-text-muted">
+                    Only transactions attributed to this member — the document
+                    is marked as filtered.
+                  </span>
+                </label>
+              )}
               <label className="flex flex-col gap-1">
                 <span className="font-medium text-text-primary">Timezone</span>
                 <select

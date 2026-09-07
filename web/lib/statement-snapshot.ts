@@ -25,13 +25,20 @@ export type StatementFilters = {
   category?: string;
   /** Case-insensitive substring of the counterparty / merchant name. */
   merchant?: string;
+  /** A household member's user id - transactions.attributed_user_id. */
+  participantUserId?: string;
+  /** A transaction_tags.tag value. */
+  tag?: string;
 };
 
 /** True when any scope-narrowing filter is set (the document is then marked "filtered"). */
 export function hasStatementFilter(
   filters: StatementFilters | undefined,
 ): boolean {
-  return !!(filters?.direction || filters?.category || filters?.merchant);
+  return !!(
+    filters?.direction || filters?.category || filters?.merchant ||
+    filters?.participantUserId || filters?.tag
+  );
 }
 
 /** The transactions columns lib/statement-generation.ts selects for a statement. */

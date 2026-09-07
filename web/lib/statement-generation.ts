@@ -1,7 +1,11 @@
 import "server-only";
 import { supabaseSession } from "./supabase-session-server";
 import { supabaseServer } from "./supabase-server";
-import { getActiveWorkspace, type WorkspaceSummary } from "./queries";
+import {
+  getActiveWorkspace,
+  getSpaceMemberDirectory,
+  type WorkspaceSummary,
+} from "./queries";
 import { isValidReportTimezone } from "./timezones";
 import {
   reconstructStatementPeriod,
@@ -283,12 +287,16 @@ export type StatementSourceOption = {
   currency: string;
 };
 
+export type StatementParticipantOption = { id: string; label: string };
+
 export type StatementFormOptions =
   | {
     ok: true;
     sources: StatementSourceOption[];
     /** A curated IANA zone (isValidReportTimezone), for the generate form's default. */
     timezone: string;
+    /** Household co-members, for the "attributed to" filter. Empty for personal / org spaces. */
+    participants: StatementParticipantOption[];
   }
   | { ok: false; kind: StatementErrorKind; message: string };
 
@@ -323,7 +331,19 @@ export async function getStatementFormOptions(): Promise<StatementFormOptions> {
     ? profileTz
     : "Africa/Kigali";
 
-  return { ok: true, sources, timezone };
+  // The "attributed to" filter only makes sense in a shared household,
+  // where transactions carry an attributed_user_id. Personal and org
+  // spaces get an empty list and the form omits the control.
+  let participants: StatementParticipantOption[] = [];
+  if (ctx.workspace.kind === "household") {
+    const members = await getSpaceMemberDirectory(ctx.workspace.id);
+    participants = members.map((m) => ({
+      id: m.userId,
+      label: m.displayName?.trim() || "A household member",
+    }));
+  }
+
+  return { ok: true, sources, timezone, participants };
 }
 
 // ---------------------------------------------------------------------------
@@ -347,6 +367,8 @@ type FactFilterOpts = {
   direction?: "in" | "out";
   category?: string;
   merchant?: string;
+  participantUserId?: string;
+  tag?: string;
 };
 
 function applyFactFilters(q: any, opts: FactFilterOpts): any {
@@ -361,7 +383,16 @@ function applyFactFilters(q: any, opts: FactFilterOpts): any {
     const safe = opts.merchant.replace(/[%,()\\]/g, " ").trim();
     if (safe) q = q.ilike("counterparty_name", `%${safe}%`);
   }
+  if (opts.participantUserId) {
+    q = q.eq("attributed_user_id", opts.participantUserId);
+  }
+  if (opts.tag) q = q.eq("transaction_tags.tag", opts.tag);
   return q;
+}
+
+/** When a tag filter is active the select needs an inner join to transaction_tags. */
+function factSelect(base: string, opts: FactFilterOpts): string {
+  return opts.tag ? `${base}, transaction_tags!inner(tag)` : base;
 }
 
 function baseFactQuery(
@@ -388,7 +419,7 @@ async function fetchFactCount(
     baseFactQuery(
       workspaceId,
       period,
-      client.from("transactions").select("id", {
+      client.from("transactions").select(factSelect("id", opts), {
         count: "exact",
         head: true,
       }),
@@ -418,7 +449,7 @@ async function fetchFacts(
       baseFactQuery(
         workspaceId,
         period,
-        client.from("transactions").select(TXN_COLUMNS),
+        client.from("transactions").select(factSelect(TXN_COLUMNS, opts)),
       )
         .order("occurred_at", { ascending: true })
         .order("created_at", { ascending: true })
@@ -480,6 +511,10 @@ function normalizeFilters(
     ...(input?.direction ? { direction: input.direction } : {}),
     ...(input?.category?.trim() ? { category: input.category.trim() } : {}),
     ...(input?.merchant?.trim() ? { merchant: input.merchant.trim() } : {}),
+    ...(input?.participantUserId?.trim()
+      ? { participantUserId: input.participantUserId.trim() }
+      : {}),
+    ...(input?.tag?.trim() ? { tag: input.tag.trim() } : {}),
   };
 }
 
@@ -611,6 +646,8 @@ async function assembleStatement(
     direction: scope.filters.direction,
     category: scope.filters.category,
     merchant: scope.filters.merchant,
+    participantUserId: scope.filters.participantUserId,
+    tag: scope.filters.tag,
   });
   if (!factsRes.ok) return err(factsRes.kind);
   const rows = factsRes.rows;
@@ -662,9 +699,16 @@ function validateRequestShape(
   }
   if (
     (req.filters?.category && req.filters.category.length > 80) ||
-    (req.filters?.merchant && req.filters.merchant.length > 80)
+    (req.filters?.merchant && req.filters.merchant.length > 80) ||
+    (req.filters?.tag && req.filters.tag.length > 80)
   ) {
     return err("invalid_input", "A filter value is too long.");
+  }
+  if (
+    req.filters?.participantUserId &&
+    !UUID_RE.test(req.filters.participantUserId)
+  ) {
+    return err("invalid_input", "A filter value was malformed.");
   }
   if (!isValidReportTimezone(req.timezone)) {
     return err("invalid_timezone");
@@ -994,6 +1038,8 @@ export async function createStatement(
     direction: scope.filters.direction,
     category: scope.filters.category,
     merchant: scope.filters.merchant,
+    participantUserId: scope.filters.participantUserId,
+    tag: scope.filters.tag,
   });
   if (count === 0) return err("no_transactions");
   if (count !== null && count > MAX_STATEMENT_TRANSACTIONS) {

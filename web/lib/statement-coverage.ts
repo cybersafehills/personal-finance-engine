@@ -78,6 +78,8 @@ export type StatementCoverageInput = {
     direction?: "in" | "out";
     category?: string;
     merchant?: string;
+    participantUserId?: string;
+    tag?: string;
   };
 };
 
@@ -169,6 +171,8 @@ function filterSummaryText(
   else if (filters?.direction === "in") parts.push("Money In only");
   if (filters?.category) parts.push(`Category: ${filters.category}`);
   if (filters?.merchant) parts.push(`Merchant matches "${filters.merchant}"`);
+  if (filters?.participantUserId) parts.push("One member's transactions");
+  if (filters?.tag) parts.push(`Tag: ${filters.tag}`);
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 

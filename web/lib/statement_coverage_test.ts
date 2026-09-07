@@ -250,6 +250,22 @@ Deno.test("buildStatementCoverageMetadata: compound filters are joined", () => {
   );
 });
 
+Deno.test("buildStatementCoverageMetadata: participant + tag filters are surfaced without leaking identity", () => {
+  const { coverage } = buildStatementCoverageMetadata({
+    facts: [],
+    sources: [source({ id: "s1" })],
+    filters: {
+      participantUserId: "11111111-1111-4111-8111-111111111111",
+      tag: "reimbursable",
+    },
+  });
+  assertEquals(coverage.filtered, true);
+  assertEquals(
+    coverage.filterSummary,
+    "One member's transactions · Tag: reimbursable",
+  );
+});
+
 Deno.test("buildStatementCoverageMetadata: a detected gap makes it not complete", () => {
   const { coverage } = buildStatementCoverageMetadata({
     facts: [
