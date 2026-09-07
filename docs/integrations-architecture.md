@@ -35,7 +35,7 @@ account menu (desktop), and a link in Settings.
 | --- | --- | --- |
 | `/integrations` | Dashboard: connected summary, "move data" entry points, available-later categories | **live (PR 0)** |
 | `/integrations/connections` | Connected devices / Shortcuts / providers (canonical connector model) — moved here from `/settings/connections`, which now redirects | **live (PR 0)** |
-| `/integrations/imports` | Import Studio. **PR 2-4 live**: upload -> detect -> profile -> map -> validate -> review -> commit -> undo (interactive mapping, saved templates, per-row validation, duplicate signals, staging review with bulk actions, `commit_import_batch` / `rollback_import_batch`). |
+| `/integrations/imports` | Import Studio. **PR 2-4 live**: upload -> detect -> profile -> map -> validate -> review -> commit -> undo (interactive mapping, saved templates, per-row validation, duplicate signals, staging review with bulk actions, `commit_import_batch` / `rollback_import_batch`). **Track B**: `/integrations/imports/templates` — downloadable starter register templates (Daily Sales / Expense / Cashbook) that auto-map on re-upload. |
 | `/integrations/exports` | Export Center. **PR 5 live**: config (format / relative or custom period / account + direction filters / XLSX sheet picker), inline generation for small exports + a cron for large ones, saved templates, history with signed-URL download. |
 | `/integrations/activity` | Consolidated activity / health feed | **live (PR 1)** |
 | `/integrations/sync` | Sync & Automation — connector sync health + recurring scheduled exports | **live (PR 6)**, opt-in flag, default off |
@@ -118,9 +118,46 @@ types + status vocabularies).
   default currency, a live "N of M sample rows parse" count, and inline
   "save as template". Desktop two-column, mobile stacked, 16px controls.
 - `/integrations/imports/[id]` pre-fills the mapping from a matched saved
-  template (when similarity ≥ threshold) else from `suggestMapping`, and
+  template (when similarity ≥ threshold), else a matched **starter
+  register template** (below), else from `suggestMapping`, and
   after `validated` shows ready/review/invalid counts + a per-row status
   and issue list in the preview.
+
+## Import Studio — starter register templates (Track B, no migration)
+
+Master prompt §13. A business owner downloads a ready-formatted
+spreadsheet, fills in rows, and uploads it back — and it auto-maps
+because each template ships with the mapping that produces it.
+
+- `web/lib/integrations/register-templates.ts` — **pure, deno-tested**.
+  `REGISTER_TEMPLATES`: **Daily Sales Register** (`all_in`), **Expense
+  Register** (`all_out`), **Cashbook** (`split`) — each a column list
+  (header + fill-in hint + example cell + required flag) and a complete
+  `ImportColumnMapping`. `buildRegisterTemplateCsv(key, {withSample})`
+  (via `export/csv-safe.ts` `csvDocument` — formula-neutralised),
+  `matchRegisterTemplate(headers)` (reuses `headerSignature` /
+  `signatureSimilarity` / `TEMPLATE_AUTO_APPLY_THRESHOLD`; a template's
+  own headers score 1.0, Daily Sales vs Expense ~0.45 so they never
+  collide), `isRegisterTemplateKey` guards the route.
+- `web/lib/integrations/register-templates-workbook.ts` — **server-only**
+  (exceljs). `buildRegisterTemplateXlsx(key)`: a data sheet (frozen bold
+  header + example row, formula-neutralised cells, same conventions as
+  `export/workbook.ts`) plus a "How to fill this in" sheet.
+- `GET /api/integrations/imports/templates/[key]?format=csv|xlsx&sample=0`
+  — generated on the fly, `content-disposition: attachment`, no storage
+  object; gated on `isImportStudioEnabled` only (downloading a blank form
+  needs no capability). CSV `?sample=0` drops the example row.
+- `/integrations/imports/templates` — picker page (per template: name,
+  summary, "imports as", column list, Excel + CSV download). Linked from
+  `/integrations/imports` (header + empty state) and
+  `/integrations/imports/new`.
+- `/integrations/imports/[id]` mapping pre-fill gains a
+  `matchRegisterTemplate` step between the saved-template match and the
+  `suggestMapping` fallback, so an uploaded filled-in template arrives
+  pre-mapped (`matchedTemplateName` shows in `ImportMappingForm`).
+- Invoice Register is deferred to multi-domain import (gap analysis G1) —
+  invoices are not an Import Studio target yet, so shipping a template
+  that cannot be imported would violate master prompt §6/§8.
 
 ## Import Studio — staging review, commit, rollback (PR 4, migration 20261029000000)
 

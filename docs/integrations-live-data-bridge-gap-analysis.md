@@ -52,7 +52,7 @@ and §98 ("Is any functionality duplicated?").
 | Marketplace catalog | **Complete** |
 | RLS / tenant isolation / capability gating / audit | **Complete** |
 | **Multi-domain import (invoices / expenses / income as first-class)** | **Missing** |
-| **Downloadable register templates** | **Missing** |
+| **Downloadable register templates** | **Done (Track B)** — Daily Sales / Expense / Cashbook; Invoice deferred to G1 |
 | **Unified "add a connection" setup wizard** | **Missing** |
 | **"Connect existing business records" multi-sheet onboarding** | **Missing** |
 | **Public API write endpoints (POST/PATCH)** | **Missing (deferred by design)** |
@@ -82,7 +82,7 @@ Success §97) · P2 (materially incomplete) · P3 (polish / nice-to-have) · —
 | 10 | Reusable field-mapping engine, scoped per workspace/connection/type | ✅ | `mapping.ts` (pure, client+server); `import_templates` matched by `header_signature`, workspace-scoped RLS | — |
 | 11 | Intelligent mapping assistance (deterministic → heuristic → AI, user confirms) | 🟡 | `suggestMapping` (header-name heuristics) + `profileTabularData` column guess. **No AI-assisted suggestion** despite `@anthropic-ai/sdk` in deps; acceptable per §11 ("AI must not be required") but listed as a gap | P3 |
 | 12 | Data-type detection (dates, currencies, amounts, negatives, refs) | ✅ | `parseAmount` / `parseStatementDate` in `statement-import.ts`; thousands separators, `RWF 1,000,000`, split/signed handled | — |
-| 13 | **Integration templates** (Daily Sales Register, Expense Register, Invoice Register, Cashbook) + downloadable formatted templates | ❌ | Users can *save* a mapping template after an import, but there are **no starter register templates and no "download a blank template" action** | **P1** |
+| 13 | **Integration templates** (Daily Sales Register, Expense Register, Invoice Register, Cashbook) + downloadable formatted templates | 🟡→✅ | **Track B**: `/integrations/imports/templates` + `GET /api/integrations/imports/templates/[key]?format=csv\|xlsx` generate blank Daily Sales / Expense / Cashbook forms that auto-map on re-upload (`register-templates.ts`, `matchRegisterTemplate`). Invoice Register deferred to G1 (invoices aren't an import target). | done (Invoice → G1) |
 | 14 | Safe staged import pipeline (RECEIVED→…→IMPORTED + exception states) | ✅ | `IMPORT_BATCH_STATUSES` (9) + `IMPORT_RECORD_STATUSES` (10); `commit_import_batch` is transactional, deterministic `payload_hash` | — |
 | 15 | Integration Inbox (exception review) | ✅ | `ImportStagingReview.tsx` (status chips, bulk approve/ignore/reopen); Financial Inbox `import_review` item | — |
 | 16 | Duplicate detection, multi-layer, external IDs, uncertain → review | ✅ | `matching.ts` (exact/likely/possible/distinct + explainable signals) + Space fingerprint in `commit_import_batch` → `dedupe_state='possible_duplicate'`, never auto-merged | — |
@@ -170,7 +170,7 @@ Success §97) · P2 (materially incomplete) · P3 (polish / nice-to-have) · —
 | 98 | Final engineering review checklist | ➖ | Run at the end of gap-closure | — |
 | 99 | Final implementation report | ➖ | Deliverable of the eventual work | — |
 
-**Tally:** ✅ 48 · 🟡 38 · ❌ 6 · ➖ 7.
+**Tally:** ✅ 48 · 🟡 38 · ❌ 6 · ➖ 7. _(Post-#164 / Track B: §13 ❌→✅ — see the gap register for what shipped.)_
 
 ---
 
@@ -182,7 +182,7 @@ Success §97) · P2 (materially incomplete) · P3 (polish / nice-to-have) · —
 | --- | --- | --- | --- |
 | G1 | **Multi-domain import.** Import Studio only creates `transactions`. Invoices, expenses, income, payments as import targets. | 8(step 3), 13, 24, 97 | Biggest single lift. Needs a `target_object` on `import_batches`, per-domain canonical field sets + validators + commit RPCs, and per-domain preview. Bills/invoices already have their own tables and a `commit`-style path — reuse, don't fork (§70). |
 | G2 | **Unified "add a connection" setup wizard.** | 5, 8, 60, 97 | One `/integrations/connect` flow: connection type → direction → data type → source (file/sheet/API) → hand off to the existing mapping/preview/commit steps. Mostly a shell over existing actions. |
-| G3 | **Downloadable register templates** (Daily Sales, Expense, Invoice, Cashbook) + "download a blank template". | 13 | Static XLSX/CSV generators via the existing `workbook.ts` builders + a `/integrations/imports/templates` picker. Small. |
+| ~~G3~~ | ~~**Downloadable register templates** (Daily Sales, Expense, Invoice, Cashbook) + "download a blank template".~~ **DONE (Track B, PR B2)** — `register-templates.ts` (pure, deno-tested) + `register-templates-workbook.ts` (server-only xlsx) + `/api/integrations/imports/templates/[key]` + `/integrations/imports/templates` picker; auto-maps on re-upload via `matchRegisterTemplate`. Invoice Register → G1 (not an import target yet; shipping it would break §6/§8). | 13 | Was "Small". |
 | G4 | **"Connect existing business records" onboarding** — multi-sheet workbook analyzer. | 41 | Extend `parseXlsx` (already returns all sheets) + `profileTabularData` to classify every sheet, present candidate tables with counts, route each to an import batch. |
 | G5 | **E2E + integration test coverage** for the Integrations flows. | 82, 83, 84, 86 | At minimum: upload→map→preview→commit→see txn→history happy path; cross-tenant + bad-key negatives; a fixture corpus (§83). |
 | ~~G6~~ | ~~**Production rollout** — every `INTEGRATIONS_*` flag is unset.~~ **Runbook DONE** — [`integrations-rollout-runbook.md`](integrations-rollout-runbook.md) + [`activate_integration_export_worker.sql`](../supabase/scheduling/activate_integration_export_worker.sql), shipped as docs-only PR #164 (branch `docs/integrations-rollout-runbook`). Remaining is operator execution (flip flags per the staged sequence, run the smoke test + regression pass), not an engineering task. | 55, 88, 90, 97 | Was the cheapest P1. |
@@ -245,10 +245,13 @@ flags; nothing here reshapes the core.
 2. **PR B1 — Unified connect wizard (G2).** `/integrations/connect` shell:
    type → direction → data type → source; hands off to the existing
    upload/mapping/preview/commit. Pure composition over existing actions.
-3. **PR B2 — Register templates + blank-template download (G3).** Starter
-   templates (Daily Sales / Expense / Invoice / Cashbook) as seed
-   `import_templates` + a `/integrations/imports/templates` picker + XLSX/CSV
-   blank generators from `workbook.ts`.
+3. ~~**PR B2 — Register templates + blank-template download (G3).**~~ **DONE.**
+   Shipped as static, code-defined templates (not per-workspace seed rows):
+   `register-templates.ts` (Daily Sales / Expense / Cashbook, each with its
+   mapping) + `register-templates-workbook.ts` (xlsx) + a download route + a
+   `/integrations/imports/templates` picker. `matchRegisterTemplate` slots
+   into the `/integrations/imports/[id]` pre-fill chain so a filled-in
+   template auto-maps. Invoice Register moves to PR B4/B5 (G1).
 4. **PR B3 — Multi-sheet workbook analyzer / "connect existing records" (G4).**
    Classify every sheet in an upload, show candidate tables + counts, route
    each to its own batch. Builds directly on `parseXlsx` + `profileTabularData`.

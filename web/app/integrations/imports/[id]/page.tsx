@@ -20,6 +20,7 @@ import {
   suggestMapping,
   TEMPLATE_AUTO_APPLY_THRESHOLD,
 } from "../../../../lib/integrations/mapping";
+import { matchRegisterTemplate } from "../../../../lib/integrations/register-templates";
 import type { ImportRecord } from "../../../../lib/integrations/model";
 
 export const dynamic = "force-dynamic";
@@ -81,6 +82,7 @@ export default async function ImportBatchPage({
     initialMapping = persisted as ImportColumnMapping;
   } else {
     const match = await findMatchingImportTemplate(headers);
+    const starter = matchRegisterTemplate(headers);
     if (
       match &&
       match.score >= TEMPLATE_AUTO_APPLY_THRESHOLD &&
@@ -88,6 +90,10 @@ export default async function ImportBatchPage({
     ) {
       initialMapping = match.template.mapping as ImportColumnMapping;
       matchedTemplateName = match.template.name;
+    } else if (starter) {
+      // An unfilled or filled-in OneLedger starter template (§13).
+      initialMapping = starter.template.mapping;
+      matchedTemplateName = starter.template.name;
     } else {
       initialMapping = suggestMapping(headers, profile.currencyGuess ?? null);
     }
