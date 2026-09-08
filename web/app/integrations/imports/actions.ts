@@ -8,6 +8,10 @@ import { isImportStudioEnabled } from "../../../lib/integrations/gate";
 import { parseCsv } from "../../../lib/csv";
 import { parseXlsx } from "../../../lib/xlsx-read";
 import { profileTabularData } from "../../../lib/integrations/profile";
+import {
+  analyzeWorkbook,
+  type WorkbookAnalysis,
+} from "../../../lib/integrations/workbook-analyzer";
 import { getMatchCandidateTransactions } from "../../../lib/integrations/queries";
 import {
   headerSignature,
@@ -88,13 +92,21 @@ function fileKind(name: string): "csv" | "xlsx" | null {
   return null;
 }
 
-export async function uploadImportFile(
-  formData: FormData,
-): Promise<UploadImportResult> {
-  const access = await requireImportAccess("integration.import");
-  if (!access.ok) return access;
-  const { workspaceId, userId } = access;
+const XLSX_MIME =
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
+type ParsedSheet = { name: string; headers: string[]; rows: string[][] };
+type ParsedUpload =
+  | { ok: true; kind: "csv" | "xlsx"; bytes: Uint8Array; sheets: ParsedSheet[] }
+  | { ok: false; error: string };
+
+/**
+ * Validate + parse an uploaded FormData file into one or more sheets,
+ * entirely in memory. Nothing is written. CSV yields a single sheet;
+ * .xlsx yields every worksheet (empty ones included, so the caller can
+ * report them).
+ */
+async function parseUploadFile(formData: FormData): Promise<ParsedUpload> {
   const file = formData.get("file");
   if (!(file instanceof File) || file.size === 0) {
     return { ok: false, error: "Choose a file to import." };
@@ -102,7 +114,6 @@ export async function uploadImportFile(
   if (file.size > MAX_BYTES) {
     return { ok: false, error: "That file is larger than the 10 MB limit." };
   }
-
   const kind = fileKind(file.name);
   if (!kind) {
     return {
@@ -111,26 +122,22 @@ export async function uploadImportFile(
     };
   }
 
-  // --- parse + profile entirely in memory; write nothing until it's valid.
   const bytes = new Uint8Array(await file.arrayBuffer());
-  let headers: string[];
-  let rows: string[][];
   try {
     if (kind === "csv") {
       const parsed = parseCsv(new TextDecoder().decode(bytes));
-      headers = parsed.headers;
-      rows = parsed.rows;
-    } else {
-      const parsed = await parseXlsx(bytes);
-      const sheet =
-        parsed.sheets.find((s) => s.headers.length > 0 && s.rows.length > 0) ??
-          parsed.sheets[0];
-      if (!sheet) {
-        return { ok: false, error: "That workbook has no readable sheets." };
-      }
-      headers = sheet.headers;
-      rows = sheet.rows;
+      return {
+        ok: true,
+        kind,
+        bytes,
+        sheets: [{ name: file.name, headers: parsed.headers, rows: parsed.rows }],
+      };
     }
+    const parsed = await parseXlsx(bytes);
+    if (parsed.sheets.length === 0) {
+      return { ok: false, error: "That workbook has no readable sheets." };
+    }
+    return { ok: true, kind, bytes, sheets: parsed.sheets };
   } catch (error) {
     return {
       ok: false,
@@ -139,22 +146,38 @@ export async function uploadImportFile(
         : "That file could not be read.",
     };
   }
+}
+
+/**
+ * Persist one parsed sheet as a `profiled` import batch: the batch row,
+ * the original bytes in private storage (keyed by batch id, so several
+ * sheets of one workbook never collide), the staged `import_records`,
+ * and an `import.uploaded` event. Service-role after the caller's
+ * capability check - the check is the boundary (report-artifacts model).
+ */
+async function stageImportBatch(params: {
+  workspaceId: string;
+  userId: string;
+  kind: "csv" | "xlsx";
+  bytes: Uint8Array;
+  originalFilename: string;
+  headers: string[];
+  rows: string[][];
+  sheetName?: string;
+}): Promise<{ ok: true; batchId: string } | { ok: false; error: string }> {
+  const { workspaceId, userId, kind, bytes, headers, rows, sheetName } = params;
+  const originalFilename = params.originalFilename.slice(0, 255);
 
   if (headers.length === 0 || rows.length === 0) {
-    return {
-      ok: false,
-      error: "That file has no data rows under a header row.",
-    };
+    return { ok: false, error: "That sheet has no data rows under a header row." };
   }
 
   const profile = profileTabularData(headers, rows);
   const truncated = rows.length > MAX_RECORDS;
   const stagedRows = truncated ? rows.slice(0, MAX_RECORDS) : rows;
 
-  // --- persist. service-role after the capability check above (same model
-  // as the report-artifacts bucket): the check IS the boundary here.
   const admin = supabaseServer();
-  const safeName = sanitizeFilename(file.name);
+  const safeName = sanitizeFilename(originalFilename);
 
   const { data: batch, error: batchError } = await admin
     .from("import_batches")
@@ -162,13 +185,13 @@ export async function uploadImportFile(
       workspace_id: workspaceId,
       created_by: userId,
       source_kind: kind,
-      original_filename: file.name.slice(0, 255),
+      original_filename: originalFilename,
       status: "uploaded",
     })
     .select("id")
     .single();
   if (batchError || !batch) {
-    console.error("uploadImportFile: batch insert failed", batchError?.message);
+    console.error("stageImportBatch: batch insert failed", batchError?.message);
     return { ok: false, error: "Could not start the import. Please try again." };
   }
 
@@ -176,13 +199,11 @@ export async function uploadImportFile(
   const { error: uploadError } = await admin.storage
     .from(IMPORT_BUCKET)
     .upload(storagePath, bytes, {
-      contentType: kind === "csv"
-        ? "text/csv"
-        : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      contentType: kind === "csv" ? "text/csv" : XLSX_MIME,
       upsert: false,
     });
   if (uploadError) {
-    console.error("uploadImportFile: storage upload failed", uploadError.message);
+    console.error("stageImportBatch: storage upload failed", uploadError.message);
     await admin
       .from("import_batches")
       .update({ status: "failed", error: { stage: "upload" } })
@@ -201,12 +222,15 @@ export async function uploadImportFile(
     .from("import_records")
     .insert(records);
   if (recordsError) {
-    console.error("uploadImportFile: records insert failed", recordsError.message);
+    console.error("stageImportBatch: records insert failed", recordsError.message);
     await admin
       .from("import_batches")
       .update({ status: "failed", error: { stage: "records" } })
       .eq("id", batch.id);
-    return { ok: false, error: "Could not stage the file rows. Please try again." };
+    return {
+      ok: false,
+      error: "Could not stage the file rows. Please try again.",
+    };
   }
 
   await admin
@@ -214,7 +238,12 @@ export async function uploadImportFile(
     .update({
       status: "profiled",
       storage_path: storagePath,
-      detected: { ...profile, truncated, stagedRowCount: stagedRows.length },
+      detected: {
+        ...profile,
+        ...(sheetName ? { sheetName } : {}),
+        truncated,
+        stagedRowCount: stagedRows.length,
+      },
       mapping: { suggested: profile.columnGuess },
       row_counts: {
         total: rows.length,
@@ -235,13 +264,145 @@ export async function uploadImportFile(
     severity: "info",
     ref_type: "import_batch",
     ref_id: batch.id,
-    summary: `${file.name} uploaded — ${profile.readyRows} of ${rows.length} rows ready to map`,
-    context: { sourceKind: kind, rowCount: rows.length, truncated },
+    summary: `${originalFilename} uploaded — ${profile.readyRows} of ${rows.length} rows ready to map`,
+    context: {
+      sourceKind: kind,
+      rowCount: rows.length,
+      truncated,
+      ...(sheetName ? { sheetName } : {}),
+    },
   });
+
+  return { ok: true, batchId: batch.id };
+}
+
+export async function uploadImportFile(
+  formData: FormData,
+): Promise<UploadImportResult> {
+  const access = await requireImportAccess("integration.import");
+  if (!access.ok) return access;
+  const { workspaceId, userId } = access;
+
+  const parsed = await parseUploadFile(formData);
+  if (!parsed.ok) return parsed;
+
+  // Single-file path: the first sheet with data (xlsx multi-sheet goes
+  // through analyzeWorkbookUpload / createImportBatchesFromWorkbook).
+  const sheet = parsed.sheets.find(
+    (s) => s.headers.length > 0 && s.rows.length > 0,
+  ) ?? parsed.sheets[0];
+  if (!sheet) {
+    return { ok: false, error: "That file has no readable sheet." };
+  }
+
+  const result = await stageImportBatch({
+    workspaceId,
+    userId,
+    kind: parsed.kind,
+    bytes: parsed.bytes,
+    originalFilename: (formData.get("file") as File).name,
+    headers: sheet.headers,
+    rows: sheet.rows,
+  });
+  if (!result.ok) return result;
 
   revalidatePath("/integrations/imports");
   revalidatePath("/integrations");
-  return { ok: true, batchId: batch.id };
+  return { ok: true, batchId: result.batchId };
+}
+
+export type WorkbookAnalyzeResult =
+  | { ok: true; filename: string; analysis: WorkbookAnalysis }
+  | { ok: false; error: string };
+
+/**
+ * Analyze every sheet of an uploaded workbook and report which look like
+ * transaction tables (master prompt §41). Read-only: nothing is written,
+ * so the user can inspect and correct before staging anything.
+ */
+export async function analyzeWorkbookUpload(
+  formData: FormData,
+): Promise<WorkbookAnalyzeResult> {
+  const access = await requireImportAccess("integration.import");
+  if (!access.ok) return access;
+
+  const parsed = await parseUploadFile(formData);
+  if (!parsed.ok) return parsed;
+
+  const analysis = analyzeWorkbook(
+    parsed.sheets.map((s) => ({
+      name: s.name,
+      headers: s.headers,
+      rows: s.rows,
+    })),
+  );
+  return {
+    ok: true,
+    filename: (formData.get("file") as File).name,
+    analysis,
+  };
+}
+
+export type CreateFromWorkbookResult =
+  | { ok: true; created: number; batchIds: string[]; failedSheets: string[] }
+  | { ok: false; error: string };
+
+/**
+ * Stage one import batch per chosen sheet of a workbook. Each batch then
+ * runs the normal Import Studio flow (map / validate / review / commit).
+ */
+export async function createImportBatchesFromWorkbook(
+  formData: FormData,
+  sheetNames: string[],
+): Promise<CreateFromWorkbookResult> {
+  const access = await requireImportAccess("integration.import");
+  if (!access.ok) return access;
+  const { workspaceId, userId } = access;
+
+  const parsed = await parseUploadFile(formData);
+  if (!parsed.ok) return parsed;
+
+  const wanted = new Set(sheetNames);
+  const chosen = parsed.sheets.filter(
+    (s) => wanted.has(s.name) && s.headers.length > 0 && s.rows.length > 0,
+  );
+  if (chosen.length === 0) {
+    return { ok: false, error: "Pick at least one sheet with data to import." };
+  }
+  if (chosen.length > 20) {
+    return { ok: false, error: "That’s more than 20 sheets — import them in smaller groups." };
+  }
+
+  const filename = (formData.get("file") as File).name;
+  const batchIds: string[] = [];
+  const failedSheets: string[] = [];
+  for (const sheet of chosen) {
+    const result = await stageImportBatch({
+      workspaceId,
+      userId,
+      kind: parsed.kind,
+      bytes: parsed.bytes,
+      originalFilename: `${filename} — ${sheet.name}`,
+      headers: sheet.headers,
+      rows: sheet.rows,
+      sheetName: sheet.name,
+    });
+    if (result.ok) batchIds.push(result.batchId);
+    else failedSheets.push(sheet.name);
+  }
+
+  if (batchIds.length === 0) {
+    return { ok: false, error: "None of the selected sheets could be staged." };
+  }
+
+  revalidatePath("/integrations/imports");
+  revalidatePath("/integrations");
+  return {
+    ok: true,
+    created: batchIds.length,
+    batchIds,
+    failedSheets,
+  };
 }
 
 export type ApplyMappingResult =

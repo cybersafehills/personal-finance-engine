@@ -54,7 +54,7 @@ and §98 ("Is any functionality duplicated?").
 | **Multi-domain import (invoices / expenses / income as first-class)** | **Missing** |
 | **Downloadable register templates** | **Done (Track B)** — Daily Sales / Expense / Cashbook; Invoice deferred to G1 |
 | **Unified "add a connection" setup wizard** | **Done (Track B, PR B1)** |
-| **"Connect existing business records" multi-sheet onboarding** | **Missing** |
+| **"Connect existing business records" multi-sheet onboarding** | **Done (Track B, PR B3)** |
 | **Public API write endpoints (POST/PATCH)** | **Missing (deferred by design)** |
 | **Live spreadsheet sync (Sheets / Excel-365 OAuth)** | **Missing (stubs only)** |
 | **E2E test coverage of the Integrations flows** | **Missing** |
@@ -110,7 +110,7 @@ Success §97) · P2 (materially incomplete) · P3 (polish / nice-to-have) · —
 | 38 | Reconciliation participation | ✅ | Reconciliation Center unifies balance drift + payment matches + import dups + workbook conflicts | — |
 | 39 | Spreadsheet change tracking by stable IDs, not row position | 🟡 | `workbooks/diff.ts` matches by external id else amount+direction+day+description. **No injected hidden record-id column** in the generated workbook, so re-matching after a user sorts/inserts rows leans on the heuristic | P2 |
 | 40 | OneLedger-generated connector workbook | 🟡 | `connected_workbooks` `manual_file` mode writes a full `.xlsx` (Summary/Transactions/Income/Expenses/Categories/Accounts). **Not surfaced as a one-click "Create OneLedger Workbook"**; requires the dark Workbooks flag | P3 |
-| 41 | **"Connect existing business records" onboarding** (upload workbook → analyze sheets → candidate tables → counts → mapping suggestions) | ❌ | `profileTabularData` analyzes **one** sheet after upload. **No multi-sheet workbook analyzer, no "here are your candidate transaction/expense/invoice tables" screen, no onboarding entry point** | **P1** |
+| 41 | **"Connect existing business records" onboarding** (upload workbook → analyze sheets → candidate tables → counts → mapping suggestions) | 🟡→✅ | **Track B / PR B3**: `/integrations/imports/analyze` + `workbook-analyzer.ts` (pure, deno-tested) classify every sheet `transactions|unrecognised|empty` with hedged confidence + counts + date range + template match; `analyzeWorkbookUpload` (read-only) then `createImportBatchesFromWorkbook` stages one batch per chosen sheet. Candidate types beyond transactions wait on G1. | done (transactions; other types → G1) |
 | 42 | Import preview experience (what will be created, counts, account, categories, dups, invalid; sampled rows, paginated) | 🟡 | `/integrations/imports/[id]` shows ready/review/invalid counts + per-row status/issues. **Sampling/pagination for large batches is limited; category assignment preview is absent** (import doesn't assign categories) | P2 |
 | 43 | Error experience (plain language, not `422 INVALID_SCHEMA`) | ✅ | `validation.ts` messages are human ("The amount could not be read."); `xlsx-read` gives ".xls → re-save as .xlsx" | — |
 | 44 | Empty states | ✅ | `EmptyState` used across `/integrations/**` | — |
@@ -170,7 +170,7 @@ Success §97) · P2 (materially incomplete) · P3 (polish / nice-to-have) · —
 | 98 | Final engineering review checklist | ➖ | Run at the end of gap-closure | — |
 | 99 | Final implementation report | ➖ | Deliverable of the eventual work | — |
 
-**Tally:** ✅ 48 · 🟡 38 · ❌ 6 · ➖ 7 _(as of the discovery pass)_. **Track B shipped since:** §13 ❌→✅ (register templates, #165), §8 🟡→✅ (connect wizard, PR B1). See the gap register rows for detail.
+**Tally:** ✅ 48 · 🟡 38 · ❌ 6 · ➖ 7 _(as of the discovery pass)_. **Track B shipped since:** §13 ❌→✅ (register templates, #165), §8 🟡→✅ (connect wizard, #166), §41 🟡→✅ (workbook analyzer, PR B3). See the gap register rows for detail.
 
 ---
 
@@ -183,7 +183,7 @@ Success §97) · P2 (materially incomplete) · P3 (polish / nice-to-have) · —
 | G1 | **Multi-domain import.** Import Studio only creates `transactions`. Invoices, expenses, income, payments as import targets. | 8(step 3), 13, 24, 97 | Biggest single lift. Needs a `target_object` on `import_batches`, per-domain canonical field sets + validators + commit RPCs, and per-domain preview. Bills/invoices already have their own tables and a `commit`-style path — reuse, don't fork (§70). |
 | ~~G2~~ | ~~**Unified "add a connection" setup wizard.**~~ **DONE (Track B, PR B1)** — `/integrations/connect` (searchParams server wizard, `StepWizard` chrome) + `connect-wizard.ts` (pure resolver, 10 deno tests). Source → direction → data type, then `<Link>` straight into `/integrations/imports/new` / `/integrations/exports` / `/integrations/sync`. "Connect a system" CTA added to the `/integrations` header. No action/table/flag. | 5, 8, 60, 97 | Was "mostly a shell". |
 | ~~G3~~ | ~~**Downloadable register templates** (Daily Sales, Expense, Invoice, Cashbook) + "download a blank template".~~ **DONE (Track B, PR B2)** — `register-templates.ts` (pure, deno-tested) + `register-templates-workbook.ts` (server-only xlsx) + `/api/integrations/imports/templates/[key]` + `/integrations/imports/templates` picker; auto-maps on re-upload via `matchRegisterTemplate`. Invoice Register → G1 (not an import target yet; shipping it would break §6/§8). | 13 | Was "Small". |
-| G4 | **"Connect existing business records" onboarding** — multi-sheet workbook analyzer. | 41 | Extend `parseXlsx` (already returns all sheets) + `profileTabularData` to classify every sheet, present candidate tables with counts, route each to an import batch. |
+| ~~G4~~ | ~~**"Connect existing business records" onboarding** — multi-sheet workbook analyzer.~~ **DONE (Track B, PR B3)** — `workbook-analyzer.ts` (`analyzeSheet`/`analyzeWorkbook`, 7 deno tests) + `/integrations/imports/analyze` + `WorkbookAnalyzeForm` + `analyzeWorkbookUpload` (read-only) / `createImportBatchesFromWorkbook` actions (refactor extracts `parseUploadFile` + `stageImportBatch` from `uploadImportFile`). One batch per chosen sheet, `detected.sheetName` recorded. No migration. | 41 | Was P1. |
 | G5 | **E2E + integration test coverage** for the Integrations flows. | 82, 83, 84, 86 | At minimum: upload→map→preview→commit→see txn→history happy path; cross-tenant + bad-key negatives; a fixture corpus (§83). |
 | ~~G6~~ | ~~**Production rollout** — every `INTEGRATIONS_*` flag is unset.~~ **Runbook DONE** — [`integrations-rollout-runbook.md`](integrations-rollout-runbook.md) + [`activate_integration_export_worker.sql`](../supabase/scheduling/activate_integration_export_worker.sql), shipped as docs-only PR #164 (branch `docs/integrations-rollout-runbook`). Remaining is operator execution (flip flags per the staged sequence, run the smoke test + regression pass), not an engineering task. | 55, 88, 90, 97 | Was the cheapest P1. |
 
@@ -257,9 +257,12 @@ flags; nothing here reshapes the core.
    `/integrations/imports/templates` picker. `matchRegisterTemplate` slots
    into the `/integrations/imports/[id]` pre-fill chain so a filled-in
    template auto-maps. Invoice Register moves to PR B4/B5 (G1).
-4. **PR B3 — Multi-sheet workbook analyzer / "connect existing records" (G4).**
-   Classify every sheet in an upload, show candidate tables + counts, route
-   each to its own batch. Builds directly on `parseXlsx` + `profileTabularData`.
+4. ~~**PR B3 — Multi-sheet workbook analyzer / "connect existing records" (G4).**~~
+   **DONE.** `workbook-analyzer.ts` (pure classifier) + `/integrations/imports/analyze`
+   (`WorkbookAnalyzeForm` client) + `analyzeWorkbookUpload` (read-only) and
+   `createImportBatchesFromWorkbook`. `uploadImportFile` refactored to share
+   `parseUploadFile` + `stageImportBatch`. Each chosen sheet -> its own batch ->
+   the normal map/validate/review/commit flow. No migration/flag.
 5. **PR B4 — Multi-domain import: expenses (G1, slice 1).** `target_object`
    column on `import_batches`; expense canonical fields + validation + commit
    RPC reusing the bills/expense tables. Prove the pattern on one domain.

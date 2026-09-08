@@ -253,7 +253,14 @@ function FinalStep({
             starter template
           </Link>
           ), map its columns, review duplicates, and confirm before anything
-          enters your ledger.
+          enters your ledger. Got a multi-sheet workbook?{" "}
+          <Link
+            href="/integrations/imports/analyze"
+            className="font-medium text-accent hover:underline"
+          >
+            Analyze it first
+          </Link>
+          .
         </p>
       </div>
     );

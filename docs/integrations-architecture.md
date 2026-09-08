@@ -36,7 +36,7 @@ account menu (desktop), and a link in Settings.
 | `/integrations` | Dashboard: connected summary, "move data" entry points, available-later categories. **Track B**: a "Connect a system" header CTA → `/integrations/connect`. | **live (PR 0)** |
 | `/integrations/connect` | **Track B**: the unified setup wizard (§8) — source → direction → data type, then hands off to Import Studio / Export Center / connected workbooks. A searchParams-driven server component; no new action or migration. | **live (Track B)** |
 | `/integrations/connections` | Connected devices / Shortcuts / providers (canonical connector model) — moved here from `/settings/connections`, which now redirects | **live (PR 0)** |
-| `/integrations/imports` | Import Studio. **PR 2-4 live**: upload -> detect -> profile -> map -> validate -> review -> commit -> undo (interactive mapping, saved templates, per-row validation, duplicate signals, staging review with bulk actions, `commit_import_batch` / `rollback_import_batch`). **Track B**: `/integrations/imports/templates` — downloadable starter register templates (Daily Sales / Expense / Cashbook) that auto-map on re-upload. |
+| `/integrations/imports` | Import Studio. **PR 2-4 live**: upload -> detect -> profile -> map -> validate -> review -> commit -> undo (interactive mapping, saved templates, per-row validation, duplicate signals, staging review with bulk actions, `commit_import_batch` / `rollback_import_batch`). **Track B**: `/integrations/imports/templates` — downloadable starter register templates (Daily Sales / Expense / Cashbook) that auto-map on re-upload; `/integrations/imports/analyze` — multi-sheet workbook analyzer (§41) that classifies each sheet and stages the chosen ones as separate batches. |
 | `/integrations/exports` | Export Center. **PR 5 live**: config (format / relative or custom period / account + direction filters / XLSX sheet picker), inline generation for small exports + a cron for large ones, saved templates, history with signed-URL download. |
 | `/integrations/activity` | Consolidated activity / health feed | **live (PR 1)** |
 | `/integrations/sync` | Sync & Automation — connector sync health + recurring scheduled exports | **live (PR 6)**, opt-in flag, default off |
@@ -187,6 +187,44 @@ because each template ships with the mapping that produces it.
 - Invoice Register is deferred to multi-domain import (gap analysis G1) —
   invoices are not an Import Studio target yet, so shipping a template
   that cannot be imported would violate master prompt §6/§8.
+
+## Import Studio — multi-sheet workbook analyzer (Track B, no migration)
+
+Master prompt §41 ("connect existing business records"), gap analysis G4.
+Upload a workbook you already keep, see which sheets look like
+transaction tables, and stage the ones you pick — each as its own import
+batch that runs the normal review-before-commit flow.
+
+- `web/lib/integrations/workbook-analyzer.ts` — **pure, deno-tested**.
+  `analyzeSheet` / `analyzeWorkbook` classify each sheet
+  `transactions | unrecognised | empty` with a hedged `high|medium|low`
+  confidence and a one-sentence note (§41: never claim certainty). Reuses
+  `profileTabularData` + `matchRegisterTemplate`; a starter-template match
+  or a `bank_transactions` profile with ≥70 % ready rows is `high`,
+  some-ready is `medium`, date/amount columns but nothing parseable is
+  `low`, no date+amount columns is `unrecognised`. `recommendedSheetNames`
+  drives the default ticks.
+- `app/integrations/imports/actions.ts` refactor: the batch-staging body
+  of `uploadImportFile` is extracted into `parseUploadFile` (validate +
+  parse to N sheets, no writes) and `stageImportBatch` (one `profiled`
+  batch: row + storage object keyed by batch id + staged `import_records`
+  + `import.uploaded` event). `detected.sheetName` is recorded for
+  workbook-sourced batches.
+- New actions (`integration.import`-gated): `analyzeWorkbookUpload`
+  (**read-only** — parse + `analyzeWorkbook`, no writes) and
+  `createImportBatchesFromWorkbook(formData, sheetNames[])` (one
+  `stageImportBatch` per chosen non-empty sheet, ≤ 20; the client
+  re-submits the same file rather than the server stashing bytes).
+- `web/components/WorkbookAnalyzeForm.tsx` (client) — pick file → analyze
+  → per-sheet cards (kind + confidence badges, ready/attention counts,
+  date range, currency, note) with checkboxes defaulted to the
+  recommended sheets → `Import N sheets` → `/integrations/imports`.
+- `/integrations/imports/analyze` page; linked from
+  `/integrations/imports` (header), `/integrations/imports/new`, and the
+  connect wizard's import step. `/integrations/imports/[id]` shows
+  `sheet "<name>"` in its subtitle for workbook-sourced batches.
+- No migration, no new capability or flag; `detected` / `context` JSON
+  carry `sheetName`.
 
 ## Import Studio — staging review, commit, rollback (PR 4, migration 20261029000000)
 

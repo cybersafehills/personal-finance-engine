@@ -64,6 +64,12 @@ export default async function ImportsPage() {
               Starter templates
             </Link>
             <Link
+              href="/integrations/imports/analyze"
+              className="inline-flex min-h-11 items-center rounded-control border border-border-subtle bg-surface px-4 text-sm font-medium text-text-primary"
+            >
+              Analyze a workbook
+            </Link>
+            <Link
               href="/integrations/imports/new"
               className="inline-flex min-h-11 items-center rounded-control bg-accent px-4 text-sm font-medium text-accent-foreground"
             >
