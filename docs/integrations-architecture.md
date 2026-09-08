@@ -33,12 +33,41 @@ account menu (desktop), and a link in Settings.
 
 | Route | Purpose | Status |
 | --- | --- | --- |
-| `/integrations` | Dashboard: connected summary, "move data" entry points, available-later categories | **live (PR 0)** |
+| `/integrations` | Dashboard: connected summary, "move data" entry points, available-later categories. **Track B**: a "Connect a system" header CTA → `/integrations/connect`. | **live (PR 0)** |
+| `/integrations/connect` | **Track B**: the unified setup wizard (§8) — source → direction → data type, then hands off to Import Studio / Export Center / connected workbooks. A searchParams-driven server component; no new action or migration. | **live (Track B)** |
 | `/integrations/connections` | Connected devices / Shortcuts / providers (canonical connector model) — moved here from `/settings/connections`, which now redirects | **live (PR 0)** |
 | `/integrations/imports` | Import Studio. **PR 2-4 live**: upload -> detect -> profile -> map -> validate -> review -> commit -> undo (interactive mapping, saved templates, per-row validation, duplicate signals, staging review with bulk actions, `commit_import_batch` / `rollback_import_batch`). **Track B**: `/integrations/imports/templates` — downloadable starter register templates (Daily Sales / Expense / Cashbook) that auto-map on re-upload. |
 | `/integrations/exports` | Export Center. **PR 5 live**: config (format / relative or custom period / account + direction filters / XLSX sheet picker), inline generation for small exports + a cron for large ones, saved templates, history with signed-URL download. |
 | `/integrations/activity` | Consolidated activity / health feed | **live (PR 1)** |
 | `/integrations/sync` | Sync & Automation — connector sync health + recurring scheduled exports | **live (PR 6)**, opt-in flag, default off |
+
+## Connect wizard (Track B, no migration)
+
+Master prompt §8, gap analysis G2. `/integrations/connect` is a **router,
+not a re-implementation** — §8 steps 4-9 (file / map / validate / preview /
+confirm / done) stay in Import Studio and the Export Center.
+
+- `web/lib/integrations/connect-wizard.ts` (**pure, deno-tested**) — the
+  option catalogs (`SOURCE_OPTIONS`, `DIRECTION_OPTIONS`,
+  `IMPORT_DATA_TYPE_OPTIONS`, each row `available` or `coming_soon`) and
+  `resolveConnectHandoff({source, direction, dataType})` →
+  `{ ok, href, label, summary }` | `{ ok:false, reason }`. Only
+  file-based CSV/XLSX is `available`; Google Sheets / API / Webhook are
+  `coming_soon` and link to the Marketplace, never anywhere live
+  (§5/§6). Import offers `transactions` only — the other data types are
+  `coming_soon` pending multi-domain import (G1).
+- `web/app/integrations/connect/page.tsx` — a **searchParams-driven
+  server component** (same pattern as the onboarding wizard): step is
+  derived from `?source=` / `?direction=`, options are `<Link>`s that
+  carry the selection forward, `PageHeader` `backHref` is the previous
+  step, `components/ds/StepWizard` renders the progress. The direction
+  step greys out `import` / `export` / `two_way` unless the workspace's
+  `isImportStudioEnabled` / `isExportCenterEnabled` / `isWorkbooksEnabled`
+  gate is on. The final step links straight to `/integrations/imports/new`
+  (+ a "start from a template" link), `/integrations/exports`, or
+  `/integrations/sync`.
+- No new server action, table, capability or flag; gated on
+  `isIntegrationsEnabled` like the rest of the area.
 
 ## Data model (PR 1, migration 20261027000000)
 

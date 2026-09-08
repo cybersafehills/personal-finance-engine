@@ -53,7 +53,7 @@ and §98 ("Is any functionality duplicated?").
 | RLS / tenant isolation / capability gating / audit | **Complete** |
 | **Multi-domain import (invoices / expenses / income as first-class)** | **Missing** |
 | **Downloadable register templates** | **Done (Track B)** — Daily Sales / Expense / Cashbook; Invoice deferred to G1 |
-| **Unified "add a connection" setup wizard** | **Missing** |
+| **Unified "add a connection" setup wizard** | **Done (Track B, PR B1)** |
 | **"Connect existing business records" multi-sheet onboarding** | **Missing** |
 | **Public API write endpoints (POST/PATCH)** | **Missing (deferred by design)** |
 | **Live spreadsheet sync (Sheets / Excel-365 OAuth)** | **Missing (stubs only)** |
@@ -77,7 +77,7 @@ Success §97) · P2 (materially incomplete) · P3 (polish / nice-to-have) · —
 | 5 | Primary UX: Integrations area with view/add/configure/pause/test/health | 🟡 | `/integrations` + `/integrations/connections` + `/integrations/sync`. Per-connection pause/resume/test exist for **destinations & workbooks & webhooks**; there is no single "connected systems" surface unifying inbound connectors + outbound destinations + workbooks + ledgers | P2 |
 | 6 | Initial connector types (Excel import, CSV import/export, XLSX export) | ✅ | `xlsx-read.ts` (exceljs), `csv.ts`, Export Center `buildCsv`/`buildXlsx` | — |
 | 7 | Explicit direction per integration (in / out / two-way) | ✅ | `connected_workbooks.direction`, `integration_destinations.kind` | — |
-| 8 | **Polished setup wizard** (choose connection → direction → data type → file → map → validate → preview → confirm → done) | ❌ | Import Studio has upload→map→validate→review→commit but **no step-1 "what are you connecting" wizard**; connections/imports/exports/workbooks are separate entry points. `/integrations/connections/setup` is MoMo-Shortcut-specific, not generic | **P1** |
+| 8 | **Polished setup wizard** (choose connection → direction → data type → file → map → validate → preview → confirm → done) | 🟡→✅ | **Track B / PR B1**: `/integrations/connect` — searchParams-driven server wizard (source → direction → data type) that hands off to Import Studio / Export Center / connected workbooks for steps 4-9. `resolveConnectHandoff` in `connect-wizard.ts` (pure, deno-tested); non-file sources + non-transaction imports shown `coming_soon`, never linked live. | done (steps 1-3; 4-9 were already there) |
 | 9 | Canonical financial data model | ✅ | `CANONICAL_IMPORT_FIELDS` (`model.ts`); reuses `transactions` schema, no parallel domain model | — |
 | 10 | Reusable field-mapping engine, scoped per workspace/connection/type | ✅ | `mapping.ts` (pure, client+server); `import_templates` matched by `header_signature`, workspace-scoped RLS | — |
 | 11 | Intelligent mapping assistance (deterministic → heuristic → AI, user confirms) | 🟡 | `suggestMapping` (header-name heuristics) + `profileTabularData` column guess. **No AI-assisted suggestion** despite `@anthropic-ai/sdk` in deps; acceptable per §11 ("AI must not be required") but listed as a gap | P3 |
@@ -170,7 +170,7 @@ Success §97) · P2 (materially incomplete) · P3 (polish / nice-to-have) · —
 | 98 | Final engineering review checklist | ➖ | Run at the end of gap-closure | — |
 | 99 | Final implementation report | ➖ | Deliverable of the eventual work | — |
 
-**Tally:** ✅ 48 · 🟡 38 · ❌ 6 · ➖ 7. _(Post-#164 / Track B: §13 ❌→✅ — see the gap register for what shipped.)_
+**Tally:** ✅ 48 · 🟡 38 · ❌ 6 · ➖ 7 _(as of the discovery pass)_. **Track B shipped since:** §13 ❌→✅ (register templates, #165), §8 🟡→✅ (connect wizard, PR B1). See the gap register rows for detail.
 
 ---
 
@@ -181,7 +181,7 @@ Success §97) · P2 (materially incomplete) · P3 (polish / nice-to-have) · —
 | ID | Gap | Sections | Notes |
 | --- | --- | --- | --- |
 | G1 | **Multi-domain import.** Import Studio only creates `transactions`. Invoices, expenses, income, payments as import targets. | 8(step 3), 13, 24, 97 | Biggest single lift. Needs a `target_object` on `import_batches`, per-domain canonical field sets + validators + commit RPCs, and per-domain preview. Bills/invoices already have their own tables and a `commit`-style path — reuse, don't fork (§70). |
-| G2 | **Unified "add a connection" setup wizard.** | 5, 8, 60, 97 | One `/integrations/connect` flow: connection type → direction → data type → source (file/sheet/API) → hand off to the existing mapping/preview/commit steps. Mostly a shell over existing actions. |
+| ~~G2~~ | ~~**Unified "add a connection" setup wizard.**~~ **DONE (Track B, PR B1)** — `/integrations/connect` (searchParams server wizard, `StepWizard` chrome) + `connect-wizard.ts` (pure resolver, 10 deno tests). Source → direction → data type, then `<Link>` straight into `/integrations/imports/new` / `/integrations/exports` / `/integrations/sync`. "Connect a system" CTA added to the `/integrations` header. No action/table/flag. | 5, 8, 60, 97 | Was "mostly a shell". |
 | ~~G3~~ | ~~**Downloadable register templates** (Daily Sales, Expense, Invoice, Cashbook) + "download a blank template".~~ **DONE (Track B, PR B2)** — `register-templates.ts` (pure, deno-tested) + `register-templates-workbook.ts` (server-only xlsx) + `/api/integrations/imports/templates/[key]` + `/integrations/imports/templates` picker; auto-maps on re-upload via `matchRegisterTemplate`. Invoice Register → G1 (not an import target yet; shipping it would break §6/§8). | 13 | Was "Small". |
 | G4 | **"Connect existing business records" onboarding** — multi-sheet workbook analyzer. | 41 | Extend `parseXlsx` (already returns all sheets) + `profileTabularData` to classify every sheet, present candidate tables with counts, route each to an import batch. |
 | G5 | **E2E + integration test coverage** for the Integrations flows. | 82, 83, 84, 86 | At minimum: upload→map→preview→commit→see txn→history happy path; cross-tenant + bad-key negatives; a fixture corpus (§83). |
@@ -242,9 +242,14 @@ flags; nothing here reshapes the core.
 
 **Track B — Definition-of-Success gaps (core value)**
 
-2. **PR B1 — Unified connect wizard (G2).** `/integrations/connect` shell:
-   type → direction → data type → source; hands off to the existing
-   upload/mapping/preview/commit. Pure composition over existing actions.
+2. ~~**PR B1 — Unified connect wizard (G2).**~~ **DONE.** `/integrations/connect`
+   — a searchParams-driven server wizard (source → direction → data type) over
+   `components/ds/StepWizard`, then `<Link>` straight into
+   `/integrations/imports/new` / `/integrations/exports` / `/integrations/sync`.
+   `connect-wizard.ts` (pure resolver + catalogs, 10 deno tests); non-file
+   sources and non-transaction imports are `coming_soon`, never linked live
+   (§5/§6). "Connect a system" CTA added to the `/integrations` header. No
+   action, table, capability or flag.
 3. ~~**PR B2 — Register templates + blank-template download (G3).**~~ **DONE.**
    Shipped as static, code-defined templates (not per-workspace seed rows):
    `register-templates.ts` (Daily Sales / Expense / Cashbook, each with its
