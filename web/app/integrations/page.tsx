@@ -103,6 +103,14 @@ export default async function IntegrationsPage() {
         subtitle="Bring financial data into OneLedger, keep it clean, and send it back out."
         backHref="/"
         backLabel="Home"
+        action={
+          <Link
+            href="/integrations/connect"
+            className="inline-flex min-h-11 items-center rounded-control bg-accent px-4 text-sm font-medium text-accent-foreground"
+          >
+            Connect a system
+          </Link>
+        }
       />
 
       <div className="mb-6 grid grid-cols-2 gap-2 sm:grid-cols-3">
