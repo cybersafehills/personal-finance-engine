@@ -57,7 +57,7 @@ and §98 ("Is any functionality duplicated?").
 | **"Connect existing business records" multi-sheet onboarding** | **Done (Track B, PR B3)** |
 | **Public API write endpoints (POST/PATCH)** | **Missing (deferred by design)** |
 | **Live spreadsheet sync (Sheets / Excel-365 OAuth)** | **Missing (stubs only)** |
-| **E2E test coverage of the Integrations flows** | **Missing** |
+| **E2E test coverage of the Integrations flows** | **Started (Track B, PR B4)** — happy-path + nav; RBAC-member negative deferred |
 | **Production rollout (flags are unset)** | **Runbook shipped (PR #164); operator activation pending** |
 
 ---
@@ -151,7 +151,7 @@ Success §97) · P2 (materially incomplete) · P3 (polish / nice-to-have) · —
 | 79 | i18n — don't hardcode date/amount formats | 🟡 | `parseStatementDate` takes an explicit `DateOrder`; `defaultCurrency` configurable. **Supported-currency list is hard-coded** in `validation.ts` (`["RWF","USD","EUR","GBP","KES","UGX","TZS"]`) not read from workspace/config | P2 |
 | 80 | Timezones — don't shift date-only records | 🟡 | `schedule.ts` notes "DST not modelled; timezone stored but always UTC". Import `occurred_at` is an ISO instant from `parseStatementDate` — **date-only source rows get a UTC midnight**, which can shift the business-local day | P2 |
 | 81 | Currency — never assume RWF | 🟡 | Mapping carries currency; **`validation.ts` still defaults its supported set RWF-first and the Space default is "assumed" silently on missing-currency rows** (warning only) | P3 |
-| 82 | Testing strategy (unit + integration + E2E, incl. failure cases) | 🟡 | **Unit: strong** (19 files, pure logic). **Integration (DB): none for integration tables. E2E: none** for imports/exports/webhooks/API/reconciliation (`connections.spec.ts` covers only connections) | **P1** |
+| 82 | Testing strategy (unit + integration + E2E, incl. failure cases) | 🟡→✅ | **Unit: strong** (22 files). **E2E (Track B / PR B4):** `e2e/integrations-nav.spec.ts` (connect wizard, templates picker + download API, analyze page — cross-browser) + `e2e/integrations-import.spec.ts` (upload → map → commit → ledger, file-type rejection, 2-sheet workbook analyze — chromium). DB-level pgTAP + more negatives still open (§84). | done for imports/wizard/templates/analyze |
 | 83 | Test data / fixtures (clean, missing cols, malformed dates, dup IDs, multi-sheet, large, mixed currency, empty, formula cells, string-numbers, unknown categories, invalid accounts) | ❌ | No `web/e2e/fixtures/integrations/**` or equivalent spreadsheet corpus | P2 |
 | 84 | Security testing (unauth create, cross-tenant reads, manipulated workspace IDs, bad/revoked keys, replayed webhooks, malicious names, oversize, formula injection, malformed files) | 🟡 | `webhook_test.ts` covers SSRF + signing; `csv-safe_test.ts` covers injection. **No cross-tenant / bad-key / oversize / replay e2e or integration tests** | P2 |
 | 85 | Performance testing / documented limits | 🟡 | Limits exist (10 MB, 5000 rows, 20000-row inline-export threshold) but are **not benchmarked or documented as a limits table** | P3 |
@@ -170,7 +170,7 @@ Success §97) · P2 (materially incomplete) · P3 (polish / nice-to-have) · —
 | 98 | Final engineering review checklist | ➖ | Run at the end of gap-closure | — |
 | 99 | Final implementation report | ➖ | Deliverable of the eventual work | — |
 
-**Tally:** ✅ 48 · 🟡 38 · ❌ 6 · ➖ 7 _(as of the discovery pass)_. **Track B shipped since:** §13 ❌→✅ (register templates, #165), §8 🟡→✅ (connect wizard, #166), §41 🟡→✅ (workbook analyzer, PR B3). See the gap register rows for detail.
+**Tally:** ✅ 48 · 🟡 38 · ❌ 6 · ➖ 7 _(as of the discovery pass)_. **Track B shipped since:** §13 ❌→✅ (register templates, #165), §8 🟡→✅ (connect wizard, #166), §41 🟡→✅ (workbook analyzer, #167), §82 🟡→✅ for the import/wizard/templates/analyze flows (e2e, PR B4). See the gap register rows for detail.
 
 ---
 
@@ -184,7 +184,7 @@ Success §97) · P2 (materially incomplete) · P3 (polish / nice-to-have) · —
 | ~~G2~~ | ~~**Unified "add a connection" setup wizard.**~~ **DONE (Track B, PR B1)** — `/integrations/connect` (searchParams server wizard, `StepWizard` chrome) + `connect-wizard.ts` (pure resolver, 10 deno tests). Source → direction → data type, then `<Link>` straight into `/integrations/imports/new` / `/integrations/exports` / `/integrations/sync`. "Connect a system" CTA added to the `/integrations` header. No action/table/flag. | 5, 8, 60, 97 | Was "mostly a shell". |
 | ~~G3~~ | ~~**Downloadable register templates** (Daily Sales, Expense, Invoice, Cashbook) + "download a blank template".~~ **DONE (Track B, PR B2)** — `register-templates.ts` (pure, deno-tested) + `register-templates-workbook.ts` (server-only xlsx) + `/api/integrations/imports/templates/[key]` + `/integrations/imports/templates` picker; auto-maps on re-upload via `matchRegisterTemplate`. Invoice Register → G1 (not an import target yet; shipping it would break §6/§8). | 13 | Was "Small". |
 | ~~G4~~ | ~~**"Connect existing business records" onboarding** — multi-sheet workbook analyzer.~~ **DONE (Track B, PR B3)** — `workbook-analyzer.ts` (`analyzeSheet`/`analyzeWorkbook`, 7 deno tests) + `/integrations/imports/analyze` + `WorkbookAnalyzeForm` + `analyzeWorkbookUpload` (read-only) / `createImportBatchesFromWorkbook` actions (refactor extracts `parseUploadFile` + `stageImportBatch` from `uploadImportFile`). One batch per chosen sheet, `detected.sheetName` recorded. No migration. | 41 | Was P1. |
-| G5 | **E2E + integration test coverage** for the Integrations flows. | 82, 83, 84, 86 | At minimum: upload→map→preview→commit→see txn→history happy path; cross-tenant + bad-key negatives; a fixture corpus (§83). |
+| G5 | **E2E + integration test coverage** for the Integrations flows. | 82, 83, 84, 86 | **PARTLY DONE (Track B, PR B4)** — `integrations-nav.spec.ts` + `integrations-import.spec.ts` (upload→map→commit→see txn happy path, file-type rejection, workbook analyze; `ensureImportTargetSource` / `cleanupImportArtifacts` seed helpers). **Still open:** RBAC-member negative, re-commit idempotency spec, export/webhook/API/reconciliation e2e, DB-level pgTAP cross-tenant. |
 | ~~G6~~ | ~~**Production rollout** — every `INTEGRATIONS_*` flag is unset.~~ **Runbook DONE** — [`integrations-rollout-runbook.md`](integrations-rollout-runbook.md) + [`activate_integration_export_worker.sql`](../supabase/scheduling/activate_integration_export_worker.sql), shipped as docs-only PR #164 (branch `docs/integrations-rollout-runbook`). Remaining is operator execution (flip flags per the staged sequence, run the smoke test + regression pass), not an engineering task. | 55, 88, 90, 97 | Was the cheapest P1. |
 
 ### P2 — materially incomplete
@@ -268,7 +268,13 @@ flags; nothing here reshapes the core.
    RPC reusing the bills/expense tables. Prove the pattern on one domain.
 6. **PR B5 — Multi-domain import: invoices + income (G1, slice 2).** Same
    pattern, remaining domains.
-7. **PR B6 — E2E + fixtures (G5).** `integrations.spec.ts` happy path +
+7. ~~**PR B6 — E2E + fixtures (G5).**~~ **STARTED as PR B4** (moved ahead of G1
+   to back the multi-domain work). `integrations-nav.spec.ts` +
+   `integrations-import.spec.ts` cover the connect wizard, templates,
+   analyzer, and the upload→map→commit→ledger happy path. Remaining G5 scope
+   (RBAC-member negative, export/webhook/API e2e, pgTAP cross-tenant) folds
+   into later PRs. Original note kept below:
+   `integrations.spec.ts` happy path +
    cross-tenant / bad-key negatives; `web/e2e/fixtures/integrations/**` corpus
    from §83; `integrations-a11y.spec.ts` (also closes G16).
 

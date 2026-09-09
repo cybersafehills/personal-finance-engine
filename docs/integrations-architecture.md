@@ -226,6 +226,35 @@ batch that runs the normal review-before-commit flow.
 - No migration, no new capability or flag; `detected` / `context` JSON
   carry `sheetName`.
 
+## Integrations e2e coverage (Track B, gap analysis G5)
+
+Playwright specs against the disposable local Supabase stack, matching the
+existing suite's conventions (`e2e/fixtures.ts`, `e2e/seed.ts`).
+
+- `web/e2e/integrations-nav.spec.ts` — cross-browser (all 4 projects):
+  the `/integrations` "Connect a system" entry; the connect wizard
+  source → direction → data type → `/integrations/imports/new`; a
+  `coming_soon` source links to the Marketplace not a live flow; the
+  starter-templates picker + `GET /api/integrations/imports/templates/[key]`
+  (CSV body + `attachment` + 404 on an unknown key); the analyze page
+  renders.
+- `web/e2e/integrations-import.spec.ts` — **chromium-desktop only** (the
+  cross-browser projects skip `integrations-import` in
+  `playwright.config.ts`, like `visual` / `pay-scan`): a CSV imported
+  upload → map → set account → commit, then asserted in `/transactions`;
+  an unsupported file type rejected with nothing staged; a two-sheet
+  `.xlsx` (built with exceljs in-test) analyzed → the one candidate sheet
+  staged as its own batch.
+- `e2e/seed.ts` gains `ensureImportTargetSource` (a `financial_sources`
+  row + linked `accounts` row — what `listImportTargetSources` /
+  `setImportBatchTarget` require) and `cleanupImportArtifacts`.
+- `playwright.config.ts` `webServer.env` sets `INTEGRATIONS_ENABLED` /
+  `_IMPORT_STUDIO_ENABLED` / `_EXPORT_CENTER_ENABLED` explicitly (they
+  already default on).
+- **Deferred:** an RBAC-member "no import action" negative (needs a second
+  seeded member) and a re-commit idempotency spec — covered for now by
+  the commit RPC's `payload_hash` unit-level guarantees.
+
 ## Import Studio — staging review, commit, rollback (PR 4, migration 20261029000000)
 
 - `commit_import_batch(p_batch_id)` / `rollback_import_batch(p_batch_id)` —
