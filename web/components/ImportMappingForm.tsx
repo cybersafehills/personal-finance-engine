@@ -14,7 +14,10 @@ import {
   missingRequiredFields,
   normalizeImportRow,
 } from "../lib/integrations/mapping";
-import type { CanonicalImportField } from "../lib/integrations/model";
+import type {
+  CanonicalImportField,
+  ImportTargetObject,
+} from "../lib/integrations/model";
 
 const SIMPLE_FIELDS: { field: CanonicalImportField; label: string; hint?: string }[] = [
   { field: "date", label: "Date", hint: "Required" },
@@ -40,13 +43,16 @@ export function ImportMappingForm({
   sampleRows,
   initialMapping,
   matchedTemplateName,
+  targetObject = "transaction",
 }: {
   batchId: string;
   headers: string[];
   sampleRows: string[][];
   initialMapping: ImportColumnMapping;
   matchedTemplateName?: string | null;
+  targetObject?: ImportTargetObject;
 }) {
+  const amountLocked = targetObject === "expense" || targetObject === "income";
   const router = useRouter();
   const [mapping, setMapping] = useState<ImportColumnMapping>(initialMapping);
   const [templateName, setTemplateName] = useState("");
@@ -151,18 +157,27 @@ export function ImportMappingForm({
         <legend className="text-sm font-semibold text-text-primary">
           Amount
         </legend>
-        {AMOUNT_MODES.map((mode) => (
-          <label key={mode.value} className="flex items-center gap-2 text-sm">
-            <input
-              type="radio"
-              name="amountMode"
-              checked={mapping.amountMode === mode.value}
-              onChange={() =>
-                setMapping((p) => ({ ...p, amountMode: mode.value }))}
-            />
-            {mode.label}
-          </label>
-        ))}
+        {amountLocked ? (
+          <p className="text-sm text-text-muted">
+            {targetObject === "expense"
+              ? "Every row imports as money out"
+              : "Every row imports as money in"}
+            {" "}— and a Category is required on every row.
+          </p>
+        ) : (
+          AMOUNT_MODES.map((mode) => (
+            <label key={mode.value} className="flex items-center gap-2 text-sm">
+              <input
+                type="radio"
+                name="amountMode"
+                checked={mapping.amountMode === mode.value}
+                onChange={() =>
+                  setMapping((p) => ({ ...p, amountMode: mode.value }))}
+              />
+              {mode.label}
+            </label>
+          ))
+        )}
         <div className="grid gap-3 sm:grid-cols-2">
           {mapping.amountMode === "split" ? (
             <>

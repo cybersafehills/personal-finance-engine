@@ -78,6 +78,51 @@ test("a CSV imports end to end and the rows land in the ledger", async ({ page }
   ).toBeVisible();
 });
 
+test("an expense register imports as money-out, and a row without a category is blocked", async ({ page }) => {
+  // "Supplier" isn't a merchant synonym for suggestMapping, so the row's
+  // visible name comes from Description — put the marker there.
+  const csv = [
+    "Date,Supplier,Description,Category,Amount,Currency",
+    "05/02/2026,Office Ltd,E2E Expense Kept,Office,4000,RWF",
+    "06/02/2026,Taxi Co,E2E Expense Blocked,,2500,RWF",
+  ].join("\n");
+
+  await page.goto("/integrations/imports/new?target=expense");
+  await expect(
+    page.getByRole("heading", { name: "Import an expense register", level: 1 }),
+  ).toBeVisible();
+
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "expenses.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from(csv),
+  });
+  await page.getByRole("button", { name: /Upload and detect/ }).click();
+  await expect(page).toHaveURL(/\/integrations\/imports\/[0-9a-f-]{36}$/);
+  await expect(page.getByText(/Every row imports as money out/)).toBeVisible();
+
+  await page.getByRole("button", { name: /Apply mapping and validate/ }).click();
+  await expect(
+    page.getByRole("heading", { name: "Review and import" }),
+  ).toBeVisible();
+  // One row is ready, the uncategorised one is blocked.
+  await expect(page.getByRole("button", { name: /Import 1 ready row\b/ })).toBeVisible();
+
+  await page.getByLabel("Import into").selectOption({
+    label: "E2E Import Source (RWF)",
+  });
+  await page.getByRole("button", { name: "Set account" }).click();
+  await page.getByRole("button", { name: /Import 1 ready row\b/ }).click();
+
+  await page.goto("/transactions");
+  await expect(
+    page.getByRole("link", { name: /E2E Expense Kept/ }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: /E2E Expense Blocked/ }),
+  ).toHaveCount(0);
+});
+
 test("an unsupported file type is rejected before anything is staged", async ({ page }) => {
   await page.goto("/integrations/imports/new");
   await page.locator('input[type="file"]').setInputFiles({

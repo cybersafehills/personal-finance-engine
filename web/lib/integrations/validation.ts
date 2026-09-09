@@ -27,6 +27,8 @@ export type ValidationContext = {
   /** external_transaction_ids already seen earlier in the same batch. */
   seenExternalIds: Set<string>;
   now: Date;
+  /** expense / income imports: a row without a category cannot be imported. */
+  requireCategory: boolean;
 };
 
 const FUTURE_TOLERANCE_MS = 24 * 60 * 60 * 1000; // a day of clock skew
@@ -39,6 +41,7 @@ export function defaultValidationContext(
     supportedCurrencies: ["RWF", "USD", "EUR", "GBP", "KES", "UGX", "TZS"],
     seenExternalIds: new Set(),
     now: new Date(),
+    requireCategory: false,
     ...overrides,
   };
 }
@@ -134,6 +137,14 @@ export function validateNormalizedRow(
       severity: "info",
       code: "description_missing",
       message: "This row has no description or merchant.",
+    });
+  }
+
+  if (ctx.requireCategory && !row.category?.trim()) {
+    issues.push({
+      severity: "blocking",
+      code: "category_required",
+      message: "This import needs a category on every row — map a Category column.",
     });
   }
 

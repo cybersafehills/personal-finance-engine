@@ -51,7 +51,7 @@ and §98 ("Is any functionality duplicated?").
 | Outbound webhook subscriptions | **Complete** |
 | Marketplace catalog | **Complete** |
 | RLS / tenant isolation / capability gating / audit | **Complete** |
-| **Multi-domain import (invoices / expenses / income as first-class)** | **Missing** |
+| **Multi-domain import (invoices / expenses / income as first-class)** | **Expense + income done (Track B, PR B5)**; invoices blocked on the Bills schema |
 | **Downloadable register templates** | **Done (Track B)** — Daily Sales / Expense / Cashbook; Invoice deferred to G1 |
 | **Unified "add a connection" setup wizard** | **Done (Track B, PR B1)** |
 | **"Connect existing business records" multi-sheet onboarding** | **Done (Track B, PR B3)** |
@@ -170,7 +170,7 @@ Success §97) · P2 (materially incomplete) · P3 (polish / nice-to-have) · —
 | 98 | Final engineering review checklist | ➖ | Run at the end of gap-closure | — |
 | 99 | Final implementation report | ➖ | Deliverable of the eventual work | — |
 
-**Tally:** ✅ 48 · 🟡 38 · ❌ 6 · ➖ 7 _(as of the discovery pass)_. **Track B shipped since:** §13 ❌→✅ (register templates, #165), §8 🟡→✅ (connect wizard, #166), §41 🟡→✅ (workbook analyzer, #167), §82 🟡→✅ for the import/wizard/templates/analyze flows (e2e, PR B4). See the gap register rows for detail.
+**Tally:** ✅ 48 · 🟡 38 · ❌ 6 · ➖ 7 _(as of the discovery pass)_. **Track B shipped since:** §13 ❌→✅ (#165), §8 🟡→✅ (#166), §41 🟡→✅ (#167), §82 🟡→✅ (e2e, #168), §9/§24 category + expense/income import (PR B5). Track B complete bar invoice import (Bills-schema-blocked). See the gap register rows for detail.
 
 ---
 
@@ -180,7 +180,7 @@ Success §97) · P2 (materially incomplete) · P3 (polish / nice-to-have) · —
 
 | ID | Gap | Sections | Notes |
 | --- | --- | --- | --- |
-| G1 | **Multi-domain import.** Import Studio only creates `transactions`. Invoices, expenses, income, payments as import targets. | 8(step 3), 13, 24, 97 | Biggest single lift. Needs a `target_object` on `import_batches`, per-domain canonical field sets + validators + commit RPCs, and per-domain preview. Bills/invoices already have their own tables and a `commit`-style path — reuse, don't fork (§70). |
+| G1 | **Multi-domain import.** | 8(step 3), 13, 24, 97 | **PARTLY DONE (Track B, PR B5)** — `import_batches.target_object` (`transaction`/`expense`/`income`, migration `20261130000000`); expense/income are constrained modes over the `transactions` target (server forces `all_out`/`all_in` + requires a category). `commit_import_batch` now also persists the mapped category (`category_source='system'`), fixing a pre-existing silent drop. Connect wizard's expense/income data types are live. **Invoices deferred** — `public.bills.bill_document_id` is `NOT NULL` + `bills_one_per_document`, so a bill needs an uploaded document; spreadsheet invoice import would be a Bills-program schema change. |
 | ~~G2~~ | ~~**Unified "add a connection" setup wizard.**~~ **DONE (Track B, PR B1)** — `/integrations/connect` (searchParams server wizard, `StepWizard` chrome) + `connect-wizard.ts` (pure resolver, 10 deno tests). Source → direction → data type, then `<Link>` straight into `/integrations/imports/new` / `/integrations/exports` / `/integrations/sync`. "Connect a system" CTA added to the `/integrations` header. No action/table/flag. | 5, 8, 60, 97 | Was "mostly a shell". |
 | ~~G3~~ | ~~**Downloadable register templates** (Daily Sales, Expense, Invoice, Cashbook) + "download a blank template".~~ **DONE (Track B, PR B2)** — `register-templates.ts` (pure, deno-tested) + `register-templates-workbook.ts` (server-only xlsx) + `/api/integrations/imports/templates/[key]` + `/integrations/imports/templates` picker; auto-maps on re-upload via `matchRegisterTemplate`. Invoice Register → G1 (not an import target yet; shipping it would break §6/§8). | 13 | Was "Small". |
 | ~~G4~~ | ~~**"Connect existing business records" onboarding** — multi-sheet workbook analyzer.~~ **DONE (Track B, PR B3)** — `workbook-analyzer.ts` (`analyzeSheet`/`analyzeWorkbook`, 7 deno tests) + `/integrations/imports/analyze` + `WorkbookAnalyzeForm` + `analyzeWorkbookUpload` (read-only) / `createImportBatchesFromWorkbook` actions (refactor extracts `parseUploadFile` + `stageImportBatch` from `uploadImportFile`). One batch per chosen sheet, `detected.sheetName` recorded. No migration. | 41 | Was P1. |
@@ -263,7 +263,15 @@ flags; nothing here reshapes the core.
    `createImportBatchesFromWorkbook`. `uploadImportFile` refactored to share
    `parseUploadFile` + `stageImportBatch`. Each chosen sheet -> its own batch ->
    the normal map/validate/review/commit flow. No migration/flag.
-5. **PR B4 — Multi-domain import: expenses (G1, slice 1).** `target_object`
+5. ~~**PR B4 — Multi-domain import: expenses (G1, slice 1).**~~ / ~~**PR B5 — invoices + income.**~~
+   **DONE as one PR (B5).** `import_batches.target_object` + a `commit_import_batch`
+   `create or replace` (also fixes the mapped-category silent drop);
+   `validation.ts requireCategory`; `applyImportMapping` forces the amount mode
+   + category requirement server-side; `/integrations/imports/new?target=…`,
+   `ImportMappingForm` lock, connect-wizard routing. **Invoices stay deferred** —
+   `bills.bill_document_id NOT NULL` blocks spreadsheet invoice import without a
+   Bills-domain change. Original note kept below:
+   `target_object`
    column on `import_batches`; expense canonical fields + validation + commit
    RPC reusing the bills/expense tables. Prove the pattern on one domain.
 6. **PR B5 — Multi-domain import: invoices + income (G1, slice 2).** Same

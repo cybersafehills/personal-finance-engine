@@ -40,6 +40,31 @@ export type ExportJobStatus = (typeof EXPORT_JOB_STATUSES)[number];
 export const INTEGRATION_FILE_KINDS = ["csv", "xlsx"] as const;
 export type IntegrationFileKind = (typeof INTEGRATION_FILE_KINDS)[number];
 
+/**
+ * What an import's rows become on commit. `expense` / `income` are
+ * constrained modes over the same `transactions` target: direction is
+ * forced (money out / money in) and a category is required per row.
+ */
+export const IMPORT_TARGET_OBJECTS = [
+  "transaction",
+  "expense",
+  "income",
+] as const;
+export type ImportTargetObject = (typeof IMPORT_TARGET_OBJECTS)[number];
+
+export function isImportTargetObject(v: string): v is ImportTargetObject {
+  return (IMPORT_TARGET_OBJECTS as readonly string[]).includes(v);
+}
+
+/** The amount mode `expense` / `income` lock the mapping to. */
+export function forcedAmountModeFor(
+  target: ImportTargetObject,
+): "all_out" | "all_in" | null {
+  if (target === "expense") return "all_out";
+  if (target === "income") return "all_in";
+  return null;
+}
+
 export const INTEGRATION_EVENT_SEVERITIES = ["info", "warning", "error"] as const;
 export type IntegrationEventSeverity =
   (typeof INTEGRATION_EVENT_SEVERITIES)[number];
@@ -88,6 +113,7 @@ export type ImportBatch = {
   templateId: string | null;
   createdBy: string | null;
   sourceKind: IntegrationFileKind;
+  targetObject: ImportTargetObject;
   originalFilename: string;
   storagePath: string | null;
   status: ImportBatchStatus;

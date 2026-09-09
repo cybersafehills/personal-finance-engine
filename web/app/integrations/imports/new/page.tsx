@@ -4,10 +4,39 @@ import { EmptyState } from "../../../../components/EmptyState";
 import { ImportUploadForm } from "../../../../components/ImportUploadForm";
 import { getActiveWorkspaceId } from "../../../../lib/queries";
 import { isImportStudioEnabled } from "../../../../lib/integrations/gate";
+import {
+  type ImportTargetObject,
+  isImportTargetObject,
+} from "../../../../lib/integrations/model";
 
 export const dynamic = "force-dynamic";
 
-export default async function NewImportPage() {
+const COPY: Record<
+  ImportTargetObject,
+  { title: string; subtitle: string }
+> = {
+  transaction: {
+    title: "Import data",
+    subtitle:
+      "Upload a bank statement, spreadsheet, or export. Nothing enters your ledger until you review it.",
+  },
+  expense: {
+    title: "Import an expense register",
+    subtitle:
+      "Every row imports as money out, and a category is required. You’ll map columns and review before anything enters your ledger.",
+  },
+  income: {
+    title: "Import an income register",
+    subtitle:
+      "Every row imports as money in, and a category is required. You’ll map columns and review before anything enters your ledger.",
+  },
+};
+
+export default async function NewImportPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const workspaceId = await getActiveWorkspaceId();
 
   if (!isImportStudioEnabled(workspaceId)) {
@@ -23,15 +52,22 @@ export default async function NewImportPage() {
     );
   }
 
+  const rawTarget = (await searchParams).target;
+  const target: ImportTargetObject =
+    typeof rawTarget === "string" && isImportTargetObject(rawTarget)
+      ? rawTarget
+      : "transaction";
+  const copy = COPY[target];
+
   return (
     <div>
       <PageHeader
-        title="Import data"
-        subtitle="Upload a bank statement, spreadsheet, or export. Nothing enters your ledger until you review it."
+        title={copy.title}
+        subtitle={copy.subtitle}
         backHref="/integrations/imports"
         backLabel="Imports"
       />
-      <ImportUploadForm />
+      <ImportUploadForm targetObject={target} />
 
       <div className="mt-4 flex flex-col gap-1.5 text-sm text-text-muted">
         <p>

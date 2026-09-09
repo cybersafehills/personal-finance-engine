@@ -21,6 +21,7 @@ import {
   TEMPLATE_AUTO_APPLY_THRESHOLD,
 } from "../../../../lib/integrations/mapping";
 import { matchRegisterTemplate } from "../../../../lib/integrations/register-templates";
+import { forcedAmountModeFor } from "../../../../lib/integrations/model";
 import type { ImportRecord } from "../../../../lib/integrations/model";
 
 export const dynamic = "force-dynamic";
@@ -103,6 +104,17 @@ export default async function ImportBatchPage({
     }
   }
 
+  // expense / income imports lock the amount mode server-side; reflect
+  // that in the pre-filled mapping so the form shows the real state.
+  const forced = forcedAmountModeFor(batch.targetObject);
+  if (forced && initialMapping.amountMode !== forced) {
+    initialMapping = {
+      ...initialMapping,
+      amountMode: forced,
+      directionMode: "from_amount",
+    };
+  }
+
   const targetSources = validated || committed
     ? await listImportTargetSources()
     : [];
@@ -112,6 +124,10 @@ export default async function ImportBatchPage({
       <PageHeader
         title={batch.originalFilename}
         subtitle={`${batch.sourceKind.toUpperCase()}${
+          batch.targetObject !== "transaction"
+            ? ` · ${batch.targetObject} register`
+            : ""
+        }${
           profile.sheetName ? ` · sheet “${profile.sheetName}”` : ""
         } · uploaded ${formatDateTime(batch.createdAt)}`}
         backHref="/integrations/imports"
@@ -196,6 +212,7 @@ export default async function ImportBatchPage({
                 .map((r) => (r.rawCells.cells as string[] | undefined) ?? [])}
               initialMapping={initialMapping}
               matchedTemplateName={matchedTemplateName}
+              targetObject={batch.targetObject}
             />
           </details>
         </section>

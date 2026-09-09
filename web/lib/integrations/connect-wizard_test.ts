@@ -28,9 +28,39 @@ Deno.test("catalogs: exactly one live source, and it is 'file'", () => {
   assert(isConnectSource("file"));
 });
 
-Deno.test("import data types: transactions live, the rest coming soon", () => {
+Deno.test("import data types: transactions/expenses/income live, invoices coming soon", () => {
   const live = IMPORT_DATA_TYPE_OPTIONS.filter((d) => d.status === "available");
-  assertEquals(live.map((d) => d.key), ["transactions"]);
+  assertEquals(live.map((d) => d.key).sort(), ["expenses", "income", "transactions"]);
+  const soon = IMPORT_DATA_TYPE_OPTIONS.filter((d) => d.status === "coming_soon");
+  assertEquals(soon.map((d) => d.key), ["invoices"]);
+});
+
+Deno.test("resolve: expense/income import route with a target query param", () => {
+  const exp = resolveConnectHandoff({
+    source: "file",
+    direction: "import",
+    dataType: "expenses",
+  });
+  assert(exp.ok);
+  if (exp.ok) assertEquals(exp.href, "/integrations/imports/new?target=expense");
+
+  const inc = resolveConnectHandoff({
+    source: "file",
+    direction: "import",
+    dataType: "income",
+  });
+  assert(inc.ok);
+  if (inc.ok) assertEquals(inc.href, "/integrations/imports/new?target=income");
+});
+
+Deno.test("resolve: invoice import is still refused with a reason", () => {
+  const r = resolveConnectHandoff({
+    source: "file",
+    direction: "import",
+    dataType: "invoices",
+  });
+  assertEquals(r.ok, false);
+  if (!r.ok) assert(/invoice/i.test(r.reason));
 });
 
 Deno.test("every direction option names a gate flag", () => {

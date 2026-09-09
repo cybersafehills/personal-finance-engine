@@ -29,7 +29,12 @@ import {
   validateNormalizedRow,
   type RowValidation,
 } from "../../../lib/integrations/validation";
-import type { ImportRecordStatus } from "../../../lib/integrations/model";
+import {
+  forcedAmountModeFor,
+  type ImportRecordStatus,
+  type ImportTargetObject,
+  isImportTargetObject,
+} from "../../../lib/integrations/model";
 
 const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
 const MAX_RECORDS = 5000; // staging rows persisted per batch in this phase
@@ -164,8 +169,10 @@ async function stageImportBatch(params: {
   headers: string[];
   rows: string[][];
   sheetName?: string;
+  targetObject?: ImportTargetObject;
 }): Promise<{ ok: true; batchId: string } | { ok: false; error: string }> {
   const { workspaceId, userId, kind, bytes, headers, rows, sheetName } = params;
+  const targetObject = params.targetObject ?? "transaction";
   const originalFilename = params.originalFilename.slice(0, 255);
 
   if (headers.length === 0 || rows.length === 0) {
@@ -185,6 +192,7 @@ async function stageImportBatch(params: {
       workspace_id: workspaceId,
       created_by: userId,
       source_kind: kind,
+      target_object: targetObject,
       original_filename: originalFilename,
       status: "uploaded",
     })
@@ -286,6 +294,12 @@ export async function uploadImportFile(
   const parsed = await parseUploadFile(formData);
   if (!parsed.ok) return parsed;
 
+  const rawTarget = formData.get("target");
+  const targetObject: ImportTargetObject =
+    typeof rawTarget === "string" && isImportTargetObject(rawTarget)
+      ? rawTarget
+      : "transaction";
+
   // Single-file path: the first sheet with data (xlsx multi-sheet goes
   // through analyzeWorkbookUpload / createImportBatchesFromWorkbook).
   const sheet = parsed.sheets.find(
@@ -303,6 +317,7 @@ export async function uploadImportFile(
     originalFilename: (formData.get("file") as File).name,
     headers: sheet.headers,
     rows: sheet.rows,
+    targetObject,
   });
   if (!result.ok) return result;
 
@@ -429,7 +444,7 @@ export async function applyImportMapping(
   const admin = supabaseServer();
   const { data: batch, error: batchError } = await admin
     .from("import_batches")
-    .select("id, status")
+    .select("id, status, target_object")
     .eq("id", batchId)
     .eq("workspace_id", workspaceId)
     .maybeSingle();
@@ -440,6 +455,19 @@ export async function applyImportMapping(
     return { ok: false, error: "This import can no longer be re-mapped." };
   }
 
+  // expense / income imports: the server owns the direction (via a forced
+  // amount mode) and requires a category on every row, whatever the
+  // client sent.
+  const targetObject: ImportTargetObject = isImportTargetObject(
+    String(batch.target_object),
+  )
+    ? (batch.target_object as ImportTargetObject)
+    : "transaction";
+  const forced = forcedAmountModeFor(targetObject);
+  const effectiveMapping: ImportColumnMapping = forced
+    ? { ...mapping, amountMode: forced, directionMode: "from_amount" }
+    : mapping;
+
   const { data: records, error: recordsError } = await admin
     .from("import_records")
     .select("id, row_index, raw_cells")
@@ -449,7 +477,7 @@ export async function applyImportMapping(
     return { ok: false, error: "Could not load the staged rows." };
   }
 
-  const ctx = defaultValidationContext();
+  const ctx = defaultValidationContext({ requireCategory: forced !== null });
   const statuses: RowValidation["status"][] = [];
   type RowUpdate = {
     id: string;
@@ -468,7 +496,7 @@ export async function applyImportMapping(
   const updates: RowUpdate[] = records.map((record) => {
     const cells =
       ((record.raw_cells as { cells?: string[] })?.cells as string[]) ?? [];
-    const normalized = normalizeImportRow(cells, mapping);
+    const normalized = normalizeImportRow(cells, effectiveMapping);
     if (!normalized.ok) {
       statuses.push("invalid");
       normalizedByIndex.push(null);
@@ -558,7 +586,7 @@ export async function applyImportMapping(
     .from("import_batches")
     .update({
       status: "validated",
-      mapping,
+      mapping: effectiveMapping,
       row_counts: {
         total: updates.length,
         ready: counts.ready,

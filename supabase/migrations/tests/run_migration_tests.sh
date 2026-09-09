@@ -6298,6 +6298,30 @@ else
   fail "Integrations: rollback wrong (result=$INT_ROLLBACK left=$INT_LEFT status=$INT_RB_STATUS audit=$INT_RB_AUDIT)"
 fi
 
+# 20261130000000: import_batches.target_object (transaction|expense|income)
+# and commit_import_batch persisting the mapped category (source='system').
+INT_MD_DEFAULT="$(psql -d pfe_rls -t -A -c "insert into public.import_batches (workspace_id, financial_source_id, created_by, source_kind, original_filename, status) values ('$WORKSPACE_A', '$U_SRC', '$USER_A', 'csv', 'md-default.csv', 'validated') returning target_object;" | head -1)"
+if psql -d pfe_rls -c "insert into public.import_batches (workspace_id, created_by, source_kind, original_filename, target_object) values ('$WORKSPACE_A', '$USER_A', 'csv', 'bad.csv', 'invoice');" >/dev/null 2>$ARTIFACT_DIR/pfe_int_md.log; then
+  fail "Integrations: import_batches.target_object accepted an out-of-set value"
+else
+  if [ "$INT_MD_DEFAULT" = "transaction" ]; then
+    pass "Integrations: import_batches.target_object defaults to 'transaction' and its CHECK rejects an unknown mode"
+  else
+    fail "Integrations: import_batches.target_object default wrong (got '$INT_MD_DEFAULT')"
+  fi
+fi
+rm -f $ARTIFACT_DIR/pfe_int_md.log
+
+INT_MD_CB="$(psql -d pfe_rls -t -A -c "insert into public.import_batches (workspace_id, financial_source_id, created_by, source_kind, original_filename, status, target_object) values ('$WORKSPACE_A', '$U_SRC', '$USER_A', 'csv', 'expenses.csv', 'validated', 'expense') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "insert into public.import_records (import_batch_id, workspace_id, row_index, status, normalized) values ('$INT_MD_CB', '$WORKSPACE_A', 0, 'ready', '{\"occurred_at\":\"2026-08-14T09:00:00Z\",\"amount_minor\":9000,\"direction\":\"out\",\"merchant\":\"CATEGORISED SUPPLIER\",\"category\":\"Utilities\"}'::jsonb);" >/dev/null
+INT_MD_COMMIT="$(as_user "$USER_A" "select (j->>'created') from (select public.commit_import_batch('$INT_MD_CB') as j) s;")"
+INT_MD_CAT="$(psql -d pfe_rls -t -A -c "select category || '|' || category_source from public.transactions where import_batch_id = '$INT_MD_CB';" | tail -1)"
+if [ "$INT_MD_COMMIT" = "1" ] && [ "$INT_MD_CAT" = "Utilities|system" ]; then
+  pass "Integrations: commit_import_batch persists the mapped category with category_source='system'"
+else
+  fail "Integrations: multi-domain commit wrong (created=$INT_MD_COMMIT cat='$INT_MD_CAT')"
+fi
+
 # 20261030000000: the private export bucket exists and is not public.
 INT_EXP_BUCKET="$(psql -d pfe_rls -t -A -c "select count(*) from storage.buckets where id = 'integration-exports' and public = false;")"
 if [ "$INT_EXP_BUCKET" = "1" ]; then
