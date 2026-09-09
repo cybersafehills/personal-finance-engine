@@ -244,11 +244,23 @@ export async function cleanupImportArtifacts(
   const userId = await testUserId(admin);
   const { workspaceId } = await ensureWorkspaceAndAccount(admin);
 
-  await admin
+  // commit_import_batch writes a raw_financial_events row per imported
+  // transaction; its `canonical_transaction_id` FK has no ON DELETE, so
+  // the raw events must go first or the transactions delete throws (and
+  // leaves rows that break downstream empty-state specs).
+  const { data: imported } = await admin
     .from("transactions")
-    .delete()
+    .select("id")
     .eq("workspace_id", workspaceId)
     .eq("source", "import");
+  const importedIds = (imported ?? []).map((t) => t.id as string);
+  if (importedIds.length > 0) {
+    await admin
+      .from("raw_financial_events")
+      .delete()
+      .in("canonical_transaction_id", importedIds);
+    await admin.from("transactions").delete().in("id", importedIds);
+  }
   await admin.from("import_records").delete().eq("workspace_id", workspaceId);
   await admin.from("import_batches").delete().eq("workspace_id", workspaceId);
 

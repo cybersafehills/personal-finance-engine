@@ -28,7 +28,8 @@ test.describe("Integrations shell", () => {
     await page.getByRole("link", { name: /Bring data into OneLedger/ }).click();
     await expect(page).toHaveURL(/[?&]direction=import/);
 
-    await page.getByRole("link", { name: /^Transactions/ }).click();
+    // "Transactions" alone also matches the shell nav link — key off the blurb.
+    await page.getByRole("link", { name: /Money in and out/ }).click();
     await expect(page).toHaveURL(/\/integrations\/imports\/new$/);
   });
 

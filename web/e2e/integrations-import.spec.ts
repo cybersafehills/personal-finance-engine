@@ -87,7 +87,9 @@ test("an unsupported file type is rejected before anything is staged", async ({ 
   });
   await page.getByRole("button", { name: /Upload and detect/ }).click();
 
-  await expect(page.getByRole("alert")).toContainText(/\.csv and \.xlsx/);
+  await expect(
+    page.getByText(/Only \.csv and \.xlsx files are supported/),
+  ).toBeVisible();
   await expect(page).toHaveURL(/\/integrations\/imports\/new$/);
 });
 
