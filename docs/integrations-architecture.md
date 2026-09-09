@@ -36,7 +36,7 @@ account menu (desktop), and a link in Settings.
 | `/integrations` | Dashboard: connected summary, "move data" entry points, available-later categories. **Track B**: a "Connect a system" header CTA → `/integrations/connect`. | **live (PR 0)** |
 | `/integrations/connect` | **Track B**: the unified setup wizard (§8) — source → direction → data type, then hands off to Import Studio / Export Center / connected workbooks. A searchParams-driven server component; no new action or migration. | **live (Track B)** |
 | `/integrations/connections` | Connected devices / Shortcuts / providers (canonical connector model) — moved here from `/settings/connections`, which now redirects | **live (PR 0)** |
-| `/integrations/imports` | Import Studio. **PR 2-4 live**: upload -> detect -> profile -> map -> validate -> review -> commit -> undo (interactive mapping, saved templates, per-row validation, duplicate signals, staging review with bulk actions, `commit_import_batch` / `rollback_import_batch`). **Track B**: `/integrations/imports/templates` — downloadable starter register templates (Daily Sales / Expense / Cashbook) that auto-map on re-upload; `/integrations/imports/analyze` — multi-sheet workbook analyzer (§41) that classifies each sheet and stages the chosen ones as separate batches. |
+| `/integrations/imports` | Import Studio. **PR 2-4 live**: upload -> detect -> profile -> map -> validate -> review -> commit -> undo (interactive mapping, saved templates, per-row validation, duplicate signals, staging review with bulk actions, `commit_import_batch` / `rollback_import_batch`). **Track B**: `/integrations/imports/templates` — downloadable starter register templates (Daily Sales / Expense / Cashbook) that auto-map on re-upload; `/integrations/imports/analyze` — multi-sheet workbook analyzer (§41) that classifies each sheet and stages the chosen ones as separate batches; `?target=expense\|income` — expense / income register modes (forced direction + required category). |
 | `/integrations/exports` | Export Center. **PR 5 live**: config (format / relative or custom period / account + direction filters / XLSX sheet picker), inline generation for small exports + a cron for large ones, saved templates, history with signed-URL download. |
 | `/integrations/activity` | Consolidated activity / health feed | **live (PR 1)** |
 | `/integrations/sync` | Sync & Automation — connector sync health + recurring scheduled exports | **live (PR 6)**, opt-in flag, default off |
@@ -283,6 +283,49 @@ existing suite's conventions (`e2e/fixtures.ts`, `e2e/seed.ts`).
 - Financial Inbox: an `import_review` item for a batch sitting in
   `validated` with rows still to decide (`web/lib/financial-inbox.ts`,
   gated on `isIntegrationsEnabled`).
+
+## Import Studio — multi-domain: expense / income registers (Track B, migration 20261125000000)
+
+Gap analysis G1 (slice 1), master prompt §8 step 3. The Import Studio now
+imports **expense** and **income** registers as well as plain
+transactions. In OneLedger's ledger model an expense IS a money-out
+transaction with a category and income IS a money-in one, so these are
+**constrained modes over the same `transactions` target**, not a new
+domain table.
+
+- Migration `20261125000000_integration_import_multidomain.sql`:
+  `import_batches.target_object` (`transaction` default | `expense` |
+  `income`, CHECK). And a `create or replace` of `commit_import_batch`
+  that **persists the mapped `category`** (`category_source = 'system'`) —
+  fixing a pre-existing bug where a mapped Category column was silently
+  dropped even for plain transaction imports. `'system'` (not `'manual'`)
+  so `rollback_import_batch` still removes the row.
+- `web/lib/integrations/model.ts` — `IMPORT_TARGET_OBJECTS`,
+  `forcedAmountModeFor(target)` → `all_out` / `all_in` / null,
+  `isImportTargetObject`.
+- `web/lib/integrations/validation.ts` — `ValidationContext.requireCategory`;
+  when set, a row without a category is a **blocking** `category_required`
+  issue (→ `invalid`, excluded from commit).
+- `web/app/integrations/imports/actions.ts` — `uploadImportFile` reads a
+  `target` form field; `stageImportBatch` persists `target_object`;
+  `applyImportMapping` reads the batch's `target_object`, **forces the
+  amount mode server-side** (`{...mapping, amountMode: forced,
+  directionMode: 'from_amount'}`) and passes `requireCategory` to
+  validation — the client cannot opt out of either.
+- `/integrations/imports/new?target=expense|income` — titled/subtitled
+  per mode, passes the target to `ImportUploadForm` (hidden field).
+  `ImportMappingForm` hides the amount-mode radios and shows "every row
+  imports as money out/in — Category required" when locked.
+  `/integrations/imports/[id]` pre-fills the forced amount mode and shows
+  "· expense register" in its subtitle.
+- Connect wizard: `expenses` / `income` data-type options are now
+  `available` and route to `/integrations/imports/new?target=…`.
+- **Invoices stay out of scope.** `public.bills` has
+  `bill_document_id uuid NOT NULL` + `bills_one_per_document` — a bill
+  cannot exist without an uploaded document, so spreadsheet invoice
+  import would need a Bills-program schema change. The wizard's
+  `invoices` option stays `coming_soon`; the Invoice Register template is
+  still deferred.
 
 ## Export Center (PR 5, migration 20261030000000)
 

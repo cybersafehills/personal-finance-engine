@@ -3,11 +3,16 @@
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { uploadImportFile } from "../app/integrations/imports/actions";
+import type { ImportTargetObject } from "../lib/integrations/model";
 
 const ACCEPT = ".csv,.xlsx";
 const MAX_MB = 10;
 
-export function ImportUploadForm() {
+export function ImportUploadForm({
+  targetObject = "transaction",
+}: {
+  targetObject?: ImportTargetObject;
+}) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -25,6 +30,7 @@ export function ImportUploadForm() {
     setError(null);
     const data = new FormData();
     data.set("file", file);
+    data.set("target", targetObject);
     startTransition(async () => {
       const result = await uploadImportFile(data);
       if (result.ok) {

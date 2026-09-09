@@ -84,3 +84,28 @@ Deno.test("tallyValidation counts by status", () => {
     { ready: 2, needsReview: 1, invalid: 1 },
   );
 });
+
+Deno.test("requireCategory: a categorised row passes, an uncategorised one is blocked", () => {
+  const withCat = validateNormalizedRow(
+    row({ category: "Utilities" }),
+    defaultValidationContext({ now: NOW, requireCategory: true }),
+  );
+  assertEquals(withCat.status, "ready");
+
+  const noCat = validateNormalizedRow(
+    row({ category: null }),
+    defaultValidationContext({ now: NOW, requireCategory: true }),
+  );
+  assertEquals(noCat.status, "invalid");
+  assertEquals(
+    noCat.issues.some((i) => i.code === "category_required"),
+    true,
+  );
+
+  // Default context (plain transaction import) never blocks on category.
+  const plain = validateNormalizedRow(
+    row({ category: null }),
+    defaultValidationContext({ now: NOW }),
+  );
+  assertEquals(plain.status, "ready");
+});

@@ -139,14 +139,14 @@ export const IMPORT_DATA_TYPE_OPTIONS: DataTypeOption[] = [
   {
     key: "expenses",
     name: "Expenses",
-    blurb: "A dedicated expense register.",
-    status: "coming_soon",
+    blurb: "An expense register — every row is money out, with a category.",
+    status: "available",
   },
   {
     key: "income",
     name: "Income",
-    blurb: "A dedicated income register.",
-    status: "coming_soon",
+    blurb: "An income register — every row is money in, with a category.",
+    status: "available",
   },
   {
     key: "invoices",
@@ -208,18 +208,28 @@ export function resolveConnectHandoff(
   if (!sel.dataType) {
     return { ok: false, reason: "Choose what kind of data you’re importing." };
   }
-  if (sel.dataType !== "transactions") {
+  if (sel.dataType === "invoices") {
     return {
       ok: false,
       reason:
-        "Importing that as its own type is coming with multi-domain import. For now, bring these rows in as transactions.",
+        "Importing invoices from a spreadsheet is coming later — for now, add them from an uploaded document under Bills.",
     };
   }
+  const target = sel.dataType === "expenses"
+    ? "expense"
+    : sel.dataType === "income"
+    ? "income"
+    : null;
   return {
     ok: true,
-    href: "/integrations/imports/new",
+    href: target
+      ? `/integrations/imports/new?target=${target}`
+      : "/integrations/imports/new",
     label: "Choose your file",
-    summary:
-      "You’ll upload a CSV or Excel file (or start from a template), map its columns, review duplicates, and confirm before anything enters your ledger.",
+    summary: target === "expense"
+      ? "You’ll upload an expense register — every row imports as money out, and a category is required. Review before anything enters your ledger."
+      : target === "income"
+      ? "You’ll upload an income register — every row imports as money in, and a category is required. Review before anything enters your ledger."
+      : "You’ll upload a CSV or Excel file (or start from a template), map its columns, review duplicates, and confirm before anything enters your ledger.",
   };
 }

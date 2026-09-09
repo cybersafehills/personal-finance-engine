@@ -39,7 +39,7 @@ import {
 // Space they are currently in. Kept out of the very large web/lib/queries.ts.
 
 const BATCH_COLUMNS =
-  "id, workspace_id, financial_source_id, template_id, created_by, source_kind, original_filename, storage_path, status, row_counts, detected, mapping, error, created_at, updated_at, committed_at, rolled_back_at";
+  "id, workspace_id, financial_source_id, template_id, created_by, source_kind, target_object, original_filename, storage_path, status, row_counts, detected, mapping, error, created_at, updated_at, committed_at, rolled_back_at";
 
 const RECORD_COLUMNS =
   "id, import_batch_id, workspace_id, row_index, raw_cells, normalized, status, validation, match, canonical_transaction_id, created_at, updated_at";
@@ -59,6 +59,7 @@ function toBatch(row: any): ImportBatch {
     templateId: row.template_id ?? null,
     createdBy: row.created_by ?? null,
     sourceKind: row.source_kind,
+    targetObject: row.target_object ?? "transaction",
     originalFilename: row.original_filename,
     storagePath: row.storage_path ?? null,
     status: row.status,
