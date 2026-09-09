@@ -78,6 +78,15 @@ export default defineConfig({
       // Financial Statements: opens /reports/statements + its actions for
       // statements.spec.ts. Inert for every other spec.
       FINANCIAL_STATEMENTS_ENABLED: "true",
+      // Integrations: the base area + Import Studio + Export Center for
+      // integrations-nav.spec.ts / integrations-import.spec.ts. These
+      // default on ("on unless exactly false"); set explicitly so the
+      // suite is stable if that default ever changes. Sync / workbooks /
+      // developer stay off (their own opt-in flags), so the connect
+      // wizard's two-way option correctly reads "Not enabled".
+      INTEGRATIONS_ENABLED: "true",
+      INTEGRATIONS_IMPORT_STUDIO_ENABLED: "true",
+      INTEGRATIONS_EXPORT_CENTER_ENABLED: "true",
     },
   },
 
@@ -140,7 +149,7 @@ export default defineConfig({
     {
       name: "chrome-android",
       testIgnore:
-        /(unauthenticated|brand-splash|pay-scan|visual)\.spec\.ts/,
+        /(unauthenticated|brand-splash|pay-scan|visual|integrations-import)\.spec\.ts/,
       use: { ...devices["Pixel 7"], storageState: AUTH_STORAGE_STATE_PATH },
       dependencies: ["setup"],
     },
@@ -150,7 +159,7 @@ export default defineConfig({
     {
       name: "webkit-desktop",
       testIgnore:
-        /(unauthenticated|brand-splash|pay-scan|visual)\.spec\.ts/,
+        /(unauthenticated|brand-splash|pay-scan|visual|integrations-import)\.spec\.ts/,
       use: {
         ...devices["Desktop Safari"],
         viewport: { width: 1280, height: 900 },
@@ -165,7 +174,7 @@ export default defineConfig({
     {
       name: "mobile-safari",
       testIgnore:
-        /(unauthenticated|brand-splash|pay-scan|visual)\.spec\.ts/,
+        /(unauthenticated|brand-splash|pay-scan|visual|integrations-import)\.spec\.ts/,
       use: { ...devices["iPhone 14"], storageState: AUTH_STORAGE_STATE_PATH },
       dependencies: ["setup"],
     },

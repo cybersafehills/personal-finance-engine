@@ -172,3 +172,99 @@ export async function cleanupSeededTransactions(
     .delete()
     .eq("parser_version", `e2e-seed:${tag}`);
 }
+
+const IMPORT_SOURCE_NAME = "E2E Import Source";
+
+/**
+ * A `financial_sources` row owned by the test user plus a linked
+ * `accounts` row in the personal workspace — the pair the Import Studio's
+ * "Import into" picker (`listImportTargetSources`) and
+ * `setImportBatchTarget` require. Idempotent across specs / re-runs.
+ */
+export async function ensureImportTargetSource(
+  admin: SupabaseClient = adminClient(),
+): Promise<{ workspaceId: string; sourceId: string; accountId: string }> {
+  const userId = await testUserId(admin);
+  const { workspaceId } = await ensureWorkspaceAndAccount(admin);
+
+  const { data: existingSource } = await admin
+    .from("financial_sources")
+    .select("id")
+    .eq("owner_user_id", userId)
+    .eq("display_name", IMPORT_SOURCE_NAME)
+    .limit(1)
+    .maybeSingle();
+
+  const sourceId = existingSource?.id ??
+    (await admin
+      .from("financial_sources")
+      .insert({
+        owner_user_id: userId,
+        provider: "bank",
+        source_type: "bank_account",
+        display_name: IMPORT_SOURCE_NAME,
+        currency: "RWF",
+      })
+      .select("id")
+      .single()).data!.id as string;
+
+  const { data: existingAccount } = await admin
+    .from("accounts")
+    .select("id")
+    .eq("workspace_id", workspaceId)
+    .eq("financial_source_id", sourceId)
+    .limit(1)
+    .maybeSingle();
+
+  const accountId = existingAccount?.id ??
+    (await admin
+      .from("accounts")
+      .insert({
+        workspace_id: workspaceId,
+        name: IMPORT_SOURCE_NAME,
+        provider: "bank",
+        currency: "RWF",
+        is_active: true,
+        financial_source_id: sourceId,
+      })
+      .select("id")
+      .single()).data!.id as string;
+
+  return { workspaceId, sourceId, accountId };
+}
+
+/**
+ * Tears down everything an Import Studio e2e run creates: the ledger rows
+ * it committed (`source='import'`), the staging rows + batches, and the
+ * dedicated import source/account from `ensureImportTargetSource`.
+ */
+export async function cleanupImportArtifacts(
+  admin: SupabaseClient = adminClient(),
+): Promise<void> {
+  const userId = await testUserId(admin);
+  const { workspaceId } = await ensureWorkspaceAndAccount(admin);
+
+  await admin
+    .from("transactions")
+    .delete()
+    .eq("workspace_id", workspaceId)
+    .eq("source", "import");
+  await admin.from("import_records").delete().eq("workspace_id", workspaceId);
+  await admin.from("import_batches").delete().eq("workspace_id", workspaceId);
+
+  const { data: source } = await admin
+    .from("financial_sources")
+    .select("id")
+    .eq("owner_user_id", userId)
+    .eq("display_name", IMPORT_SOURCE_NAME)
+    .limit(1)
+    .maybeSingle();
+  if (source?.id) {
+    await admin
+      .from("accounts")
+      .delete()
+      .eq("financial_source_id", source.id)
+      .eq("workspace_id", workspaceId);
+    await admin.from("financial_sources").delete().eq("id", source.id);
+  }
+}
