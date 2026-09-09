@@ -284,7 +284,7 @@ existing suite's conventions (`e2e/fixtures.ts`, `e2e/seed.ts`).
   `validated` with rows still to decide (`web/lib/financial-inbox.ts`,
   gated on `isIntegrationsEnabled`).
 
-## Import Studio — multi-domain: expense / income registers (Track B, migration 20261130000000)
+## Import Studio — multi-domain: expense / income registers (Track B, migration 20261219000000)
 
 Gap analysis G1 (slice 1), master prompt §8 step 3. The Import Studio now
 imports **expense** and **income** registers as well as plain
@@ -293,7 +293,7 @@ transaction with a category and income IS a money-in one, so these are
 **constrained modes over the same `transactions` target**, not a new
 domain table.
 
-- Migration `20261130000000_integration_import_multidomain.sql`:
+- Migration `20261219000000_integration_import_multidomain.sql`:
   `import_batches.target_object` (`transaction` default | `expense` |
   `income`, CHECK). And a `create or replace` of `commit_import_batch`
   that **persists the mapped `category`** (`category_source = 'system'`) —

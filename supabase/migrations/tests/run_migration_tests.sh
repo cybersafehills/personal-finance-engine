@@ -6298,7 +6298,7 @@ else
   fail "Integrations: rollback wrong (result=$INT_ROLLBACK left=$INT_LEFT status=$INT_RB_STATUS audit=$INT_RB_AUDIT)"
 fi
 
-# 20261130000000: import_batches.target_object (transaction|expense|income)
+# 20261219000000: import_batches.target_object (transaction|expense|income)
 # and commit_import_batch persisting the mapped category (source='system').
 INT_MD_DEFAULT="$(psql -d pfe_rls -t -A -c "insert into public.import_batches (workspace_id, financial_source_id, created_by, source_kind, original_filename, status) values ('$WORKSPACE_A', '$U_SRC', '$USER_A', 'csv', 'md-default.csv', 'validated') returning target_object;" | head -1)"
 if psql -d pfe_rls -c "insert into public.import_batches (workspace_id, created_by, source_kind, original_filename, target_object) values ('$WORKSPACE_A', '$USER_A', 'csv', 'bad.csv', 'invoice');" >/dev/null 2>$ARTIFACT_DIR/pfe_int_md.log; then
