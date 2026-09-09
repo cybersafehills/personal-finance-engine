@@ -63,7 +63,11 @@ export default async function ImportBatchPage({
   const { batch, records } = result;
 
   const profile = batch.detected as Partial<
-    DataProfile & { truncated: boolean; stagedRowCount: number }
+    DataProfile & {
+      truncated: boolean;
+      stagedRowCount: number;
+      sheetName: string;
+    }
   >;
   const headers = profile.headers ?? [];
   const counts = batch.rowCounts;
@@ -107,7 +111,9 @@ export default async function ImportBatchPage({
     <div>
       <PageHeader
         title={batch.originalFilename}
-        subtitle={`${batch.sourceKind.toUpperCase()} · uploaded ${formatDateTime(batch.createdAt)}`}
+        subtitle={`${batch.sourceKind.toUpperCase()}${
+          profile.sheetName ? ` · sheet “${profile.sheetName}”` : ""
+        } · uploaded ${formatDateTime(batch.createdAt)}`}
         backHref="/integrations/imports"
         backLabel="Imports"
         action={<Badge>{batch.status.replace("_", " ")}</Badge>}

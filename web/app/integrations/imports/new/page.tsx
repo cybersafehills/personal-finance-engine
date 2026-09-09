@@ -33,16 +33,28 @@ export default async function NewImportPage() {
       />
       <ImportUploadForm />
 
-      <p className="mt-4 text-sm text-text-muted">
-        No file ready?{" "}
-        <Link
-          href="/integrations/imports/templates"
-          className="font-medium text-accent hover:underline"
-        >
-          Download a starter template
-        </Link>{" "}
-        for daily sales, expenses, or a cashbook.
-      </p>
+      <div className="mt-4 flex flex-col gap-1.5 text-sm text-text-muted">
+        <p>
+          Multi-sheet workbook?{" "}
+          <Link
+            href="/integrations/imports/analyze"
+            className="font-medium text-accent hover:underline"
+          >
+            Analyze it
+          </Link>{" "}
+          to import several sheets at once.
+        </p>
+        <p>
+          No file ready?{" "}
+          <Link
+            href="/integrations/imports/templates"
+            className="font-medium text-accent hover:underline"
+          >
+            Download a starter template
+          </Link>{" "}
+          for daily sales, expenses, or a cashbook.
+        </p>
+      </div>
     </div>
   );
 }
