@@ -60,7 +60,7 @@ async function readPersistedMilestones(
   };
 }
 
-export async function getOnboardingJourney(): Promise<OnboardingJourney> {
+export async function getOnboardingJourney(): Promise<OnboardingJourney | null> {
   const supabase = await supabaseSession();
   const { data: { user } } = await supabase.auth.getUser();
 
@@ -89,6 +89,21 @@ export async function getOnboardingJourney(): Promise<OnboardingJourney> {
       .from("transactions")
       .select("id", { count: "exact", head: true }),
   ]);
+
+  // A transient read failure on any derived signal must never flash the
+  // "just signed up" checklist at an established account: `?? 0` below
+  // would otherwise silently read a failed count as zero, un-completing a
+  // journey that's actually done every time Supabase hiccups on a
+  // force-dynamic render. Fail toward "unavailable this render" (hidden),
+  // never toward "nothing done yet" (shown).
+  if (sources.error || connections.error || txns.error) {
+    console.error("getOnboardingJourney: signal fetch failed, suppressing banner", {
+      sourcesError: sources.error?.message,
+      connectionsError: connections.error?.message,
+      txnsError: txns.error?.message,
+    });
+    return null;
+  }
 
   const conns = connections.data ?? [];
 
