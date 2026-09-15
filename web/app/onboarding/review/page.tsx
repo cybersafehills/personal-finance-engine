@@ -5,6 +5,7 @@ import {
   getOnboardingJourney,
   isOnboardingJourneyEnabled,
 } from "../../../lib/onboarding/journey";
+import { deriveOnboardingJourney } from "../../../lib/onboarding-milestones";
 import { trackOnboardingEvent } from "../../../lib/onboarding/analytics";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +20,18 @@ export const dynamic = "force-dynamic";
 export default async function OnboardingReviewPage() {
   if (!isOnboardingJourneyEnabled()) redirect("/get-started");
 
-  const journey = await getOnboardingJourney();
+  // This IS the setup flow the user navigated to, unlike the passive home
+  // banner - a signal-fetch hiccup should read as "nothing done yet", not
+  // be hidden outright.
+  const journey = await getOnboardingJourney() ?? deriveOnboardingJourney({
+    intent: null,
+    sourceCount: 0,
+    pairedDeviceCount: 0,
+    verifiedConnectionCount: 0,
+    realTransactionCount: 0,
+    firstReviewAt: null,
+    firstInsightAt: null,
+  });
   trackOnboardingEvent("setup_review_viewed", {
     doneCount: journey.doneCount,
     complete: journey.complete,
