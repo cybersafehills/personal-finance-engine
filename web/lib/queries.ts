@@ -76,7 +76,7 @@ export async function getCurrentBalance(): Promise<CurrentBalance | null> {
   const supabase = await supabaseSession();
   const { data, error } = await supabase
     .from("transactions")
-    .select("balance_after_rwf, occurred_at")
+    .select("balance_after_rwf, occurred_at, direction, principal_effect_rwf")
     .not("balance_after_rwf", "is", null)
     // Phase U: a transaction merged into its canonical duplicate is kept
     // for evidence but is never a live transaction - here it must not be
@@ -84,17 +84,32 @@ export async function getCurrentBalance(): Promise<CurrentBalance | null> {
     .neq("dedupe_state", "merged")
     .order("occurred_at", { ascending: false })
     .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    // A handful of rows, not just the newest one: MTN occasionally sends a
+    // "received" SMS whose own Balance: line hasn't caught up with the
+    // credit it's reporting yet (seen in prod on brand-new wallets' first-
+    // ever inbound transfer - the balance line reads 0 in the same message
+    // that reports +100 received). That single row is kept as-is (still
+    // the source of truth for its own transaction detail) but must not be
+    // surfaced as "current balance" - so skip past it here to the next
+    // internally-consistent snapshot rather than showing an impossible
+    // balance the moment someone finishes onboarding.
+    .limit(5);
 
   if (error) {
     console.error("getCurrentBalance failed:", error.message);
     return null;
   }
 
-  if (!data) return null;
+  const plausible = (data ?? []).find((row) => {
+    if (row.direction !== "in" || row.principal_effect_rwf === null) return true;
+    // A wallet can't go negative, so receiving money can never leave the
+    // balance below the amount just credited.
+    return row.balance_after_rwf >= row.principal_effect_rwf;
+  });
 
-  return { amountRwf: data.balance_after_rwf, asOfIso: data.occurred_at };
+  if (!plausible) return null;
+
+  return { amountRwf: plausible.balance_after_rwf, asOfIso: plausible.occurred_at };
 }
 
 export type TodayTotals = {
