@@ -10,6 +10,7 @@ import {
   isOnboardingJourneyEnabled,
 } from "../../lib/onboarding/journey";
 import {
+  deriveOnboardingJourney,
   groupOnboardingJourney,
   ONBOARDING_GROUPS,
   type OnboardingGroupKey,
@@ -34,7 +35,19 @@ export default async function OnboardingWizardPage(
   if (profile.step === "profile") redirect("/onboarding/profile");
   if (profile.step === "preferences") redirect("/onboarding/preferences");
 
-  const journey = await getOnboardingJourney();
+  // Unlike the passive home-page banner, this IS the setup flow the user
+  // navigated to - a signal-fetch hiccup here should read as "nothing
+  // done yet" (still usable, worst case repeats a step) rather than be
+  // hidden outright.
+  const journey = await getOnboardingJourney() ?? deriveOnboardingJourney({
+    intent: null,
+    sourceCount: 0,
+    pairedDeviceCount: 0,
+    verifiedConnectionCount: 0,
+    realTransactionCount: 0,
+    firstReviewAt: null,
+    firstInsightAt: null,
+  });
   const grouped = groupOnboardingJourney(journey);
   const query = await searchParams;
 

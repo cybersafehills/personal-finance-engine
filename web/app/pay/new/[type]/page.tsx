@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PageHeader } from "../../../../components/PageHeader";
 import { EmptyState } from "../../../../components/EmptyState";
@@ -18,6 +19,13 @@ const PAYMENT_TYPES = [
   "government",
 ] as const;
 type PaymentType = (typeof PAYMENT_TYPES)[number];
+
+// Person and merchant payments are easy to start on the wrong one - this
+// lets someone flip to the other form without walking back through Pay.
+const SWITCH_TYPE: Partial<Record<PaymentType, PaymentType>> = {
+  pay_person: "pay_merchant",
+  pay_merchant: "pay_person",
+};
 
 export default async function NewPaymentPage({
   params,
@@ -52,6 +60,7 @@ export default async function NewPaymentPage({
   ]);
 
   const t = messages().pay.assisted;
+  const switchTarget = SWITCH_TYPE[paymentType];
 
   return (
     <div>
@@ -60,6 +69,14 @@ export default async function NewPaymentPage({
         subtitle={t.feeNotice}
         backHref="/"
         backLabel="Home"
+        action={switchTarget && (
+          <Link
+            href={`/pay/new/${switchTarget}`}
+            className="inline-flex w-fit shrink-0 items-center gap-1 rounded-control border border-border-subtle px-3 py-2 text-sm font-medium text-accent hover:bg-background"
+          >
+            {t.switchType[paymentType as keyof typeof t.switchType]}
+          </Link>
+        )}
       />
       <PaymentDraftForm
         type={paymentType}

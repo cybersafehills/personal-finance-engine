@@ -176,6 +176,10 @@ const en = {
         government: "Government services",
       },
       reviewTitle: "Review before you continue",
+      switchType: {
+        pay_person: "Pay a merchant instead",
+        pay_merchant: "Pay a person instead",
+      },
       handoffNotice:
         "Authorization happens with your provider, on your own phone. OneLedger never asks for your Mobile Money or banking PIN, and can't send money on your behalf.",
       feeNotice: "Your provider will show the final fee before you approve.",
