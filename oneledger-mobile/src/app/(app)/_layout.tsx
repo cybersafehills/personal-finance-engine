@@ -2,7 +2,7 @@ import { Stack } from "expo-router";
 
 import { colors } from "@/theme/tokens";
 
-// Signed-in area. Becomes the tab shell in PR 5.
+// Signed-in area: the tab shell, with detail and setup screens pushed on top.
 export default function AppLayout() {
   return (
     <Stack
@@ -10,6 +10,9 @@ export default function AppLayout() {
         headerShown: false,
         contentStyle: { backgroundColor: colors.background },
       }}
-    />
+    >
+      <Stack.Screen name="(tabs)" />
+      <Stack.Screen name="connect" options={{ presentation: "modal" }} />
+    </Stack>
   );
 }
