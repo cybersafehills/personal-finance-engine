@@ -1,0 +1,40 @@
+name: Mobile App
+
+on:
+  push:
+    paths:
+      - "oneledger-mobile/**"
+      - ".github/workflows/mobile.yml"
+  pull_request:
+    paths:
+      - "oneledger-mobile/**"
+      - ".github/workflows/mobile.yml"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: oneledger-mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: oneledger-mobile/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      # Catches SDK/dependency drift (wrong native module versions, bad
+      # config plugins) before an EAS build would.
+      - name: Expo Doctor
+        run: npx --yes expo-doctor
