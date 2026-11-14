@@ -6,11 +6,53 @@ import { useFonts } from "expo-font";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 
+import { SessionProvider, useSession } from "@/features/auth/SessionProvider";
+import { LockProvider, useLock } from "@/features/lock/LockProvider";
+import { LockScreen } from "@/features/lock/LockScreen";
 import { PrivacyProvider } from "@/features/privacy/PrivacyProvider";
 import { colors } from "@/theme/tokens";
 
-// Root layout. Session and lock-gate providers are added in PR 2
-// (docs/adr/0019-expo-mobile-app.md). Keep this file thin.
+// Which screens exist depends on the session:
+//   signed out            -> sign-in
+//   signed in, owes MFA   -> mfa
+//   signed in             -> (app)
+// The lock screen is an overlay rather than a route so the navigation
+// state underneath survives a lock/unlock.
+function RootNavigator() {
+  const { loading, session, mfaRequired } = useSession();
+  const lock = useLock();
+
+  if (loading || lock.loading) return null;
+
+  const signedIn = !!session;
+
+  return (
+    <>
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: colors.background },
+        }}
+      >
+        <Stack.Protected guard={signedIn && !mfaRequired}>
+          <Stack.Screen name="(app)" />
+        </Stack.Protected>
+        <Stack.Protected guard={signedIn && mfaRequired}>
+          <Stack.Screen name="mfa" />
+        </Stack.Protected>
+        <Stack.Protected guard={!signedIn}>
+          <Stack.Screen name="sign-in" />
+        </Stack.Protected>
+      </Stack>
+      {signedIn && lock.locked ? (
+        <LockScreen mode="locked" />
+      ) : signedIn && lock.obscured ? (
+        <LockScreen mode="cover" />
+      ) : null}
+    </>
+  );
+}
+
 export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({
     Geist_400Regular,
@@ -24,14 +66,13 @@ export default function RootLayout() {
   if (!fontsLoaded && !fontError) return null;
 
   return (
-    <PrivacyProvider>
-      <StatusBar style="dark" />
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: colors.background },
-        }}
-      />
-    </PrivacyProvider>
+    <SessionProvider>
+      <LockProvider>
+        <PrivacyProvider>
+          <StatusBar style="dark" />
+          <RootNavigator />
+        </PrivacyProvider>
+      </LockProvider>
+    </SessionProvider>
   );
 }

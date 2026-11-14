@@ -143,6 +143,11 @@ export const config = {
   // before the route's own bearer check could run. Each /api/v1 handler is
   // dark unless INTEGRATIONS_DEVELOPER_API_ENABLED === "true" and does its
   // own auth + scope + rate-limit checks.
+  //
+  // /api/mobile/* is excluded: the mobile app (ADR 0019) has no session
+  // cookie. Each handler is dark unless MOBILE_API_ENABLED === "true" and
+  // does its own auth (credentials for sign-in, a Supabase bearer JWT
+  // elsewhere).
   matcher:
-    "/((?!_next/static|_next/image|favicon.ico|icon.png|apple-icon.png|api/cron|api/v1/|api/health/email|api/admin/operational-health|brand/|v1/).*)",
+    "/((?!_next/static|_next/image|favicon.ico|icon.png|apple-icon.png|api/cron|api/v1/|api/mobile/|api/health/email|api/admin/operational-health|brand/|v1/).*)",
 };

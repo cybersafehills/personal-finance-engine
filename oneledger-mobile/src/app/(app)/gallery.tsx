@@ -17,8 +17,8 @@ import { usePrivacy } from "@/features/privacy/PrivacyProvider";
 import { formatRwf } from "@/lib/money";
 import { colors, space } from "@/theme/tokens";
 
-// Design-system gallery. Temporary home screen so the primitives can be
-// reviewed in the preview; replaced by the real tab shell in PR 5.
+// Design-system gallery, reachable from the temporary home so the
+// primitives can be reviewed in the preview. Removed with the tab shell (PR 5).
 // All figures below are sample data.
 export default function Gallery() {
   const { amountsHidden, toggleAmountsHidden } = usePrivacy();
@@ -27,8 +27,8 @@ export default function Gallery() {
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.content}>
         <ScreenHeader
-          title="OneLedger"
-          subtitle="Design system preview (sample data)"
+          title="Design gallery"
+          subtitle="Sample data"
           action={
             <Button
               label={amountsHidden ? "Show amounts" : "Hide amounts"}
