@@ -25,6 +25,12 @@ export default function Home() {
           Your balance, transactions and inbox arrive in the next update.
         </Text>
         <Button
+          label="Automatic recording"
+          variant="secondary"
+          fullWidth
+          onPress={() => router.push("/capture")}
+        />
+        <Button
           label="Security"
           variant="secondary"
           fullWidth

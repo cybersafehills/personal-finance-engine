@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Shown in Settings > Notification access next to the toggle. -->
+    <string name="oneledger_capture_listener_label">OneLedger money-message capture</string>
+</resources>
