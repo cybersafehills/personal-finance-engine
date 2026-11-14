@@ -1,0 +1,63 @@
+// Pure helpers for the mobile API (/api/mobile/*, ADR 0019). Zero imports
+// so they are unit-testable with `deno test` (mobile_api_test.ts), like the
+// rest of this repo's pure logic.
+//
+// /api/mobile/* is what the OneLedger mobile app calls for operations the
+// web performs in server actions (sign-in lockout, MFA-gated mutations).
+// Dark (404) unless MOBILE_API_ENABLED === "true". Env values are passed in
+// by the caller (same convention as devicePairingV2Enabled).
+
+export function isMobileApiEnabled(value: string | undefined): boolean {
+  return value === "true";
+}
+
+/**
+ * CORS is only for browser-based development previews of the app (Expo
+ * web on localhost). Native apps send no Origin and need no CORS. Returns
+ * the origin to echo back, or null. Exact-match allowlist from
+ * MOBILE_API_CORS_ORIGINS (comma-separated); never a wildcard.
+ */
+export function allowedCorsOrigin(
+  origin: string | null,
+  allowlist: string | undefined,
+): string | null {
+  if (!origin || !allowlist) return null;
+  const allowed = allowlist.split(",").map((o) => o.trim()).filter(Boolean);
+  return allowed.includes(origin) ? origin : null;
+}
+
+export type SignInBody = { email: string; password: string };
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Validates the sign-in JSON body. Returns null when it is not usable. */
+export function parseSignInBody(body: unknown): SignInBody | null {
+  if (typeof body !== "object" || body === null) return null;
+  const { email, password } = body as Record<string, unknown>;
+  if (typeof email !== "string" || typeof password !== "string") return null;
+  const trimmed = email.trim().toLowerCase();
+  if (trimmed.length > 254 || !EMAIL_PATTERN.test(trimmed)) return null;
+  if (password.length < 1 || password.length > 1024) return null;
+  return { email: trimmed, password };
+}
+
+// Coarse per-IP limiter (per server instance; resets on deploy). The real
+// brute-force defences are the per-account lockout in
+// lib/auth/password-sign-in.ts and Supabase Auth's own per-IP limit; this
+// only stops one client hammering the endpoint.
+const HITS = new Map<string, { count: number; resetAt: number }>();
+const WINDOW_MS = 60_000;
+const MAX_PER_WINDOW = 20;
+
+export function mobileAuthRateLimited(
+  ip: string,
+  now: number = Date.now(),
+): boolean {
+  const rec = HITS.get(ip);
+  if (!rec || now > rec.resetAt) {
+    HITS.set(ip, { count: 1, resetAt: now + WINDOW_MS });
+    return false;
+  }
+  rec.count += 1;
+  return rec.count > MAX_PER_WINDOW;
+}
