@@ -34,6 +34,9 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Unit tests
+        run: npm test -- --ci
+
       # Catches SDK/dependency drift (wrong native module versions, bad
       # config plugins) before an EAS build would.
       - name: Expo Doctor
