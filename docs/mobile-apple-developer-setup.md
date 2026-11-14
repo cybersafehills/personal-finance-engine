@@ -4,28 +4,38 @@ Needed for: iOS builds on a real iPhone, TestFlight, App Store submission,
 and iOS push (APNs). **Not** needed for Android, or for iOS Simulator builds.
 Cost: US$99 per year (verify current price on Apple's site).
 
-## 0. Status and decision (2026-11-14)
+## 0. Status and decision (updated 2026-11-14)
 
+- **Decision: enroll as an Individual, under Yves Dolton's own name.** The App
+  Store seller name will be the account holder's legal name. (An earlier
+  version of this runbook recommended an Organization for Cybersafe Users and
+  Partners; that is superseded.)
 - Fee will be paid around the end of the following week; until then no paid
   membership exists. That blocks only: real-device iOS builds via EAS,
   TestFlight, App Store submission, iOS push. Everything else proceeds.
-- **The App Store listing must be under Cybersafe Users and Partners.** The
-  seller name shown on the App Store is the enrolled entity, so the account
-  that publishes must be an **Organization** account for that legal entity.
-  Enrolling as an Individual only to test sooner would put a personal name on
-  the listing and force an app transfer later (push keys re-issued, TestFlight
-  reset, extra review) — and it is unnecessary, because testing does not need
-  the paid account (see "Testing without the paid account").
-- **Recommended path:** start Organization enrollment for the Cybersafe legal
-  entity now (the D-U-N-S number and Apple's verification are the slow part),
-  and pay when Apple asks. Apple's flow verifies enrollment information first
-  and takes payment afterwards.
+- **What an Individual account changes about the listing:** only the seller
+  name (and the contact details Apple/Google may show publicly). The app name
+  ("OneLedger"), bundle id, icon, screenshots, privacy policy and review
+  process are identical. It does not change how the app works.
+- **Enter your legal name exactly as on your government ID** in the first/last
+  name fields. Apple verifies it and delays approval for aliases, nicknames or
+  company names. The seller name will appear as entered, so decide the order
+  (first/last) to match the ID.
+- Individual accounts cannot be converted to Organization. If the app should
+  later be published under a company, Apple's app-transfer process moves it
+  (bundle id and reviews are kept; push keys, TestFlight and some entitlements
+  need rework). The Android side has its own equivalent.
+- Check the developer-contact rules for your distribution regions (for
+  example EU "trader" disclosures can show a public address/phone/email); use
+  a business-style email rather than a personal one if you want separation.
 - Region: Apple states enrollment is available in "more than 220 countries or
   regions" but publishes no list we could verify for Rwanda. The authoritative
-  check is the country picker in the enrollment form. Apple's Developer
-  Program License Agreement "Exhibit A" is the formal list.
-- Android is separate: the Google Play account must also belong to the
-  Cybersafe entity if the Play listing should show it.
+  check is the country picker in the enrollment form; Apple verifies details
+  before taking payment.
+- Google Play: a **personal** Play developer account created recently is
+  subject to extra requirements (e.g. a closed test with a minimum number of
+  testers for a minimum period before production access). Verify current
+  rules in Play Console before planning the Android release date.
 
 ### Testing without the paid account
 
@@ -46,12 +56,8 @@ Cost: US$99 per year (verify current price on Apple's site).
 | App Store seller name | Your personal name | The company name |
 | Teams | One person | Multiple members/roles |
 
-Recommendation: if OneLedger is a registered company and you want the company
-name on the listing, enroll as an **Organization**; request the D-U-N-S number
-now because it is the slow part. If you need to test sooner, enroll as an
-**Individual**. An account cannot be converted from Individual to Organization
-later (an app can be transferred between accounts, which is disruptive), so
-choose deliberately.
+Chosen: **Individual** (see section 0). The Organization column is kept for
+reference in case the listing moves to a company later.
 
 Check that your country/region is on Apple's list of supported regions.
 
