@@ -10,11 +10,16 @@
 // (OTP codes, marketing, airtime top-up receipts) are turned away without
 // writing evidence.
 //
-// This module is ported verbatim to the Android companion
-// (`android/app/src/main/java/me/oneledger/companion/detection/ProviderMatchers.kt`,
-// ADR 0010 §2). The companion runs the same matchers on-device so a
-// non-financial notification never leaves the phone. When a matcher changes
-// here, change the Kotlin port and its `ProviderMatchersTest` in the same PR.
+// This module is ported verbatim to Kotlin, which runs the same matchers
+// on-device so a non-financial notification never leaves the phone:
+//   - the mobile app's capture engine (ADR 0019 §3):
+//     `oneledger-mobile/modules/oneledger-capture/android/src/main/java/me/oneledger/companion/detection/ProviderMatchers.kt`
+//   - the standalone Android companion being retired (ADR 0010 §2):
+//     `android/app/src/main/java/me/oneledger/companion/detection/ProviderMatchers.kt`
+// When a matcher changes here, change the Kotlin ports in the same PR and add
+// the new accept/reject cases to `tests/provider-cases.json`: that one file is
+// run against this module (`tests/provider_cases_test.ts`) AND against the
+// mobile app's Kotlin port (`ProviderCasesTest`), so the two cannot drift.
 
 export type DetectedProvider = {
   /** Canonical provider identifier, e.g. `mtn_momo`. */

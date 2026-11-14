@@ -32,10 +32,10 @@ not a reason to keep the whole app native.
    the app is killed. JS only reads health/events and triggers pairing. The
    `pfe_` device secret never enters JS.
 3. **Matchers are not literally shared.** They must run in Kotlin with no JS
-   engine. Parity is enforced by a shared fixture corpus
-   (`oneledger-mobile/fixtures/provider-cases.json`) consumed by the Deno
-   tests, the Kotlin tests and the mobile TS tests; CI fails on drift.
-   `supabase/functions/_shared/providers.ts` stays the source of truth.
+   engine. Parity is enforced by one shared fixture,
+   `supabase/functions/_shared/tests/provider-cases.json`, run against
+   `providers.ts` by the Deno suite and against the Kotlin port by the
+   module's `ProviderCasesTest`. `providers.ts` stays the source of truth.
 4. **Protocol unchanged.** Same `/capture` (`pair` → `test` → `capture`),
    same `DEVICE_PAIRING_V2` flag, same `capture_url` handling. No server
    change is needed for Android capture.
@@ -57,6 +57,22 @@ not a reason to keep the whole app native.
    Shortcuts guide plus pairing handoff; an App Intent ("Send to OneLedger",
    ADR 0013) follows. ADR 0013's "allow notification access" step does not
    apply to iOS.
+
+## Implementation notes (PR 3)
+
+- The module's Kotlin packages stay `me.oneledger.companion.*` (its Gradle
+  `namespace` is `me.oneledger.capture`). Android stores the user's
+  notification-access grant against the listener's component name, so the
+  class name must not change across the upgrade.
+- The service, boot receiver and permissions are declared in the module's own
+  `AndroidManifest.xml` and merged by Gradle; no config plugin is needed.
+- `FOREGROUND_SERVICE*` and `POST_NOTIFICATIONS` are not requested: the upload
+  worker is plain WorkManager. (`CAMERA` returns with QR pairing in PR 4.)
+- JSON is built with `org.json` instead of kotlinx-serialization, so the
+  module needs no serialization compiler plugin. Wire shape is unchanged and
+  pinned by `CaptureWireTest`.
+- `android.allowBackup` is `false`: the device secret is in
+  `EncryptedSharedPreferences`, which cannot be decrypted after a restore.
 
 ## Consequences
 

@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      Merged into the OneLedger app's manifest. Least privilege (ADR 0010 §2,
+      carried over by ADR 0019). No READ_SMS / RECEIVE_SMS: every target
+      provider posts a system notification for the same event, and Play policy
+      restricts SMS access to default-handler apps.
+
+      No FOREGROUND_SERVICE permissions: the upload worker is plain
+      WorkManager and never promotes itself to a foreground service.
+    -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <application>
+        <!--
+          The notification observer. Its class name is kept identical to the
+          standalone companion's (me.oneledger.companion.service...), because
+          Android stores the user's notification-access grant against the
+          component name: renaming it would silently revoke access on upgrade.
+
+          BIND_NOTIFICATION_LISTENER_SERVICE is held by the system; the user
+          grants access in Settings > Notification access. It cannot be
+          requested at runtime.
+        -->
+        <service
+            android:name="me.oneledger.companion.service.CaptureNotificationListenerService"
+            android:exported="true"
+            android:label="@string/oneledger_capture_listener_label"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <receiver
+            android:name="me.oneledger.companion.work.BootCompletedReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

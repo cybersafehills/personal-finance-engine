@@ -5,10 +5,16 @@ on:
     paths:
       - "oneledger-mobile/**"
       - ".github/workflows/mobile.yml"
+      # The on-device matcher is a Kotlin port of providers.ts; re-run its
+      # shared-case guard whenever the source of truth or the cases change.
+      - "supabase/functions/_shared/providers.ts"
+      - "supabase/functions/_shared/tests/provider-cases.json"
   pull_request:
     paths:
       - "oneledger-mobile/**"
       - ".github/workflows/mobile.yml"
+      - "supabase/functions/_shared/providers.ts"
+      - "supabase/functions/_shared/tests/provider-cases.json"
 
 jobs:
   check:
@@ -41,3 +47,74 @@ jobs:
       # config plugins) before an EAS build would.
       - name: Expo Doctor
         run: npx --yes expo-doctor
+
+  # The native Android capture engine (modules/oneledger-capture, ADR 0019).
+  # Built here rather than on a developer laptop: a full React Native Android
+  # build needs ~10 GB of SDK/NDK/Gradle caches.
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: oneledger-mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: oneledger-mobile/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # Robolectric fetches its android-all framework jar at test time via its
+      # own fetcher (not Gradle), which flakes on CI network hiccups.
+      - name: Cache Robolectric framework jars
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: robolectric-android-all-${{ runner.os }}-mobile-v1
+
+      - name: Install
+        run: npm ci
+
+      # Continuous Native Generation: android/ is not committed.
+      - name: Generate the Android project
+        run: npx expo prebuild --platform android --no-install
+
+      - name: Capture engine unit tests (matchers, wire format, client, queue, health)
+        working-directory: oneledger-mobile/android
+        run: ./gradlew :oneledger-capture:testDebugUnitTest --console=plain
+
+      # Proves the whole app compiles and the module's manifest merges
+      # (listener service, boot receiver, permissions).
+      - name: Assemble debug app
+        working-directory: oneledger-mobile/android
+        run: ./gradlew :app:assembleDebug --console=plain
+
+      - name: Check the merged manifest
+        working-directory: oneledger-mobile/android
+        run: |
+          manifest=$(find app/build/intermediates/merged_manifests/debug -name AndroidManifest.xml | head -1)
+          test -n "$manifest"
+          grep -q 'me.oneledger.companion.service.CaptureNotificationListenerService' "$manifest"
+          grep -q 'me.oneledger.companion.work.BootCompletedReceiver' "$manifest"
+          grep -q 'android.permission.BIND_NOTIFICATION_LISTENER_SERVICE' "$manifest"
+          if grep -Eq 'android.permission.(READ_SMS|RECEIVE_SMS)' "$manifest"; then
+            echo "SMS permissions must never be requested (ADR 0010 section 2)"; exit 1
+          fi
+
+      - name: Upload test reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mobile-android-reports
+          path: oneledger-mobile/modules/oneledger-capture/android/build/reports/**
+          if-no-files-found: ignore

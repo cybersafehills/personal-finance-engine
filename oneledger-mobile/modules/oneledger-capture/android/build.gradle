@@ -1,0 +1,73 @@
+// KSP generates Room's database code. Its version must match the Kotlin
+// compiler; the Expo root plugin already resolves the right one as
+// `rootProject.ext.kspVersion`, so use that instead of pinning a number that
+// would break on the next SDK upgrade.
+buildscript {
+  repositories {
+    gradlePluginPortal()
+    mavenCentral()
+    google()
+  }
+  dependencies {
+    classpath "com.google.devtools.ksp:symbol-processing-gradle-plugin:${rootProject.ext.kspVersion}"
+  }
+}
+
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+apply plugin: 'com.google.devtools.ksp'
+
+group = 'me.oneledger.capture'
+version = '0.1.0'
+
+// The capture engine (ADR 0019 §2): the standalone companion's Kotlin code,
+// packaged as a local Expo module. `namespace` is this library's own (it
+// only names the generated R class); the Kotlin packages stay
+// me.oneledger.companion.* so component names survive an in-place upgrade.
+android {
+  namespace "me.oneledger.capture"
+  defaultConfig {
+    versionCode 1
+    versionName "0.1.0"
+    consumerProguardFiles 'consumer-rules.pro'
+  }
+  lintOptions {
+    abortOnError false
+  }
+  testOptions {
+    unitTests {
+      includeAndroidResources = true
+      returnDefaultValues = true
+    }
+  }
+}
+
+def roomVersion = "2.7.2"
+def workVersion = "2.10.3"
+def okhttpVersion = "4.12.0"
+
+dependencies {
+  implementation "androidx.core:core-ktx:1.13.1"
+
+  implementation "androidx.room:room-runtime:${roomVersion}"
+  implementation "androidx.room:room-ktx:${roomVersion}"
+  ksp "androidx.room:room-compiler:${roomVersion}"
+
+  implementation "androidx.work:work-runtime-ktx:${workVersion}"
+  implementation "androidx.security:security-crypto:1.1.0-alpha06"
+  implementation "com.squareup.okhttp3:okhttp:${okhttpVersion}"
+  // Installed only in a debuggable host build (see CaptureClient); inert otherwise.
+  implementation "com.squareup.okhttp3:logging-interceptor:${okhttpVersion}"
+  implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1"
+
+  testImplementation "junit:junit:4.13.2"
+  testImplementation "org.robolectric:robolectric:4.14.1"
+  testImplementation "androidx.test:core:1.6.1"
+  testImplementation "androidx.test.ext:junit:1.2.1"
+  testImplementation "androidx.room:room-testing:${roomVersion}"
+  testImplementation "org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1"
+  testImplementation "com.squareup.okhttp3:mockwebserver:${okhttpVersion}"
+}
