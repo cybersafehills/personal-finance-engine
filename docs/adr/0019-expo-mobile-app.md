@@ -116,8 +116,12 @@ not a reason to keep the whole app native.
   logic lives in a server action with checks the database does not enforce
   (MFA, capability gates).
 - A conflict can only be cleared, never confirmed: nothing is applied on the
-  user's behalf when rules disagree. Picking a different category still goes
-  through the web.
+  user's behalf when rules disagree.
+- Picking or typing a category calls `apply_manual_category_correction` under
+  the session, like the web's "Correct category". The optional "remember for
+  this merchant" rule is written to `categorization_policies` under RLS,
+  scoped by the transaction's `workspace_id`, matched in code rather than with
+  `ilike` (PostgREST treats `*` as a wildcard). Still no `/api/mobile` route.
 
 ## Consequences
 

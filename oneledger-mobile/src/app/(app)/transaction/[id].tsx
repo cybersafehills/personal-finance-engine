@@ -96,6 +96,16 @@ export default function TransactionDetail() {
         ) : null}
       </Card>
 
+      {failed ? null : (
+        <Button
+          label={transaction.category ? "Change category" : "Choose a category"}
+          fullWidth
+          onPress={() =>
+            router.push({ pathname: "/category/[id]", params: { id: transaction.id } })
+          }
+        />
+      )}
+
       {config.apiBaseUrl ? (
         <Button
           label="Edit on the web"
