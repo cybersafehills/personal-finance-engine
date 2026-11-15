@@ -1,6 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { supabaseServer } from "./supabase-server";
+import { excludeLinkedTransfers, linkedTransferIdSet } from "./transfer-exclusion";
 import {
   dailyReportPeriod,
   previousCompleteDayKey,
@@ -182,7 +183,23 @@ async function fetchSettledTransactions(
   if (error) {
     throw new Error(`fetchSettledTransactions failed: ${error.message}`);
   }
-  return data ?? [];
+
+  // Confirmed self-transfers (transfer_links.status = 'linked') are neither
+  // income nor spending - same rule getBudgetActuals applies - so reports and
+  // emails agree with budgets and Home. A failed lookup must not silently
+  // inflate a delivered report, so it throws like the fetch above.
+  const { data: links, error: linksError } = await supabase
+    .from("transfer_links")
+    .select("out_transaction_id, in_transaction_id")
+    .eq("workspace_id", workspaceId)
+    .eq("status", "linked");
+  if (linksError) {
+    throw new Error(`fetchLinkedTransfers failed: ${linksError.message}`);
+  }
+  return excludeLinkedTransfers(
+    data ?? [],
+    linkedTransferIdSet(links ?? []),
+  );
 }
 
 function toReportTransactionFacts(
