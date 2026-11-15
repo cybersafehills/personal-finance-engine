@@ -34,6 +34,51 @@ export function needsReview(
   return REVIEW_STATUSES.includes(transaction.category_decision_status);
 }
 
+export type ReviewPrompt = {
+  /** One line explaining why OneLedger wants a look. */
+  message: string;
+  /** Null when there is nothing safe to confirm (e.g. rules disagree). */
+  confirmLabel: string | null;
+  dismissLabel: string;
+};
+
+/**
+ * What the review card says and which actions it offers. Mirrors the web's
+ * review queue: a suggestion can be accepted, an auto-applied category can
+ * be confirmed, and a conflict can only be cleared (nothing is applied on
+ * the user's behalf when rules disagree).
+ */
+export function reviewPrompt(
+  transaction: Pick<
+    TransactionRow,
+    "category_decision_status" | "category" | "suggested_category"
+  >,
+): ReviewPrompt {
+  const status = transaction.category_decision_status;
+  if (status === "suggested" && transaction.suggested_category) {
+    return {
+      message: `Suggested category: ${transaction.suggested_category}`,
+      confirmLabel: "Use it",
+      dismissLabel: "Not right",
+    };
+  }
+  if (status === "provisional" && transaction.category) {
+    return {
+      message: `Filed under ${transaction.category} automatically`,
+      confirmLabel: "Looks right",
+      dismissLabel: "Not right",
+    };
+  }
+  if (status === "conflict") {
+    return {
+      message: "Your rules disagree about this one",
+      confirmLabel: null,
+      dismissLabel: "Clear",
+    };
+  }
+  return { message: "Needs a category", confirmLabel: null, dismissLabel: "Clear" };
+}
+
 /** Signed amount for display: + in, − out, 0 for neutral or failed. */
 export function signedAmountRwf(
   transaction: Pick<TransactionRow, "direction" | "amount_rwf" | "status">,
