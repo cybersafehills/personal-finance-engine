@@ -187,6 +187,18 @@ not a reason to keep the whole app native.
   form's optional category is applied through the existing category-correction
   function after creation).
 
+## Implementation notes (Goals)
+
+- A read-only Goals screen (More → Goals). It reads `financial_goals` under RLS
+  and calls the database's `goal_progress()` per active goal (SECURITY DEFINER,
+  checks Space membership itself, granted to `authenticated`), so the percent,
+  the required monthly saving and the projected date are the database's, not
+  client maths, and no `/api/mobile` route is needed.
+- Like the web's goals list there is no workspace filter, so goals from a
+  household Space the user belongs to are listed with their own.
+- A failed progress call drops only that goal's pace lines. Creating goals and
+  adding contributions stay on the web.
+
 ## Consequences
 
 - `android/` is retired only after the new app reaches parity and one stable
