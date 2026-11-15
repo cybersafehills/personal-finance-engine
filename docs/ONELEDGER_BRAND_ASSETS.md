@@ -199,3 +199,22 @@ Not supplied by the brand owner; do not fabricate these:
   not substitute the favicon or app icon for this.
 - **Print-ready vector artwork** for formal documents/PDF exports (no PDF
   or report generation exists in this repository yet).
+
+## Mobile app icons (added 2026-11-15)
+
+The mobile app (`oneledger-mobile/`) takes its icons from a supplied pack,
+`OneLedger_Mobile_Assets_Fixed`, composed from `standalone-icon.png` using
+only alpha cropping, proportional scaling and centring (the mark's geometry
+and colours are unchanged). Files live in `oneledger-mobile/assets/branding/`.
+
+Two files were scaled again for the app (pure downscale and centring, to 72%
+of the pack's file): the Android adaptive-icon foreground and monochrome
+layers. The pack's versions let round launcher masks clip the mark. The
+Google Play 512 px icon (`oneledger-mobile/store/google-play/icon-512.png`) is
+a plain downscale of the iOS icon.
+
+Caveats that apply to every one of these: the source mark is ~318 px wide, so
+the 1024 px outputs are interpolated; and the mark's "1" is transparent, so
+the mark always needs a **light** background (a navy background hides it).
+Details and the remaining gaps: `docs/mobile-release.md`.
+
