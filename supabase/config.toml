@@ -503,6 +503,17 @@ verify_jwt = false
 enabled = true
 verify_jwt = false
 
+# Push drainer for the mobile app (docs/mobile-push.md, ADR 0019 section 8).
+# Sends unread in_app notifications to registered phones via the Expo push
+# service. No JWT: authorized by the same scheduler secret as
+# send-notifications (x-notification-cron-secret). Dark until:
+#   PUSH_NOTIFICATIONS_ENABLED = true
+# Optional: EXPO_ACCESS_TOKEN (only if the Expo project enables enhanced
+# push security). Schedule it like send-notifications (e.g. every minute).
+[functions.send-push-notifications]
+enabled = true
+verify_jwt = false
+
 # Device pairing v2 capture endpoint (docs/device-pairing.md, ADR 0008).
 # No JWT: a device authenticates with a one-time pairing token (op:"pair")
 # or its own hashed device credential (op:"test", x-device-key header) -
