@@ -7,6 +7,7 @@ import { supabase } from "@/api/supabase";
 import { deviceStore } from "@/lib/device-store";
 
 import { isExpoPushToken } from "./push-routing";
+import { pushFailureMessage } from "./push-errors";
 
 // Push notifications (ADR 0019 section 8). The phone registers an Expo push
 // token against the signed-in user; the server then pushes that user's
@@ -86,8 +87,8 @@ export async function enablePush(): Promise<ActionResult> {
     }
     await deviceStore.set(TOKEN_KEY, token);
     return { ok: true };
-  } catch {
-    return { ok: false, message: "Couldn't turn notifications on. Try again." };
+  } catch (error) {
+    return { ok: false, message: pushFailureMessage(error) };
   }
 }
 

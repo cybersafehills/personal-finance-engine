@@ -43,3 +43,6 @@ yarn-error.*
 # Native module build output
 modules/*/android/build/
 modules/*/android/.cxx/
+
+# Firebase client config for Android push (docs/mobile-push.md); keep it out of git.
+google-services.json
