@@ -1,5 +1,8 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { type StatementRowInput, toMobileStatement } from "./mobile-statements.ts";
+import {
+  type StatementRowInput,
+  toMobileStatement,
+} from "./mobile-statements.ts";
 
 const BASE: StatementRowInput = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -47,8 +50,24 @@ Deno.test("a mixed-currency statement keeps one total per currency", () => {
   const s = toMobileStatement({
     ...BASE,
     per_currency: [
-      { currency: "RWF", openingBalanceMinor: 1, closingBalanceMinor: 2, totalCreditsMinor: 3, totalDebitsMinor: 4, totalFeesMinor: 5, reconciles: true },
-      { currency: "USD", openingBalanceMinor: null, closingBalanceMinor: null, totalCreditsMinor: 600, totalDebitsMinor: 0, totalFeesMinor: 0, reconciles: null },
+      {
+        currency: "RWF",
+        openingBalanceMinor: 1,
+        closingBalanceMinor: 2,
+        totalCreditsMinor: 3,
+        totalDebitsMinor: 4,
+        totalFeesMinor: 5,
+        reconciles: true,
+      },
+      {
+        currency: "USD",
+        openingBalanceMinor: null,
+        closingBalanceMinor: null,
+        totalCreditsMinor: 600,
+        totalDebitsMinor: 0,
+        totalFeesMinor: 0,
+        reconciles: null,
+      },
     ],
   })!;
   assertEquals(s.totals.map((t) => t.currency), ["RWF", "USD"]);
@@ -57,18 +76,28 @@ Deno.test("a mixed-currency statement keeps one total per currency", () => {
 });
 
 Deno.test("an unreconciled statement is reported, never hidden", () => {
-  assertEquals(toMobileStatement({ ...BASE, reconciles: false })!.totals[0].reconciles, false);
+  assertEquals(
+    toMobileStatement({ ...BASE, reconciles: false })!.totals[0].reconciles,
+    false,
+  );
 });
 
 Deno.test("flags a superseding version and tolerates missing coverage metadata", () => {
-  const s = toMobileStatement({ ...BASE, supersedes_id: "x", coverage_metadata: null })!;
+  const s = toMobileStatement({
+    ...BASE,
+    supersedes_id: "x",
+    coverage_metadata: null,
+  })!;
   assertEquals(s.isUpdatedVersion, true);
   assertEquals(s.warningCount, 0);
 });
 
 Deno.test("the day label follows the statement's own timezone", () => {
   // The same instants read in UTC would be 31 Oct - 30 Nov.
-  assertEquals(toMobileStatement({ ...BASE, timezone: "UTC" })!.periodLabel, "31 October 2026 – 30 November 2026");
+  assertEquals(
+    toMobileStatement({ ...BASE, timezone: "UTC" })!.periodLabel,
+    "31 October 2026 – 30 November 2026",
+  );
 });
 
 Deno.test("rows the app cannot show faithfully are dropped", () => {
@@ -82,7 +111,11 @@ Deno.test("an unsupported currency yields no totals instead of wrong ones", () =
 });
 
 Deno.test("unknown scope and type fall back to plain labels", () => {
-  const s = toMobileStatement({ ...BASE, scope: "mystery", statement_type: "detailed" })!;
+  const s = toMobileStatement({
+    ...BASE,
+    scope: "mystery",
+    statement_type: "detailed",
+  })!;
   assertEquals(s.scopeLabel, "Statement");
   assertEquals(s.typeLabel, "Detailed");
 });

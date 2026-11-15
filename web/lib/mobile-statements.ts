@@ -74,7 +74,9 @@ const SCOPE_LABEL: Record<string, string> = {
 const STATUSES = ["preparing", "generating", "ready", "failed"] as const;
 
 function totalsOf(row: StatementRowInput): MobileStatementTotals[] {
-  const per = (row.per_currency ?? []).filter((c) => isSupportedCurrency(c.currency));
+  const per = (row.per_currency ?? []).filter((c) =>
+    isSupportedCurrency(c.currency)
+  );
   if (per.length > 0) {
     return per.map((c) => ({
       currency: c.currency,
@@ -99,7 +101,9 @@ function totalsOf(row: StatementRowInput): MobileStatementTotals[] {
 }
 
 /** Null for a row the app cannot show faithfully (unknown status or bad dates). */
-export function toMobileStatement(row: StatementRowInput): MobileStatement | null {
+export function toMobileStatement(
+  row: StatementRowInput,
+): MobileStatement | null {
   if (!(STATUSES as readonly string[]).includes(row.status)) return null;
   const start = new Date(row.period_start);
   const end = new Date(row.period_end);
