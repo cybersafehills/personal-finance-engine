@@ -162,6 +162,22 @@ not a reason to keep the whole app native.
 - The Home budget card loads independently of the rest of Home and respects
   privacy mode, so a slow or unavailable budget service never delays Home.
 
+## Implementation notes (Add transaction)
+
+- Adding a transaction by hand inserts into `transactions` as the signed-in
+  user, exactly as the web's `createManualTransaction` does (no MFA or
+  capability check lives in that action; RLS decides). The rules are mirrored
+  in `features/manual/input.ts` (always settled/successful, direction in or
+  out, currency from the account, fee only on money out, principal/fee effects
+  as the accounting constraint expects) and unit-tested. One deliberate
+  difference: `workspace_id` is the chosen account's own workspace rather than
+  the active-workspace cookie, which the database's same-workspace constraint
+  requires anyway.
+- Dates are Kigali time and a time more than five minutes in the future is
+  refused. There is no de-duplication: the button is disabled while saving,
+  but a deliberate second entry is a second transaction.
+- Category is chosen afterwards on the transaction's detail screen.
+
 ## Consequences
 
 - `android/` is retired only after the new app reaches parity and one stable
