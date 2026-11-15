@@ -12,6 +12,16 @@ import {
   Text,
 } from "@/components/ds";
 import {
+  IOS_TROUBLESHOOTING,
+  iosHealthDisplay,
+  type IosDeviceStatus,
+} from "@/features/ios-shortcuts/ios-health";
+import {
+  clearIosDeviceCredentialId,
+  loadIosDeviceCredentialId,
+  saveIosDeviceCredentialId,
+} from "@/features/ios-shortcuts/store";
+import {
   AUTOMATION_STEPS,
   connectPhase,
   connectShortcutRunUrl,
@@ -24,7 +34,7 @@ import {
 } from "@/features/ios-shortcuts/shortcuts";
 import { AccountPicker } from "@/features/pairing/AccountPicker";
 import {
-  getDeviceLastUsedAt,
+  getDeviceStatus,
   getPairingSessionStatus,
   listPairableAccounts,
   startPairingSession,
@@ -63,7 +73,34 @@ export default function ShortcutsGuide() {
   // would otherwise restart on every countdown tick.
   const handleConnected = useCallback((credentialId: string | null) => {
     setDeviceCredentialId(credentialId);
+    // Remember it so More can show this iPhone's health and the guide can
+    // reopen at the check step instead of from the top.
+    if (credentialId) saveIosDeviceCredentialId(credentialId);
     setStep("automate");
+  }, []);
+
+  // Coming back to a finished setup: resume at "check it works" when the
+  // remembered connection is still active.
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const id = await loadIosDeviceCredentialId();
+      if (!id) return;
+      const status = await getDeviceStatus(id);
+      if (!active || status?.status !== "active") return;
+      setDeviceCredentialId(id);
+      setStep((current) => (current === "install" ? "verify" : current));
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // "Connect again" (new iPhone, reinstalled Shortcuts): forget the old one.
+  const handleReconnect = useCallback(() => {
+    clearIosDeviceCredentialId();
+    setDeviceCredentialId(null);
+    setStep("connect");
   }, []);
 
   return (
@@ -89,7 +126,9 @@ export default function ShortcutsGuide() {
         <Connect onConnected={handleConnected} />
       ) : null}
       {step === "automate" ? <Automate onNext={() => setStep("verify")} /> : null}
-      {step === "verify" ? <Verify deviceCredentialId={deviceCredentialId} /> : null}
+      {step === "verify" ? (
+        <Verify deviceCredentialId={deviceCredentialId} onReconnect={handleReconnect} />
+      ) : null}
     </Screen>
   );
 }
@@ -356,15 +395,25 @@ function Automate({ onNext }: { onNext: () => void }) {
   );
 }
 
-function Verify({ deviceCredentialId }: { deviceCredentialId: string | null }) {
-  const [lastUsedAt, setLastUsedAt] = useState<string | null>(null);
+function Verify({
+  deviceCredentialId,
+  onReconnect,
+}: {
+  deviceCredentialId: string | null;
+  onReconnect: () => void;
+}) {
+  const [device, setDevice] = useState<IosDeviceStatus | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const [showHelp, setShowHelp] = useState(false);
 
   useEffect(() => {
     if (!deviceCredentialId) return;
     let active = true;
     const check = async () => {
-      const value = await getDeviceLastUsedAt(deviceCredentialId);
-      if (active) setLastUsedAt(value);
+      const value = await getDeviceStatus(deviceCredentialId);
+      if (!active) return;
+      setDevice(value);
+      setNow(Date.now());
     };
     check();
     const timer = setInterval(check, VERIFY_POLL_MS);
@@ -374,16 +423,24 @@ function Verify({ deviceCredentialId }: { deviceCredentialId: string | null }) {
     };
   }, [deviceCredentialId]);
 
+  const working = device?.status === "active" && device.lastUsedAtIso !== null;
+  const display = device ? iosHealthDisplay(device, now) : null;
+
   return (
     <>
       <Card style={{ gap: space[3] }}>
-        {lastUsedAt ? (
+        {working && display ? (
           <>
-            <Badge variant="positive">Working</Badge>
+            <Badge variant={display.variant}>{display.label}</Badge>
             <Text variant="heading">OneLedger is receiving from this iPhone</Text>
             <Text variant="label" color="textSecondary">
-              Last heard from it: {formatDateTime(lastUsedAt)}.
+              {display.detail} {device?.lastUsedAtIso ? `(${formatDateTime(device.lastUsedAtIso)})` : ""}
             </Text>
+          </>
+        ) : display && display.variant === "attention" ? (
+          <>
+            <Badge variant="attention">{display.label}</Badge>
+            <Text>{display.detail}</Text>
           </>
         ) : (
           <>
@@ -399,7 +456,35 @@ function Verify({ deviceCredentialId }: { deviceCredentialId: string | null }) {
           </>
         )}
       </Card>
+
+      <Card style={{ gap: space[3] }}>
+        <Button
+          label={showHelp ? "Hide troubleshooting" : "It isn't working"}
+          variant="ghost"
+          onPress={() => setShowHelp((v) => !v)}
+        />
+        {showHelp ? (
+          <View style={{ gap: space[3] }}>
+            {IOS_TROUBLESHOOTING.map((item) => (
+              <View key={item.problem} style={{ gap: 2 }}>
+                <Text variant="bodyStrong">{item.problem}</Text>
+                <Text variant="label" color="textSecondary">
+                  {item.fix}
+                </Text>
+              </View>
+            ))}
+            <Button
+              label="Open Shortcuts"
+              variant="secondary"
+              fullWidth
+              onPress={() => open(SHORTCUTS_APP_URL)}
+            />
+          </View>
+        ) : null}
+      </Card>
+
       <Button label="Finish" fullWidth onPress={() => router.back()} />
+      <Button label="Connect this iPhone again" variant="ghost" fullWidth onPress={onReconnect} />
     </>
   );
 }
