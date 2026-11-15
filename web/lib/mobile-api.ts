@@ -123,3 +123,19 @@ export function corsHeadersFor(
     "Vary": "Origin",
   };
 }
+
+/**
+ * Resolves the signed-in user for a session client. On a bearer (mobile)
+ * request the client is built with `persistSession: false` and only an
+ * Authorization header, so it has no stored session: a bare
+ * `auth.getUser()` answers "Auth session missing" and callers see no user.
+ * Passing the already-validated access token to `getUser(token)` asks Auth
+ * about that token directly. With no token (the cookie-based web), it is the
+ * plain `getUser()` exactly as before.
+ */
+export function getUserForRequest<R>(
+  auth: { getUser: (jwt?: string) => Promise<R> },
+  bearer: string | null,
+): Promise<R> {
+  return bearer ? auth.getUser(bearer) : auth.getUser();
+}
