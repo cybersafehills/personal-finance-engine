@@ -8554,6 +8554,68 @@ else
   pass "S5: the 31st request in an hour is rate limited"
 fi
 
+# ===========================================================================
+# OneLedger 3.0 E1: erasure covers the 3.0 tables. A user whose Personal Space
+# holds counterparties, a balance observation and a MATCHED payment request,
+# and who also created a payment request in someone else's household, must be
+# erasable: the matched request must not block deleting its transaction, and
+# nothing of the user's request (their own phone number as destination) may
+# survive in the shared Space.
+# ===========================================================================
+echo "=== OneLedger 3.0 E1: erasure covers new tables ==="
+E1_U="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('e1-user@example.com') returning id;" | head -1)"
+E1_O="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('e1-other@example.com') returning id;" | head -1)"
+E1_WS="$(psql -d pfe_rls -t -A -c "select w.id from public.workspaces w join public.workspace_memberships m on m.workspace_id=w.id where m.user_id='$E1_U' and w.kind='personal';" | head -1)"
+E1_ACCT="00000000-0000-0000-0000-0000000e1a01"
+E1_TX="00000000-0000-0000-0000-0000000e1b01"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.accounts (id, workspace_id, name, provider, currency) values ('$E1_ACCT', '$E1_WS', 'E1 acct', 'mtn_momo', 'RWF');
+  insert into public.momo_messages (id, raw_message, processing_status) values ('00000000-0000-0000-0000-0000000e1c01', 'e1', 'processed');
+  insert into public.transactions (id, momo_message_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at,
+     parser_version, counterparty_name, counterparty_reference, settlement_state, affects_balance, principal_effect_rwf, fee_effect_rwf, effect_reason)
+  values ('$E1_TX', '00000000-0000-0000-0000-0000000e1c01', '$E1_ACCT', '$E1_WS', 'money_received', 'in', 'success', 5000, 0, now(),
+     'test', 'E1 Payer', '250793000111', 'settled', true, 5000, 0, 'settled_incoming');" >/dev/null
+as_user "$E1_U" "select public.backfill_counterparties('$E1_WS');" >/dev/null
+as_user "$E1_U" "select public.record_manual_balance_observation('$E1_ACCT', 5000, now() - interval '1 minute');" >/dev/null
+E1_REQ="$(as_user "$E1_U" "select public.create_payment_request('$E1_WS', 5000, 'RWF', 'momo_phone', '0793000111', 'E1 Owner', null, now() + interval '3 days', '$(printf '%064d' 7001)');" | tail -1)"
+as_user "$E1_U" "select public.link_payment_request_transaction('$E1_REQ', '$E1_TX');" >/dev/null
+E1_PRE="$(psql -d pfe_rls -t -A -c "select (select count(*) from public.counterparties where workspace_id='$E1_WS') || '|' || (select count(*) from public.balance_observations where workspace_id='$E1_WS') || '|' || (select status from public.payment_requests where id='$E1_REQ');")"
+if [ "$E1_PRE" = "1|1|matched" ]; then
+  pass "E1: fixture ready (a counterparty, a balance observation and a matched payment request)"
+else
+  fail "E1: fixture wrong ('$E1_PRE')"
+fi
+
+E1_HH="$(as_user "$E1_O" "select public.create_household_workspace('E1 Household');" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.workspace_memberships (workspace_id, user_id, role, status, joined_at) values ('$E1_HH', '$E1_U', 'member', 'active', now());" >/dev/null
+E1_HREQ="$(as_user "$E1_U" "select public.create_payment_request('$E1_HH', 100, 'RWF', 'momo_phone', '0793000111', 'E1 in household', null, now() + interval '3 days', '$(printf '%064d' 7002)');" | tail -1)"
+E1_OREQ="$(as_user "$E1_O" "select public.create_payment_request('$E1_HH', 200, 'RWF', 'momo_phone', '0793000222', 'Other owner', null, now() + interval '3 days', '$(printf '%064d' 7003)');" | tail -1)"
+
+set +e
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; select public.execute_account_deletion('$E1_U');" > $ARTIFACT_DIR/pfe_e1.log 2>&1
+E1_RC=$?
+set -e
+if [ "$E1_RC" = "0" ]; then
+  pass "E1: erasing a user with a matched payment request, counterparties and balance observations succeeds"
+else
+  fail "E1: erasure failed (rc=$E1_RC): $(tail -3 $ARTIFACT_DIR/pfe_e1.log | tr '\n' ' ')"
+fi
+rm -f $ARTIFACT_DIR/pfe_e1.log
+
+E1_POST="$(psql -d pfe_rls -t -A -c "
+  select (select count(*) from public.counterparties where workspace_id='$E1_WS')
+    || '|' || (select count(*) from public.counterparty_identifiers where workspace_id='$E1_WS')
+    || '|' || (select count(*) from public.balance_observations where workspace_id='$E1_WS')
+    || '|' || (select count(*) from public.payment_requests where id in ('$E1_REQ','$E1_HREQ'))
+    || '|' || (select count(*) from public.payment_request_events where payment_request_id in ('$E1_REQ','$E1_HREQ'))
+    || '|' || (select count(*) from public.payment_requests where id='$E1_OREQ')
+    || '|' || (select count(*) from public.workspaces where id='$E1_HH');")"
+if [ "$E1_POST" = "0|0|0|0|0|1|1" ]; then
+  pass "E1: all of the user's counterparties, observations and payment requests (incl. the one in the shared Space) are gone; others' data stays"
+else
+  fail "E1: post-erasure state wrong ('$E1_POST', want 0|0|0|0|0|1|1)"
+fi
+
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="
 if [ "$FAIL_COUNT" -ne 0 ]; then
