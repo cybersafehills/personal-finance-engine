@@ -8314,7 +8314,7 @@ else
   pass "S4: a viewer cannot run the counterparty backfill"
 fi
 
-S4_AUDIT="$(psql -d pfe_rls -t -A -c "select string_agg(event_type, ',' order by event_type) from (select distinct event_type from public.space_audit_events where workspace_id = '$WORKSPACE_A' and event_type like 'counterparty.%') x;")"
+S4_AUDIT="$(psql -d pfe_rls -t -A -c "select string_agg(event_type, ',' order by event_type collate \"C\") from (select distinct event_type from public.space_audit_events where workspace_id = '$WORKSPACE_A' and event_type like 'counterparty.%') x;")"
 if [ "$S4_AUDIT" = "counterparty.merge_undone,counterparty.merged,counterparty.updated" ]; then
   pass "S4: update, merge and undo are each audited"
 else
