@@ -78,6 +78,42 @@ required, request-scoped session, `no-store`).
   cookie-less default), like the Inbox.
 - Amounts are integer minor units of the budget's currency.
 
+## `GET /api/mobile/statements`
+
+The user's generated **statements**, newest first (at most 30), for the app's
+Statements screen. Read-only; same guard as the others. Generating statements,
+packs, schedules and provider documents stay on the web.
+
+- `200 { ok: true, enabled, statements: [...] }`. `enabled: false` (and an
+  empty list) when `FINANCIAL_STATEMENTS_ENABLED` is off, so the app can say so
+  instead of showing an empty state. Otherwise `lib/mobile-statements.ts` reshapes
+  the stored rows: a period label in the statement's own timezone, scope/type
+  labels, status, and the **stored** totals per currency (opening, closing,
+  credits, debits, fees, `reconciles`). The app does no statement maths and shows
+  an unreconciled statement as such. Rows with an unknown status, timezone or
+  currency are left out rather than shown wrongly.
+- Scoped to the user's personal workspace (like the Inbox and Budgets); a bare
+  query would also return households' statements.
+- Amounts are integer minor units of each total's currency.
+
+## `GET /api/mobile/statements/:id/document?format=pdf|csv`
+
+A fresh, **five-minute signed download URL** for one ready statement, as JSON
+(not a redirect: the app fetches with a bearer token, then opens the URL).
+
+- `200 { ok: true, download: { url, filename, format } }`, or
+  `200 { ok: true, download: null, reason }` with `reason` one of
+  `unavailable` (flag off), `not_found` (no such statement for this user, or a
+  malformed id), `not_ready` (still preparing / failed), `failed`. The guard's
+  `401`, `403`, `404`, `429` apply as for the other endpoints.
+- Ownership is checked with the caller's own session under RLS; only then does
+  the service-role client render/sign (`lib/statement-download.ts`, shared with
+  the web's redirecting route, which keeps its exact status codes). The download
+  is audited (`statement.downloaded`); the audit passes the bearer token to
+  `getUser` explicitly, since a bearer client has no stored session.
+- The URL must never be stored or logged. The app asks again on every tap. It
+  has its own rate-limit bucket because rendering a PDF is expensive.
+
 ## Rollout
 
 1. Deploy web with the route (dark).

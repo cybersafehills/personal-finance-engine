@@ -83,6 +83,19 @@ export default function More() {
       </Card>
 
       <Card style={{ gap: space[3] }}>
+        <Text variant="bodyStrong">Statements</Text>
+        <Text variant="label" color="textSecondary">
+          Your generated statements, to view or download.
+        </Text>
+        <Button
+          label="Open statements"
+          variant="secondary"
+          fullWidth
+          onPress={() => router.push("/statements")}
+        />
+      </Card>
+
+      <Card style={{ gap: space[3] }}>
         <Text variant="bodyStrong">Goals</Text>
         <Text variant="label" color="textSecondary">
           See how your savings goals are going.
