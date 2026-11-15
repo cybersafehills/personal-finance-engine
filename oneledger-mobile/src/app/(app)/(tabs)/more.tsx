@@ -1,5 +1,6 @@
 import { router } from "expo-router";
 import { useCallback } from "react";
+import { Platform } from "react-native";
 
 import { Badge, Button, Card, Screen, ScreenHeader, Text } from "@/components/ds";
 import { useSession } from "@/features/auth/SessionProvider";
@@ -31,8 +32,16 @@ export default function More() {
         <Text variant="label" color="textSecondary">
           {captureSupported
             ? "OneLedger records MoMo transactions from this phone's notifications."
-            : "Works on Android phones. An iPhone guide is coming to the app."}
+            : "On iPhone, OneLedger records MoMo messages with an Apple Shortcut."}
         </Text>
+        {Platform.OS !== "android" ? (
+          <Button
+            label="Set up on iPhone"
+            variant={captureSupported ? "secondary" : "primary"}
+            fullWidth
+            onPress={() => router.push("/shortcuts")}
+          />
+        ) : null}
         {captureSupported ? (
           <>
             {display && display.action !== "none" ? (

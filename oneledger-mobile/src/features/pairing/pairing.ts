@@ -56,15 +56,22 @@ export async function listPairableAccounts(): Promise<
   };
 }
 
-/** Creates a pairing session for `account` and redeems it on this phone. */
-export async function connectThisPhone(
-  account: PairableAccount,
-): Promise<ActionResult> {
-  if (!supabase) return { ok: false, message: NOT_CONFIGURED };
+export type StartedPairing = {
+  /** The one-time code. Hold in memory only; never store or log it. */
+  token: string;
+  sessionId: string;
+  /** Mirrors the server's 10-minute lifetime; for the countdown only. */
+  expiresAtIso: string;
+};
 
-  // The browser preview's demo engine must not create a real pairing
-  // session on the server for a phone that does not exist.
-  if (captureIsDemo) return pairDevice("demo");
+/**
+ * Creates a one-time pairing session for `account` (the same database
+ * function the web wizard calls; it enforces "workspace owner only").
+ */
+export async function startPairingSession(
+  account: PairableAccount,
+): Promise<({ ok: true } & StartedPairing) | { ok: false; message: string }> {
+  if (!supabase) return { ok: false, message: NOT_CONFIGURED };
 
   const { token, prefix } = generatePairingToken((n) =>
     Crypto.getRandomBytes(n),
@@ -91,6 +98,61 @@ export async function connectThisPhone(
   if (error || !data) {
     return { ok: false, message: startPairingErrorMessage(error?.message ?? "") };
   }
+  return {
+    ok: true,
+    token,
+    sessionId: String(data),
+    expiresAtIso: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+  };
+}
 
-  return pairDevice(token);
+export type PairingSessionStatus = {
+  status: "pending" | "consumed" | "expired" | "cancelled";
+  /** The phone credential created when the code was redeemed. */
+  deviceCredentialId: string | null;
+};
+
+/** Read-only poll; RLS limits it to the caller's own sessions. */
+export async function getPairingSessionStatus(
+  sessionId: string,
+): Promise<PairingSessionStatus | null> {
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from("pairing_sessions")
+    .select("status, consumed_device_credential_id")
+    .eq("id", sessionId)
+    .maybeSingle();
+  if (error || !data) return null;
+  return {
+    status: data.status as PairingSessionStatus["status"],
+    deviceCredentialId: (data.consumed_device_credential_id as string | null) ?? null,
+  };
+}
+
+/** When OneLedger last heard from a connected phone, or null if never. */
+export async function getDeviceLastUsedAt(
+  deviceCredentialId: string,
+): Promise<string | null> {
+  if (!supabase) return null;
+  const { data } = await supabase
+    .from("device_credentials")
+    .select("last_used_at")
+    .eq("id", deviceCredentialId)
+    .maybeSingle();
+  return (data?.last_used_at as string | null) ?? null;
+}
+
+/** Creates a pairing session for `account` and redeems it on this phone. */
+export async function connectThisPhone(
+  account: PairableAccount,
+): Promise<ActionResult> {
+  if (!supabase) return { ok: false, message: NOT_CONFIGURED };
+
+  // The browser preview's demo engine must not create a real pairing
+  // session on the server for a phone that does not exist.
+  if (captureIsDemo) return pairDevice("demo");
+
+  const started = await startPairingSession(account);
+  if (!started.ok) return started;
+  return pairDevice(started.token);
 }

@@ -107,7 +107,7 @@ export default function Capture() {
         <EmptyState
           variant="setup"
           title="Not available on this device"
-          description="Automatic recording works on Android phones. On iPhone, OneLedger uses a Shortcut instead; that guide is coming to the app."
+          description="Automatic recording works on Android phones. On iPhone, OneLedger uses an Apple Shortcut instead; set it up from the More tab."
         />
       </Screen>
     );

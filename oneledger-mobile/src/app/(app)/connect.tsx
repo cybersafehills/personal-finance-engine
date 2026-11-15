@@ -1,6 +1,6 @@
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
-import { AppState, Linking, Platform, Pressable, View } from "react-native";
+import { AppState, Linking, Platform, View } from "react-native";
 
 import {
   Badge,
@@ -21,6 +21,7 @@ import {
   sendCaptureTest,
   type CaptureHealth,
 } from "@/features/capture/capture";
+import { AccountPicker } from "@/features/pairing/AccountPicker";
 import {
   CONNECT_STEPS,
   connectStepNumber,
@@ -33,7 +34,7 @@ import {
 } from "@/features/pairing/pairing";
 import { config } from "@/lib/config";
 import { deviceStore } from "@/lib/device-store";
-import { colors, MIN_TOUCH_TARGET, radii, space } from "@/theme/tokens";
+import { space } from "@/theme/tokens";
 
 const KEEP_RUNNING_SEEN_KEY = "connect.keepRunningSeen";
 
@@ -76,8 +77,17 @@ export default function Connect() {
         <Header />
         <EmptyState
           variant="setup"
-          title="Not available on this device"
-          description="Automatic recording works on Android phones. On iPhone, OneLedger uses a Shortcut instead; that guide is coming to the app."
+          title={Platform.OS === "ios" ? "iPhone uses a Shortcut" : "Not available on this device"}
+          description={
+            Platform.OS === "ios"
+              ? "iPhones don't let apps read notifications, so OneLedger records MoMo messages with an Apple Shortcut instead."
+              : "Automatic recording works on Android phones and, with a Shortcut, on iPhone."
+          }
+          action={
+            Platform.OS === "ios" ? (
+              <Button label="Set up on iPhone" onPress={() => router.replace("/shortcuts")} />
+            ) : undefined
+          }
         />
       </Screen>
     );
@@ -297,35 +307,11 @@ function ConnectStepCard({
           <Text variant="label" color="textSecondary">
             Which account do this phone&apos;s MoMo messages belong to?
           </Text>
-          <View accessibilityRole="radiogroup" style={{ gap: space[2] }}>
-            {accounts.map((account) => {
-              const selected = account.id === selectedId;
-              return (
-                <Pressable
-                  key={account.id}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected }}
-                  onPress={() => setSelectedId(account.id)}
-                  style={{
-                    minHeight: MIN_TOUCH_TARGET,
-                    flexDirection: "row",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    paddingHorizontal: space[3],
-                    paddingVertical: space[2],
-                    borderRadius: radii.control,
-                    borderWidth: selected ? 2 : 1,
-                    borderColor: selected ? colors.accent : colors.borderStrong,
-                  }}
-                >
-                  <Text variant="bodyStrong">{account.name}</Text>
-                  <Text variant="caption" color={selected ? "accent" : "textMuted"}>
-                    {selected ? "Selected" : "MTN MoMo"}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
+          <AccountPicker
+            accounts={accounts}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+          />
           <Button
             label="Connect this phone"
             fullWidth

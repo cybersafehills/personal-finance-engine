@@ -90,6 +90,22 @@ not a reason to keep the whole app native.
 - The browser development preview uses an in-memory demo engine (`__DEV__`
   on web only) so the flow can be reviewed without a phone.
 
+## Implementation notes (PR 6)
+
+- The iPhone guide mirrors the web pairing wizard's iOS branch: add the two
+  Shortcuts, connect (the app creates the pairing session and runs "Connect
+  to OneLedger" with the code via `shortcuts://run-shortcut`), create the
+  Messages automation (Message Contains `RWF`, Sender empty), then verify.
+- Progress is confirmed from the server, not from the Shortcut: the app polls
+  its own `pairing_sessions` row and the device's `last_used_at` under RLS.
+- Unlike Android, the one-time code is visible in JS and on screen here;
+  that is inherent to handing it to a Shortcut. The device secret is still
+  generated and held by the Shortcut, never by the app.
+- The install buttons need `EXPO_PUBLIC_MOMO_SHORTCUT_URL` (and optionally
+  `EXPO_PUBLIC_MOMO_CAPTURE_SHORTCUT_URL`). Until the Shortcuts are published
+  (docs/oneledger-capture-shortcut.md "Publishing") the guide says so.
+- Off an iPhone the screen is a walkthrough that creates nothing server-side.
+
 ## Consequences
 
 - `android/` is retired only after the new app reaches parity and one stable
