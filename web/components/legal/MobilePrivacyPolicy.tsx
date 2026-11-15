@@ -59,7 +59,7 @@ export function MobilePrivacyPolicy() {
           <li>
             Once signed in, the app reads your own OneLedger data over an
             encrypted HTTPS connection to display it: transactions, balance,
-            categories and notifications. It can also record the decisions you
+            categories, budget progress and notifications. It can also record the decisions you
             make in the app, such as accepting a suggested category or marking a
             notification as read. The app sees only what you could already see by
             signing in on the web.

@@ -151,6 +151,17 @@ not a reason to keep the whole app native.
   (docs/oneledger-capture-shortcut.md) guarantees (exact Shortcut names,
   Run Immediately, trigger word RWF, one-time codes).
 
+## Implementation notes (Budgets)
+
+- Budget figures are computed by the web's canonical `getBudgetActuals`
+  (explicitly never to be reimplemented), so the app reads them from
+  `GET /api/mobile/budgets` and only displays them. The Inbox and Budgets
+  routes share one guard (`lib/mobile-request.ts`); new read-only mobile
+  endpoints should use it.
+- Creating and editing budgets stays on the web; the app is read-only here.
+- The Home budget card loads independently of the rest of Home and respects
+  privacy mode, so a slow or unavailable budget service never delays Home.
+
 ## Consequences
 
 - `android/` is retired only after the new app reaches parity and one stable

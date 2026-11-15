@@ -70,6 +70,19 @@ export default function More() {
       <NotificationsCard />
 
       <Card style={{ gap: space[3] }}>
+        <Text variant="bodyStrong">Budget</Text>
+        <Text variant="label" color="textSecondary">
+          See how this period is going against your budget.
+        </Text>
+        <Button
+          label="Open budget"
+          variant="secondary"
+          fullWidth
+          onPress={() => router.push("/budgets")}
+        />
+      </Card>
+
+      <Card style={{ gap: space[3] }}>
         <Text variant="bodyStrong">Security</Text>
         <Button
           label="App lock"
