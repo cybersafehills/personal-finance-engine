@@ -106,6 +106,19 @@ not a reason to keep the whole app native.
   (docs/oneledger-capture-shortcut.md "Publishing") the guide says so.
 - Off an iPhone the screen is a walkthrough that creates nothing server-side.
 
+## Implementation notes (review actions)
+
+- Accepting or rejecting a category suggestion calls the same database
+  functions as the web's server actions (`confirm_transaction_category`,
+  `dismiss_suggested_category`) directly with the user's session. They check
+  workspace membership themselves and are granted to `authenticated`, so no
+  `/api/mobile` route is needed for them. A route is only added when the
+  logic lives in a server action with checks the database does not enforce
+  (MFA, capability gates).
+- A conflict can only be cleared, never confirmed: nothing is applied on the
+  user's behalf when rules disagree. Picking a different category still goes
+  through the web.
+
 ## Consequences
 
 - `android/` is retired only after the new app reaches parity and one stable

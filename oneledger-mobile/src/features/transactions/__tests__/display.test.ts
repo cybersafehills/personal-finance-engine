@@ -3,6 +3,7 @@ import {
   groupByDay,
   needsReview,
   pickPlausibleBalance,
+  reviewPrompt,
   safeSearchTerm,
   signedAmountRwf,
   sumTodayTotals,
@@ -100,5 +101,42 @@ describe("safeSearchTerm", () => {
   it("strips filter syntax characters", () => {
     expect(safeSearchTerm("  shop,(a)%  ")).toBe("shop  a");
     expect(safeSearchTerm("%%")).toBe("");
+  });
+});
+
+describe("reviewPrompt", () => {
+  it("offers to accept a suggestion that exists", () => {
+    const p = reviewPrompt({
+      category_decision_status: "suggested",
+      category: null,
+      suggested_category: "Transport",
+    });
+    expect(p.message).toBe("Suggested category: Transport");
+    expect(p.confirmLabel).toBe("Use it");
+  });
+
+  it("offers to confirm an automatic category", () => {
+    const p = reviewPrompt({
+      category_decision_status: "provisional",
+      category: "Food",
+      suggested_category: null,
+    });
+    expect(p.message).toBe("Filed under Food automatically");
+    expect(p.confirmLabel).toBe("Looks right");
+  });
+
+  it("never offers to confirm when rules conflict or nothing is there to confirm", () => {
+    expect(
+      reviewPrompt({ category_decision_status: "conflict", category: "Food", suggested_category: null })
+        .confirmLabel,
+    ).toBeNull();
+    expect(
+      reviewPrompt({ category_decision_status: "suggested", category: null, suggested_category: null })
+        .confirmLabel,
+    ).toBeNull();
+    expect(
+      reviewPrompt({ category_decision_status: "provisional", category: null, suggested_category: null })
+        .confirmLabel,
+    ).toBeNull();
   });
 });
