@@ -1,3 +1,5 @@
+import { supabase } from "@/api/supabase";
+import { parseInboxResponse, type InboxResult } from "@/features/inbox/parse";
 import { config } from "@/lib/config";
 
 // Client for the web app's /api/mobile/* endpoints (ADR 0019): operations
@@ -74,4 +76,38 @@ export async function signInWithPassword(
     // Non-JSON error page; fall through to the generic message.
   }
   return parseSignInResponse(response.status, body);
+}
+
+/**
+ * The full prioritized Inbox, computed by the web app (it owns the feature
+ * flags and the cross-domain read models). Sends the user's own Supabase
+ * access token; the server validates it and runs everything under RLS.
+ */
+export async function fetchInbox(): Promise<InboxResult> {
+  if (!supabase || !config.apiBaseUrl) {
+    return { ok: false, reason: "unavailable", message: "The full inbox isn't available yet." };
+  }
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  if (!token) return { ok: false, reason: "unauthorized", message: "Please sign in again." };
+
+  let response: Response;
+  try {
+    response = await fetch(`${config.apiBaseUrl}/api/mobile/inbox`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+  } catch {
+    return {
+      ok: false,
+      reason: "error",
+      message: "Couldn't load your inbox. Check your connection and try again.",
+    };
+  }
+  let body: unknown = null;
+  try {
+    body = await response.json();
+  } catch {
+    // Non-JSON error page; the status alone decides.
+  }
+  return parseInboxResponse(response.status, body);
 }

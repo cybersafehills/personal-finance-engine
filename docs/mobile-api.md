@@ -33,6 +33,32 @@ the web login action uses: per-account lockout (8 failures / 15 minutes),
 | 429 | `{ ok: false, error: "locked_out" \| "rate_limited", message }` | Account lockout, or the coarse per-IP limiter (20 / minute / instance). |
 | 404 | `{ ok: false, error: "not_found" }` | Flag off. |
 
+## `GET /api/mobile/inbox`
+
+The same prioritized Inbox the web renders (`lib/financial-inbox.ts`), for the
+app's Inbox tab. Read-only.
+
+- **Auth:** `Authorization: Bearer <Supabase access token>`. The route
+  validates it with Supabase Auth (`getUser`), then requires the second factor
+  to be complete: a user with a verified factor needs an `aal2` token, else
+  `403 mfa_required`. (The web proxy has no MFA gate of its own; this is
+  stricter on purpose.)
+- **How it reuses the web code:** `lib/mobile-session-context.ts` keeps the
+  validated token in an `AsyncLocalStorage` for the request, and
+  `supabaseSession()` builds its client from it instead of the cookie. Outside
+  a mobile request the store is empty and web behaviour is unchanged. All
+  queries still run as the user under RLS; feature flags (payments,
+  integrations, bills) are evaluated server-side. There is no session cookie,
+  so the active workspace is the user's personal one (the web's cookie-less
+  default).
+- **Responses:** `200 { ok: true, inbox: { items, total, criticalCount,
+  highCount, countsByKind } }`, `401 unauthorized`, `403 mfa_required`,
+  `404` flag off, `429 rate_limited` (60 / minute / IP / instance), `500
+  server_error`. `no-store`; the token and body are never logged.
+- **In-app decisions:** only plain database functions the app already calls
+  under the user's session (confirm / dismiss a category, merge / dismiss a
+  duplicate). Every other item opens its web page.
+
 ## Rollout
 
 1. Deploy web with the route (dark).

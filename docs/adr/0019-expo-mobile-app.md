@@ -123,6 +123,19 @@ not a reason to keep the whole app native.
   scoped by the transaction's `workspace_id`, matched in code rather than with
   `ilike` (PostgREST treats `*` as a wildcard). Still no `/api/mobile` route.
 
+## Implementation notes (Inbox)
+
+- The Inbox is computed by the web app and served at `GET /api/mobile/inbox`
+  (docs/mobile-api.md). It aggregates ~10 domains behind server-side feature
+  flags, so re-implementing it in the app would duplicate that logic and the
+  flags. The route makes the existing read models run under the caller's
+  bearer token (request-scoped `AsyncLocalStorage`, honoured by
+  `supabaseSession()`); RLS remains the boundary.
+- The route requires a completed second factor, which the web proxy does not.
+- The Inbox tab falls back to the direct category-review queue when the
+  endpoint is off or the app is not configured, so category checks never
+  depend on the server route.
+
 ## Consequences
 
 - `android/` is retired only after the new app reaches parity and one stable
