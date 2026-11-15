@@ -19,3 +19,10 @@ Account **statements** are per-account records; showing a transfer leg there is 
 2. Statements: keep rows, exclude from summary totals, add "Transfers" line.
 3. Regression: fixtures asserting dashboard == report == email == budgets for a workspace with a linked pair; note one-time visible change to historical report figures; do not regenerate already-delivered reports.
 4. Unlinked-but-detected pairs remain counted until the user confirms the link (existing "heuristic only" rule).
+
+## Resolution (2026-11-15, same branch)
+Fixed for **Home totals** (`getTodayTotals`), **category totals** (`getCategoryTotals`) and **reports/emails** (`fetchSettledTransactions` in `report-generation.ts`, which feeds every report figure incl. trends/alerts) via the shared pure helper `web/lib/transfer-exclusion.ts` (+ `transfer_exclusion_test.ts`). Report path throws if the link lookup fails (never silently inflates a delivered report); Home/category fall back to the old behaviour and log.
+Verified: `deno test web/lib` (833 pass); `tsc` reports no errors in touched files (unrelated pre-existing errors: generated `PageProps` types and brand PNG module declarations).
+**Not verified:** the Supabase query wiring itself (no DB run; only the pure filter is unit-tested); e2e/Playwright not run.
+**Still open:** (a) statements (`statement-generation.ts`) unchanged — needs the product decision above; (b) household members who cannot see one transfer leg are still excluded from the visible leg (treated as intra-household transfer) — confirm; (c) other surfaces not audited: `getLifetimeFlowTotals`, mobile screens, `/api/v1`, Inbox forecast.
+Visible effect: Home/report/category figures drop by the amount of confirmed transfer pairs; delivered reports are not regenerated.
