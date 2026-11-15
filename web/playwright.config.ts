@@ -71,6 +71,9 @@ export default defineConfig({
     env: {
       PORT: String(PORT),
       SCAN_TO_PAY_ENABLED: "true",
+      // The mobile app's API (/api/mobile/*) is dark unless exactly "true";
+      // mobile-api.spec.ts drives it with a bearer token, no cookie.
+      MOBILE_API_ENABLED: "true",
       BILLS_ENABLED: "true",
       BILLS_EXTRACTION_ENABLED: "true",
       AI_PROVIDER: "mock",
