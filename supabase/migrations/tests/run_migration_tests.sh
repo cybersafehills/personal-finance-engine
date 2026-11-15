@@ -688,7 +688,10 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # OneLedger 3.0 S4 (20261224000000) adds counterparties,
 # counterparty_identifiers and counterparty_merge_events (RLS enabled, member
 # SELECT only; writes via RPCs) - 134 tables, 133 with RLS.
-if [ "$TABLE_COUNT" = "134" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# OneLedger 3.0 S5 (20261225000000) adds payment_requests and
+# payment_request_events (RLS enabled, member SELECT only; writes via RPCs) -
+# 136 tables, 135 with RLS.
+if [ "$TABLE_COUNT" = "136" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -835,10 +838,12 @@ AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from inform
 # caller's RLS applies). 166 + 2 = 168.
 # OneLedger 3.0 S4 (20261224000000): SELECT on the three counterparty tables
 # + counterparty_summaries_v (security_invoker). 168 + 4 = 172.
-if [ "$AUTHENTICATED_GRANT_COUNT" = "172" ]; then
-  pass "authenticated holds exactly the 172 table grants expected, no more"
+# OneLedger 3.0 S5 (20261225000000): SELECT on payment_requests,
+# payment_request_events and payment_requests_v (security_invoker). 172 + 3 = 175.
+if [ "$AUTHENTICATED_GRANT_COUNT" = "175" ]; then
+  pass "authenticated holds exactly the 175 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 172 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 175 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -862,10 +867,13 @@ echo "=== function/sequence privilege regression check ==="
 # design must be callable by someone who has an invite link but hasn't
 # signed in yet.
 ANON_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname = 'anon' where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
-if [ "$ANON_FN_EXEC_COUNT" = "1" ]; then
-  pass "anon holds EXECUTE on exactly one function (invite_preview) after the full chain"
+# OneLedger 3.0 S5 (20261225000000) adds resolve_payment_request: the public
+# resolver for a shared payment-request link. It takes only a SHA-256 digest and
+# returns the minimum a payer needs. A second, deliberate anon function.
+if [ "$ANON_FN_EXEC_COUNT" = "2" ]; then
+  pass "anon holds EXECUTE on exactly two functions (invite_preview, resolve_payment_request) after the full chain"
 else
-  fail "anon holds EXECUTE on $ANON_FN_EXEC_COUNT function grant(s) after the full chain, expected exactly 1 (invite_preview)"
+  fail "anon holds EXECUTE on $ANON_FN_EXEC_COUNT function grant(s) after the full chain, expected exactly 2 (invite_preview, resolve_payment_request)"
 fi
 
 # authenticated gains EXECUTE on is_workspace_member() in Phase B (the RLS
@@ -1033,10 +1041,14 @@ AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_p
 # OneLedger 3.0 S4 (20261224000000): backfill_counterparties,
 # update_counterparty, merge_counterparties, undo_counterparty_merge - all
 # member+-gated; normalize_msisdn is internal (revoked). 121 + 4 = 125.
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "125" ]; then
-  pass "authenticated holds EXECUTE on exactly the 125 functions expected, no more"
+# OneLedger 3.0 S5 (20261225000000): create_/cancel_/mark_..._paid_by_owner/
+# link_..._transaction (member+-gated) + resolve_payment_request (public,
+# also callable by authenticated). _payment_request_for_update is internal.
+# 125 + 5 = 130.
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "130" ]; then
+  pass "authenticated holds EXECUTE on exactly the 130 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 125 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 130 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -8319,6 +8331,227 @@ if [ "$S4_AUDIT" = "counterparty.merge_undone,counterparty.merged,counterparty.u
   pass "S4: update, merge and undo are each audited"
 else
   fail "S4: audit events wrong: '$S4_AUDIT'"
+fi
+
+# ===========================================================================
+# OneLedger 3.0 S5: payment requests, Stage 1 (20261225000000_payment_requests).
+# Non-custodial. The DB sees only a SHA-256 digest of the token; "paid" only
+# via owner assertion or a human-linked matching settled incoming transaction.
+# ===========================================================================
+echo "=== OneLedger 3.0 S5: payment requests ==="
+
+s5h() { printf '%064d' "$1"; }   # a valid 64-hex digest (digits are hex)
+s5_anon() { psql -d pfe_rls -t -A -F'|' -c "set role anon; $1" | grep -v '^SET$' || true; }
+S5_FUT="now() + interval '7 days'"
+
+S5_H1="$(s5h 1)"
+S5_REQ1="$(as_user "$USER_A" "select public.create_payment_request('$WORKSPACE_A', 5000, 'RWF', 'momo_phone', '+250 793 000 439', ' Samuel N ', 'Rent Nov', $S5_FUT, '$S5_H1', 'idem-key-0001');" | tail -1)"
+S5_ROW="$(psql -d pfe_rls -t -A -c "select destination_value || '|' || recipient_display || '|' || status || '|' || token_hash from public.payment_requests where id = '$S5_REQ1';")"
+if [ "$S5_ROW" = "250793000439|Samuel N|open|$S5_H1" ]; then
+  pass "S5: a member creates a request; destination and name are normalised/trimmed server-side; only the digest is stored"
+else
+  fail "S5: create wrong (id='$S5_REQ1' row='$S5_ROW')"
+fi
+
+S5_REQ1B="$(as_user "$USER_A" "select public.create_payment_request('$WORKSPACE_A', 9999, 'RWF', 'momo_phone', '0793000439', 'Other', null, $S5_FUT, '$(s5h 2)', 'idem-key-0001');" | tail -1)"
+if [ "$S5_REQ1B" = "$S5_REQ1" ]; then
+  pass "S5: retrying with the same idempotency key returns the original request, creating nothing new"
+else
+  fail "S5: idempotency broken ($S5_REQ1B vs $S5_REQ1)"
+fi
+
+# --- public resolver ---------------------------------------------------------
+S5_PUB="$(s5_anon "select status, amount_minor, currency, recipient_display, reference, destination_type, destination_value from public.resolve_payment_request('$S5_H1');")"
+if [ "$S5_PUB" = "open|5000|RWF|Samuel N|Rent Nov|momo_phone|250793000439" ]; then
+  pass "S5: the anonymous resolver returns exactly what a payer needs for an open request"
+else
+  fail "S5: public resolve wrong: '$S5_PUB'"
+fi
+S5_COLS="$(psql -d pfe_rls -t -A -c "select pg_get_function_result('public.resolve_payment_request(text)'::regprocedure);")"
+if echo "$S5_COLS" | grep -qiE "workspace|created_by|user|owner|id uuid|transaction"; then
+  fail "S5: the public resolver exposes more than the minimum: $S5_COLS"
+else
+  pass "S5: the public resolver exposes no workspace, owner, id or transaction fields"
+fi
+S5_UNK="$(s5_anon "select count(*) from public.resolve_payment_request('$(s5h 999999)');")"
+S5_BAD="$(s5_anon "select count(*) from public.resolve_payment_request('not-a-digest');")"
+S5_RAWTOK="$(s5_anon "select count(*) from public.resolve_payment_request('$(printf 'z%.0s' $(seq 1 64))');")"
+if [ "$S5_UNK" = "0" ] && [ "$S5_BAD" = "0" ] && [ "$S5_RAWTOK" = "0" ]; then
+  pass "S5: unknown and malformed digests resolve to nothing"
+else
+  fail "S5: unknown/malformed resolve leaked (unk=$S5_UNK bad=$S5_BAD raw=$S5_RAWTOK)"
+fi
+S5_ANON_TBL="$(psql -d pfe_rls -t -A -c "select has_table_privilege('anon','public.payment_requests','SELECT') or has_table_privilege('anon','public.payment_requests_v','SELECT');")"
+if [ "$S5_ANON_TBL" = "false" ] || [ "$S5_ANON_TBL" = "f" ]; then
+  pass "S5: anon cannot read payment_requests directly (only the resolver)"
+else
+  fail "S5: anon can read payment request tables directly"
+fi
+
+# --- validation ---------------------------------------------------------------
+s5_bad() { # label sql
+  if as_user "$USER_A" "$2" >/dev/null 2>&1; then fail "S5: accepted invalid input: $1"; else pass "S5: rejected invalid input: $1"; fi
+}
+s5_bad "zero amount" "select public.create_payment_request('$WORKSPACE_A', 0, 'RWF', 'momo_phone', '0793000439', 'X', null, $S5_FUT, '$(s5h 10)');"
+s5_bad "unsupported currency" "select public.create_payment_request('$WORKSPACE_A', 100, 'GBP', 'momo_phone', '0793000439', 'X', null, $S5_FUT, '$(s5h 11)');"
+s5_bad "non-Rwandan phone" "select public.create_payment_request('$WORKSPACE_A', 100, 'RWF', 'momo_phone', '0693000439', 'X', null, $S5_FUT, '$(s5h 12)');"
+s5_bad "bad merchant code" "select public.create_payment_request('$WORKSPACE_A', 100, 'RWF', 'merchant_code', '12', 'X', null, $S5_FUT, '$(s5h 13)');"
+s5_bad "expiry too soon" "select public.create_payment_request('$WORKSPACE_A', 100, 'RWF', 'momo_phone', '0793000439', 'X', null, now() + interval '10 seconds', '$(s5h 14)');"
+s5_bad "expiry beyond 90 days" "select public.create_payment_request('$WORKSPACE_A', 100, 'RWF', 'momo_phone', '0793000439', 'X', null, now() + interval '91 days', '$(s5h 15)');"
+s5_bad "control character in name" "select public.create_payment_request('$WORKSPACE_A', 100, 'RWF', 'momo_phone', '0793000439', 'a'||chr(7)||'b', null, $S5_FUT, '$(s5h 16)');"
+s5_bad "digest that is not 64 hex" "select public.create_payment_request('$WORKSPACE_A', 100, 'RWF', 'momo_phone', '0793000439', 'X', null, $S5_FUT, 'abc');"
+s5_bad "duplicate token digest" "select public.create_payment_request('$WORKSPACE_A', 100, 'RWF', 'momo_phone', '0793000439', 'X', null, $S5_FUT, '$S5_H1');"
+
+# --- authz / isolation ----------------------------------------------------------
+if as_user "$USER_B" "select public.create_payment_request('$WORKSPACE_A', 100, 'RWF', 'momo_phone', '0793000439', 'X', null, $S5_FUT, '$(s5h 20)');" >/dev/null 2>&1; then
+  fail "S5: a non-member created a request in another workspace"
+else
+  pass "S5: a non-member cannot create a request in another workspace"
+fi
+if as_user "$R_VIEWER_USER" "select public.create_payment_request('$R_MATRIX_HH', 100, 'RWF', 'momo_phone', '0793000439', 'X', null, $S5_FUT, '$(s5h 21)');" >/dev/null 2>&1; then
+  fail "S5: a viewer created a payment request"
+else
+  pass "S5: a viewer cannot create a payment request"
+fi
+S5_B_SEES="$(as_user "$USER_B" "select count(*) from public.payment_requests;")"
+if [ "$S5_B_SEES" = "0" ]; then
+  pass "S5: another workspace's member cannot read the request (RLS)"
+else
+  fail "S5: cross-tenant leak - USER_B reads $S5_B_SEES request(s)"
+fi
+if as_user "$USER_B" "select public.cancel_payment_request('$S5_REQ1');" >/dev/null 2>&1; then
+  fail "S5: another workspace cancelled this request"
+else
+  pass "S5: another workspace cannot cancel the request"
+fi
+S5_PRIV="$(psql -d pfe_rls -t -A -c "select bool_or(has_table_privilege('authenticated', t, p)) from unnest(array['public.payment_requests','public.payment_request_events']) t, unnest(array['INSERT','UPDATE','DELETE']) p;")"
+S5_INT="$(psql -d pfe_rls -t -A -c "select has_function_privilege('authenticated','public._payment_request_for_update(uuid,boolean)','EXECUTE');")"
+if { [ "$S5_PRIV" = "false" ] || [ "$S5_PRIV" = "f" ]; } && { [ "$S5_INT" = "false" ] || [ "$S5_INT" = "f" ]; }; then
+  pass "S5: no direct writes on request tables; the internal guard function is not callable"
+else
+  fail "S5: privileges leaked (write='$S5_PRIV' internal='$S5_INT')"
+fi
+
+# --- cancel / expiry -------------------------------------------------------------
+S5_H3="$(s5h 3)"
+S5_REQ3="$(as_user "$USER_A" "select public.create_payment_request('$WORKSPACE_A', 3000, 'RWF', 'merchant_code', '093011', 'Shop', null, $S5_FUT, '$S5_H3');" | tail -1)"
+as_user "$USER_A" "select public.cancel_payment_request('$S5_REQ3');" >/dev/null
+S5_CAN="$(s5_anon "select status, amount_minor, coalesce(destination_value, 'withheld') from public.resolve_payment_request('$S5_H3');")"
+if [ "$S5_CAN" = "cancelled|3000|withheld" ]; then
+  pass "S5: a cancelled request resolves as cancelled and withholds the destination"
+else
+  fail "S5: cancelled resolve wrong: '$S5_CAN'"
+fi
+if as_user "$USER_A" "select public.cancel_payment_request('$S5_REQ3');" >/dev/null 2>&1; then
+  fail "S5: a cancelled request was cancelled again"
+else
+  pass "S5: a terminal request cannot change state again"
+fi
+
+S5_H4="$(s5h 4)"
+S5_REQ4="$(as_user "$USER_A" "select public.create_payment_request('$WORKSPACE_A', 4000, 'RWF', 'momo_phone', '0793000439', 'Late', null, $S5_FUT, '$S5_H4');" | tail -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "update public.payment_requests set created_at = now() - interval '2 days', expires_at = now() - interval '1 hour' where id = '$S5_REQ4';" >/dev/null
+S5_EXP="$(s5_anon "select status, coalesce(destination_value, 'withheld') from public.resolve_payment_request('$S5_H4');")"
+S5_EXPV="$(as_user "$USER_A" "select status from public.payment_requests_v where id = '$S5_REQ4';")"
+if [ "$S5_EXP" = "expired|withheld" ] && [ "$S5_EXPV" = "expired" ]; then
+  pass "S5: an expired request resolves as expired (no cron needed) and withholds the destination"
+else
+  fail "S5: expiry wrong (public='$S5_EXP' view='$S5_EXPV')"
+fi
+if as_user "$USER_A" "select public.mark_payment_request_paid_by_owner('$S5_REQ4');" >/dev/null 2>&1; then
+  fail "S5: an expired request was marked paid by owner"
+else
+  pass "S5: an expired request cannot be marked paid by the owner"
+fi
+
+# --- owner assertion ---------------------------------------------------------------
+S5_H5="$(s5h 5)"
+S5_REQ5="$(as_user "$USER_A" "select public.create_payment_request('$WORKSPACE_A', 6000, 'RWF', 'momo_phone', '0793000439', 'Owner says', null, $S5_FUT, '$S5_H5');" | tail -1)"
+as_user "$USER_A" "select public.mark_payment_request_paid_by_owner('$S5_REQ5', 'cash handed over');" >/dev/null
+S5_MP="$(s5_anon "select status, coalesce(destination_value, 'withheld') from public.resolve_payment_request('$S5_H5');")"
+S5_MPE="$(psql -d pfe_rls -t -A -c "select metadata->>'verified' from public.payment_request_events where payment_request_id = '$S5_REQ5' and event_type = 'marked_paid_by_owner';")"
+if [ "$S5_MP" = "marked_paid_by_owner|withheld" ] && [ "$S5_MPE" = "false" ]; then
+  pass "S5: owner-marked paid is a distinct, explicitly unverified status"
+else
+  fail "S5: owner-marked wrong (public='$S5_MP' verified='$S5_MPE')"
+fi
+
+# --- human-linked match ------------------------------------------------------------------
+s5_tx() { # n workspace account type direction amount currency
+  psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+    insert into public.momo_messages (id, raw_message, processing_status) values ('00000000-0000-0000-0000-0000000057$1', 's5-$1', 'processed');
+    insert into public.transactions
+      (id, momo_message_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at,
+       parser_version, counterparty_name, settlement_state, affects_balance, principal_effect_rwf, fee_effect_rwf, effect_reason)
+    values ('00000000-0000-0000-0000-0000000058$1', '00000000-0000-0000-0000-0000000057$1', '$3', '$2', '$4', '$5', 'success', $6, 0, now(),
+            'test', 'Payer', 'settled', true, $( [ "$5" = "in" ] && echo "$6" || echo "-$6" ), 0,
+            '$( [ "$5" = "in" ] && echo settled_incoming || echo settled_outgoing_with_fee )');" >/dev/null
+}
+S5_TX() { echo "00000000-0000-0000-0000-0000000058$1"; }
+s5_tx 01 "$WORKSPACE_A" "$S4_ACCT" money_received in 7000
+s5_tx 02 "$WORKSPACE_A" "$S4_ACCT" money_received in 7500
+s5_tx 03 "$WORKSPACE_A" "$S4_ACCT" send_money out 7000
+s5_tx 04 "$WORKSPACE_B" "$S4_ACCT_B" money_received in 7000
+
+S5_H6="$(s5h 6)"
+S5_REQ6="$(as_user "$USER_A" "select public.create_payment_request('$WORKSPACE_A', 7000, 'RWF', 'momo_phone', '0793000439', 'Match me', null, $S5_FUT, '$S5_H6');" | tail -1)"
+s5_link_bad() {
+  if as_user "$USER_A" "select public.link_payment_request_transaction('$S5_REQ6', '$2');" >/dev/null 2>&1; then
+    fail "S5: linked a non-matching transaction ($1)"
+  else
+    pass "S5: refuses to link a non-matching transaction ($1)"
+  fi
+}
+s5_link_bad "different amount" "$(S5_TX 02)"
+s5_link_bad "outgoing" "$(S5_TX 03)"
+s5_link_bad "another workspace's transaction" "$(S5_TX 04)"
+S5_NOMATCH="$(s5_anon "select status from public.resolve_payment_request('$S5_H6');")"
+if [ "$S5_NOMATCH" = "open" ]; then
+  pass "S5: failed link attempts leave the request open"
+else
+  fail "S5: failed link changed status to '$S5_NOMATCH'"
+fi
+as_user "$USER_A" "select public.link_payment_request_transaction('$S5_REQ6', '$(S5_TX 01)');" >/dev/null
+S5_M="$(psql -d pfe_rls -t -A -c "select status || '|' || (matched_transaction_id = '$(S5_TX 01)')::text from public.payment_requests where id = '$S5_REQ6';")"
+if [ "$S5_M" = "matched|true" ]; then
+  pass "S5: a human links a settled, equal-amount incoming transaction -> matched"
+else
+  fail "S5: match wrong: '$S5_M'"
+fi
+S5_H7="$(s5h 7)"
+S5_REQ7="$(as_user "$USER_A" "select public.create_payment_request('$WORKSPACE_A', 7000, 'RWF', 'momo_phone', '0793000439', 'Second', null, $S5_FUT, '$S5_H7');" | tail -1)"
+if as_user "$USER_A" "select public.link_payment_request_transaction('$S5_REQ7', '$(S5_TX 01)');" >/dev/null 2>&1; then
+  fail "S5: one transaction settled two requests"
+else
+  pass "S5: a transaction can settle at most one request"
+fi
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "update public.payment_requests set status = 'matched' where id = '$S5_REQ7';" >/dev/null 2>&1; then
+  fail "S5: status 'matched' accepted without a linked transaction"
+else
+  pass "S5: the database refuses status 'matched' without a linked transaction"
+fi
+
+# --- audit trail -----------------------------------------------------------------------
+S5_EV="$(psql -d pfe_rls -t -A -c "select string_agg(event_type, ',' order by event_type) from (select distinct event_type from public.payment_request_events where workspace_id = '$WORKSPACE_A') x;")"
+S5_AU="$(psql -d pfe_rls -t -A -c "select count(distinct event_type) from public.space_audit_events where workspace_id = '$WORKSPACE_A' and event_type like 'payment_request.%';")"
+if [ "$S5_EV" = "cancelled,created,marked_paid_by_owner,matched" ] && [ "$S5_AU" = "4" ]; then
+  pass "S5: create, cancel, owner-mark and match are each recorded in the event log and the space audit trail"
+else
+  fail "S5: audit trail wrong (events='$S5_EV' audit_kinds=$S5_AU)"
+fi
+
+# --- rate limit (fresh user so earlier fixtures do not count) ------------------------------
+S5_U="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('s5-limit@example.com') returning id;" | head -1)"
+S5_WS="$(psql -d pfe_rls -t -A -c "select w.id from public.workspaces w join public.workspace_memberships m on m.workspace_id = w.id where m.user_id = '$S5_U';" | head -1)"
+if as_user "$S5_U" "select count(public.create_payment_request('$S5_WS', 100, 'RWF', 'momo_phone', '0793000439', 'Bulk', null, $S5_FUT, lpad((1000 + i)::text, 64, '0'))) from generate_series(1, 30) i;" >/dev/null 2>&1; then
+  pass "S5: 30 requests in an hour are allowed"
+else
+  fail "S5: the first 30 requests were refused"
+fi
+if as_user "$S5_U" "select public.create_payment_request('$S5_WS', 100, 'RWF', 'momo_phone', '0793000439', 'Bulk', null, $S5_FUT, lpad('2000', 64, '0'));" >/dev/null 2>&1; then
+  fail "S5: the 31st request in an hour was allowed"
+else
+  pass "S5: the 31st request in an hour is rate limited"
 fi
 
 echo ""
