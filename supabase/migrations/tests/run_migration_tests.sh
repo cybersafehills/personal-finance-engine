@@ -685,7 +685,10 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # OneLedger 3.0 S3 (20261223000000) adds balance_observations (RLS enabled,
 # member SELECT only; writes via record_manual_balance_observation) - 131
 # tables, 130 with RLS. (account_balance_baselines_v is a view, not a table.)
-if [ "$TABLE_COUNT" = "131" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# OneLedger 3.0 S4 (20261224000000) adds counterparties,
+# counterparty_identifiers and counterparty_merge_events (RLS enabled, member
+# SELECT only; writes via RPCs) - 134 tables, 133 with RLS.
+if [ "$TABLE_COUNT" = "134" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -830,10 +833,12 @@ AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from inform
 # OneLedger 3.0 S3 (20261223000000): balance_observations SELECT (member-read
 # via RLS) + account_balance_baselines_v SELECT (security_invoker view, so the
 # caller's RLS applies). 166 + 2 = 168.
-if [ "$AUTHENTICATED_GRANT_COUNT" = "168" ]; then
-  pass "authenticated holds exactly the 168 table grants expected, no more"
+# OneLedger 3.0 S4 (20261224000000): SELECT on the three counterparty tables
+# + counterparty_summaries_v (security_invoker). 168 + 4 = 172.
+if [ "$AUTHENTICATED_GRANT_COUNT" = "172" ]; then
+  pass "authenticated holds exactly the 172 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 168 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 172 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -1025,10 +1030,13 @@ AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_p
 # signed-in user creating a transaction, owner-checked inside. 119 + 1 = 120.
 # OneLedger 3.0 S3 (20261223000000) adds record_manual_balance_observation -
 # authenticated-callable, member+-gated and audited. 120 + 1 = 121.
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "121" ]; then
-  pass "authenticated holds EXECUTE on exactly the 121 functions expected, no more"
+# OneLedger 3.0 S4 (20261224000000): backfill_counterparties,
+# update_counterparty, merge_counterparties, undo_counterparty_merge - all
+# member+-gated; normalize_msisdn is internal (revoked). 121 + 4 = 125.
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "125" ]; then
+  pass "authenticated holds EXECUTE on exactly the 125 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 121 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 125 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -8040,6 +8048,277 @@ if [ "$S3_VB" = "0" ] && [ "$S3_VA" = "1" ]; then
   pass "S3: account_balance_baselines_v respects tenant isolation (member sees own account, other tenant sees none)"
 else
   fail "S3: view isolation wrong (owner sees $S3_VA, other tenant sees $S3_VB)"
+fi
+
+# ===========================================================================
+# OneLedger 3.0 S4: counterparties (20261224000000_counterparties).
+# Reuses USER_A/WORKSPACE_A, USER_B/WORKSPACE_B, R_MATRIX_HH (+R_VIEWER_USER).
+# ===========================================================================
+echo "=== OneLedger 3.0 S4: counterparties ==="
+
+# SQL normalize_msisdn must agree with web/lib/counterparties/normalize.ts on
+# the shared vectors (web/lib/counterparties/msisdn-vectors.json).
+S4_VEC_BAD="$(psql -d pfe_rls -t -A -c "select count(*) from (values ('250793000439'::text, '250793000439'::text), ('+250 793 000 439'::text, '250793000439'::text), ('0793000439'::text, '250793000439'::text), ('793000439'::text, '250793000439'::text), ('00250793000439'::text, '250793000439'::text), ('(0793) 000-439'::text, '250793000439'::text), ('*********901'::text, null::text), ('093011'::text, null::text), ('250693000439'::text, null::text), ('25079300043'::text, null::text), (''::text, null::text), (null::text, null::text)) v(i, o) where public.normalize_msisdn(v.i) is distinct from v.o;")"
+if [ "$S4_VEC_BAD" = "0" ]; then
+  pass "S4: SQL normalize_msisdn agrees with the shared msisdn vectors (TS parity)"
+else
+  fail "S4: normalize_msisdn disagrees with $S4_VEC_BAD shared vector(s)"
+fi
+
+S4_ACCT="00000000-0000-0000-0000-0000000054a1"
+S4_ACCT_B="00000000-0000-0000-0000-0000000054a2"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.accounts (id, workspace_id, name, provider, currency) values
+    ('$S4_ACCT', '$WORKSPACE_A', 'S4 acct A', 'mtn_momo', 'RWF'),
+    ('$S4_ACCT_B', '$WORKSPACE_B', 'S4 acct B', 'mtn_momo', 'RWF');" >/dev/null
+
+s4_tx() { # idx workspace account type direction amount fee name reference minutes_ago
+  local n="$1" ws="$2" acct="$3" typ="$4" dir="$5" amt="$6" fee="$7" name="$8" ref="$9" ago="${10}"
+  local mid="00000000-0000-0000-0000-00000000550$n" tid="00000000-0000-0000-0000-00000000560$n"
+  local nm="null" rf="null" p f
+  [ -n "$name" ] && nm="'$name'"
+  [ -n "$ref" ] && rf="'$ref'"
+  if [ "$dir" = "in" ]; then p="$amt"; f="-$fee"; else p="-$amt"; f="-$fee"; fi
+  psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+    insert into public.momo_messages (id, raw_message, processing_status) values ('$mid', 's4-$n', 'processed');
+    insert into public.transactions
+      (id, momo_message_id, account_id, workspace_id, transaction_type, direction, status,
+       amount_rwf, fee_rwf, occurred_at, parser_version, counterparty_name, counterparty_reference,
+       settlement_state, affects_balance, principal_effect_rwf, fee_effect_rwf, effect_reason)
+    values ('$tid', '$mid', '$acct', '$ws', '$typ', '$dir', 'success', $amt, $fee,
+            now() - interval '$ago minutes', 'test', $nm, $rf, 'settled', true, $p, $f,
+            '$( [ "$dir" = "in" ] && echo settled_incoming || echo settled_outgoing_with_fee )');" >/dev/null
+}
+S4_T() { echo "00000000-0000-0000-0000-00000000560$1"; }
+
+s4_tx 1 "$WORKSPACE_A" "$S4_ACCT" money_received in 5000 0 "Samuel NSHIMIYIMANA" "250793000439" 600
+s4_tx 2 "$WORKSPACE_A" "$S4_ACCT" send_money out 2000 100 "Samuel N" "0793000439" 500
+s4_tx 3 "$WORKSPACE_A" "$S4_ACCT" merchant_payment out 1500 0 "KMLVIO CENTER SHOP" "093011" 400
+s4_tx 4 "$WORKSPACE_A" "$S4_ACCT" send_money out 700 0 "Ogabor JULIUS" "*********901" 300
+s4_tx 5 "$WORKSPACE_A" "$S4_ACCT" send_money out 800 0 "  ogabor   julius " "*********902" 200
+s4_tx 6 "$WORKSPACE_A" "$S4_ACCT" airtime out 300 0 "Airtime" "" 100
+s4_tx 7 "$WORKSPACE_B" "$S4_ACCT_B" send_money out 900 0 "Samuel NSHIMIYIMANA" "250793000439" 100
+
+S4_R1="$(as_user "$USER_A" "select public.backfill_counterparties('$WORKSPACE_A');" | tail -1)"
+S4_CP_COUNT="$(psql -d pfe_rls -t -A -c "select count(distinct counterparty_id) from public.transactions where id in ('00000000-0000-0000-0000-000000005601','00000000-0000-0000-0000-000000005602','00000000-0000-0000-0000-000000005603','00000000-0000-0000-0000-000000005604','00000000-0000-0000-0000-000000005605','00000000-0000-0000-0000-000000005606');")"
+S4_UNRES="$(psql -d pfe_rls -t -A -c "select count(*) from public.transactions where workspace_id = '$WORKSPACE_A' and id::text like '00000000-0000-0000-0000-00000000560%' and counterparty_id is null;")"
+if [ "$S4_CP_COUNT" = "4" ] && [ "$S4_UNRES" = "0" ]; then
+  pass "S4: backfill creates 4 counterparties (msisdn, merchant code, name label x2) and resolves every seeded transaction"
+else
+  fail "S4: backfill wrong (counterparties=$S4_CP_COUNT unresolved=$S4_UNRES result=$S4_R1)"
+fi
+
+S4_SAME="$(psql -d pfe_rls -t -A -c "select count(distinct counterparty_id) from public.transactions where id in ('$(S4_T 1)', '$(S4_T 2)');")"
+if [ "$S4_SAME" = "1" ]; then
+  pass "S4: the same phone number with different labels and formats resolves to ONE counterparty"
+else
+  fail "S4: msisdn identity split across $S4_SAME counterparties"
+fi
+
+S4_KINDS="$(psql -d pfe_rls -t -A -c "select string_agg(kind || '/' || confidence, ',' order by kind, confidence) from public.counterparties where id in (select counterparty_id from public.transactions where id in ('00000000-0000-0000-0000-000000005601','00000000-0000-0000-0000-000000005602','00000000-0000-0000-0000-000000005603','00000000-0000-0000-0000-000000005604','00000000-0000-0000-0000-000000005605','00000000-0000-0000-0000-000000005606'));")"
+if [ "$S4_KINDS" = "merchant/high,person/high,unknown/low,unknown/low" ]; then
+  pass "S4: strong identifiers are high confidence; name-only counterparties are unknown/low"
+else
+  fail "S4: kind/confidence wrong: '$S4_KINDS'"
+fi
+
+S4_NAME_SAME="$(psql -d pfe_rls -t -A -c "select count(distinct counterparty_id) from public.transactions where id in ('$(S4_T 4)', '$(S4_T 5)');")"
+if [ "$S4_NAME_SAME" = "1" ]; then
+  pass "S4: masked references never form identities; the exact (normalised) label groups them as a weak counterparty"
+else
+  fail "S4: name-label grouping wrong ($S4_NAME_SAME)"
+fi
+
+S4_XT="$(psql -d pfe_rls -t -A -c "select count(*) from public.counterparty_identifiers where identifier_type = 'msisdn' and normalized_value = '250793000439';")"
+S4_XT_B="$(psql -d pfe_rls -t -A -c "select count(*) from public.transactions t join public.counterparties c on c.id = t.counterparty_id where t.id = '$(S4_T 7)' and c.workspace_id is distinct from '$WORKSPACE_A';")"
+# Workspace B's tx is still unresolved (only A was backfilled); resolve B and compare.
+as_user "$USER_B" "select public.backfill_counterparties('$WORKSPACE_B');" >/dev/null
+S4_XT="$(psql -d pfe_rls -t -A -c "select count(*) from public.counterparty_identifiers where identifier_type = 'msisdn' and normalized_value = '250793000439';")"
+S4_B_OWN="$(psql -d pfe_rls -t -A -c "select count(distinct c.workspace_id) from public.transactions t join public.counterparties c on c.id = t.counterparty_id where t.id = '$(S4_T 7)' and c.workspace_id = '$WORKSPACE_B';")"
+if [ "$S4_XT" = "2" ] && [ "$S4_B_OWN" = "1" ]; then
+  pass "S4: the same phone number in two workspaces yields two independent counterparties (no cross-tenant matching)"
+else
+  fail "S4: cross-workspace identity leaked (identifiers=$S4_XT b_own=$S4_B_OWN)"
+fi
+
+S4_CP_ALL1="$(psql -d pfe_rls -t -A -c "select count(*) from public.counterparties where workspace_id = '$WORKSPACE_A';")"
+S4_R2="$(as_user "$USER_A" "select public.backfill_counterparties('$WORKSPACE_A');" | tail -1)"
+S4_CP_COUNT2="$(psql -d pfe_rls -t -A -c "select count(*) from public.counterparties where workspace_id = '$WORKSPACE_A';")"
+if [ "$S4_CP_COUNT2" = "$S4_CP_ALL1" ] && echo "$S4_R2" | grep -q '"created": 0' && echo "$S4_R2" | grep -q '"linked": 0'; then
+  pass "S4: re-running the backfill is a no-op (idempotent)"
+else
+  fail "S4: backfill is not idempotent (count=$S4_CP_COUNT2 result=$S4_R2)"
+fi
+
+# A transaction arriving later is resolved incrementally, joining the existing counterparty.
+s4_tx 8 "$WORKSPACE_A" "$S4_ACCT" send_money out 400 0 "Someone Else" "+250 793 000 439" 50
+as_user "$USER_A" "select public.backfill_counterparties('$WORKSPACE_A');" >/dev/null
+S4_INC="$(psql -d pfe_rls -t -A -c "select count(distinct counterparty_id) from public.transactions where id in ('$(S4_T 1)', '$(S4_T 8)');")"
+if [ "$S4_INC" = "1" ]; then
+  pass "S4: a later transaction with the same number joins the existing counterparty on the next backfill"
+else
+  fail "S4: incremental resolution failed ($S4_INC)"
+fi
+
+# Saved payee (Assisted Pay) seeds name/kind and, when trusted, confirmation.
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.trusted_recipients (workspace_id, display_name, kind, normalized_msisdn, trust_status)
+  values ('$WORKSPACE_A', 'Sam (brother)', 'phone', '250793000439', 'trusted_by_user');" >/dev/null 2>$ARTIFACT_DIR/pfe_s4_tr.log || fail "S4: could not seed trusted recipient: $(cat $ARTIFACT_DIR/pfe_s4_tr.log)"
+rm -f $ARTIFACT_DIR/pfe_s4_tr.log
+as_user "$USER_A" "select public.backfill_counterparties('$WORKSPACE_A');" >/dev/null
+S4_SEED="$(psql -d pfe_rls -t -A -c "select display_name || '|' || kind || '|' || confidence from public.counterparties c join public.transactions t on t.counterparty_id = c.id where t.id = '$(S4_T 1)';")"
+if [ "$S4_SEED" = "Sam (brother)|person|user_confirmed" ]; then
+  pass "S4: a trusted saved payee names and confirms the matching counterparty"
+else
+  fail "S4: saved-payee seeding wrong: '$S4_SEED'"
+fi
+
+# --- isolation, authz ------------------------------------------------------
+S4_B_SEES="$(as_user "$USER_B" "select count(*) from public.counterparties where workspace_id = '$WORKSPACE_A';")"
+if [ "$S4_B_SEES" = "0" ]; then
+  pass "S4: another workspace's member cannot read this workspace's counterparties (RLS)"
+else
+  fail "S4: cross-tenant leak - USER_B reads $S4_B_SEES counterparty row(s)"
+fi
+if as_user "$USER_B" "select public.backfill_counterparties('$WORKSPACE_A');" >/dev/null 2>&1; then
+  fail "S4: USER_B ran a backfill against another workspace"
+else
+  pass "S4: a non-member cannot run the backfill for another workspace"
+fi
+S4_PRIV="$(psql -d pfe_rls -t -A -c "select bool_or(has_table_privilege('authenticated', t, p)) from unnest(array['public.counterparties','public.counterparty_identifiers','public.counterparty_merge_events']) t, unnest(array['INSERT','UPDATE','DELETE']) p;")"
+if [ "$S4_PRIV" = "false" ] || [ "$S4_PRIV" = "f" ]; then
+  pass "S4: authenticated has no direct write privilege on any counterparty table"
+else
+  fail "S4: direct write privilege leaked ('$S4_PRIV')"
+fi
+S4_INT="$(psql -d pfe_rls -t -A -c "select has_function_privilege('authenticated','public.normalize_msisdn(text)','EXECUTE');")"
+if [ "$S4_INT" = "false" ] || [ "$S4_INT" = "f" ]; then
+  pass "S4: the internal normalize_msisdn helper is not callable by authenticated"
+else
+  fail "S4: normalize_msisdn is callable by authenticated"
+fi
+
+# --- summaries --------------------------------------------------------------
+S4_CP_SAM="$(psql -d pfe_rls -t -A -c "select counterparty_id from public.transactions where id = '$(S4_T 1)';")"
+S4_SUM="$(as_user "$USER_A" "select sent_minor || '|' || received_minor || '|' || txn_count from public.counterparty_summaries_v where counterparty_id = '$S4_CP_SAM';")"
+# Sam: in 5000; out 2000+100 fee; out 400 (t8). sent = 2100 + 400 = 2500
+if [ "$S4_SUM" = "2500|5000|3" ]; then
+  pass "S4: counterparty summary reports sent / received / count (fees in sent)"
+else
+  fail "S4: summary wrong: '$S4_SUM' (want 2500|5000|3)"
+fi
+
+# A confirmed self-transfer link removes both legs from the summary.
+s4_tx 9 "$WORKSPACE_A" "$S4_ACCT" money_received in 2000 0 "Samuel NSHIMIYIMANA" "250793000439" 40
+as_user "$USER_A" "select public.backfill_counterparties('$WORKSPACE_A');" >/dev/null
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "insert into public.transfer_links (workspace_id, out_transaction_id, in_transaction_id, status) values ('$WORKSPACE_A', '$(S4_T 2)', '$(S4_T 9)', 'linked');" >/dev/null 2>$ARTIFACT_DIR/pfe_s4_tl.log || fail "S4: could not seed transfer link: $(cat $ARTIFACT_DIR/pfe_s4_tl.log)"
+rm -f $ARTIFACT_DIR/pfe_s4_tl.log
+S4_SUM2="$(as_user "$USER_A" "select sent_minor || '|' || received_minor || '|' || txn_count from public.counterparty_summaries_v where counterparty_id = '$S4_CP_SAM';")"
+# remaining: t1 in 5000, t8 out 400 -> sent 400 received 5000 count 2
+if [ "$S4_SUM2" = "400|5000|2" ]; then
+  pass "S4: confirmed self-transfer legs are excluded from counterparty summaries (parity with Insights)"
+else
+  fail "S4: transfer exclusion wrong in summary: '$S4_SUM2' (want 400|5000|2)"
+fi
+
+# --- update ------------------------------------------------------------------
+S4_CP_OG="$(psql -d pfe_rls -t -A -c "select counterparty_id from public.transactions where id = '$(S4_T 4)';")"
+as_user "$USER_A" "select public.update_counterparty('$S4_CP_OG', ' Ogabor Julius Ineji ', 'person');" >/dev/null
+S4_UPD="$(psql -d pfe_rls -t -A -c "select display_name || '|' || kind || '|' || confidence from public.counterparties where id = '$S4_CP_OG';")"
+S4_RAW="$(psql -d pfe_rls -t -A -c "select counterparty_name from public.transactions where id = '$(S4_T 4)';")"
+if [ "$S4_UPD" = "Ogabor Julius Ineji|person|user_confirmed" ] && [ "$S4_RAW" = "Ogabor JULIUS" ]; then
+  pass "S4: a correction renames/kinds the counterparty and confirms it, while the raw transaction label is preserved"
+else
+  fail "S4: update wrong ('$S4_UPD' raw='$S4_RAW')"
+fi
+if as_user "$USER_A" "select public.update_counterparty('$S4_CP_OG', 'x', 'robot');" >/dev/null 2>&1; then
+  fail "S4: an invalid kind was accepted"
+else
+  pass "S4: an invalid kind is rejected"
+fi
+
+# --- merge / undo ---------------------------------------------------------------
+S4_CP_SHOP="$(psql -d pfe_rls -t -A -c "select counterparty_id from public.transactions where id = '$(S4_T 3)';")"
+S4_CP_AIR="$(psql -d pfe_rls -t -A -c "select counterparty_id from public.transactions where id = '$(S4_T 6)';")"
+S4_EV1="$(as_user "$USER_A" "select public.merge_counterparties('$S4_CP_SHOP', array['$S4_CP_AIR']::uuid[]);" | tail -1)"
+S4_MERGED="$(psql -d pfe_rls -t -A -c "select merged_into_id from public.counterparties where id = '$S4_CP_AIR';")"
+S4_SUM_M="$(as_user "$USER_A" "select count(*) || '|' || coalesce(sum(sent_minor),0) from public.counterparty_summaries_v where counterparty_id in ('$S4_CP_SHOP', '$S4_CP_AIR');")"
+# shop 1500 + airtime 300 under the survivor only
+if [ "$S4_MERGED" = "$S4_CP_SHOP" ] && [ "$S4_SUM_M" = "1|1800" ]; then
+  pass "S4: merge folds the merged counterparty's activity into the survivor; transaction links are untouched"
+else
+  fail "S4: merge wrong (merged_into='$S4_MERGED' summary='$S4_SUM_M')"
+fi
+S4_TX_LINK="$(psql -d pfe_rls -t -A -c "select counterparty_id from public.transactions where id = '$(S4_T 6)';")"
+if [ "$S4_TX_LINK" = "$S4_CP_AIR" ]; then
+  pass "S4: a merge never rewrites transactions.counterparty_id (soft, reversible link)"
+else
+  fail "S4: merge rewrote the transaction link"
+fi
+
+as_user "$USER_A" "select public.undo_counterparty_merge('$S4_EV1');" >/dev/null
+S4_UNDONE="$(psql -d pfe_rls -t -A -c "select coalesce(merged_into_id::text, 'null') from public.counterparties where id = '$S4_CP_AIR';")"
+S4_SUM_U="$(as_user "$USER_A" "select count(*) from public.counterparty_summaries_v where counterparty_id in ('$S4_CP_SHOP', '$S4_CP_AIR');")"
+if [ "$S4_UNDONE" = "null" ] && [ "$S4_SUM_U" = "2" ]; then
+  pass "S4: undoing a merge restores the original counterparties exactly"
+else
+  fail "S4: undo wrong (merged_into='$S4_UNDONE' rows=$S4_SUM_U)"
+fi
+if as_user "$USER_A" "select public.undo_counterparty_merge('$S4_EV1');" >/dev/null 2>&1; then
+  fail "S4: a merge was undone twice"
+else
+  pass "S4: a merge cannot be undone twice"
+fi
+
+# chain: Og -> Air, then Air -> Shop (flatten); undo order enforced.
+as_user "$USER_A" "select public.merge_counterparties('$S4_CP_AIR', array['$S4_CP_OG']::uuid[]);" >/dev/null
+S4_EV3="$(as_user "$USER_A" "select public.merge_counterparties('$S4_CP_SHOP', array['$S4_CP_AIR']::uuid[]);" | tail -1)"
+S4_EV2="$(psql -d pfe_rls -t -A -c "select id from public.counterparty_merge_events where survivor_id = '$S4_CP_AIR' and undone_at is null;")"
+S4_FLAT="$(psql -d pfe_rls -t -A -c "select merged_into_id from public.counterparties where id = '$S4_CP_OG';")"
+if [ "$S4_FLAT" = "$S4_CP_SHOP" ]; then
+  pass "S4: merging a survivor flattens its children onto the new survivor (one-hop resolution)"
+else
+  fail "S4: chain not flattened (og.merged_into='$S4_FLAT')"
+fi
+if as_user "$USER_A" "select public.undo_counterparty_merge('$S4_EV2');" >/dev/null 2>&1; then
+  fail "S4: an earlier merge was undone while a later merge depends on it"
+else
+  pass "S4: an earlier merge cannot be undone out of order (merge_state_changed)"
+fi
+as_user "$USER_A" "select public.undo_counterparty_merge('$S4_EV3');" >/dev/null
+as_user "$USER_A" "select public.undo_counterparty_merge('$S4_EV2');" >/dev/null
+S4_ALL="$(psql -d pfe_rls -t -A -c "select count(*) from public.counterparties where workspace_id = '$WORKSPACE_A' and merged_into_id is not null;")"
+if [ "$S4_ALL" = "0" ]; then
+  pass "S4: undoing merges in reverse order restores every counterparty"
+else
+  fail "S4: $S4_ALL counterparty(ies) still merged after full undo"
+fi
+
+# --- merge guards ---------------------------------------------------------------
+S4_CP_B="$(psql -d pfe_rls -t -A -c "select counterparty_id from public.transactions where id = '$(S4_T 7)';")"
+if as_user "$USER_A" "select public.merge_counterparties('$S4_CP_SHOP', array['$S4_CP_B']::uuid[]);" >/dev/null 2>&1; then
+  fail "S4: merged a counterparty from ANOTHER workspace"
+else
+  pass "S4: a counterparty from another workspace can never be merged in"
+fi
+if as_user "$USER_A" "select public.merge_counterparties('$S4_CP_SHOP', array['$S4_CP_SHOP']::uuid[]);" >/dev/null 2>&1; then
+  fail "S4: merged a counterparty into itself"
+else
+  pass "S4: a counterparty cannot be merged into itself"
+fi
+
+# --- roles: viewer denied ----------------------------------------------------------
+if as_user "$R_VIEWER_USER" "select public.backfill_counterparties('$R_MATRIX_HH');" >/dev/null 2>&1; then
+  fail "S4: a viewer ran the counterparty backfill"
+else
+  pass "S4: a viewer cannot run the counterparty backfill"
+fi
+
+S4_AUDIT="$(psql -d pfe_rls -t -A -c "select string_agg(event_type, ',' order by event_type) from (select distinct event_type from public.space_audit_events where workspace_id = '$WORKSPACE_A' and event_type like 'counterparty.%') x;")"
+if [ "$S4_AUDIT" = "counterparty.merge_undone,counterparty.merged,counterparty.updated" ]; then
+  pass "S4: update, merge and undo are each audited"
+else
+  fail "S4: audit events wrong: '$S4_AUDIT'"
 fi
 
 echo ""
