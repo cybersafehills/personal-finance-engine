@@ -5,7 +5,7 @@
     "scheme": "oneledger",
     "version": "2.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/branding/ios-app-icon-1024.png",
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": false,
@@ -13,19 +13,20 @@
       "buildNumber": "1",
       "config": {
         "usesNonExemptEncryption": false
-      }
+      },
+      "icon": "./assets/branding/ios-app-icon-1024.png"
     },
     "android": {
       "package": "me.oneledger.companion",
       "adaptiveIcon": {
-        "backgroundColor": "#FFFFFF",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "foregroundImage": "./assets/branding/android-adaptive-foreground-safe-1024.png",
+        "monochromeImage": "./assets/branding/android-monochrome-safe-432.png",
+        "backgroundColor": "#FFFFFF"
       },
       "predictiveBackGestureEnabled": false,
       "allowBackup": false,
-      "versionCode": 10
+      "versionCode": 10,
+      "icon": "./assets/branding/android-legacy-icon-1024.png"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -46,7 +47,22 @@
           "faceIDPermission": "Allow OneLedger to use Face ID to unlock the app."
         }
       ],
-      "expo-notifications"
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/branding/android-notification-96.png",
+          "color": "#0050F4"
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/branding/splash-logo-1024.png",
+          "imageWidth": 220,
+          "resizeMode": "contain",
+          "backgroundColor": "#FFFFFF"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

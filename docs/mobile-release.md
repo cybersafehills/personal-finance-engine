@@ -13,7 +13,7 @@ or Xcode.
 | App version | `2.0.0` (successor to the companion's `1.0.3`); Android `versionCode` 10, iOS `buildNumber` 1 |
 | Cloud build workflow | `.github/workflows/mobile-build.yml`, manual only |
 | Android signing | EAS-managed keystore (the companion was never on a store); back it up after the first build |
-| App icon / splash | **Template placeholders. Blocker for any store build** |
+| App icon / splash / notification icon | In place (supplied pack); see "Brand asset slots" for the remaining gaps |
 | iOS | Waits for the Apple Developer Program membership |
 
 ## One-time setup
@@ -92,11 +92,10 @@ guide, so the Shortcuts must be published first
 
 ## Blockers before any store build
 
-- **Real app icon, splash and store graphics.** `assets/` still holds the Expo
-  template artwork. Brand rules (`docs/ONELEDGER_BRAND_ASSETS.md`) forbid
-  redrawing or recolouring the mark, so each slot below must be filled from an
-  approved brand file, resized only if the source is larger than the slot.
-  See "Brand asset slots".
+- **Store graphics.** The app's own icons are in place. Still missing for
+  the stores: the Play feature graphic (1024x500), screenshots for both
+  stores, and (preferably) a vector source for a sharper 1024 icon. See
+  "Brand asset slots".
 - **Privacy policy / Data safety** updates (above).
 - **Push** (docs/mobile-push.md) is optional for a first release; nothing needs
   it to be on.
@@ -109,50 +108,38 @@ increasing) / `expo.ios.buildNumber` in `app.json` for every store upload.
 
 ## Brand asset slots
 
-Every place the app and the store listings need artwork. A source that is too
-small for a slot is **reported, not upscaled**. In the app config these are
-the files under `oneledger-mobile/assets/`.
+Artwork comes from the supplied mobile asset pack
+(`OneLedger_Mobile_Assets_Fixed`), itself composed from the approved
+`Standalone icon.png` by alpha-cropping, proportional scaling and centring
+only. Provenance is recorded in `docs/ONELEDGER_BRAND_ASSETS.md`.
 
-| Slot | File / where | Required |
+| Slot | File | State |
 |---|---|---|
-| App icon (iOS App Store icon, and the default icon) | `assets/icon.png` (`expo.icon`) | 1024x1024 PNG, **opaque (no alpha)**, square corners (the OS rounds them), no transparency anywhere |
-| Android adaptive icon, foreground | `assets/android-icon-foreground.png` | 1024x1024 PNG with alpha. Keep the mark inside the centre ~66% (a ~683 px circle); the OS crops the rest |
-| Android adaptive icon, background | `assets/android-icon-background.png` (or the colour `#07143A` in `app.json`) | 1024x1024 PNG, or a flat colour |
-| Android themed (monochrome) icon | `assets/android-icon-monochrome.png` | 1024x1024 PNG, single colour on transparent, same safe zone as the foreground |
-| Splash mark | `assets/splash-icon.png` | 1024x1024 PNG, alpha allowed; shown centred on the splash background colour |
-| Android notification icon (push) | not set yet (`expo-notifications` plugin `icon`) | 96x96 PNG, **white on transparent** (Android renders it as a silhouette) |
-| Web preview favicon | `assets/favicon.png` | 48x48 or larger PNG (development preview only). **Done:** the web app's approved `favicon-48x48.png` |
-| Play Store hi-res icon | Play Console upload | exactly 512x512 PNG, 32-bit, up to 1 MB |
-| Play Store feature graphic | Play Console upload | exactly 1024x500 PNG or JPG, no alpha |
-| Play Store phone screenshots | Play Console upload | 2 to 8; 16:9 or 9:16; each side 320 to 3840 px |
-| App Store screenshots | App Store Connect upload | iPhone 6.9" 1320x2868 (or 6.7" 1290x2796); iPad not needed (`supportsTablet` is false) |
+| App icon / iOS App Store icon | `assets/branding/ios-app-icon-1024.png` | In place. 1024x1024, opaque, mark ~69%. As supplied |
+| Android legacy icon (pre-8.0) | `assets/branding/android-legacy-icon-1024.png` | In place. As supplied |
+| Android adaptive foreground | `assets/branding/android-adaptive-foreground-safe-1024.png` | In place, **scaled to 72% of the pack's file**: the pack's mark (591 px) was clipped by round launcher masks. Verified under circle, squircle and rounded-square masks |
+| Android adaptive background | `#FFFFFF` in `app.json` | In place. Must be light: the mark's "1" is transparent |
+| Android themed (monochrome) icon | `assets/branding/android-monochrome-safe-432.png` | In place, pack's white silhouette scaled to 72% for the same reason |
+| Android notification icon | `assets/branding/android-notification-96.png` + tint `#0050F4` | In place. Pure white silhouette, as supplied |
+| Splash | `assets/branding/splash-logo-1024.png` on `#FFFFFF`, width 220 | In place. Renders the mark at about its native resolution |
+| Web preview favicon | `assets/favicon.png` | In place (the web app's approved 48 px favicon) |
+| Play Store hi-res icon | `store/google-play/icon-512.png` | Ready to upload. A plain downscale of the iOS icon |
+| Play Store feature graphic | none | **Missing.** 1024x500 PNG/JPG, a layout decision for the brand owner |
+| Play and App Store screenshots | none | **Missing.** Take them from a real build (Play: 16:9 or 9:16, 320 to 3840 px per side; App Store: iPhone 6.9" 1320x2868) |
 
-Brand files already in the repo (`brand-source/oneledger/`), checked against
-these slots: `standalone-icon.png` is 510x511 with alpha, which is **too small
-for every 1024 slot** and one pixel short of the 512x512 Play icon.
+### Known limits of the supplied artwork
 
-### Findings from the supplied brand folder (2026-11-15)
-
-The folder matches what is already archived in `brand-source/oneledger/`
-(same files, same sizes; only the bytes differ, probably a re-export).
-
-- **The mark is ~318x327 px inside every file.** `Standalone icon.png`
-  (510x511), `Icon OneLedger.png` (763x887, opaque) and the web favicon source
-  all hold the same ~318 px mark surrounded by margin. Filling a 1024 slot
-  properly means enlarging the mark about 2x, which softens its hard edges.
-- **The "1" is transparent**, not white. The mark is navy with a cut-out, so
-  it needs a **light** background everywhere: on navy the "1" and the whole
-  mark disappear. (Android adaptive background is now `#FFFFFF`.)
-- **`Monochrome dark logo.png` still has the checkerboard baked in** as pixels
-  (see "Known source defect" in `docs/ONELEDGER_BRAND_ASSETS.md`), so it
-  cannot be used as-is for a themed icon or anything on a coloured surface.
-- **What is enough as supplied:** the on-device icons. Home-screen icons are
-  rendered at most ~180 px (iOS) and ~432 px (Android adaptive foreground,
-  of which the mark is ~285 px), below the source's 318 px, so they stay crisp
-  when scaled down. **What is not:** the 1024 App Store master, the 512 Play
-  icon, and any large store listing use, which would be upscaled.
-- **A vector source (SVG / PDF / AI) or a PNG of at least ~1500 px mark width
-  from the brand owner** solves every slot at once.
-- **Needs sign-off before doing:** the Android notification icon and themed
-  (monochrome) icon must be a single-colour silhouette. That is a recolour of
-  the mark, which the brand rules forbid without approval.
+- **Enlarged, not native.** The source mark is ~318 px wide; the 1024 icons
+  are interpolated about 2.2x (the pack's own README says so). Home-screen
+  icons are rendered below the source size and stay crisp; the 1024 store
+  listing icon is softer. A vector source (SVG / PDF / AI) or a PNG with the
+  mark at least ~1500 px wide would fix it.
+- **No dark splash.** The pack's navy splash puts the navy mark on an almost
+  identical navy field, so only the blue wedge shows. The app is light-only
+  (`userInterfaceStyle: light`), so no `dark` variant is configured. If dark
+  mode is ever added, that variant needs the brand owner's rework, and its
+  `#081839` background is an approximation of the brand navy, not a supplied
+  token (`#07143A` is the verified one).
+- **Silhouette icons** (notification, themed) are the pack's white versions of
+  the mark's alpha channel. Review them on a real phone: a solid square with a
+  "1" cut-out is legible but plain.
