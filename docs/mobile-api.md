@@ -59,6 +59,23 @@ app's Inbox tab. Read-only.
   under the user's session (confirm / dismiss a category, merge / dismiss a
   duplicate). Every other item opens its web page.
 
+## `GET /api/mobile/budgets`
+
+The user's **active budgets** with their actuals, for the app's Budget screen
+and Home card. Read-only; same guard as the Inbox (`lib/mobile-request.ts`:
+flag, rate limit, bearer token validated with Supabase Auth, second factor
+required, request-scoped session, `no-store`).
+
+- The figures come from `getBudgetActuals`, the single canonical aggregation
+  (`lib/budget-math.ts`); the app never recomputes them. `lib/mobile-budgets.ts`
+  only reshapes them to JSON: alert amounts are `bigint` (not JSON-safe), so
+  alerts are rendered to the same sentences the web shows
+  (`lib/budget-alert-text.ts`, shared with `components/AlertsList.tsx`).
+- `200 { ok: true, budgets: [...] }` (empty when there is no active budget; at
+  most 3; budgets in a currency the apps cannot format are left out),
+  `401`, `403 mfa_required`, `404` flag off, `429`, `500`.
+- Amounts are integer minor units of the budget's currency.
+
 ## Rollout
 
 1. Deploy web with the route (dark).

@@ -62,6 +62,17 @@ test.describe("mobile API", () => {
       expect(item.actions.map((a: { type: string }) => a.type)).toContain("confirm_category");
       // The payload carries the summary the app displays.
       expect(body.inbox.total).toBeGreaterThanOrEqual(1);
+
+      // Budgets run the same guard and the canonical actuals code under the
+      // bearer session. The seeded user may have no active budget, so this
+      // asserts the contract (200 + an array), not specific figures.
+      const budgets = await api.get("/api/mobile/budgets", {
+        headers: { authorization: `Bearer ${session.access_token}` },
+      });
+      expect(budgets.status()).toBe(200);
+      const budgetsBody = await budgets.json();
+      expect(budgetsBody.ok).toBe(true);
+      expect(Array.isArray(budgetsBody.budgets)).toBe(true);
     } finally {
       await api.dispose();
     }
@@ -71,6 +82,7 @@ test.describe("mobile API", () => {
     const api = await playwrightRequest.newContext({ baseURL: BASE_URL });
     try {
       expect((await api.get("/api/mobile/inbox")).status()).toBe(401);
+      expect((await api.get("/api/mobile/budgets")).status()).toBe(401);
       expect(
         (await api.get("/api/mobile/inbox", { headers: { authorization: "Basic abc" } })).status(),
       ).toBe(401);

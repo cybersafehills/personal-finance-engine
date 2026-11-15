@@ -1,4 +1,5 @@
-import { supabase } from "@/api/supabase";
+import { bearerGet, failureForOutcome } from "@/api/bearer";
+import { parseBudgetsResponse, type BudgetsResult } from "@/features/budgets/parse";
 import { parseInboxResponse, type InboxResult } from "@/features/inbox/parse";
 import { config } from "@/lib/config";
 
@@ -84,30 +85,18 @@ export async function signInWithPassword(
  * access token; the server validates it and runs everything under RLS.
  */
 export async function fetchInbox(): Promise<InboxResult> {
-  if (!supabase || !config.apiBaseUrl) {
-    return { ok: false, reason: "unavailable", message: "The full inbox isn't available yet." };
+  const result = await bearerGet("/api/mobile/inbox");
+  if (result.kind !== "response") {
+    return { ok: false, ...failureForOutcome(result, "The full inbox") };
   }
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
-  if (!token) return { ok: false, reason: "unauthorized", message: "Please sign in again." };
+  return parseInboxResponse(result.status, result.body);
+}
 
-  let response: Response;
-  try {
-    response = await fetch(`${config.apiBaseUrl}/api/mobile/inbox`, {
-      headers: { authorization: `Bearer ${token}` },
-    });
-  } catch {
-    return {
-      ok: false,
-      reason: "error",
-      message: "Couldn't load your inbox. Check your connection and try again.",
-    };
+/** Active budgets with their actuals, from the web's canonical budget maths. */
+export async function fetchBudgets(): Promise<BudgetsResult> {
+  const result = await bearerGet("/api/mobile/budgets");
+  if (result.kind !== "response") {
+    return { ok: false, ...failureForOutcome(result, "Budgets") };
   }
-  let body: unknown = null;
-  try {
-    body = await response.json();
-  } catch {
-    // Non-JSON error page; the status alone decides.
-  }
-  return parseInboxResponse(response.status, body);
+  return parseBudgetsResponse(result.status, result.body);
 }

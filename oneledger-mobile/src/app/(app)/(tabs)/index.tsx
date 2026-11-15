@@ -1,4 +1,5 @@
 import { router } from "expo-router";
+import { useCallback } from "react";
 import { RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -12,6 +13,8 @@ import {
   StatTile,
   Text,
 } from "@/components/ds";
+import { fetchBudgets } from "@/api/mobile-api";
+import { statusDisplay, totals, worstStatus } from "@/features/budgets/display";
 import { captureSupported, getCaptureHealth } from "@/features/capture/capture";
 import { usePrivacy } from "@/features/privacy/PrivacyProvider";
 import {
@@ -23,7 +26,7 @@ import {
 import { TransactionItem } from "@/features/transactions/TransactionItem";
 import { useQuery } from "@/hooks/useQuery";
 import { formatDateTime } from "@/lib/kigali-time";
-import { formatRwf } from "@/lib/money";
+import { formatMoney, formatRwf } from "@/lib/money";
 import { colors, space } from "@/theme/tokens";
 
 async function loadHome() {
@@ -42,6 +45,12 @@ export default function Home() {
   const { amountsHidden, toggleAmountsHidden } = usePrivacy();
   // `loadHome` is a module-level function, so its identity is stable.
   const { data, loading, refreshing, error, refresh } = useQuery(loadHome);
+  // Server-computed, so it loads on its own: a slow or unavailable budget
+  // service never delays or breaks the rest of Home.
+  const loadBudgets = useCallback(() => fetchBudgets(), []);
+  const { data: budgetResult } = useQuery(loadBudgets);
+  const budget = budgetResult?.ok ? (budgetResult.budgets[0] ?? null) : null;
+  const budgetSummary = budget ? totals(budget.allocations) : null;
 
   // Recording is "not working" when the engine exists but is not healthy.
   const recordingNeedsSetup =
@@ -119,6 +128,30 @@ export default function Home() {
                   so you don&apos;t have to type them in.
                 </Text>
                 <Button label="Set it up" fullWidth onPress={() => router.push("/connect")} />
+              </Card>
+            ) : null}
+
+            {budget && budgetSummary ? (
+              <Card style={styles.stack}>
+                <View style={styles.cardHeader}>
+                  <Text variant="bodyStrong">{budget.name}</Text>
+                  <Badge variant={statusDisplay(worstStatus(budget.allocations)).variant}>
+                    {statusDisplay(worstStatus(budget.allocations)).label}
+                  </Badge>
+                </View>
+                <Text variant="label" color="textSecondary" tabular>
+                  {amountsHidden
+                    ? "•••••• left this period"
+                    : budgetSummary.remainingMinor >= 0
+                      ? `${formatMoney(BigInt(Math.round(budgetSummary.remainingMinor)), budget.currency)} left this period`
+                      : `${formatMoney(BigInt(Math.round(-budgetSummary.remainingMinor)), budget.currency)} over this period`}
+                </Text>
+                <Button
+                  label="See your budget"
+                  variant="secondary"
+                  fullWidth
+                  onPress={() => router.push("/budgets")}
+                />
               </Card>
             ) : null}
 
