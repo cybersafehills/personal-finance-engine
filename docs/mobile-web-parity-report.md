@@ -198,39 +198,53 @@ The app's data layer and design tokens already mirror the web
 
 ### 3.1 Inbox says "Couldn't load your inbox. Check your connection and try again."
 
-What is proven: an unauthenticated `curl` to `/api/mobile/inbox` and
-`/api/mobile/budgets` returns **401 `{"ok":false,"error":"unauthorized"}` as
-JSON**, so both routes are deployed, the `MOBILE_API_ENABLED` flag is on, and
-`web/proxy.ts` does not intercept `api/mobile/` (excluded in its matcher). The
-failure is therefore with the **authenticated** call. `parseInboxResponse`
-(`src/features/inbox/parse.ts`) returns the exact on-screen sentence ("Couldn't
-load your inbox. Check your connection and try again.") for: any status other
-than 200/404/401/403 (500 `server_error`, 429 `rate_limited`, 5xx), **and also**
-a 200 whose body is non-JSON or has `ok !== true`. A 404 would have shown the
-`ReviewList` fallback, a dropped connection says "the full inbox", and a
-malformed 200 body says "wasn't understood". The same web read model renders
-fine on the site for this account (49 items, mostly payment reconciliation), so
-the suspect is the bearer-only request context, not the data.
+**ROOT CAUSE FOUND (verified): the phone is not talking to production.** It is
+talking to a local dev web server that cannot compile.
 
-Most likely: `getFinancialInbox()` throws when run under the bearer-only session
-(`runWithMobileSession` in `web/lib/mobile-session-context.ts`), for example a
-code path that reads the cookie/active-workspace, or one of the cross-domain
-read models failing; the route swallows the error (`catch { 500 }`).
+- `oneledger-mobile/.env.local` sets `EXPO_PUBLIC_API_BASE_URL=http://192.168.1.10:3100`
+  (the Mac's LAN address), so the dev build calls a local Next.js server.
+- Production request logs (`vercel logs`, last 24h, `/api/mobile`) contain only
+  the checker's own curl probes (401 JSON). The phone's Inbox request never reached
+  production. Production is healthy: the routes are deployed, the
+  `MOBILE_API_ENABLED` flag is on, and `web/proxy.ts` does not intercept them.
+- The local server on :3100 (`next-server`, cwd `web/`) answers **every** route,
+  including `/api/mobile/inbox`, with **HTTP 500 text/html**. The Next error says:
+  `./app/layout.tsx:7:1 Module not found: Can't resolve 'geist/font/sans'`.
+  `geist` is in `web/package.json` (added in PR #135) but is **not installed** in
+  `web/node_modules`.
+- `parseInboxResponse` turns any non-200/404/401/403 response into exactly the
+  on-screen sentence, so the app showed "Couldn't load your inbox".
+- Also: `web/.env.local` has no `MOBILE_API_ENABLED`, so once it compiles the route
+  would return 404 and the app would fall back to the category review list.
 
-Do this, in order:
-1. Vercel runtime logs for `/api/mobile/inbox` on the production project
-   (Vercel MCP `get_runtime_errors` / `get_runtime_logs`, or the dashboard).
-   Find the real exception.
-2. Reproduce locally: call the handler with a real access token, log the
-   caught error in `web/lib/mobile-request.ts` (message only, never the token or
-   body), fix the read model so it works without a cookie.
-3. Make the app degrade instead of dead-ending: in `inbox.tsx`, treat
-   `reason: "error"` like `"unavailable"` (show the direct `ReviewList` with a
-   small "Showing category checks only" note plus a Retry), so the tab is never
-   empty when the server hiccups.
-4. Same check for `/api/mobile/budgets`: Home shows no budget card in the
-   screenshot; confirm that's "no active budget" and not the same 500 swallowed
-   (`features/budgets` + Home ignore failures silently by design).
+Fix (run on the Mac, not in the app):
+1. `cd web && npm install` (installs `geist`).
+2. Restart the web dev server on the LAN, with the mobile API on:
+   `MOBILE_API_ENABLED=true npx next dev -p 3100 -H 0.0.0.0`
+   (or add `MOBILE_API_ENABLED=true` to `web/.env.local`). Keep `.env.local`'s
+   `NEXT_PUBLIC_SUPABASE_*` pointing at the same Supabase project the app signs in to.
+3. Phone and Mac on the same Wi-Fi; reload the app and pull to refresh the Inbox.
+   Or point the build at production: set `EXPO_PUBLIC_API_BASE_URL=https://www.oneledger.me`
+   and restart Expo with `-c` (EXPO_PUBLIC_ values are inlined at build time).
+
+Secondary findings (not the cause, but real; fix while here):
+- `getCanonicalConnectorInstallations` (`web/lib/queries.ts`, used by the Inbox)
+  calls `supabase.auth.getUser()` on a client built with `persistSession: false`
+  and only an `Authorization` header. It has no stored session, so under the
+  bearer path `getUser()` returns "no user" and the function silently returns
+  `[]`: **connector-health items never appear in the mobile Inbox**. Fix by calling
+  `getUser(token)` with the request's bearer token (`mobileAccessToken()`), or by
+  reading the user id from the validated token in `mobile-request.ts`. Other
+  `auth.getUser()` callers on mobile-reachable paths
+  (`getAuthUserId`, `getLifetimeFlowTotals`) have the same issue.
+- `mobileGet` catches every handler error and returns `500 server_error` without
+  logging, so a real production failure would leave no trace in runtime logs
+  (none found in the last 7 days). Log the error message (never the token or body).
+- Make the app degrade: in `inbox.tsx`, treat `reason: "error"` like `"unavailable"`
+  (show `ReviewList` with a short "Showing category checks only" note and Retry).
+- Home shows no budget card: the budget route had the same dead server, so this
+  was the same failure swallowed by Home's silent budget load, not "no budget".
+  (Production has an active September Budget.)
 
 ### 3.2 Shortcuts step: "One-tap setup isn't available yet. The Shortcuts haven't been published"
 
