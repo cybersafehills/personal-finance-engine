@@ -679,7 +679,10 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # Provider Statements PR19 (20261218000000) adds provider_statements (RLS
 # enabled, member SELECT only; upload/delete are service-role) - 129
 # tables, 128 with RLS.
-if [ "$TABLE_COUNT" = "129" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Mobile push (20261221000000) adds push_devices (RLS enabled, own-row
+# SELECT only; register/unregister run through SECURITY DEFINER functions)
+# - 130 tables, 129 with RLS.
+if [ "$TABLE_COUNT" = "130" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -817,10 +820,14 @@ AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from inform
 # Provider Statements PR19 (20261218000000) adds provider_statements with a
 # SELECT-only grant for authenticated (upload + delete run service-role in
 # lib/provider-statements.ts). 164 + 1 = 165.
-if [ "$AUTHENTICATED_GRANT_COUNT" = "165" ]; then
-  pass "authenticated holds exactly the 165 table grants expected, no more"
+# Mobile push (20261221000000) adds push_devices with a SELECT-only grant for
+# authenticated (a user may read their own registered phones; writes go
+# through register_push_device / unregister_push_device, and the sender uses
+# the service role). 165 + 1 = 166.
+if [ "$AUTHENTICATED_GRANT_COUNT" = "166" ]; then
+  pass "authenticated holds exactly the 166 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 165 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 166 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -1004,10 +1011,14 @@ AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_p
 # Insight notifications (20261209000000) adds note_insight_change -
 # authenticated-callable, workspace-member-gated (notification_event_catalog
 # is only CREATE OR REPLACEd). 116 + 1 = 117.
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "117" ]; then
-  pass "authenticated holds EXECUTE on exactly the 117 functions expected, no more"
+# Mobile push (20261221000000) adds register_push_device and
+# unregister_push_device - authenticated-callable, own-rows only (they act on
+# auth.uid()). claim_/ack_/release_notification_push* and
+# disable_push_devices are service-role only. 117 + 2 = 119.
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "119" ]; then
+  pass "authenticated holds EXECUTE on exactly the 119 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 117 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 119 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
