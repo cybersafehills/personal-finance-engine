@@ -11,6 +11,7 @@ import {
 
 import { signInWithPassword } from "@/api/mobile-api";
 import { supabase } from "@/api/supabase";
+import { disablePush } from "@/features/push/push";
 
 export type ActionResult = { ok: true } | { ok: false; message: string };
 
@@ -120,6 +121,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
+    // While still signed in: stop pushes to this phone for this account.
+    await disablePush();
     // Local scope: ends this device's session only, like the web's sign out.
     await supabase?.auth.signOut({ scope: "local" });
     setSession(null);

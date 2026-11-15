@@ -40,7 +40,8 @@
         {
           "faceIDPermission": "Allow OneLedger to use Face ID to unlock the app."
         }
-      ]
+      ],
+      "expo-notifications"
     ],
     "experiments": {
       "typedRoutes": true

@@ -1,11 +1,18 @@
 import { router } from "expo-router";
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { Platform } from "react-native";
 
 import { Badge, Button, Card, Screen, ScreenHeader, Text } from "@/components/ds";
 import { useSession } from "@/features/auth/SessionProvider";
 import { captureSupported, getCaptureHealth } from "@/features/capture/capture";
 import { healthDisplay } from "@/features/capture/health-display";
+import { getUnreadNotificationCount } from "@/features/notifications/queries";
+import {
+  disablePush,
+  enablePush,
+  isPushEnabled,
+  pushSupported,
+} from "@/features/push/push";
 import { useQuery } from "@/hooks/useQuery";
 import { space } from "@/theme/tokens";
 
@@ -57,6 +64,8 @@ export default function More() {
         ) : null}
       </Card>
 
+      <NotificationsCard />
+
       <Card style={{ gap: space[3] }}>
         <Text variant="bodyStrong">Security</Text>
         <Button
@@ -69,5 +78,66 @@ export default function More() {
 
       <Button label="Sign out" variant="ghost" fullWidth onPress={signOut} />
     </Screen>
+  );
+}
+
+async function loadNotificationsCard() {
+  const [unread, enabled] = await Promise.all([
+    getUnreadNotificationCount(),
+    isPushEnabled(),
+  ]);
+  return { unread, enabled };
+}
+
+function NotificationsCard() {
+  const { data, refresh } = useQuery(loadNotificationsCard);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function toggle() {
+    if (busy || !data) return;
+    setBusy(true);
+    setMessage(null);
+    if (data.enabled) {
+      await disablePush();
+    } else {
+      const result = await enablePush();
+      if (!result.ok) setMessage(result.message);
+    }
+    setBusy(false);
+    refresh();
+  }
+
+  return (
+    <Card style={{ gap: space[3] }}>
+      <Text variant="bodyStrong">Notifications</Text>
+      {data && data.unread > 0 ? (
+        <Badge variant="attention">{`${data.unread} new`}</Badge>
+      ) : null}
+      <Button
+        label="See notifications"
+        variant="secondary"
+        fullWidth
+        onPress={() => router.push("/notifications")}
+      />
+      {pushSupported ? (
+        <Button
+          label={data?.enabled ? "Turn off phone alerts" : "Turn on phone alerts"}
+          variant={data?.enabled ? "ghost" : "primary"}
+          fullWidth
+          loading={busy}
+          onPress={toggle}
+        />
+      ) : (
+        <Text variant="label" color="textMuted">
+          Phone alerts need the app installed on a real phone.
+        </Text>
+      )}
+      {message ? (
+        <Text variant="label" color="attention" accessibilityRole="alert">
+          {message}
+        </Text>
+      ) : null}
+    </Card>
   );
 }
