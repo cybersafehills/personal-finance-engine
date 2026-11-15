@@ -131,7 +131,7 @@ export default function Home() {
                   label="Review now"
                   variant="secondary"
                   fullWidth
-                  onPress={() => router.push("/review")}
+                  onPress={() => router.push("/inbox")}
                 />
               </Card>
             ) : null}

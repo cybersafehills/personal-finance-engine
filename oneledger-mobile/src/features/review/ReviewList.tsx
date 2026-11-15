@@ -15,11 +15,11 @@ import { getReviewQueue } from "@/features/transactions/queries";
 import { useQuery } from "@/hooks/useQuery";
 import { colors, space } from "@/theme/tokens";
 
-// Transactions whose category OneLedger is unsure about. Each one can be
+// Direct (no server round-trip) review queue: transactions whose category OneLedger is unsure about. Each one can be
 // accepted or rejected right here (the same database functions the web calls).
 // A decided row leaves the list immediately; if saving fails it stays, with
 // the reason, so a decision is never silently lost.
-export default function Review() {
+export function ReviewList({ notice }: { notice?: string }) {
   const load = useCallback(() => getReviewQueue(), []);
   const { data, loading, refreshing, error, refresh } = useQuery(load);
   const [decided, setDecided] = useState<ReadonlySet<string>>(new Set());
@@ -63,8 +63,8 @@ export default function Review() {
         ListHeaderComponent={
           <View style={{ paddingTop: space[4], gap: space[3], marginBottom: space[3] }}>
             <ScreenHeader
-              title="To review"
-              subtitle="Transactions that need a category check"
+              title="Inbox"
+              subtitle={notice ?? "Transactions that need a category check"}
             />
           </View>
         }
