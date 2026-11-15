@@ -73,25 +73,73 @@ producer or add a generic-body option here.
 
 ## Activation checklist
 
-Nothing below is done yet.
+Status as of 2026-11-15. Pushes only start once steps 2/3 (credentials) and
+5/6 (flag + schedule) are all done; until then everything is inert.
 
-1. **Expo project.** Create an Expo account/project and run `eas init` in
-   `oneledger-mobile/` so `extra.eas.projectId` exists in the app config.
-   Without it the app says notifications aren't set up yet.
-2. **Android (FCM).** Create a Firebase project for package
-   `me.oneledger.companion`, add `google-services.json` to the app config
-   (`android.googleServicesFile`), and upload the FCM v1 service-account key
-   to Expo (`eas credentials`).
-3. **iOS (APNs).** Needs the Apple Developer Program membership
-   (docs/mobile-apple-developer-setup.md): create an APNs key and let
-   `eas credentials` manage it.
-4. **Database + function.** Merge to `main`; the Deploy Supabase workflow
-   applies the migration and deploys `send-push-notifications`.
-5. **Secrets.** `supabase secrets set PUSH_NOTIFICATIONS_ENABLED=true`
-   (and `EXPO_ACCESS_TOKEN` only if enhanced push security is on).
-   `NOTIFICATION_CRON_SECRET` must already be set.
-6. **Schedule.** Call the function every minute (Dashboard schedule or
-   `pg_cron`), with the `x-notification-cron-secret` header.
-7. **Verify** on a real phone: turn on phone alerts, trigger a notification
-   (for example accept a Space invite on another account), confirm it
-   arrives and that tapping it opens the app.
+| # | Step | Who | Status |
+|---|---|---|---|
+| 1 | Expo project (`@dolyindesign/oneledger`, `extra.eas.projectId`) | done | **Done** |
+| 4 | Migration + `send-push-notifications` deployed to production (Deploy Supabase on #181, flag off) | done | **Done**, verified in the run log |
+| 2 | Android: Firebase + FCM credentials | **you** | Open |
+| 3 | iOS: APNs key | **you**, after the Apple fee | Blocked on Apple |
+| 5 | Turn the function on (`PUSH_NOTIFICATIONS_ENABLED`) | needs an explicit go-ahead | Open |
+| 6 | Schedule the function every minute | needs an explicit go-ahead | Open |
+| 7 | Verify on a real phone | you + me | Open |
+
+### 2. Android: Firebase (about 15 minutes, your Google account)
+
+Without this an Android build cannot get a push token; the app says "Phone
+alerts aren't set up in this version of the app yet." (`push-errors.ts`).
+
+1. <https://console.firebase.google.com> -> **Add project** (name it
+   OneLedger; Analytics can stay off).
+2. **Add app -> Android**, package name **`me.oneledger.companion`** (must
+   match exactly). Download **`google-services.json`**.
+3. Give the file to EAS (do not commit it; it is git-ignored):
+   ```sh
+   cd oneledger-mobile
+   npx eas-cli env:create --name GOOGLE_SERVICES_JSON --type file \
+     --value ./google-services.json --visibility sensitive \
+     --environment preview --environment production
+   ```
+   `app.config.ts` picks it up automatically (`android.googleServicesFile`);
+   no code change. Without the variable the field is omitted and builds work
+   as before.
+4. **FCM v1 credentials for Expo.** In Firebase: Project settings -> Service
+   accounts -> **Generate new private key** (a JSON file). Then
+   `npx eas-cli credentials` -> Android -> the `production` (and `preview`)
+   profile -> **Google Service Account** -> *FCM V1 key* -> upload that JSON.
+   Delete the downloaded key file afterwards; it is a secret.
+5. Make a new Android build (`eas build -p android --profile preview`). A
+   build made before this step does not include Firebase.
+
+### 3. iOS: APNs
+
+Needs the Apple Developer membership (docs/mobile-apple-developer-setup.md).
+Then `npx eas-cli credentials` -> iOS lets EAS create and store the APNs key.
+
+### 5. Turn the function on (production change)
+
+```sh
+supabase secrets set PUSH_NOTIFICATIONS_ENABLED=true --project-ref zttxsaiywkfrbdxgzbjd
+```
+`NOTIFICATION_CRON_SECRET` is already set (shared with `send-notifications`).
+`EXPO_ACCESS_TOKEN` only if "enhanced push security" is enabled in the Expo
+project. Safe to do early: with no registered devices the function finds
+nothing to send.
+
+### 6. Schedule (production change)
+
+Call `POST <project>/functions/v1/send-push-notifications` every minute with
+header `x-notification-cron-secret: <NOTIFICATION_CRON_SECRET>`, the same way
+`send-notifications` is scheduled (Dashboard schedule or `pg_cron`, see the
+other runbooks). Check it with a manual call first: it must return 200 with a
+`sent: 0` style summary and never log tokens or text.
+
+### 7. Verify on a real phone
+
+Install a build made after step 2, sign in, **More -> Turn on phone alerts**,
+allow the system prompt, then trigger a notification (for example accept a
+Space invite on another account). It should arrive within about a minute and
+tapping it should open the right screen. Simulators and the web preview
+cannot receive pushes.
