@@ -2,6 +2,7 @@ import * as Crypto from "expo-crypto";
 
 import { supabase } from "@/api/supabase";
 import { captureIsDemo, pairDevice } from "@/features/capture/capture";
+import type { IosDeviceStatus } from "@/features/ios-shortcuts/ios-health";
 
 import {
   connectorKeyForProvider,
@@ -140,6 +141,29 @@ export async function getDeviceLastUsedAt(
     .eq("id", deviceCredentialId)
     .maybeSingle();
   return (data?.last_used_at as string | null) ?? null;
+}
+
+/**
+ * Status of one device credential: what the iPhone health view needs. Null
+ * when the credential cannot be read (deleted, or not this user's).
+ */
+export async function getDeviceStatus(
+  deviceCredentialId: string,
+): Promise<IosDeviceStatus | null> {
+  if (!supabase) return null;
+  const { data } = await supabase
+    .from("device_credentials")
+    .select("status, created_at, last_used_at")
+    .eq("id", deviceCredentialId)
+    .maybeSingle();
+  if (!data) return null;
+  const status = data.status as string;
+  if (status !== "active" && status !== "paused" && status !== "revoked") return null;
+  return {
+    status,
+    createdAtIso: data.created_at as string,
+    lastUsedAtIso: (data.last_used_at as string | null) ?? null,
+  };
 }
 
 /** Creates a pairing session for `account` and redeems it on this phone. */

@@ -6,6 +6,7 @@ import { Badge, Button, Card, Screen, ScreenHeader, Text } from "@/components/ds
 import { useSession } from "@/features/auth/SessionProvider";
 import { captureSupported, getCaptureHealth } from "@/features/capture/capture";
 import { healthDisplay } from "@/features/capture/health-display";
+import { IosStatusCard } from "@/features/ios-shortcuts/IosStatusCard";
 import { getUnreadNotificationCount } from "@/features/notifications/queries";
 import {
   disablePush,
@@ -41,7 +42,7 @@ export default function More() {
             ? "OneLedger records MoMo transactions from this phone's notifications."
             : "On iPhone, OneLedger records MoMo messages with an Apple Shortcut."}
         </Text>
-        {Platform.OS !== "android" ? (
+        {Platform.OS === "web" ? (
           <Button
             label="Set up on iPhone"
             variant={captureSupported ? "secondary" : "primary"}
@@ -63,6 +64,8 @@ export default function More() {
           </>
         ) : null}
       </Card>
+
+      {Platform.OS === "ios" ? <IosStatusCard /> : null}
 
       <NotificationsCard />
 

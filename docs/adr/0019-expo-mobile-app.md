@@ -135,6 +135,21 @@ not a reason to keep the whole app native.
 - The Inbox tab falls back to the direct category-review queue when the
   endpoint is off or the app is not configured, so category checks never
   depend on the server route.
+## Implementation notes (iPhone health)
+
+- iOS gives the app no view of the Shortcut, so the only honest health signal
+  is the server's record of the device credential (`status`, `created_at`,
+  `last_used_at`). The setup guide remembers the credential id it learns when
+  pairing completes (device store; the id is not a secret, the Shortcut holds
+  the secret) and the More tab shows working / waiting / quiet / disconnected
+  from it. Quiet means no message for 7 days, or none ever after 3 days; that
+  is normal for a light MoMo user, so the copy says to check, not that it is
+  broken.
+- Reopening the guide with a still-active connection resumes at "check it
+  works"; "Connect this iPhone again" forgets the old connection.
+- The troubleshooting list only states things the capture spec
+  (docs/oneledger-capture-shortcut.md) guarantees (exact Shortcut names,
+  Run Immediately, trigger word RWF, one-time codes).
 
 ## Consequences
 
