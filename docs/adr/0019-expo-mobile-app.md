@@ -198,6 +198,14 @@ not a reason to keep the whole app native.
   path and one audit event for both clients.
 - Generating statements, packs, schedules and provider documents stay on the
   web; the screen links there when there are none.
+## Implementation notes (Transaction filters)
+
+- The Transactions tab filters by direction, period and "needs review" on top
+  of the existing text search. All of it is a read under RLS (`direction`,
+  `occurred_at`, `category_decision_status`), so there is no `/api/mobile`
+  route. Periods are Kigali calendar days (last 7 days = today plus six);
+  the bounds live in `features/transactions/filters.ts` and are unit-tested.
+- Filters are screen state, not persisted: reopening the tab shows everything.
 
 ## Consequences
 
