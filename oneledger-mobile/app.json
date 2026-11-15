@@ -3,13 +3,17 @@
     "name": "OneLedger",
     "slug": "oneledger",
     "scheme": "oneledger",
-    "version": "0.1.0",
+    "version": "2.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "me.oneledger.app"
+      "bundleIdentifier": "me.oneledger.app",
+      "buildNumber": "1",
+      "config": {
+        "usesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "me.oneledger.companion",
@@ -20,7 +24,8 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "allowBackup": false
+      "allowBackup": false,
+      "versionCode": 10
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -45,6 +50,12 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "6c66451a-7901-4f47-9f6d-05b73ebd96bb"
+      }
+    },
+    "owner": "dolyindesign"
   }
 }
