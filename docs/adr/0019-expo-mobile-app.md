@@ -186,6 +186,18 @@ not a reason to keep the whole app native.
 - Category is chosen afterwards on the transaction's detail screen (the web
   form's optional category is applied through the existing category-correction
   function after creation).
+## Implementation notes (Statements)
+
+- A read-only viewer: list the statements and download a PDF/CSV. The list is
+  `GET /api/mobile/statements` (stored totals, personal workspace, behind
+  `FINANCIAL_STATEMENTS_ENABLED`); a download is a fresh five-minute signed URL
+  from `GET /api/mobile/statements/:id/document`, opened with the system
+  (`expo-linking`), so no new native module and no build is needed.
+- The document logic was extracted from the web route into
+  `lib/statement-download.ts` so there is one ownership check, one render
+  path and one audit event for both clients.
+- Generating statements, packs, schedules and provider documents stay on the
+  web; the screen links there when there are none.
 ## Implementation notes (Transaction filters)
 
 - The Transactions tab filters by direction, period and "needs review" on top
