@@ -45,3 +45,15 @@
 - No JSON API variant of the resolver (the page is the only consumer today).
 - Amounts render via the existing `formatMoney` (e.g. "RF 5,000").
 - Still not built: owner UI/mobile screens to create/share/cancel/mark/link, and the flag allowlist.
+
+## S5c — owner screens (built; PR stacked on S5b)
+**Delivered (web only):** `/pay/requests` (list), `/pay/requests/new` (create + one-time share panel with copy / native share / QR), `/pay/requests/[id]` (details, history, link-a-payment, mark paid yourself, cancel); server actions in `app/pay/requests/actions.ts`; components `PaymentRequestForm` / `PaymentRequestActions`; `lib/payment-requests/owner.ts` (+ `owner-data.ts`), 6 more tests (22 in the folder).
+- **Opt-in:** needs `PAYMENT_REQUESTS_ENABLED=true`; optional `PAYMENT_REQUESTS_WORKSPACE_ALLOWLIST` (comma-separated workspace ids) restricts creation/management (the public `/r` page checks only the global flag so shared links keep resolving). Off by default; not enabled anywhere. Also needs `SITE_URL` set to a bare **https** origin or creation refuses ("Sharing links isn't configured").
+- **Token is shown once.** The server generates it (256-bit), stores only the digest, and returns the URL in that single action response; the detail page can't re-show it. A double-submit (same idempotency key) returns the original request with "link can't be shown again". Losing the link = cancel and recreate.
+- Server actions re-check session, active workspace, flag and allowlist on every call; `requireMfaForSensitiveAction` guards create, mark-paid and link (users with a verified factor must be at aal2; users without MFA are unaffected, per existing policy). RLS and the RPC role checks remain the authority. Error text is mapped to fixed friendly messages (raw DB text never shown).
+- "Link the payment" lists only settled incoming transactions of exactly the request amount that no other request has claimed (RWF only); marking paid is a confirm-twice action worded as the owner's own, unverified statement.
+- Not in main navigation: reach it at `/pay/requests` (nav needs capability plumbing through AppShell/MoreSheet — deliberately left out of this slice).
+
+**Verified:** full `tsc` and `eslint` clean on the new code; `deno test web/lib` passes; `next build` succeeds and registers the three routes; unauthenticated requests to all three redirect to `/login`.
+**NOT verified (be explicit):** the authenticated screens and server actions were **not exercised in a browser or against a real Supabase** — there is no local Supabase/GoTrue here, so create → share → cancel → mark paid → link has not been walked through end to end (the SQL behind it is covered by the 645 migration tests; the UI/action wiring is only type-checked and built). Also not tested: clipboard/share/QR in real browsers or phones, accessibility audit, Playwright. **A manual walkthrough on a Supabase branch with the flag on is required before enabling.**
+Still not built: mobile (Expo) screens, navigation entry, SITE_URL/flag docs in `.env.local.example`.
