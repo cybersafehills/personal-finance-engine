@@ -354,3 +354,37 @@ Deno.test("rejects non-integer money (no floats)", () => {
   }
   assertEquals(threw, true);
 });
+
+// Evidence for docs/oneledger-3/transfer-exclusion-finding.md: the existing
+// report path (report-math over report-generation's fetch, which never
+// consults transfer_links) counts a linked own-account transfer pair as both
+// income and spend; the insights core does not. Documents current behaviour.
+Deno.test("finding: legacy report snapshot counts a linked transfer pair, insights core does not", () => {
+  const pair = [
+    f({ id: "x_out", principalEffectRwf: -30000 }),
+    f({
+      id: "x_in",
+      direction: "in",
+      principalEffectRwf: 30000,
+      transactionType: "money_received",
+    }),
+  ];
+  const legacy = computeFinancialSnapshot(
+    pair.map((x) => ({
+      id: x.id,
+      direction: x.direction,
+      principalEffectRwf: x.principalEffectRwf,
+      feeEffectRwf: x.feeEffectRwf,
+      category: x.category,
+      counterpartyName: x.counterpartyName,
+      occurredAt: x.occurredAt,
+    })),
+    null,
+    null,
+  );
+  assertEquals(legacy.moneyReceivedRwf, 30000);
+  assertEquals(legacy.moneySpentRwf, 30000);
+  const o = computeOverview(pair, scope, new Set(["x_out", "x_in"]));
+  assertEquals(o.currencies[0].moneyInMinor, 0n);
+  assertEquals(o.currencies[0].moneyOutMinor, 0n);
+});
