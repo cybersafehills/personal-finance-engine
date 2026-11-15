@@ -1,6 +1,7 @@
 import Feather from "@expo/vector-icons/Feather";
 import { Tabs } from "expo-router";
 
+import { AppHeader } from "@/components/shell/AppHeader";
 import { colors } from "@/theme/tokens";
 import { fonts } from "@/theme/typography";
 
@@ -25,7 +26,8 @@ export default function TabsLayout() {
   return (
     <Tabs
       screenOptions={{
-        headerShown: false,
+        headerShown: true,
+        header: () => <AppHeader />,
         tabBarActiveTintColor: colors.accent,
         tabBarInactiveTintColor: colors.textMuted,
         tabBarLabelStyle: { fontFamily: fonts.medium, fontSize: 12 },
@@ -41,10 +43,9 @@ export default function TabsLayout() {
         name="transactions"
         options={{ title: "Transactions", tabBarIcon: icon("list") }}
       />
-      <Tabs.Screen
-        name="inbox"
-        options={{ title: "Inbox", tabBarIcon: icon("inbox") }}
-      />
+      {/* Inbox is opened from the header icon (as on the web), not the bar. */}
+      <Tabs.Screen name="inbox" options={{ title: "Inbox", href: null }} />
+      <Tabs.Screen name="plan" options={{ title: "Plan", tabBarIcon: icon("target") }} />
       <Tabs.Screen name="more" options={{ title: "More", tabBarIcon: icon("menu") }} />
     </Tabs>
   );

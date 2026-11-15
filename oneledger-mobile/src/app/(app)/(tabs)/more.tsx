@@ -24,7 +24,7 @@ export default function More() {
   const display = health ? healthDisplay(health.state) : null;
 
   return (
-    <Screen>
+    <Screen edges={["left", "right", "bottom"]}>
       <ScreenHeader title="More" />
 
       <Card style={{ gap: space[1] }}>
@@ -68,32 +68,6 @@ export default function More() {
       {Platform.OS === "ios" ? <IosStatusCard /> : null}
 
       <NotificationsCard />
-
-      <Card style={{ gap: space[3] }}>
-        <Text variant="bodyStrong">Budget</Text>
-        <Text variant="label" color="textSecondary">
-          See how this period is going against your budget.
-        </Text>
-        <Button
-          label="Open budget"
-          variant="secondary"
-          fullWidth
-          onPress={() => router.push("/budgets")}
-        />
-      </Card>
-
-      <Card style={{ gap: space[3] }}>
-        <Text variant="bodyStrong">Statements</Text>
-        <Text variant="label" color="textSecondary">
-          Your generated statements, to view or download.
-        </Text>
-        <Button
-          label="Open statements"
-          variant="secondary"
-          fullWidth
-          onPress={() => router.push("/statements")}
-        />
-      </Card>
 
       <Card style={{ gap: space[3] }}>
         <Text variant="bodyStrong">Security</Text>
