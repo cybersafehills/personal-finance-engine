@@ -114,6 +114,21 @@ A fresh, **five-minute signed download URL** for one ready statement, as JSON
 - The URL must never be stored or logged. The app asks again on every tap. It
   has its own rate-limit bucket because rendering a PDF is expensive.
 
+## `GET /api/mobile/config`
+
+Which optional features are switched on for the caller, so the app shows a screen
+or button only when it will work. The flags live in server env, which the app
+cannot read, so this runs the web's own gate functions (`lib/mobile-config.ts`).
+Read-only; same guard as the others.
+
+- `200 { ok: true, config: { pay, assistedPay, ussdDirectory, scanToPay,
+  statements, insights, bills, spaces, integrations, businessSurfaces } }`, all
+  booleans. No env values, allowlists or ids are exposed. `401`, `403
+  mfa_required`, `404` flag off, `429`, `500` as for the other endpoints.
+- Resolved for the user's personal workspace (no session cookie), like the Inbox.
+- It reports availability only; the endpoints it describes still enforce their
+  own gates, so a stale `config` can never grant anything.
+
 ## Rollout
 
 1. Deploy web with the route (dark).

@@ -303,12 +303,52 @@ test.describe("mobile API", () => {
     }
   });
 
+  test("config: booleans only, resolved under the bearer token", async () => {
+    const api = await playwrightRequest.newContext({ baseURL: BASE_URL });
+    try {
+      const signIn = await api.post("/api/mobile/auth/sign-in", {
+        data: { email: E2E_USER.email, password: E2E_USER.password },
+      });
+      expect(signIn.status()).toBe(200);
+      const res = await api.get("/api/mobile/config", {
+        headers: { authorization: `Bearer ${(await signIn.json()).access_token}` },
+      });
+      expect(res.status()).toBe(200);
+      expect(res.headers()["cache-control"]).toContain("no-store");
+      const body = await res.json();
+      expect(body.ok).toBe(true);
+      const keys = Object.keys(body.config).sort();
+      expect(keys).toEqual([
+        "assistedPay",
+        "bills",
+        "businessSurfaces",
+        "insights",
+        "integrations",
+        "pay",
+        "scanToPay",
+        "spaces",
+        "statements",
+        "ussdDirectory",
+      ]);
+      for (const k of keys) expect(typeof body.config[k]).toBe("boolean");
+      // FINANCIAL_STATEMENTS_ENABLED is on for this suite (playwright.config.ts).
+      expect(body.config.statements).toBe(true);
+      // The sub-flags never outrun their parent.
+      if (body.config.assistedPay || body.config.ussdDirectory || body.config.scanToPay) {
+        expect(body.config.pay).toBe(true);
+      }
+    } finally {
+      await api.dispose();
+    }
+  });
+
   test("the Inbox refuses a missing, malformed or invalid token", async () => {
     const api = await playwrightRequest.newContext({ baseURL: BASE_URL });
     try {
       expect((await api.get("/api/mobile/inbox")).status()).toBe(401);
       expect((await api.get("/api/mobile/budgets")).status()).toBe(401);
       expect((await api.get("/api/mobile/statements")).status()).toBe(401);
+      expect((await api.get("/api/mobile/config")).status()).toBe(401);
       expect(
         (await api.get("/api/mobile/statements/00000000-0000-4000-8000-000000000000/document")).status(),
       ).toBe(401);
