@@ -28,3 +28,20 @@
 5. A request whose matched transaction is hard-deleted would violate its own check and fail loudly rather than silently downgrade (transactions aren't hard-deleted by the app; workspace erasure cascades). Confirm account-erasure/export coverage for the new tables before rollout.
 6. Phishing risk remains inherent to any "pay this number" page: the recipient shown is the **owner's own text**, not verified. The payer-facing copy must keep "not verified by OneLedger".
 7. Legal/regulatory review (Rwanda) is still required before enabling beyond your own allowlist; no compliance claim is made.
+
+## S5b — public page `/r/[token]` (built; PR stacked on S5)
+**Delivered:** `web/app/r/[token]/page.tsx`; `web/lib/payment-requests/{resolve,public-view,rate-limit}.ts` (+9 tests, 16 in the folder); `/r` added to `proxy.ts` PUBLIC_PATHS; `next.config.ts` headers for `/r/:token`.
+- **Dark** unless `PAYMENT_REQUESTS_ENABLED=true` (renders the app 404 otherwise). **Not enabled anywhere** — set it only after review.
+- Resolution uses the **anon** key and the SHA-256 digest only; the raw token never leaves the web process (verified: the stub RPC server saw 64-char digests only). Malformed tokens never reach the network.
+- Per-IP limit 30 page loads/minute (in-memory, per instance, resets on deploy, bounded memory) — same best-effort model as `/verify`. The 256-bit token is the real defence.
+- Headers on `/r/:token` (verified on a production build): `Cache-Control: no-store, max-age=0`, `X-Robots-Tag: noindex, nofollow`, `Referrer-Policy: no-referrer`; page also sets `robots` + `referrer` metadata.
+- Page content: amount, requested-by name, reference, validity, and (open only) the number/merchant code, always with "not verified by OneLedger" wording and a "check the name and number" warning. Cancelled/expired/paid-states show no destination. The mapper refuses malformed rows (unknown status/currency, non-positive amount, open without a valid destination) rather than render them.
+
+**Verified:** unit tests; full `tsc` clean (after `next typegen`); `next build` succeeds; against a local stub of the Supabase RPC on a dev server and a production `next start`: open/cancelled/matched render correctly, unknown/malformed tokens give the 404 page, rate limit trips at the 31st request from one IP and not for another, flag-off gives 404. **Not verified:** against a real Supabase (the stub emulates the RPC contract only; the SQL itself is covered by the 645 migration tests), real browsers/devices, CI, Playwright, production deploy.
+
+**Known limitations**
+- A real **HTTP 404 status is not returned** for unknown tokens: the app-wide `app/loading.tsx` makes Next stream a 200 with the not-found UI (same as `/verify`). The `noindex` header still applies.
+- The limiter is per instance; on multi-instance Vercel the effective limit is higher. A shared limiter (the `api_rate_buckets` table or Edge Config) would be needed for a hard cap.
+- No JSON API variant of the resolver (the page is the only consumer today).
+- Amounts render via the existing `formatMoney` (e.g. "RF 5,000").
+- Still not built: owner UI/mobile screens to create/share/cancel/mark/link, and the flag allowlist.
