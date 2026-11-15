@@ -1,7 +1,7 @@
 import { supabase } from "@/api/supabase";
 import type { SupportedCurrency } from "@/lib/money";
 
-import type { ManualAccount, ManualTransactionRow } from "./input";
+import type { ManualAccount, ManualTransactionArgs } from "./input";
 
 // Database calls for adding a transaction by hand. Same insert the web's
 // "Add transaction" does, as the signed-in user: Row Level Security decides
@@ -33,14 +33,24 @@ export async function listManualAccounts(): Promise<ManualAccount[]> {
     }));
 }
 
-/** Inserts the transaction and returns its id. */
-export async function createManualTransaction(row: ManualTransactionRow): Promise<string> {
+/**
+ * Creates the transaction through create_manual_transaction and returns its
+ * id. Signed-in users cannot INSERT into `transactions` directly (ingestion is
+ * the only writer); this function is the one audited path. It checks the
+ * caller owns the account's workspace and re-validates every field.
+ */
+export async function createManualTransaction(args: ManualTransactionArgs): Promise<string> {
   if (!supabase) throw new ManualEntryError("This build isn't connected to OneLedger yet.");
-  const { data, error } = await supabase.from("transactions").insert(row).select("id").single();
+  const { data, error } = await supabase.rpc("create_manual_transaction", args);
   if (error || !data) {
+    const message = error?.message ?? "";
     throw new ManualEntryError(
-      "Couldn't save that. Check your connection and try again; nothing was added.",
+      message.includes("not_found_or_forbidden")
+        ? "You can't add transactions to this account."
+        : /invalid_(time)/.test(message)
+          ? "That time isn't valid. Check the date and time."
+          : "Couldn't save that. Check your connection and try again; nothing was added.",
     );
   }
-  return data.id as string;
+  return data as string;
 }

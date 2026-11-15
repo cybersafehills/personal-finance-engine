@@ -23,49 +23,37 @@ const form = (over: Partial<ManualForm> = {}): ManualForm => ({
 });
 
 describe("buildManualTransaction", () => {
-  it("builds the row the database's accounting constraint expects for money out", () => {
+  it("builds the arguments for create_manual_transaction", () => {
     const r = buildManualTransaction(form({ feeText: "100" }), account, NOW);
     if (!r.ok) throw new Error(r.error);
-    expect(r.row).toMatchObject({
-      account_id: "a1",
-      workspace_id: "w1",
-      source: "manual",
-      status: "success",
-      settlement_state: "settled",
-      affects_balance: true,
-      effect_reason: "manual_entry",
-      direction: "out",
-      currency: "RWF",
-      amount_rwf: 4200,
-      fee_rwf: 100,
-      principal_effect_rwf: -4200,
-      fee_effect_rwf: -100,
-      counterparty_name: "Kigali Fresh",
-      category: null,
-      parser_version: "manual-entry-v1",
-      momo_message_id: null,
+    expect(r.args).toEqual({
+      p_account_id: "a1",
+      p_transaction_type: "merchant_payment",
+      p_direction: "out",
+      p_amount_minor: 4200,
+      p_fee_minor: 100,
+      p_occurred_at: "2026-11-15T10:00:00.000Z",
+      p_counterparty_name: "Kigali Fresh",
+      p_notes: null,
     });
-    expect(r.row.occurred_at).toBe("2026-11-15T10:00:00.000Z");
   });
 
-  it("moves principal up and never charges a fee on money in", () => {
+  it("sends no fee for money in (fees on incoming money are not modelled)", () => {
     const r = buildManualTransaction(
       form({ direction: "in", transactionType: "money_received", feeText: "500" }),
       account,
       NOW,
     );
     if (!r.ok) throw new Error(r.error);
-    expect(r.row.principal_effect_rwf).toBe(4200);
-    expect(r.row.fee_effect_rwf).toBe(0);
-    expect(r.row.fee_rwf).toBe(0);
+    expect(r.args.p_direction).toBe("in");
+    expect(r.args.p_fee_minor).toBe(0);
   });
 
   it("uses the account's currency decimals", () => {
     const eur: ManualAccount = { ...account, currency: "EUR" };
     const r = buildManualTransaction(form({ amountText: "12.50" }), eur, NOW);
     if (!r.ok) throw new Error(r.error);
-    expect(r.row.currency).toBe("EUR");
-    expect(r.row.amount_rwf).toBe(1250);
+    expect(r.args.p_amount_minor).toBe(1250);
   });
 
   it("rejects bad, zero, negative and absurd amounts", () => {
@@ -97,8 +85,8 @@ describe("buildManualTransaction", () => {
   it("stores empty optional text as null and limits lengths", () => {
     const r = buildManualTransaction(form({ counterpartyName: "  ", notes: " " }), account, NOW);
     if (!r.ok) throw new Error(r.error);
-    expect(r.row.counterparty_name).toBeNull();
-    expect(r.row.notes).toBeNull();
+    expect(r.args.p_counterparty_name).toBeNull();
+    expect(r.args.p_notes).toBeNull();
     expect(buildManualTransaction(form({ counterpartyName: "x".repeat(121) }), account, NOW).ok).toBe(false);
     expect(buildManualTransaction(form({ notes: "x".repeat(501) }), account, NOW).ok).toBe(false);
   });

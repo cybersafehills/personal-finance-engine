@@ -1,4 +1,5 @@
 import { request as playwrightRequest, expect, test } from "@playwright/test";
+import { createClient } from "@supabase/supabase-js";
 
 import {
   adminClient,
@@ -174,6 +175,93 @@ test.describe("mobile API", () => {
       // period that does not cover the seeded transaction.
       if (createdBudget) expect(budget.uncategorizedCount).toBeGreaterThanOrEqual(1);
     } finally {
+      await api.dispose();
+    }
+  });
+
+  test("a signed-in user adds a transaction only through create_manual_transaction", async () => {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    test.skip(!url || !anon, "needs the local Supabase URL and anon key in the environment");
+
+    const api = await playwrightRequest.newContext({ baseURL: BASE_URL });
+    let createdId: string | null = null;
+    try {
+      const signIn = await api.post("/api/mobile/auth/sign-in", {
+        data: { email: E2E_USER.email, password: E2E_USER.password },
+      });
+      expect(signIn.status()).toBe(200);
+      const { access_token: token } = await signIn.json();
+
+      // The user's own session, exactly as the app and the web action use it.
+      const user = createClient(url!, anon!, {
+        auth: { persistSession: false, autoRefreshToken: false },
+        global: { headers: { Authorization: `Bearer ${token}` } },
+      });
+      const { workspaceId, accountId } = await ensureWorkspaceAndAccount();
+
+      // Signed-in users have no INSERT on transactions (ingestion is the only
+      // direct writer): this is the permission the web action used to hit.
+      const direct = await user.from("transactions").insert({
+        account_id: accountId,
+        workspace_id: workspaceId,
+        source: "manual",
+        transaction_type: "send_money",
+        direction: "out",
+        status: "success",
+        amount_rwf: 1,
+        fee_rwf: 0,
+        occurred_at: new Date().toISOString(),
+        parser_version: "e2e-direct",
+      });
+      expect(direct.error?.code).toBe("42501");
+
+      const created = await user.rpc("create_manual_transaction", {
+        p_account_id: accountId,
+        p_transaction_type: "merchant_payment",
+        p_direction: "out",
+        p_amount_minor: 4200,
+        p_fee_minor: 100,
+        p_occurred_at: new Date(Date.now() - 60_000).toISOString(),
+        p_counterparty_name: "E2E Manual Entry",
+        p_notes: null,
+      });
+      expect(created.error).toBeNull();
+      createdId = created.data as string;
+      expect(createdId).toMatch(/^[0-9a-f-]{36}$/);
+
+      // Readable back under the user's own RLS, with effects the accounting
+      // constraints accept (out: principal and fee both move down).
+      const { data: row, error: readError } = await user
+        .from("transactions")
+        .select("direction, amount_rwf, fee_rwf, principal_effect_rwf, fee_effect_rwf, source, status, counterparty_name")
+        .eq("id", createdId)
+        .single();
+      expect(readError).toBeNull();
+      expect(row).toMatchObject({
+        direction: "out",
+        amount_rwf: 4200,
+        fee_rwf: 100,
+        principal_effect_rwf: -4200,
+        fee_effect_rwf: -100,
+        source: "manual",
+        status: "success",
+        counterparty_name: "E2E Manual Entry",
+      });
+
+      const invalid = await user.rpc("create_manual_transaction", {
+        p_account_id: accountId,
+        p_transaction_type: "merchant_payment",
+        p_direction: "out",
+        p_amount_minor: 0,
+        p_fee_minor: 0,
+        p_occurred_at: new Date().toISOString(),
+        p_counterparty_name: null,
+        p_notes: null,
+      });
+      expect(invalid.error?.message).toContain("invalid_amount");
+    } finally {
+      if (createdId) await adminClient().from("transactions").delete().eq("id", createdId);
       await api.dispose();
     }
   });

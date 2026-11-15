@@ -103,7 +103,7 @@ export default function AddTransaction() {
     setSaving(true);
     setFormError(null);
     try {
-      const id = await createManualTransaction(built.row);
+      const id = await createManualTransaction(built.args);
       router.replace({ pathname: "/transaction/[id]", params: { id } });
     } catch (e) {
       setFormError(e instanceof ManualEntryError ? e.message : "Couldn't save that. Try again.");

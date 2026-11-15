@@ -2,11 +2,12 @@ import { kigaliDayBoundsUtc } from "@/lib/kigali-time";
 import { toMinorUnits, type SupportedCurrency } from "@/lib/money";
 
 // Building a manually entered transaction. These are the rules of the web's
-// createManualTransaction (web/app/transactions/actions.ts): a manual entry
-// is always settled and successful, direction is in or out, the currency comes
-// from the chosen account, and the principal/fee effects are exactly what the
-// database's accounting check constraint expects. Kept pure so it is tested
-// without a database; the insert itself runs under the user's session (RLS).
+// createManualTransaction (web/app/transactions/actions.ts), validated here
+// first so the person gets a friendly message; the database function
+// create_manual_transaction (20261222000000) re-checks everything, derives the
+// workspace and currency from the account and computes the principal/fee
+// effects, so none of that is the app's to get wrong. Kept pure so it is
+// tested without a database.
 
 export type ManualTransactionType =
   | "send_money"
@@ -58,33 +59,20 @@ export type ManualForm = {
   notes: string;
 };
 
-/** The `transactions` row to insert. */
-export type ManualTransactionRow = {
-  momo_message_id: null;
-  account_id: string;
-  workspace_id: string;
-  source: "manual";
-  transaction_type: ManualTransactionType;
-  direction: "in" | "out";
-  status: "success";
-  currency: SupportedCurrency;
-  amount_rwf: number;
-  fee_rwf: number;
-  principal_effect_rwf: number;
-  fee_effect_rwf: number;
-  settlement_state: "settled";
-  affects_balance: true;
-  effect_reason: "manual_entry";
-  counterparty_name: string | null;
-  occurred_at: string;
-  category: null;
-  category_source: null;
-  notes: string | null;
-  parser_version: "manual-entry-v1";
+/** Arguments of the create_manual_transaction database function. */
+export type ManualTransactionArgs = {
+  p_account_id: string;
+  p_transaction_type: ManualTransactionType;
+  p_direction: "in" | "out";
+  p_amount_minor: number;
+  p_fee_minor: number;
+  p_occurred_at: string;
+  p_counterparty_name: string | null;
+  p_notes: string | null;
 };
 
 export type BuildResult =
-  | { ok: true; row: ManualTransactionRow }
+  | { ok: true; args: ManualTransactionArgs }
   | { ok: false; error: string };
 
 /** Far above any real amount; keeps every figure an exact JS integer. */
@@ -164,33 +152,17 @@ export function buildManualTransaction(
     return { ok: false, error: `Keep the note under ${MAX_NOTES} characters.` };
   }
 
-  const amountMinor = Number(amount);
-  const feeMinor = Number(fee);
-  const out = form.direction === "out";
   return {
     ok: true,
-    row: {
-      momo_message_id: null,
-      account_id: account.id,
-      workspace_id: account.workspaceId,
-      source: "manual",
-      transaction_type: form.transactionType,
-      direction: form.direction,
-      status: "success",
-      currency: account.currency,
-      amount_rwf: amountMinor,
-      fee_rwf: feeMinor,
-      principal_effect_rwf: out ? -amountMinor : amountMinor,
-      fee_effect_rwf: out ? -feeMinor : 0,
-      settlement_state: "settled",
-      affects_balance: true,
-      effect_reason: "manual_entry",
-      counterparty_name: counterparty || null,
-      occurred_at: when.iso,
-      category: null,
-      category_source: null,
-      notes: notes || null,
-      parser_version: "manual-entry-v1",
+    args: {
+      p_account_id: account.id,
+      p_transaction_type: form.transactionType,
+      p_direction: form.direction,
+      p_amount_minor: Number(amount),
+      p_fee_minor: Number(fee),
+      p_occurred_at: when.iso,
+      p_counterparty_name: counterparty || null,
+      p_notes: notes || null,
     },
   };
 }
