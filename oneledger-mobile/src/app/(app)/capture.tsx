@@ -15,7 +15,6 @@ import {
   captureSupported,
   disconnectDevice,
   getCaptureHealth,
-  openNotificationAccessSettings,
   sendCaptureTest,
   type CaptureHealth,
 } from "@/features/capture/capture";
@@ -130,15 +129,17 @@ export default function Capture() {
 
         {display.action === "allow_access" ? (
           <Button
-            label="Open notification settings"
+            label="Fix this"
             fullWidth
-            onPress={openNotificationAccessSettings}
+            onPress={() => router.push("/connect")}
           />
         ) : null}
         {display.action === "connect" || display.action === "reconnect" ? (
-          <Text variant="label" color="textMuted">
-            Connecting a phone from the app arrives in the next update.
-          </Text>
+          <Button
+            label={display.action === "connect" ? "Set it up" : "Connect again"}
+            fullWidth
+            onPress={() => router.push("/connect")}
+          />
         ) : null}
       </Card>
 

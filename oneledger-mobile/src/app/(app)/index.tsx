@@ -25,7 +25,12 @@ export default function Home() {
           Your balance, transactions and inbox arrive in the next update.
         </Text>
         <Button
-          label="Automatic recording"
+          label="Record MoMo automatically"
+          fullWidth
+          onPress={() => router.push("/connect")}
+        />
+        <Button
+          label="Recording status"
           variant="secondary"
           fullWidth
           onPress={() => router.push("/capture")}

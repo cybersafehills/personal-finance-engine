@@ -74,6 +74,22 @@ not a reason to keep the whole app native.
 - `android.allowBackup` is `false`: the device secret is in
   `EncryptedSharedPreferences`, which cannot be decrypted after a restore.
 
+## Implementation notes (PR 4)
+
+- **Connecting from inside the app needs no code.** The signed-in app calls
+  `create_device_pairing_session` itself (the database function enforces
+  "workspace owner only") and hands the one-time token straight to the native
+  engine. The token is generated on the device, held only in memory, and
+  never displayed. A typed/pasted code and the `oneledger://pair?c=` deep
+  link remain as fallbacks for the web wizard.
+- **No camera permission.** QR scanning existed to carry a code from the web
+  to the phone; with in-app connect it is unnecessary.
+- The connect flow's step is derived from the engine's real state, not
+  stored, so it resumes after a trip to system settings or a restart.
+- A prominent disclosure is shown before pairing or notification access.
+- The browser development preview uses an in-memory demo engine (`__DEV__`
+  on web only) so the flow can be reviewed without a phone.
+
 ## Consequences
 
 - `android/` is retired only after the new app reaches parity and one stable
