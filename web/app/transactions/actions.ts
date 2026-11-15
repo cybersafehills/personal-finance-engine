@@ -54,12 +54,13 @@ export type ManualTransactionInput = {
  * unknown MTN statuses) that simply doesn't exist for a manual entry, and
  * it isn't import-reachable from web/ anyway (see kigali-time.ts's own
  * comment on why cross-package imports don't survive Vercel's web/-only
- * deploy). The principal/fee effect formula below is deliberately kept
- * byte-for-byte identical to what the generated net_effect_rwf column and
- * the transactions_new_accounting_fields_all_or_nothing check constraint
- * both already enforce for status='success' - so this insert is provably
- * consistent with the database's own invariants, not a parallel
- * reimplementation of contested logic.
+ * deploy). The principal/fee effect formula lives in the
+ * create_manual_transaction() database function this calls, deliberately
+ * kept identical to what the generated net_effect_rwf column and the
+ * transactions_new_accounting_fields_all_or_nothing check constraint both
+ * already enforce for status='success' - so the insert is consistent with
+ * the database's own invariants, not a parallel reimplementation of
+ * contested logic.
  *
  * The transaction's currency is inherited from the selected account, not
  * chosen separately - this is also what unlocks EUR/USD budget actuals:
@@ -121,50 +122,47 @@ export async function createManualTransaction(
     }
   }
 
-  // Matches the generated net_effect_rwf expression and the
-  // transactions_new_accounting_fields_all_or_nothing check constraint
-  // exactly for status='success': 'out' moves principal down by amount
-  // and fee down by fee; 'in' moves principal up by amount and never
-  // subtracts a fee (fees on incoming money aren't modeled - matches
-  // existing MoMo ingestion behavior, see accounting.ts).
-  const principalEffectMinor = input.direction === "out" ? -amountMinor : amountMinor;
-  const feeEffectMinor = input.direction === "out" ? -feeMinor : 0n;
+  // The insert goes through create_manual_transaction
+  // (20261222000000_create_manual_transaction.sql), not a direct INSERT:
+  // signed-in users have no INSERT on `transactions` (Phase B: ingestion is
+  // the only writer). The function re-checks workspace ownership, derives the
+  // workspace and currency from the account, and writes the principal/fee
+  // effects exactly as the accounting check constraints expect (out moves
+  // principal and fee down; in moves principal up and carries no fee).
+  const { data: transactionId, error } = await supabase.rpc(
+    "create_manual_transaction",
+    {
+      p_account_id: account.id,
+      p_transaction_type: input.transactionType,
+      p_direction: input.direction,
+      p_amount_minor: amountMinor.toString(),
+      p_fee_minor: feeMinor.toString(),
+      p_occurred_at: input.occurredAt,
+      p_counterparty_name: input.counterpartyName.trim() || null,
+      p_notes: input.notes.trim() || null,
+    },
+  );
 
-  const { data, error } = await supabase
-    .from("transactions")
-    .insert({
-      momo_message_id: null,
-      account_id: account.id,
-      workspace_id: workspaceId,
-      source: "manual",
-      transaction_type: input.transactionType,
-      direction: input.direction,
-      status: "success",
-      currency: account.currency,
-      amount_rwf: amountMinor,
-      fee_rwf: feeMinor,
-      principal_effect_rwf: principalEffectMinor,
-      fee_effect_rwf: feeEffectMinor,
-      settlement_state: "settled",
-      affects_balance: true,
-      effect_reason: "manual_entry",
-      counterparty_name: input.counterpartyName.trim() || null,
-      occurred_at: input.occurredAt,
-      category: input.category.trim() || null,
-      category_source: input.category.trim() ? "manual" : null,
-      notes: input.notes.trim() || null,
-      parser_version: "manual-entry-v1",
-    })
-    .select("id")
-    .single();
-
-  if (error || !data) {
+  if (error || !transactionId) {
     return { ok: false, error: "Could not create the transaction." };
+  }
+
+  // The optional category is applied as a manual decision (with its history
+  // entry) through the same function the "Correct category" form uses. The
+  // transaction already exists, so a failure here is not fatal: it can be
+  // categorized from its detail page, where the user lands next.
+  const category = input.category.trim();
+  if (category) {
+    await supabase.rpc("apply_manual_category_correction", {
+      p_transaction_id: transactionId,
+      p_category: category,
+      p_subcategory: null,
+    });
   }
 
   revalidatePath("/transactions");
   revalidatePath("/budgets");
-  return { ok: true, transactionId: data.id };
+  return { ok: true, transactionId };
 }
 
 export type SimpleActionResult = { ok: true } | { ok: false; error: string };
