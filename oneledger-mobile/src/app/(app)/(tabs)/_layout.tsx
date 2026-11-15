@@ -42,8 +42,8 @@ export default function TabsLayout() {
         options={{ title: "Transactions", tabBarIcon: icon("list") }}
       />
       <Tabs.Screen
-        name="review"
-        options={{ title: "To review", tabBarIcon: icon("inbox") }}
+        name="inbox"
+        options={{ title: "Inbox", tabBarIcon: icon("inbox") }}
       />
       <Tabs.Screen name="more" options={{ title: "More", tabBarIcon: icon("menu") }} />
     </Tabs>

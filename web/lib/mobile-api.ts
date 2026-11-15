@@ -52,6 +52,7 @@ const MAX_PER_WINDOW = 20;
 export function mobileAuthRateLimited(
   ip: string,
   now: number = Date.now(),
+  maxPerWindow: number = MAX_PER_WINDOW,
 ): boolean {
   const rec = HITS.get(ip);
   if (!rec || now > rec.resetAt) {
@@ -59,5 +60,66 @@ export function mobileAuthRateLimited(
     return false;
   }
   rec.count += 1;
-  return rec.count > MAX_PER_WINDOW;
+  return rec.count > maxPerWindow;
+}
+
+// ---------------------------------------------------------------------------
+// Bearer-authenticated reads (GET /api/mobile/inbox, ...). The app presents
+// its Supabase access token; the route validates it with Supabase Auth and
+// then runs the ordinary read models under that token, so RLS is still the
+// boundary. These helpers are the pure parts.
+// ---------------------------------------------------------------------------
+
+/** The token from `Authorization: Bearer <token>`, or null. */
+export function bearerToken(header: string | null): string | null {
+  if (!header) return null;
+  const match = /^Bearer\s+(\S+)\s*$/i.exec(header);
+  return match ? match[1] : null;
+}
+
+/**
+ * The `aal` claim of a Supabase access token. Read only AFTER Supabase Auth
+ * has validated the token (getUser), so the claim is trustworthy; this never
+ * verifies a signature itself.
+ */
+export function tokenAal(token: string): "aal1" | "aal2" | null {
+  const part = token.split(".")[1];
+  if (!part) return null;
+  try {
+    const b64 = part.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
+    const claims = JSON.parse(atob(padded)) as { aal?: unknown };
+    return claims.aal === "aal1" || claims.aal === "aal2" ? claims.aal : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A user who has a verified second factor must have completed it. A session
+ * that only passed the password step (aal1) is not enough, so a stolen or
+ * half-finished sign-in cannot read the Inbox.
+ */
+export function mfaSatisfied(
+  aal: "aal1" | "aal2" | null,
+  factors: ReadonlyArray<{ status?: string }> | undefined | null,
+): boolean {
+  const hasVerifiedFactor = (factors ?? []).some((f) => f.status === "verified");
+  return !hasVerifiedFactor || aal === "aal2";
+}
+
+/** CORS for browser development previews only; same exact-match rule as sign-in. */
+export function corsHeadersFor(
+  origin: string | null,
+  allowlist: string | undefined,
+  methods: string,
+): Record<string, string> {
+  const allowed = allowedCorsOrigin(origin, allowlist);
+  if (!allowed) return {};
+  return {
+    "Access-Control-Allow-Origin": allowed,
+    "Access-Control-Allow-Methods": methods,
+    "Access-Control-Allow-Headers": "content-type, authorization",
+    "Vary": "Origin",
+  };
 }

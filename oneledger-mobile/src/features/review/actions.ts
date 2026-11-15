@@ -9,9 +9,15 @@ import { supabase } from "@/api/supabase";
 /** Thrown when a decision could not be saved. The message is user-safe. */
 export class ReviewActionError extends Error {}
 
-async function callRpc(fn: "confirm_transaction_category" | "dismiss_suggested_category", id: string) {
+type RpcName =
+  | "confirm_transaction_category"
+  | "dismiss_suggested_category"
+  | "dismiss_possible_duplicate"
+  | "merge_duplicate_transaction";
+
+async function callRpc(fn: RpcName, args: Record<string, string>) {
   if (!supabase) throw new ReviewActionError("This build isn't connected to OneLedger yet.");
-  const { error } = await supabase.rpc(fn, { p_transaction_id: id });
+  const { error } = await supabase.rpc(fn, args);
   if (error) {
     throw new ReviewActionError(
       error.message.includes("not_found_or_forbidden")
@@ -23,12 +29,29 @@ async function callRpc(fn: "confirm_transaction_category" | "dismiss_suggested_c
 
 /** Accept the suggested (or automatic) category as a manual decision. */
 export function confirmCategory(transactionId: string): Promise<void> {
-  return callRpc("confirm_transaction_category", transactionId);
+  return callRpc("confirm_transaction_category", { p_transaction_id: transactionId });
+}
+
+/** "Not a duplicate": the transaction goes back to a normal, unique one. */
+export function dismissDuplicate(transactionId: string): Promise<void> {
+  return callRpc("dismiss_possible_duplicate", { p_transaction_id: transactionId });
+}
+
+/**
+ * Keep `canonicalId`, fold `duplicateId` into it. The duplicate row is kept as
+ * evidence but leaves every total and list (the database enforces that both
+ * are in the same workspace and that the caller may categorise there).
+ */
+export function mergeDuplicate(duplicateId: string, canonicalId: string): Promise<void> {
+  return callRpc("merge_duplicate_transaction", {
+    p_duplicate_id: duplicateId,
+    p_canonical_id: canonicalId,
+  });
 }
 
 /** Reject the suggestion; the transaction goes back to Uncategorized. */
 export function dismissSuggestion(transactionId: string): Promise<void> {
-  return callRpc("dismiss_suggested_category", transactionId);
+  return callRpc("dismiss_suggested_category", { p_transaction_id: transactionId });
 }
 
 export type CorrectionResult = {
