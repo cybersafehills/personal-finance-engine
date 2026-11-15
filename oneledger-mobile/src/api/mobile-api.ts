@@ -1,5 +1,12 @@
 import { bearerGet, failureForOutcome } from "@/api/bearer";
 import { parseBudgetsResponse, type BudgetsResult } from "@/features/budgets/parse";
+import {
+  parseDownloadResponse,
+  parseStatementsResponse,
+  type DownloadResult,
+  type StatementsResult,
+} from "@/features/statements/parse";
+import type { DownloadFormat } from "@/features/statements/types";
 import { parseInboxResponse, type InboxResult } from "@/features/inbox/parse";
 import { config } from "@/lib/config";
 
@@ -99,4 +106,31 @@ export async function fetchBudgets(): Promise<BudgetsResult> {
     return { ok: false, ...failureForOutcome(result, "Your budget") };
   }
   return parseBudgetsResponse(result.status, result.body);
+}
+
+/** The user's generated statements (read-only; generating stays on the web). */
+export async function fetchStatements(): Promise<StatementsResult> {
+  const result = await bearerGet("/api/mobile/statements");
+  if (result.kind !== "response") {
+    return { ok: false, ...failureForOutcome(result, "Your statements") };
+  }
+  return parseStatementsResponse(result.status, result.body);
+}
+
+/**
+ * A fresh, five-minute download link for one ready statement. Ask on every tap
+ * and open it straight away; never store or log it.
+ */
+export async function fetchStatementDownload(
+  id: string,
+  format: DownloadFormat,
+): Promise<DownloadResult> {
+  const result = await bearerGet(
+    `/api/mobile/statements/${encodeURIComponent(id)}/document?format=${format}`,
+  );
+  if (result.kind !== "response") {
+    const f = failureForOutcome(result, "That statement");
+    return { ok: false, reason: f.reason, message: f.message };
+  }
+  return parseDownloadResponse(result.status, result.body);
 }

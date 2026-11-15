@@ -178,11 +178,52 @@ test.describe("mobile API", () => {
     }
   });
 
+  test("statements: list under the bearer token, and no download for an unknown id", async () => {
+    const api = await playwrightRequest.newContext({ baseURL: BASE_URL });
+    try {
+      const signIn = await api.post("/api/mobile/auth/sign-in", {
+        data: { email: E2E_USER.email, password: E2E_USER.password },
+      });
+      expect(signIn.status()).toBe(200);
+      const headers = { authorization: `Bearer ${(await signIn.json()).access_token}` };
+
+      // FINANCIAL_STATEMENTS_ENABLED is on for this suite (playwright.config.ts).
+      const list = await api.get("/api/mobile/statements", { headers });
+      expect(list.status()).toBe(200);
+      expect(list.headers()["cache-control"]).toContain("no-store");
+      const body = await list.json();
+      expect(body.ok).toBe(true);
+      expect(body.enabled).toBe(true);
+      expect(Array.isArray(body.statements)).toBe(true);
+      for (const st of body.statements) {
+        expect(typeof st.periodLabel).toBe("string");
+        expect(Array.isArray(st.totals)).toBe(true);
+      }
+
+      // An id that is not a statement the caller can see (RLS hides other
+      // users' rows exactly like a missing one) gets no URL, and a malformed
+      // id never reaches the database.
+      for (const id of ["00000000-0000-4000-8000-000000000000", "not-a-uuid"]) {
+        const res = await api.get(`/api/mobile/statements/${id}/document?format=pdf`, { headers });
+        expect(res.status()).toBe(200);
+        const doc = await res.json();
+        expect(doc.download).toBeNull();
+        expect(doc.reason).toBe("not_found");
+      }
+    } finally {
+      await api.dispose();
+    }
+  });
+
   test("the Inbox refuses a missing, malformed or invalid token", async () => {
     const api = await playwrightRequest.newContext({ baseURL: BASE_URL });
     try {
       expect((await api.get("/api/mobile/inbox")).status()).toBe(401);
       expect((await api.get("/api/mobile/budgets")).status()).toBe(401);
+      expect((await api.get("/api/mobile/statements")).status()).toBe(401);
+      expect(
+        (await api.get("/api/mobile/statements/00000000-0000-4000-8000-000000000000/document")).status(),
+      ).toBe(401);
       expect(
         (await api.get("/api/mobile/inbox", { headers: { authorization: "Basic abc" } })).status(),
       ).toBe(401);
