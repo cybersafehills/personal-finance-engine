@@ -1,10 +1,8 @@
-import * as Linking from "expo-linking";
 import { useCallback, useState } from "react";
 import { FlatList, RefreshControl, View } from "react-native";
 
 import {
   Button,
-  Card,
   EmptyState,
   ListScreen,
   listContentStyle,
@@ -15,7 +13,6 @@ import { confirmCategory, dismissSuggestion, ReviewActionError } from "@/feature
 import { ReviewCard } from "@/features/review/ReviewCard";
 import { getReviewQueue } from "@/features/transactions/queries";
 import { useQuery } from "@/hooks/useQuery";
-import { config } from "@/lib/config";
 import { colors, space } from "@/theme/tokens";
 
 // Transactions whose category OneLedger is unsure about. Each one can be
@@ -69,20 +66,6 @@ export default function Review() {
               title="To review"
               subtitle="Transactions that need a category check"
             />
-            {rows.length > 0 && config.apiBaseUrl ? (
-              <Card style={{ gap: space[3] }}>
-                <Text variant="label" color="textSecondary">
-                  Accept or reject each suggestion here. To pick a different
-                  category, use OneLedger on the web.
-                </Text>
-                <Button
-                  label="Pick a category on the web"
-                  variant="secondary"
-                  fullWidth
-                  onPress={() => Linking.openURL(`${config.apiBaseUrl}/inbox`)}
-                />
-              </Card>
-            ) : null}
           </View>
         }
         renderItem={({ item }) => (

@@ -1,3 +1,4 @@
+import { router } from "expo-router";
 import { StyleSheet, View } from "react-native";
 
 import { Button, Text } from "@/components/ds";
@@ -38,6 +39,14 @@ export function ReviewCard({
             <Button label={prompt.confirmLabel} loading={busy} disabled={busy} onPress={onConfirm} />
           ) : null}
           <Button label={prompt.dismissLabel} variant="secondary" disabled={busy} onPress={onDismiss} />
+          <Button
+            label="Pick another"
+            variant="ghost"
+            disabled={busy}
+            onPress={() =>
+              router.push({ pathname: "/category/[id]", params: { id: transaction.id } })
+            }
+          />
         </View>
       </View>
     </View>
