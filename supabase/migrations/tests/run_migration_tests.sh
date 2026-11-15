@@ -1015,10 +1015,12 @@ AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_p
 # unregister_push_device - authenticated-callable, own-rows only (they act on
 # auth.uid()). claim_/ack_/release_notification_push* and
 # disable_push_devices are service-role only. 117 + 2 = 119.
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "119" ]; then
-  pass "authenticated holds EXECUTE on exactly the 119 functions expected, no more"
+# create_manual_transaction (20261222000000) is the one write path for a
+# signed-in user creating a transaction, owner-checked inside. 119 + 1 = 120.
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "120" ]; then
+  pass "authenticated holds EXECUTE on exactly the 120 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 119 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 120 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -7825,6 +7827,71 @@ if [ "$ERZ_PEND" = "$ERZ_Q1" ] && { [ "$ERZ_PEND_ACL" = "false|false" ] || [ "$E
   pass "Account erasure: pending_account_deletions returns only past-due scheduled requests, and the erasure fns are service-role only"
 else
   fail "Account erasure: pending queue wrong (pending='$ERZ_PEND' want '$ERZ_Q1', acl='$ERZ_PEND_ACL')"
+fi
+
+
+# ---------------------------------------------------------------------------
+# Manual transactions (20261222000000): create_manual_transaction is the only
+# way a signed-in user creates a transaction. Direct INSERT stays denied.
+# ---------------------------------------------------------------------------
+MT_ID="$(as_user "$USER_A" "select public.create_manual_transaction('$S_ACCT_A','merchant_payment','out',4200,100,now() - interval '1 hour','  Kigali Fresh ','lunch');" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+MT_ROW="$(as_user "$USER_A" "select direction||'|'||amount_rwf||'|'||fee_rwf||'|'||principal_effect_rwf||'|'||fee_effect_rwf||'|'||net_effect_rwf||'|'||source||'|'||status||'|'||settlement_state||'|'||currency||'|'||counterparty_name||'|'||notes from public.transactions where id = '$MT_ID';")"
+if [ "$MT_ROW" = "out|4200|100|-4200|-100|-4300|manual|success|settled|RWF|Kigali Fresh|lunch" ]; then
+  pass "Manual transactions: an owner creates a settled manual row whose effects match the accounting constraints, and reads it back under RLS"
+else
+  fail "Manual transactions: created row wrong ('$MT_ROW')"
+fi
+
+MT_IN="$(as_user "$USER_A" "select public.create_manual_transaction('$S_ACCT_A','money_received','in',500,999,now(),null,null);" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+MT_IN_ROW="$(as_user "$USER_A" "select direction||'|'||amount_rwf||'|'||fee_rwf||'|'||principal_effect_rwf||'|'||fee_effect_rwf||'|'||net_effect_rwf||'|'||coalesce(counterparty_name,'-') from public.transactions where id = '$MT_IN';")"
+if [ "$MT_IN_ROW" = "in|500|0|500|0|500|-" ]; then
+  pass "Manual transactions: money in carries no fee and empty text is stored as null"
+else
+  fail "Manual transactions: money-in row wrong ('$MT_IN_ROW')"
+fi
+
+if as_user "$USER_B" "select public.create_manual_transaction('$S_ACCT_A','send_money','out',100,0,now(),null,null);" >/dev/null 2>$ARTIFACT_DIR/pfe_mt_b.log; then
+  fail "Manual transactions: a user outside the workspace created a row"
+else
+  pass "Manual transactions: a user outside the account's workspace is refused (not_found_or_forbidden)"
+fi
+rm -f $ARTIFACT_DIR/pfe_mt_b.log
+
+MT_BAD_OK=0
+for args in \
+  "'bogus','out',100,0,now(),null,null" \
+  "'send_money','neutral',100,0,now(),null,null" \
+  "'send_money','out',0,0,now(),null,null" \
+  "'send_money','out',-5,0,now(),null,null" \
+  "'send_money','out',2000000000000,0,now(),null,null" \
+  "'send_money','out',100,-1,now(),null,null" \
+  "'send_money','out',100,0,now() + interval '1 day',null,null" \
+  "'send_money','out',100,0,null,null,null" \
+  "'send_money','out',100,0,now(),repeat('x',121),null" \
+  "'send_money','out',100,0,now(),null,repeat('x',501)"; do
+  if as_user "$USER_A" "select public.create_manual_transaction('$S_ACCT_A',$args);" >/dev/null 2>&1; then
+    MT_BAD_OK=$((MT_BAD_OK + 1))
+    echo "  accepted invalid input: $args"
+  fi
+done
+if [ "$MT_BAD_OK" = "0" ]; then
+  pass "Manual transactions: invalid type, direction, amount, fee, time and text are all rejected"
+else
+  fail "Manual transactions: $MT_BAD_OK invalid input(s) were accepted"
+fi
+
+if as_user "$USER_A" "insert into public.transactions (account_id, workspace_id, source, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version) values ('$S_ACCT_A', '$WORKSPACE_A', 'manual', 'send_money', 'out', 'success', 1, 0, now(), 'direct');" >/dev/null 2>$ARTIFACT_DIR/pfe_mt_direct.log; then
+  fail "Manual transactions: a signed-in user could INSERT into transactions directly"
+else
+  pass "Manual transactions: direct INSERT into transactions stays denied for signed-in users"
+fi
+rm -f $ARTIFACT_DIR/pfe_mt_direct.log
+
+MT_ACL="$(psql -d pfe_rls -t -A -c "select has_function_privilege('anon','public.create_manual_transaction(uuid,text,text,bigint,bigint,timestamptz,text,text)','execute') || '|' || has_function_privilege('authenticated','public.create_manual_transaction(uuid,text,text,bigint,bigint,timestamptz,text,text)','execute');" | tail -1)"
+if [ "$MT_ACL" = "f|t" ] || [ "$MT_ACL" = "false|true" ]; then
+  pass "Manual transactions: create_manual_transaction is executable by signed-in users only (not anon)"
+else
+  fail "Manual transactions: ACL wrong ('$MT_ACL', want anon=false authenticated=true)"
 fi
 
 echo ""
