@@ -121,7 +121,7 @@ the files under `oneledger-mobile/assets/`.
 | Android themed (monochrome) icon | `assets/android-icon-monochrome.png` | 1024x1024 PNG, single colour on transparent, same safe zone as the foreground |
 | Splash mark | `assets/splash-icon.png` | 1024x1024 PNG, alpha allowed; shown centred on the splash background colour |
 | Android notification icon (push) | not set yet (`expo-notifications` plugin `icon`) | 96x96 PNG, **white on transparent** (Android renders it as a silhouette) |
-| Web preview favicon | `assets/favicon.png` | 48x48 or larger PNG (development preview only) |
+| Web preview favicon | `assets/favicon.png` | 48x48 or larger PNG (development preview only). **Done:** the web app's approved `favicon-48x48.png` |
 | Play Store hi-res icon | Play Console upload | exactly 512x512 PNG, 32-bit, up to 1 MB |
 | Play Store feature graphic | Play Console upload | exactly 1024x500 PNG or JPG, no alpha |
 | Play Store phone screenshots | Play Console upload | 2 to 8; 16:9 or 9:16; each side 320 to 3840 px |
@@ -130,3 +130,29 @@ the files under `oneledger-mobile/assets/`.
 Brand files already in the repo (`brand-source/oneledger/`), checked against
 these slots: `standalone-icon.png` is 510x511 with alpha, which is **too small
 for every 1024 slot** and one pixel short of the 512x512 Play icon.
+
+### Findings from the supplied brand folder (2026-11-15)
+
+The folder matches what is already archived in `brand-source/oneledger/`
+(same files, same sizes; only the bytes differ, probably a re-export).
+
+- **The mark is ~318x327 px inside every file.** `Standalone icon.png`
+  (510x511), `Icon OneLedger.png` (763x887, opaque) and the web favicon source
+  all hold the same ~318 px mark surrounded by margin. Filling a 1024 slot
+  properly means enlarging the mark about 2x, which softens its hard edges.
+- **The "1" is transparent**, not white. The mark is navy with a cut-out, so
+  it needs a **light** background everywhere: on navy the "1" and the whole
+  mark disappear. (Android adaptive background is now `#FFFFFF`.)
+- **`Monochrome dark logo.png` still has the checkerboard baked in** as pixels
+  (see "Known source defect" in `docs/ONELEDGER_BRAND_ASSETS.md`), so it
+  cannot be used as-is for a themed icon or anything on a coloured surface.
+- **What is enough as supplied:** the on-device icons. Home-screen icons are
+  rendered at most ~180 px (iOS) and ~432 px (Android adaptive foreground,
+  of which the mark is ~285 px), below the source's 318 px, so they stay crisp
+  when scaled down. **What is not:** the 1024 App Store master, the 512 Play
+  icon, and any large store listing use, which would be upscaled.
+- **A vector source (SVG / PDF / AI) or a PNG of at least ~1500 px mark width
+  from the brand owner** solves every slot at once.
+- **Needs sign-off before doing:** the Android notification icon and themed
+  (monochrome) icon must be a single-colour silhouette. That is a recolour of
+  the mark, which the brand rules forbid without approval.
