@@ -682,7 +682,10 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # Mobile push (20261221000000) adds push_devices (RLS enabled, own-row
 # SELECT only; register/unregister run through SECURITY DEFINER functions)
 # - 130 tables, 129 with RLS.
-if [ "$TABLE_COUNT" = "130" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# OneLedger 3.0 S3 (20261223000000) adds balance_observations (RLS enabled,
+# member SELECT only; writes via record_manual_balance_observation) - 131
+# tables, 130 with RLS. (account_balance_baselines_v is a view, not a table.)
+if [ "$TABLE_COUNT" = "131" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -824,10 +827,13 @@ AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from inform
 # authenticated (a user may read their own registered phones; writes go
 # through register_push_device / unregister_push_device, and the sender uses
 # the service role). 165 + 1 = 166.
-if [ "$AUTHENTICATED_GRANT_COUNT" = "166" ]; then
-  pass "authenticated holds exactly the 166 table grants expected, no more"
+# OneLedger 3.0 S3 (20261223000000): balance_observations SELECT (member-read
+# via RLS) + account_balance_baselines_v SELECT (security_invoker view, so the
+# caller's RLS applies). 166 + 2 = 168.
+if [ "$AUTHENTICATED_GRANT_COUNT" = "168" ]; then
+  pass "authenticated holds exactly the 168 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 166 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 168 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -1017,10 +1023,12 @@ AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_p
 # disable_push_devices are service-role only. 117 + 2 = 119.
 # create_manual_transaction (20261222000000) is the one write path for a
 # signed-in user creating a transaction, owner-checked inside. 119 + 1 = 120.
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "120" ]; then
-  pass "authenticated holds EXECUTE on exactly the 120 functions expected, no more"
+# OneLedger 3.0 S3 (20261223000000) adds record_manual_balance_observation -
+# authenticated-callable, member+-gated and audited. 120 + 1 = 121.
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "121" ]; then
+  pass "authenticated holds EXECUTE on exactly the 121 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 120 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 121 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -7892,6 +7900,146 @@ if [ "$MT_ACL" = "f|t" ] || [ "$MT_ACL" = "false|true" ]; then
   pass "Manual transactions: create_manual_transaction is executable by signed-in users only (not anon)"
 else
   fail "Manual transactions: ACL wrong ('$MT_ACL', want anon=false authenticated=true)"
+fi
+
+# ===========================================================================
+# OneLedger 3.0 S3: balance provenance (20261223000000_balance_observations).
+# balance_observations is append-only and member-readable; the ONLY write path
+# is record_manual_balance_observation (member+, audited, no existence oracle).
+# account_balance_baselines_v is security_invoker, so RLS applies through it.
+# Reuses USER_A/WORKSPACE_A, USER_B/WORKSPACE_B, F2_ACCT_A/F2_ACCT_B and the
+# Phase R household fixture (R_MATRIX_HH with admin/member/viewer users).
+# ===========================================================================
+echo "=== OneLedger 3.0 S3: balance observations ==="
+
+S3_OBS_A="$(as_user "$USER_A" "select public.record_manual_balance_observation('$F2_ACCT_A', 125000, now() - interval '1 hour', 'counted at the shop');" | tail -1)"
+if [ -n "$S3_OBS_A" ] && [ "$(psql -d pfe_rls -t -A -c "select amount_minor || '|' || currency || '|' || source from public.balance_observations where id = '$S3_OBS_A';")" = "125000|RWF|manual" ]; then
+  pass "S3: a workspace member records a manual balance observation (currency taken from the account)"
+else
+  fail "S3: manual observation was not recorded correctly (id='$S3_OBS_A')"
+fi
+
+S3_AUDIT="$(psql -d pfe_rls -t -A -c "select count(*) from public.space_audit_events where workspace_id = '$WORKSPACE_A' and event_type = 'balance.manual_observation' and (new_value->>'observation_id') = '$S3_OBS_A';")"
+if [ "$S3_AUDIT" = "1" ]; then
+  pass "S3: recording a manual observation writes exactly one audit event"
+else
+  fail "S3: expected 1 audit event for the observation, found $S3_AUDIT"
+fi
+
+S3_B_SEES="$(as_user "$USER_B" "select count(*) from public.balance_observations;")"
+if [ "$S3_B_SEES" = "0" ]; then
+  pass "S3: another workspace's member cannot read the observation (RLS)"
+else
+  fail "S3: cross-tenant leak - USER_B sees $S3_B_SEES observation row(s)"
+fi
+
+if as_user "$USER_B" "select public.record_manual_balance_observation('$F2_ACCT_A', 1, now());" >/dev/null 2>$ARTIFACT_DIR/pfe_s3_xt.log; then
+  fail "S3: USER_B recorded an observation against another workspace's account"
+else
+  if grep -q "account_not_found" $ARTIFACT_DIR/pfe_s3_xt.log; then
+    pass "S3: cross-tenant observation is refused with the same error as a missing account (no existence oracle)"
+  else
+    fail "S3: cross-tenant refusal had an unexpected error: $(cat $ARTIFACT_DIR/pfe_s3_xt.log)"
+  fi
+fi
+rm -f $ARTIFACT_DIR/pfe_s3_xt.log
+
+if as_user "$USER_A" "select public.record_manual_balance_observation('$F2_ACCT_A', 1, now() + interval '1 day');" >/dev/null 2>$ARTIFACT_DIR/pfe_s3_fut.log; then
+  fail "S3: a future as_of was accepted"
+else
+  pass "S3: a future as_of is rejected"
+fi
+rm -f $ARTIFACT_DIR/pfe_s3_fut.log
+
+# authenticated has no direct write path (append-only, RPC-only).
+S3_PRIV="$(psql -d pfe_rls -t -A -c "select has_table_privilege('authenticated','public.balance_observations','INSERT') || '|' || has_table_privilege('authenticated','public.balance_observations','UPDATE') || '|' || has_table_privilege('authenticated','public.balance_observations','DELETE') || '|' || has_table_privilege('authenticated','public.balance_observations','SELECT');")"
+if [ "$S3_PRIV" = "false|false|false|true" ] || [ "$S3_PRIV" = "f|f|f|t" ]; then
+  pass "S3: authenticated can only SELECT balance_observations (no direct insert, update or delete)"
+else
+  fail "S3: balance_observations privileges wrong for authenticated: '$S3_PRIV' (want no INSERT/UPDATE/DELETE, SELECT only)"
+fi
+
+# Role gate: viewer denied, member allowed (household fixture from Phase R).
+S3_HH_ACCT="00000000-0000-0000-0000-0000000053a1"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "insert into public.accounts (id, workspace_id, name, provider, currency) values ('$S3_HH_ACCT', '$R_MATRIX_HH', 'S3 household', 'mtn_momo', 'RWF');" >/dev/null
+if as_user "$R_VIEWER_USER" "select public.record_manual_balance_observation('$S3_HH_ACCT', 1, now());" >/dev/null 2>&1; then
+  fail "S3: a viewer recorded a balance observation"
+else
+  pass "S3: a viewer cannot record a balance observation"
+fi
+if as_user "$R_MEMBER_USER" "select public.record_manual_balance_observation('$S3_HH_ACCT', 7000, now() - interval '2 hours');" >/dev/null 2>&1; then
+  pass "S3: a household member can record a balance observation"
+else
+  fail "S3: a household member was refused"
+fi
+
+# --- account_balance_baselines_v -------------------------------------------
+S3_ACCT_V="00000000-0000-0000-0000-0000000053b1"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "insert into public.accounts (id, workspace_id, name, provider, currency) values ('$S3_ACCT_V', '$WORKSPACE_A', 'S3 view acct', 'mtn_momo', 'RWF');" >/dev/null
+
+S3_V0="$(psql -d pfe_rls -t -A -c "select coalesce(baseline_source,'none') || '|' || txns_since_count from public.account_balance_baselines_v where account_id = '$S3_ACCT_V';")"
+if [ "$S3_V0" = "none|0" ]; then
+  pass "S3: an account with no evidence has no baseline (-> Unavailable)"
+else
+  fail "S3: empty account baseline wrong: '$S3_V0'"
+fi
+
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.momo_messages (id, raw_message, processing_status) values
+    ('00000000-0000-0000-0000-0000000053c1', 's3a', 'processed'),
+    ('00000000-0000-0000-0000-0000000053c2', 's3b', 'processed'),
+    ('00000000-0000-0000-0000-0000000053c3', 's3c', 'processed');
+  insert into public.transactions
+    (id, momo_message_id, account_id, workspace_id, transaction_type, direction, status,
+     amount_rwf, fee_rwf, occurred_at, parser_version, balance_after_rwf,
+     settlement_state, affects_balance, principal_effect_rwf, fee_effect_rwf, effect_reason)
+  values
+    ('00000000-0000-0000-0000-0000000053d1', '00000000-0000-0000-0000-0000000053c1', '$S3_ACCT_V', '$WORKSPACE_A', 'money_received', 'in', 'success',
+     50000, 0, now() - interval '3 hours', 'test', 80000, 'settled', true, 50000, 0, 'settled_incoming');
+" >/dev/null 2>$ARTIFACT_DIR/pfe_s3_tx.log || { fail "S3: could not seed provider transaction: $(cat $ARTIFACT_DIR/pfe_s3_tx.log)"; }
+rm -f $ARTIFACT_DIR/pfe_s3_tx.log
+
+S3_V1="$(psql -d pfe_rls -t -A -c "select baseline_source || '|' || baseline_amount_minor || '|' || txns_since_count from public.account_balance_baselines_v where account_id = '$S3_ACCT_V';")"
+if [ "$S3_V1" = "provider_reported|80000|0" ]; then
+  pass "S3: provider-reported balance_after becomes the baseline"
+else
+  fail "S3: provider baseline wrong: '$S3_V1'"
+fi
+
+# A later settled out-transaction (-1000, fee -100) and a pending one.
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.transactions
+    (id, momo_message_id, account_id, workspace_id, transaction_type, direction, status,
+     amount_rwf, fee_rwf, occurred_at, parser_version,
+     settlement_state, affects_balance, principal_effect_rwf, fee_effect_rwf, effect_reason)
+  values
+    ('00000000-0000-0000-0000-0000000053d2', '00000000-0000-0000-0000-0000000053c2', '$S3_ACCT_V', '$WORKSPACE_A', 'send_money', 'out', 'success',
+     1000, 100, now() - interval '2 hours', 'test', 'settled', true, -1000, -100, 'settled_outgoing_with_fee');
+" >/dev/null 2>$ARTIFACT_DIR/pfe_s3_tx2.log || { fail "S3: could not seed later transaction: $(cat $ARTIFACT_DIR/pfe_s3_tx2.log)"; }
+rm -f $ARTIFACT_DIR/pfe_s3_tx2.log
+S3_V2="$(psql -d pfe_rls -t -A -c "select txns_since_count || '|' || net_effect_since_minor || '|' || unresolved_since_count from public.account_balance_baselines_v where account_id = '$S3_ACCT_V';")"
+if [ "$S3_V2" = "1|-1100|0" ]; then
+  pass "S3: activity since the baseline is summed (principal + fee) and counted"
+else
+  fail "S3: since-baseline aggregates wrong: '$S3_V2'"
+fi
+
+# A manual observation newer than the provider baseline takes over.
+S3_V3_ID="$(as_user "$USER_A" "select public.record_manual_balance_observation('$S3_ACCT_V', 77000, now() - interval '30 minutes');" | tail -1)"
+S3_V3="$(psql -d pfe_rls -t -A -c "select baseline_source || '|' || baseline_amount_minor || '|' || txns_since_count from public.account_balance_baselines_v where account_id = '$S3_ACCT_V';")"
+if [ "$S3_V3" = "manual|77000|0" ]; then
+  pass "S3: a newer manual observation replaces the provider baseline"
+else
+  fail "S3: manual baseline selection wrong: '$S3_V3' (obs=$S3_V3_ID)"
+fi
+
+# Tenant isolation through the security_invoker view.
+S3_VB="$(as_user "$USER_B" "select count(*) from public.account_balance_baselines_v where account_id = '$S3_ACCT_V';")"
+S3_VA="$(as_user "$USER_A" "select count(*) from public.account_balance_baselines_v where account_id = '$S3_ACCT_V';")"
+if [ "$S3_VB" = "0" ] && [ "$S3_VA" = "1" ]; then
+  pass "S3: account_balance_baselines_v respects tenant isolation (member sees own account, other tenant sees none)"
+else
+  fail "S3: view isolation wrong (owner sees $S3_VA, other tenant sees $S3_VB)"
 fi
 
 echo ""
