@@ -161,6 +161,8 @@ Answer text to use:
 
 ### 3.2 Data Safety form answers
 
+> **Superseded for the OneLedger mobile app** by `docs/mobile-release.md` (production step 3). The table below is the retired companion's.
+
 | Question | Answer |
 |---|---|
 | Does your app collect or share user data? | **Yes** |
