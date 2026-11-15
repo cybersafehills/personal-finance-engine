@@ -85,5 +85,5 @@ export function parseBudgetsResponse(status: number, body: unknown): BudgetsResu
   if (status === 200) {
     return { ok: false, reason: "error", message: "The budgets response wasn't understood." };
   }
-  return { ok: false, ...failureForStatus(status, "Budgets") };
+  return { ok: false, ...failureForStatus(status, "Your budget") };
 }

@@ -96,7 +96,7 @@ export async function fetchInbox(): Promise<InboxResult> {
 export async function fetchBudgets(): Promise<BudgetsResult> {
   const result = await bearerGet("/api/mobile/budgets");
   if (result.kind !== "response") {
-    return { ok: false, ...failureForOutcome(result, "Budgets") };
+    return { ok: false, ...failureForOutcome(result, "Your budget") };
   }
   return parseBudgetsResponse(result.status, result.body);
 }

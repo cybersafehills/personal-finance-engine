@@ -74,6 +74,8 @@ required, request-scoped session, `no-store`).
 - `200 { ok: true, budgets: [...] }` (empty when there is no active budget; at
   most 3; budgets in a currency the apps cannot format are left out),
   `401`, `403 mfa_required`, `404` flag off, `429`, `500`.
+- Scoped to the user's personal workspace (no session cookie, so the web's
+  cookie-less default), like the Inbox.
 - Amounts are integer minor units of the budget's currency.
 
 ## Rollout

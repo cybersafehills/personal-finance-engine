@@ -1,6 +1,11 @@
 import { NextRequest } from "next/server";
 
-import { getBudgetActuals, getBudgetById, getBudgets } from "../../../../lib/queries";
+import {
+  getActiveWorkspaceId,
+  getBudgetActuals,
+  getBudgetById,
+  getBudgets,
+} from "../../../../lib/queries";
 import { toMobileBudget, type MobileBudget } from "../../../../lib/mobile-budgets";
 import { mobileGet, mobileOptions } from "../../../../lib/mobile-request";
 
@@ -16,8 +21,13 @@ const MAX_BUDGETS = 3;
 
 export function GET(request: NextRequest) {
   return mobileGet(request, "budgets", async () => {
+    // No session cookie here, so the active workspace is the user's personal
+    // one - the same scope the Inbox uses. getBudgets() alone returns every
+    // workspace the user belongs to, which would show a household budget on a
+    // personal screen with no sign it is not theirs.
+    const workspaceId = await getActiveWorkspaceId();
     const active = (await getBudgets())
-      .filter((b) => b.status === "active")
+      .filter((b) => b.status === "active" && b.workspace_id === workspaceId)
       .slice(0, MAX_BUDGETS);
 
     const budgets: MobileBudget[] = [];

@@ -74,6 +74,16 @@ describe("parseBudgetsResponse", () => {
     expect(r.budgets[0].uncategorizedCount).toBe(0);
   });
 
+  it("words each failure so it reads naturally on the screen", () => {
+    expect(parseBudgetsResponse(404, {})).toMatchObject({ message: "Your budget isn't available yet." });
+    expect(parseBudgetsResponse(403, {})).toMatchObject({
+      message: "Finish two-step verification to see your budget.",
+    });
+    expect(parseBudgetsResponse(500, {})).toMatchObject({
+      message: "Couldn't load your budget. Check your connection and try again.",
+    });
+  });
+
   it("maps each failure to a reason the screen can act on", () => {
     expect(parseBudgetsResponse(404, {})).toMatchObject({ ok: false, reason: "unavailable" });
     expect(parseBudgetsResponse(401, {})).toMatchObject({ ok: false, reason: "unauthorized" });
