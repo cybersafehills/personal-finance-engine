@@ -1,4 +1,4 @@
-import { actionKey, canPickCategory, kindLabel, transactionIdFromHref, webUrl } from "../display";
+import { actionKey, canPickCategory, fallbackNotice, kindLabel, transactionIdFromHref, webUrl } from "../display";
 import { parseInbox, parseInboxResponse } from "../parse";
 
 const TX = "11111111-2222-3333-4444-555555555555";
@@ -109,5 +109,22 @@ describe("display helpers", () => {
   it("keys actions distinctly", () => {
     expect(actionKey({ type: "merge_duplicate", label: "m", duplicateId: "a", canonicalId: "b" })).toBe("merge_duplicate:a");
     expect(actionKey({ type: "confirm_category", label: "c", transactionId: TX })).toBe(`confirm_category:${TX}`);
+  });
+});
+
+describe("fallbackNotice", () => {
+  const fail = (reason: "unavailable" | "unauthorized" | "mfa_required" | "error") =>
+    ({ ok: false, reason, message: "x" }) as const;
+
+  it("falls back when the full inbox is off or the server errors", () => {
+    expect(fallbackNotice(fail("unavailable"))).toMatch(/isn't available yet/);
+    expect(fallbackNotice(fail("error"))).toMatch(/couldn't load/);
+  });
+
+  it("does not fall back for sign-in or two-step problems, or on success", () => {
+    expect(fallbackNotice(fail("unauthorized"))).toBeNull();
+    expect(fallbackNotice(fail("mfa_required"))).toBeNull();
+    expect(fallbackNotice(null)).toBeNull();
+    expect(fallbackNotice({ ok: true, inbox: { items: [], total: 0, criticalCount: 0, highCount: 0 } })).toBeNull();
   });
 });

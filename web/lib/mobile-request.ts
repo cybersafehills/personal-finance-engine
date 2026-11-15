@@ -79,7 +79,13 @@ export async function mobileGet(
   try {
     const body = await runWithMobileSession(token, handler);
     return json(request, { ok: true, ...body }, 200);
-  } catch {
+  } catch (error) {
+    // Message only: never the token, the request or the response body. Without
+    // this a failing read model returns 500 and leaves no trace in the logs.
+    console.error(
+      `mobile api "${name}" failed:`,
+      error instanceof Error ? error.message : "unknown error",
+    );
     return json(request, { ok: false, error: "server_error" }, 500);
   }
 }
