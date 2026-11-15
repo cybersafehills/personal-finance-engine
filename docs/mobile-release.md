@@ -70,11 +70,21 @@ keystore** (`eas build` offers this on the first production build).
 2. Submit: create a Play service account with release permission, upload its
    JSON key to EAS (`eas credentials`), then `eas submit -p android
    --profile production` (track `internal`).
-3. **Update the Play Data safety form and store listing.** The companion only
-   sent MoMo message text. The app also signs the user in and shows their
-   transactions, balance and notifications, and registers a push token once
-   alerts are turned on. The privacy policy page (`/legal/android-privacy`) is
-   written for the companion and must be updated to match before production.
+3. **Update the Play Data safety form and store listing** to match the
+   policy (`/legal/privacy`, source `web/components/legal/MobilePrivacyPolicy.tsx`;
+   the old `/legal/android-privacy` URL serves the same text). Answers:
+
+   | Data type | Collected | Shared | Purpose | Notes |
+   |---|---|---|---|---|
+   | Personal info: email address | Yes | No | Account management | Sign-in |
+   | Financial info: other financial info | Yes | No | App functionality | Mobile-money message text (Android capture) and the user's own transactions/balances, shown back to them |
+   | Device or other IDs | Yes | Yes (push provider) | App functionality | Expo push token, only after the user turns alerts on. Disclose sharing with the push providers |
+   | App activity, location, contacts, SMS, photos, files, audio, health | No | | | Camera and SMS are not requested |
+
+   Encrypted in transit: yes. Users can request deletion: yes (account on the
+   web). Ads and analytics SDKs: none. Biometrics: handled by the OS, never
+   received by the app, so not "collected".
+
 4. The notification-access declaration (docs/android-companion-release.md
    3.1) still applies to production.
 5. Personal Play accounts may need a closed test with testers for a minimum
@@ -85,8 +95,9 @@ keystore** (`eas build` offers this on the first production build).
 Needs the Apple Developer Program membership
 (`docs/mobile-apple-developer-setup.md`). Then: register the bundle id
 `me.oneledger.app`, create the app in App Store Connect, `eas build -p ios
---profile production`, `eas submit -p ios`. Also needed: privacy nutrition
-labels, a privacy policy URL, and screenshots. iOS capture is the Shortcuts
+--profile production`, `eas submit -p ios`. Also needed: a privacy policy URL (`/legal/privacy`), privacy nutrition
+labels (Contact info: email; Financial info; Identifiers: device token for
+alerts. All linked to the user, none used for tracking), and screenshots. iOS capture is the Shortcuts
 guide, so the Shortcuts must be published first
 (docs/oneledger-capture-shortcut.md "Publishing").
 

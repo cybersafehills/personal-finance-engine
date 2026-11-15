@@ -1,5 +1,7 @@
 # OneLedger Shortcuts — Privacy Policy
 
+_**Superseded 2026-11-15** by the OneLedger mobile app policy, whose source is `web/components/legal/MobilePrivacyPolicy.tsx` (served at `/legal/privacy` and `/legal/android-privacy`). This file describes the retired companion and is kept for history._
+
 _Published at **`https://oneledger.me/legal/android-privacy`** (`web/app/legal/android-privacy/page.tsx`) — that is the URL to use in the Play Console "Privacy policy" field. This markdown file is the source of truth for the wording; keep the page in step with it. Review with counsel before a production release. Last updated: 2026-09-05._
 
 **OneLedger Shortcuts** ("the app", package `me.oneledger.companion`) is a
