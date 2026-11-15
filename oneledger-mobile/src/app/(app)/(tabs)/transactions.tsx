@@ -1,4 +1,4 @@
-import { useFocusEffect } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshControl, SectionList, View } from "react-native";
 
@@ -111,7 +111,12 @@ export default function Transactions() {
         }
         ListHeaderComponent={
           <View style={{ paddingTop: space[4], gap: space[3] }}>
-            <ScreenHeader title="Transactions" />
+            <ScreenHeader
+              title="Transactions"
+              action={
+                <Button label="Add" variant="secondary" onPress={() => router.push("/add-transaction")} />
+              }
+            />
             <TextField
               label="Search"
               value={input}

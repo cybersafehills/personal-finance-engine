@@ -162,6 +162,30 @@ not a reason to keep the whole app native.
 - The Home budget card loads independently of the rest of Home and respects
   privacy mode, so a slow or unavailable budget service never delays Home.
 
+## Implementation notes (Add transaction)
+
+- **Signed-in users cannot INSERT into `transactions`.** Phase B made
+  ingestion (service_role) the only direct writer; the only authenticated write
+  is the owner's category correction. Phase E relaxed `momo_message_id` for
+  manual rows "for the web manual-entry action" but never granted the insert,
+  so that action's direct insert was denied by Postgres. Rather than open
+  INSERT on a financial table (a user could then set any column, including
+  dedupe/decision/provenance), migration `20261222000000` adds one audited
+  entry point, `create_manual_transaction(...)`: owner of the account's
+  workspace only, workspace and currency derived from the account, the same
+  validation as the web action, effects computed exactly as the accounting
+  check constraints expect. The web action and the app both call it; the
+  migration tests assert direct INSERT stays denied.
+- Household members cannot add by hand yet (owner-only, like the category
+  correction); widen with a capability check when Spaces needs it.
+- The app validates first (`features/manual/input.ts`) for friendly messages;
+  the function re-checks everything. Dates are Kigali time and a time more than
+  five minutes in the future is refused. There is no de-duplication: the button
+  is disabled while saving, but a deliberate second entry is a second
+  transaction.
+- Category is chosen afterwards on the transaction's detail screen (the web
+  form's optional category is applied through the existing category-correction
+  function after creation).
 ## Implementation notes (Transaction filters)
 
 - The Transactions tab filters by direction, period and "needs review" on top
