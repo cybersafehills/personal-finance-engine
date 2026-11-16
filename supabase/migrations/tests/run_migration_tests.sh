@@ -6074,6 +6074,56 @@ else
 fi
 rm -f $ARTIFACT_DIR/pfe_pair_repair.log
 
+# Manual "Connect a device" on an already-connected account (20270101000000).
+# Before: create_ingestion_connection_dual_write always re-ran first-time
+# enrollment, so connector_stage_b_preflight raised source_already_attached and
+# the web form showed a generic "Could not create the connection." - including
+# after the connection had been revoked, leaving no way back from the form.
+# Now: an active/paused connection is refused with a typed
+# account_already_connected error (a working phone is never silently cut off);
+# a revoked one is restored with the new key on the SAME legacy row.
+echo "=== Manual connection: already-connected and revoked accounts ==="
+MC_OWNER="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('manual-conn-owner@example.com') returning id;" | head -1)"
+MC_WS="$(psql -d pfe_rls -t -A -c "select w.id from public.workspaces w join public.workspace_memberships m on m.workspace_id = w.id where m.user_id = '$MC_OWNER' and w.kind = 'personal';" | head -1)"
+MC_ACCOUNT="$(psql -d pfe_rls -t -A -c "set role service_role; insert into public.accounts (workspace_id, financial_source_id, name, provider, currency) values ('$MC_WS', null, 'Manual conn account', 'mtn_momo', 'RWF') returning id;" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+MC_HASH_1="$(printf 'b%.0s' $(seq 1 64))"
+MC_HASH_2="$(printf 'c%.0s' $(seq 1 64))"
+MC_HASH_3="$(printf 'f%.0s' $(seq 1 64))"
+MC_CONN_1="$(as_user "$MC_OWNER" "select public.create_ingestion_connection_dual_write('$MC_WS', '$MC_ACCOUNT', 'First phone', 'mtn_momo', '$MC_HASH_1', 'pfe_mc01');")"
+MC_INSTALL="$(psql -d pfe_rls -t -A -c "select connector_installation_id from public.ingestion_connections where id = '$MC_CONN_1';")"
+
+# 1. Active connection: refused with the typed error, nothing written.
+psql -d pfe_rls -t -A -c "set role authenticated; select set_config('request.jwt.claim.sub', '$MC_OWNER', false); select set_config('request.jwt.claims', '{\"sub\":\"$MC_OWNER\",\"aal\":\"aal1\"}', false); select public.create_ingestion_connection_dual_write('$MC_WS', '$MC_ACCOUNT', 'Second phone', 'mtn_momo', '$MC_HASH_2', 'pfe_mc02');" >/dev/null 2>$ARTIFACT_DIR/pfe_mc_active.log
+MC_ROWS="$(psql -d pfe_rls -t -A -c "select count(*) || '|' || (select count(*) from public.device_credentials where connector_installation_id = '$MC_INSTALL') from public.ingestion_connections where account_id = '$MC_ACCOUNT';")"
+if [ -n "$MC_INSTALL" ] && grep -q "account_already_connected" $ARTIFACT_DIR/pfe_mc_active.log && [ "$MC_ROWS" = "1|1" ]; then
+  pass "Manual connection: a second connection to an actively connected account is refused with account_already_connected and writes nothing"
+else
+  fail "Manual connection: active-account refusal is wrong (install=$MC_INSTALL rows=$MC_ROWS err=$(tail -1 $ARTIFACT_DIR/pfe_mc_active.log))"
+fi
+rm -f $ARTIFACT_DIR/pfe_mc_active.log
+
+# 2. Revoked connection: the form brings it back on the same legacy row.
+MC_OLD_CRED="$(psql -d pfe_rls -t -A -c "select device_credential_id from public.ingestion_connections where id = '$MC_CONN_1';")"
+as_user "$MC_OWNER" "select public.revoke_connector_installation('$MC_INSTALL');" >/dev/null
+MC_CONN_3="$(as_user "$MC_OWNER" "select public.create_ingestion_connection_dual_write('$MC_WS', '$MC_ACCOUNT', 'Replacement phone', 'mtn_momo', '$MC_HASH_3', 'pfe_mc03');" 2>$ARTIFACT_DIR/pfe_mc_restore.log)"
+MC_NEW_CRED="$(psql -d pfe_rls -t -A -c "select device_credential_id from public.ingestion_connections where id = '$MC_CONN_1';")"
+MC_LEGACY_STATE="$(psql -d pfe_rls -t -A -c "select status || '|' || credential_hash || '|' || label || '|' || (revoked_at is null) from public.ingestion_connections where id = '$MC_CONN_1';")"
+MC_INSTALL_STATE="$(psql -d pfe_rls -t -A -c "select status || '|' || (revoked_at is null) from public.connector_installations where id = '$MC_INSTALL';")"
+MC_CREDS="$(psql -d pfe_rls -t -A -c "select (select count(*) from public.device_credentials where connector_installation_id = '$MC_INSTALL' and status = 'active') || '|' || (select legacy_ingestion_connection_id from public.device_credentials where id = '$MC_NEW_CRED') || '|' || (select status || ':' || (legacy_ingestion_connection_id is null) from public.device_credentials where id = '$MC_OLD_CRED') || '|' || (select rotated_from_id from public.device_credentials where id = '$MC_NEW_CRED');")"
+MC_RESOLVES="$(psql -d pfe_rls -t -A -c "set role service_role; select device_credential_id is not null from public.resolve_canonical_ingestion_credential('$MC_HASH_3');" | grep -E '^(t|f|true|false)$' | head -1)"
+MC_TOTAL="$(psql -d pfe_rls -t -A -c "select count(*) from public.ingestion_connections where account_id = '$MC_ACCOUNT';")"
+if [ "$MC_CONN_3" = "$MC_CONN_1" ] \
+  && [ "$MC_LEGACY_STATE" = "active|$MC_HASH_3|Replacement phone|t" ] \
+  && [ "$MC_INSTALL_STATE" = "healthy|t" ] \
+  && { [ "$MC_CREDS" = "1|$MC_CONN_1|revoked:t|$MC_OLD_CRED" ] || [ "$MC_CREDS" = "1|$MC_CONN_1|revoked:true|$MC_OLD_CRED" ]; } \
+  && { [ "$MC_RESOLVES" = "t" ] || [ "$MC_RESOLVES" = "true" ]; } \
+  && [ "$MC_TOTAL" = "1" ]; then
+  pass "Manual connection: a revoked account is restored on the same connection with the new key (installation healthy, one active credential inheriting the legacy link, new hash resolves for capture)"
+else
+  fail "Manual connection: revoked restore is wrong (conn=$MC_CONN_3/$MC_CONN_1 legacy=$MC_LEGACY_STATE install=$MC_INSTALL_STATE creds=$MC_CREDS resolves=$MC_RESOLVES total=$MC_TOTAL err=$(tail -1 $ARTIFACT_DIR/pfe_mc_restore.log))"
+fi
+rm -f $ARTIFACT_DIR/pfe_mc_restore.log
+
 # Auto-enroll (20261125000000): a legacy account with financial_source_id = NULL
 # is pairable without a prior "Advanced connection" - create_device_pairing_session
 # creates + links a canonical financial source owned by the caller.
