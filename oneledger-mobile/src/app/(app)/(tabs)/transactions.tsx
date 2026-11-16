@@ -12,7 +12,10 @@ import {
   TextField,
 } from "@/components/ds";
 import { groupByDay } from "@/features/transactions/display";
+import { LifetimeChips } from "@/features/transactions/LifetimeChips";
 import {
+  getLifetimeFlowTotals,
+  getReviewQueueCount,
   getTransactions,
   TRANSACTIONS_PAGE_SIZE,
   type TransactionRow,
@@ -20,9 +23,20 @@ import {
 import { FilterChips } from "@/features/transactions/FilterChips";
 import { activeFilterCount, NO_FILTERS, type TransactionFilters } from "@/features/transactions/filters";
 import { TransactionItem } from "@/features/transactions/TransactionItem";
+import { useQuery } from "@/hooks/useQuery";
 import { colors, space } from "@/theme/tokens";
 
 const SEARCH_DEBOUNCE_MS = 350;
+
+// The header extras: the lifetime chips and the review-queue count. Loaded on
+// their own so a slow total never delays the list.
+async function loadHeaderStats() {
+  const [lifetime, reviewCount] = await Promise.all([
+    getLifetimeFlowTotals(),
+    getReviewQueueCount().catch(() => 0),
+  ]);
+  return { lifetime, reviewCount };
+}
 
 // The full ledger: newest first, grouped by day, searchable, loaded a page
 // at a time. Amounts here are never masked (a deliberate destination).
@@ -38,6 +52,7 @@ export default function Transactions() {
   const [error, setError] = useState<string | null>(null);
   const [loadedAt, setLoadedAt] = useState(() => new Date().toISOString());
   const requestId = useRef(0);
+  const { data: stats } = useQuery(loadHeaderStats);
 
   // Debounce typing into the applied query.
   useEffect(() => {
@@ -114,9 +129,28 @@ export default function Transactions() {
             <ScreenHeader
               title="Transactions"
               action={
-                <Button label="Add" variant="secondary" onPress={() => router.push("/add-transaction")} />
+                <Button
+                  label="Add transaction"
+                  variant="secondary"
+                  onPress={() => router.push("/add-transaction")}
+                />
               }
             />
+            {stats ? (
+              <>
+                <View style={{ flexDirection: "row" }}>
+                  <Button
+                    label={stats.reviewCount > 0 ? `Review queue (${stats.reviewCount})` : "Review queue"}
+                    variant="ghost"
+                    onPress={() => router.push("/inbox")}
+                  />
+                </View>
+                <LifetimeChips
+                  totals={stats.lifetime}
+                  accountCreatedIso={stats.lifetime.accountCreatedIso}
+                />
+              </>
+            ) : null}
             <TextField
               label="Search"
               value={input}
