@@ -221,6 +221,41 @@ A navigation event, never a claim the payment succeeded.
 - Shares `lib/pay/handoff.ts` with the web action (the optional SMS-reconciliation
   step uses the service role there; the web's behaviour is unchanged).
 
+## `GET /api/mobile/reports`, `GET /api/mobile/reports/:id`, `GET /api/mobile/reports/:id/document`
+
+The user's **daily financial reports** (the web's Reports page), for the app's
+Reports screens. Read-only; same guard as the others.
+
+- **A report is an immutable snapshot** (`report_runs.report_payload`) that the
+  web, the PDF and the morning email all render; nothing here recomputes a
+  figure. A report belongs to its recipient (`report_runs_select_own`), across
+  every Space they get reports in, exactly like the web page.
+- **Why the server renders the words:** alerts are sentences shared with the
+  email (`lib/report-alert-messages.ts`), and dates are formatted in the report's
+  own IANA timezone with `toLocaleString`, which a phone's JS engine may not
+  support. `lib/mobile-reports.ts` renders both, with the web's own functions, so
+  the app only displays. An unknown status or an unrecognised timezone drops the
+  row rather than showing it wrongly.
+- **List:** `200 { ok: true, reports: [{ id, dateLabel, status, statusLabel,
+  generatedLabel }] }`, newest first, at most 30.
+- **Detail:** `200 { ok: true, report }` with `snapshot` (closing balance may be
+  `null`), `categories`, `budget` (`null` = no active RWF budget), `trends` (only
+  those with history, each with a `tone`: spending/fees up are unfavourable,
+  income up is favourable, a count is neutral), `alerts` (report alerts then
+  budget alerts, each with a `tone`), `forecast`, `insights` (AI commentary,
+  separate from the snapshot) and `hasDocument`. `200 { ok: true, report: null,
+  reason: "not_found" }` for an unknown, malformed or someone else's id (RLS makes
+  them indistinguishable). A report that failed or isn't generated yet has no
+  snapshot and carries the (capped) failure reason.
+- **Document:** `200 { ok: true, download: { url } }` or `{ download: null, reason:
+  not_found | not_ready | failed }`. A fresh **five-minute signed URL** for the
+  PDF, as JSON (not a redirect: the app fetches with a bearer token, then opens
+  the URL). Ownership is the caller's own RLS session; the service role is used
+  only afterwards to render, cache and sign (`lib/report-download.ts`, shared with
+  the web's redirecting route, whose status codes are unchanged). The app asks
+  again on every tap; the URL must never be stored or logged. Its own rate-limit
+  bucket, since rendering a PDF is expensive.
+
 ## Rollout
 
 1. Deploy web with the route (dark).

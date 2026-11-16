@@ -13,6 +13,14 @@ import {
   type PayConfigResult,
   type PayIntentResult,
 } from "@/features/pay/parse";
+import {
+  parseReportDownloadResponse,
+  parseReportResponse,
+  parseReportsResponse,
+  type ReportDownloadResult,
+  type ReportResult,
+  type ReportsResult,
+} from "@/features/reports/parse";
 import { parseInboxResponse, type InboxResult } from "@/features/inbox/parse";
 import { config } from "@/lib/config";
 
@@ -189,4 +197,33 @@ export async function recordPayHandoff(
   const result = await bearerPost(`/api/mobile/pay/intents/${encodeURIComponent(id)}/handoff`, body);
   if (result.kind !== "response") return intentFailure(result);
   return parseIntentResponse(result.status, result.body);
+}
+
+/** The user's daily report runs, newest first. Dates and sentences are rendered by the server. */
+export async function fetchReports(): Promise<ReportsResult> {
+  const result = await bearerGet("/api/mobile/reports");
+  if (result.kind !== "response") {
+    return { ok: false, ...failureForOutcome(result, "Your reports") };
+  }
+  return parseReportsResponse(result.status, result.body);
+}
+
+/** One report, every figure from its stored snapshot. */
+export async function fetchReport(id: string): Promise<ReportResult> {
+  const result = await bearerGet(`/api/mobile/reports/${encodeURIComponent(id)}`);
+  if (result.kind !== "response") {
+    const f = failureForOutcome(result, "That report");
+    return { ok: false, reason: f.reason, message: f.message };
+  }
+  return parseReportResponse(result.status, result.body);
+}
+
+/** A fresh five-minute link to a report's PDF. Ask on every tap and open it at once; never store or log it. */
+export async function fetchReportDownload(id: string): Promise<ReportDownloadResult> {
+  const result = await bearerGet(`/api/mobile/reports/${encodeURIComponent(id)}/document`);
+  if (result.kind !== "response") {
+    const f = failureForOutcome(result, "That report");
+    return { ok: false, reason: f.reason, message: f.message };
+  }
+  return parseReportDownloadResponse(result.status, result.body);
 }

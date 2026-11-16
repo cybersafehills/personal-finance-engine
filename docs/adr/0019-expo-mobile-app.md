@@ -230,6 +230,25 @@ not a reason to keep the whole app native.
 - The Home budget card loads independently of the rest of Home and respects
   privacy mode, so a slow or unavailable budget service never delays Home.
 
+## Implementation notes (Reports)
+
+- Read-only Reports screens (More -> Reports): a list of daily report runs and a
+  detail with the closing balance, the day's activity, the spending breakdown,
+  budget health, trends, watch-outs, the outlook, the AI commentary and a PDF
+  download. A report is an immutable stored snapshot, so the app only displays it.
+- The server renders every sentence and date (`lib/mobile-reports.ts`, using the
+  web's shared `report-alert-messages.ts` and its timezone-aware formatters):
+  the sentences are shared with the morning email so the two never word an alert
+  differently, and the dates use `toLocaleString` with an IANA timezone, which a
+  phone's JS engine may not support. The app maps a tone to a colour and also
+  spells the tone out for screen readers, so colour is never the only signal.
+- The PDF follows the statements pattern: the render, cache and signed URL moved
+  into `lib/report-download.ts`, shared by the web's redirecting route and the
+  mobile JSON route, so there is one ownership check and one render path. The app
+  asks for a fresh five-minute link on every tap and only accepts `https`.
+- Reports are not Statements: Statements (already in the app) are generated,
+  period-scoped documents; Reports are the daily snapshots.
+
 ## Implementation notes (Add transaction)
 
 - **Signed-in users cannot INSERT into `transactions`.** Phase B made

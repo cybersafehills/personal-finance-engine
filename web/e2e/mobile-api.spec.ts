@@ -6,6 +6,7 @@ import {
   cleanupSeededTransactions,
   ensureWorkspaceAndAccount,
   seedTransaction,
+  testUserId,
 } from "./seed";
 import { E2E_USER } from "./test-users";
 
@@ -497,6 +498,118 @@ test.describe("mobile API", () => {
       expect(notObject.status()).toBe(422);
     } finally {
       await api.dispose();
+    }
+  });
+
+  test("reports: list, detail and PDF for a stored report", async () => {
+    const admin = adminClient();
+    const { workspaceId } = await ensureWorkspaceAndAccount(admin);
+    const userId = await testUserId(admin);
+
+    // Far in the past so it can't collide with a real report (one per user per day).
+    const periodStart = "2001-03-04T22:00:00Z"; // 5 March 2001, 00:00 in Kigali
+    const payload = {
+      schemaVersion: 1,
+      dateKey: "2001-03-05",
+      timezone: "Africa/Kigali",
+      financialSnapshot: {
+        openingBalanceRwf: 100000,
+        closingBalanceRwf: 120000,
+        moneyReceivedRwf: 50000,
+        moneySpentRwf: 30000,
+        feesRwf: 400,
+        netMovementRwf: 20000,
+        transactionCount: 7,
+        categorizedCount: 5,
+        uncategorizedCount: 2,
+        largestInflowRwf: 50000,
+        largestOutflowRwf: 15000,
+      },
+      categoryTotals: [{ category: "Food", amountRwf: 30000, transactionCount: 7, percentOfSpending: 100 }],
+      trends: [{ metric: "spend", label: "Spending", currentValue: 30000, comparisonValue: 25000, changePercent: 20 }],
+      alerts: [
+        { id: "a1", kind: "high_daily_spend", severity: "warning", spentRwf: 30000, thresholdRwf: 20000 },
+      ],
+      budget: { overallStatus: "no_active_budget" },
+      forecast: null,
+    };
+
+    await admin.from("report_runs").delete().eq("user_id", userId).eq("period_start", periodStart);
+    const { data: run, error } = await admin
+      .from("report_runs")
+      .insert({
+        workspace_id: workspaceId,
+        user_id: userId,
+        report_type: "daily",
+        period_start: periodStart,
+        period_end: "2001-03-05T22:00:00Z",
+        timezone: "Africa/Kigali",
+        status: "generated",
+        scheduled_for: periodStart,
+        generated_at: "2001-03-05T22:07:00Z",
+        report_payload: payload,
+      })
+      .select("id")
+      .single();
+    if (error || !run) throw new Error(`could not seed a report run: ${error?.message}`);
+    const reportId = run.id as string;
+
+    const api = await playwrightRequest.newContext({ baseURL: BASE_URL });
+    try {
+      const signIn = await api.post("/api/mobile/auth/sign-in", {
+        data: { email: E2E_USER.email, password: E2E_USER.password },
+      });
+      expect(signIn.status()).toBe(200);
+      const headers = { authorization: `Bearer ${(await signIn.json()).access_token}` };
+
+      // The list names the day in the report's own timezone.
+      const list = await (await api.get("/api/mobile/reports", { headers })).json();
+      expect(list.ok).toBe(true);
+      const item = list.reports.find((r: { id: string }) => r.id === reportId);
+      expect(item, "the seeded report is listed").toBeTruthy();
+      expect(item.dateLabel).toBe("March 5, 2001");
+      expect(item.statusLabel).toBe("Generated");
+
+      // The detail carries the stored figures and the web's own sentences.
+      const detailRes = await api.get(`/api/mobile/reports/${reportId}`, { headers });
+      expect(detailRes.status()).toBe(200);
+      expect(detailRes.headers()["cache-control"]).toContain("no-store");
+      const { report } = await detailRes.json();
+      expect(report.hasDocument).toBe(true);
+      expect(report.snapshot.closingBalanceRwf).toBe(120000);
+      expect(report.snapshot.netMovementRwf).toBe(20000);
+      expect(report.categories[0]).toMatchObject({ category: "Food", amountRwf: 30000 });
+      expect(report.trends[0]).toMatchObject({ label: "Spending", changePercent: 20, tone: "negative" });
+      expect(report.alerts[0].message).toBe("Total spending today (30,000 RWF) was higher than usual.");
+      expect(report.budget).toBeNull(); // no active budget in the payload
+      expect(report.forecast).toBeNull();
+
+      // The PDF: a real, fetchable document.
+      const doc = await (await api.get(`/api/mobile/reports/${reportId}/document`, { headers })).json();
+      expect(doc.ok).toBe(true);
+      expect(typeof doc.download.url).toBe("string");
+      const pdf = await playwrightRequest.newContext();
+      try {
+        const file = await pdf.get(doc.download.url);
+        expect(file.status()).toBe(200);
+        expect((await file.body()).subarray(0, 4).toString()).toBe("%PDF");
+      } finally {
+        await pdf.dispose();
+      }
+
+      // An unknown or malformed id has no report and no download.
+      for (const id of ["00000000-0000-4000-8000-000000000000", "not-a-uuid"]) {
+        const missing = await (await api.get(`/api/mobile/reports/${id}`, { headers })).json();
+        expect(missing.report).toBeNull();
+        expect(missing.reason).toBe("not_found");
+        const noDoc = await (await api.get(`/api/mobile/reports/${id}/document`, { headers })).json();
+        expect(noDoc.download).toBeNull();
+        expect(noDoc.reason).toBe("not_found");
+      }
+    } finally {
+      await api.dispose();
+      await admin.storage.from("report-artifacts").remove([`reports/${reportId}.pdf`]);
+      await admin.from("report_runs").delete().eq("id", reportId); // artifacts go with it
     }
   });
 

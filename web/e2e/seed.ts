@@ -48,7 +48,7 @@ export function adminClient(): SupabaseClient {
   });
 }
 
-async function testUserId(admin: SupabaseClient): Promise<string> {
+export async function testUserId(admin: SupabaseClient): Promise<string> {
   const { data } = await admin.auth.admin.listUsers();
   const user = data.users.find((u) => u.email === E2E_USER.email);
   if (!user) throw new Error("E2E user not provisioned - run the setup project first.");
