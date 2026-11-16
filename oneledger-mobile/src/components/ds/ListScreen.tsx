@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { StyleSheet, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, type Edge } from "react-native-safe-area-context";
 
 import { colors, space } from "@/theme/tokens";
 
@@ -9,9 +9,16 @@ import { colors, space } from "@/theme/tokens";
  * scrolling itself): safe area, page gutter and the same max width as
  * `Screen`. Put the FlatList/SectionList inside.
  */
-export function ListScreen({ children }: { children: ReactNode }) {
+export function ListScreen({
+  children,
+  edges = ["top", "left", "right"],
+}: {
+  children: ReactNode;
+  /** Drop "top" on screens under the app header (it owns the inset). */
+  edges?: readonly Edge[];
+}) {
   return (
-    <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
+    <SafeAreaView style={styles.safe} edges={edges}>
       <View style={styles.body}>{children}</View>
     </SafeAreaView>
   );
