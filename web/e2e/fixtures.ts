@@ -1,4 +1,4 @@
-import { test as base, expect, type BrowserContext } from "@playwright/test";
+import { test as base, expect, type BrowserContext, type Page } from "@playwright/test";
 
 /**
  * Every spec file imports `test`/`expect` from here instead of directly
@@ -62,3 +62,23 @@ export async function grantClipboard(context: BrowserContext, browserName: strin
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   }
 }
+
+/**
+ * The global Pay action. It is a header pill from lg (1024px) up and the
+ * centre button of the phone bottom nav below that (AppShell /
+ * PayTrigger); both are in the DOM but only one is ever visible, so this
+ * resolves to the right one on desktop and on mobile-safari alike.
+ */
+export function payButton(page: Page) {
+  return page.getByRole("button", { name: "Pay", exact: true }).filter({ visible: true });
+}
+
+/**
+ * Reason string for `test.skip(({ isMobile }) => isMobile, DESKTOP_LAYOUT)`
+ * on tests that assert the desktop header layout (the lg: header nav, the
+ * desktop payment hand-off). The phone layout has its own tests at 390px
+ * ("phone bottom bar" in shell-navigation.spec.ts, the bottom-nav Pay
+ * test in pay-ussd.spec.ts), which do run on mobile-safari.
+ */
+export const DESKTOP_LAYOUT =
+  "Asserts the desktop (lg) layout; the phone layout has its own tests";

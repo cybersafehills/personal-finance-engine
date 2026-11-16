@@ -1,4 +1,4 @@
-import { test, expect } from "./fixtures";
+import { test, expect, DESKTOP_LAYOUT } from "./fixtures";
 
 // Smoke coverage for the Financial Inbox as the single front door
 // (assessment sections 33-35): it is a primary nav destination reachable
@@ -10,7 +10,9 @@ import { test, expect } from "./fixtures";
 
 test("Inbox is a primary destination and its page renders", async ({
   page,
+  isMobile,
 }) => {
+  test.skip(isMobile, DESKTOP_LAYOUT);
   await page.goto("/");
 
   await page

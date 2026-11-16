@@ -1,4 +1,4 @@
-import { test, expect, grantClipboard } from "./fixtures";
+import { test, expect, grantClipboard, payButton } from "./fixtures";
 import AxeBuilder from "@axe-core/playwright";
 
 // Pay & Services - Phase 1 (Verified USSD Hub). Covers the persistent
@@ -17,12 +17,11 @@ test("the global Pay action opens the launcher and is fully keyboard-dismissable
 }) => {
   await page.goto("/");
 
-  // Scoped to the header so the (DOM-present but lg:hidden) mobile
-  // bottom-nav Pay trigger doesn't trip strict mode.
-  const payButton = page.locator("header").getByRole("button", { name: "Pay", exact: true });
-  await expect(payButton).toBeVisible();
+  // Header pill on desktop, bottom-nav button on a phone (see fixtures).
+  const pay = payButton(page);
+  await expect(pay).toBeVisible();
 
-  await payButton.click();
+  await pay.click();
   const dialog = page.getByRole("dialog", { name: "Pay & Services" });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Open USSD directory" })).toBeVisible();
@@ -30,15 +29,15 @@ test("the global Pay action opens the launcher and is fully keyboard-dismissable
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
   // Focus returns to the trigger.
-  await expect(payButton).toBeFocused();
+  await expect(pay).toBeFocused();
 });
 
 test("the launcher closes from the pinned bottom control, not a header action", async ({
   page,
 }) => {
   await page.goto("/");
-  const payButton = page.locator("header").getByRole("button", { name: "Pay", exact: true });
-  await payButton.click();
+  const pay = payButton(page);
+  await pay.click();
 
   const dialog = page.getByRole("dialog", { name: "Pay & Services" });
   await expect(dialog).toBeVisible();
@@ -50,12 +49,12 @@ test("the launcher closes from the pinned bottom control, not a header action", 
 
   await close.click();
   await expect(dialog).toBeHidden();
-  await expect(payButton).toBeFocused();
+  await expect(pay).toBeFocused();
 });
 
 test("the launcher routes to the USSD directory", async ({ page }) => {
   await page.goto("/");
-  await page.locator("header").getByRole("button", { name: "Pay", exact: true }).click();
+  await payButton(page).click();
   await page.getByRole("button", { name: "Open USSD directory" }).click();
   await expect(page).toHaveURL(/\/pay\/ussd$/);
   await expect(page.getByRole("heading", { name: "USSD directory" })).toBeVisible();
@@ -168,7 +167,7 @@ test("the open launcher has no serious/critical accessibility violations", async
   page,
 }) => {
   await page.goto("/");
-  await page.locator("header").getByRole("button", { name: "Pay", exact: true }).click();
+  await payButton(page).click();
   await expect(page.getByRole("dialog", { name: "Pay & Services" })).toBeVisible();
   const results = await new AxeBuilder({ page }).analyze();
   const seriousOrWorse = results.violations.filter(

@@ -1,4 +1,4 @@
-import { test, expect, grantClipboard } from "./fixtures";
+import { test, expect, grantClipboard, DESKTOP_LAYOUT, payButton } from "./fixtures";
 import AxeBuilder from "@axe-core/playwright";
 
 // Pay & Services - Phase 2a (Assisted Quick Pay). Non-custodial: the
@@ -35,7 +35,7 @@ test("the launcher's payment actions are live and route to a typed draft", async
   // The global Pay action is a header pill from lg (1024px) up and the
   // centre button of the bottom nav below it (AppShell / PayTrigger); only
   // one is ever visible. Scoping to <header> timed out on mobile-safari.
-  await page.getByRole("button", { name: "Pay", exact: true }).filter({ visible: true }).click();
+  await payButton(page).click();
   await page.getByRole("button", { name: "Pay a person" }).click();
   await expect(page).toHaveURL(/\/pay\/new\/pay_person$/);
   await expect(page.getByRole("heading", { name: "Pay a person" })).toBeVisible();
@@ -57,7 +57,9 @@ test("desktop hand-off offers Copy + QR, not a dialer, and moves the intent to a
   page,
   context,
   browserName,
+  isMobile,
 }) => {
+  test.skip(isMobile, DESKTOP_LAYOUT);
   await grantClipboard(context, browserName);
   await prepareAPersonPayment(page);
 
