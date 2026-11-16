@@ -321,14 +321,42 @@ describe("Transaction detail screen", () => {
         expect(screen.queryByText("DUPLICATES")).toBeNull();
       });
 
-      it("flags a possible duplicate and sends you to the Inbox to resolve it", async () => {
+      it("flags a possible duplicate and sends a personal transaction to the Inbox to resolve it", async () => {
         mockGetTransaction.mockResolvedValue(txn());
-        mockExtras.mockResolvedValue({ ...noExtras, duplicates: dup({ dedupeState: "possible_duplicate" }) });
+        mockExtras.mockResolvedValue({
+          ...noExtras,
+          context: context(),
+          duplicates: dup({ dedupeState: "possible_duplicate" }),
+        });
         await render(<TransactionDetail />);
 
         expect(await screen.findByText("This transaction is flagged as a possible duplicate.")).toBeTruthy();
         await fireEvent.press(screen.getByText("Review it"));
         expect(router.push).toHaveBeenCalledWith("/inbox");
+      });
+
+      it("sends a household transaction to the web's review queue, since the Inbox only covers the personal Space", async () => {
+        mockGetTransaction.mockResolvedValue(txn());
+        mockExtras.mockResolvedValue({
+          ...noExtras,
+          context: context({ workspaceKind: "household" }),
+          duplicates: dup({ dedupeState: "possible_duplicate" }),
+        });
+        await render(<TransactionDetail />);
+
+        await screen.findByText("This transaction is flagged as a possible duplicate.");
+        expect(screen.queryByText("Review it")).toBeNull();
+        await fireEvent.press(screen.getByText("Review on the web"));
+        expect(mockOpenUrl).toHaveBeenCalledWith("https://app.example.test/transactions/review");
+        expect(router.push).not.toHaveBeenCalledWith("/inbox");
+      });
+
+      it("also uses the web when the transaction's Space couldn't be read", async () => {
+        mockGetTransaction.mockResolvedValue(txn());
+        mockExtras.mockResolvedValue({ ...noExtras, context: null, duplicates: dup({ dedupeState: "possible_duplicate" }) });
+        await render(<TransactionDetail />);
+        expect(await screen.findByText("Review on the web")).toBeTruthy();
+        expect(screen.queryByText("Review it")).toBeNull();
       });
 
       it("explains a merged-away transaction and opens the one that was kept", async () => {

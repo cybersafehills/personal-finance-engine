@@ -2,7 +2,8 @@ import { addTag, isValidTag, listWorkspaceTags, normalizeTag, removeTag, TagErro
 
 type Result = { data?: unknown; error?: { code?: string; message: string } | null };
 let mockInsertResult: Result = { error: null };
-let mockDeleteResult: Result = { error: null };
+let mockDeleteResult: Result = { data: [{ tag: "tax" }], error: null };
+let mockStillThere: Result = { data: [], error: null };
 let mockSelectResult: Result = { data: [], error: null };
 let mockUser: { id: string } | null = { id: "me" };
 const mockInsert = jest.fn();
@@ -20,13 +21,19 @@ jest.mock("@/api/supabase", () => ({
         const chain: Record<string, unknown> = {};
         chain.eq = (...args: unknown[]) => {
           mockEqCalls.push(args);
-          return mockEqCalls.length % 2 === 0 ? Promise.resolve(mockDeleteResult) : chain;
+          return chain;
         };
+        chain.select = () => Promise.resolve(mockDeleteResult);
         return chain;
       },
       select: () => {
         const chain: Record<string, unknown> = {};
-        chain.eq = () => chain;
+        let eqs = 0;
+        chain.eq = () => {
+          eqs += 1;
+          // transaction_id + tag filters on the re-read; workspace filter on the list
+          return eqs === 2 ? Promise.resolve(mockStillThere) : chain;
+        };
         chain.order = () => chain;
         chain.limit = () => Promise.resolve(mockSelectResult);
         return chain;
@@ -37,7 +44,8 @@ jest.mock("@/api/supabase", () => ({
 
 beforeEach(() => {
   mockInsertResult = { error: null };
-  mockDeleteResult = { error: null };
+  mockDeleteResult = { data: [{ tag: "tax" }], error: null };
+  mockStillThere = { data: [], error: null };
   mockSelectResult = { data: [], error: null };
   mockUser = { id: "me" };
   mockInsert.mockReset();
@@ -103,13 +111,32 @@ describe("addTag", () => {
 });
 
 describe("removeTag", () => {
-  it("deletes by transaction and normalised tag", async () => {
-    await removeTag("t1", " TAX ");
+  it("deletes by transaction and normalised tag, and is done when a row was removed", async () => {
+    await expect(removeTag("t1", " TAX ")).resolves.toBeUndefined();
     expect(mockEqCalls).toEqual([["transaction_id", "t1"], ["tag", "tax"]]);
   });
 
-  it("reports a failure in a user-safe way", async () => {
-    mockDeleteResult = { error: { message: "denied" } };
+  it("reports a database failure in a user-safe way", async () => {
+    mockDeleteResult = { data: null, error: { message: "denied internal" } };
+    await expect(removeTag("t1", "tax")).rejects.toThrow("Couldn't remove that tag. Try again.");
+  });
+
+  it("is not fooled by a delete that removed nothing because the user isn't allowed to", async () => {
+    // RLS: no error, zero rows, and the tag is still there.
+    mockDeleteResult = { data: [], error: null };
+    mockStillThere = { data: [{ tag: "tax" }], error: null };
+    await expect(removeTag("t1", "tax")).rejects.toThrow("You can't change tags on this transaction.");
+  });
+
+  it("treats a tag that was already removed elsewhere as done", async () => {
+    mockDeleteResult = { data: [], error: null };
+    mockStillThere = { data: [], error: null };
+    await expect(removeTag("t1", "tax")).resolves.toBeUndefined();
+  });
+
+  it("doesn't guess when it can't tell whether the tag is still there", async () => {
+    mockDeleteResult = { data: [], error: null };
+    mockStillThere = { data: null, error: { message: "boom" } };
     await expect(removeTag("t1", "tax")).rejects.toThrow("Couldn't remove that tag. Try again.");
   });
 });

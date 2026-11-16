@@ -90,6 +90,18 @@ export default function TransactionDetail() {
   const latestReason = extras?.history[0]?.decision_reason ?? null;
   const history = extras?.history ?? [];
 
+  // The Inbox only covers the personal Space, so a flagged transaction anywhere
+  // else (or whose Space we couldn't read) is resolved in the web's review queue.
+  const duplicateReviewAction =
+    context?.workspaceKind === "personal"
+      ? { label: "Review it", onPress: () => router.push("/inbox") }
+      : config.apiBaseUrl
+        ? {
+            label: "Review on the web",
+            onPress: () => Linking.openURL(`${config.apiBaseUrl}/transactions/review`),
+          }
+        : null;
+
   return (
     <Screen>
       {back}
@@ -135,7 +147,7 @@ export default function TransactionDetail() {
 
       <DuplicatesCard
         context={extras?.duplicates ?? null}
-        onReview={() => router.push("/inbox")}
+        reviewAction={duplicateReviewAction}
         onOpen={(txnId) => router.push({ pathname: "/transaction/[id]", params: { id: txnId } })}
       />
 

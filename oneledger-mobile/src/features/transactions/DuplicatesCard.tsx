@@ -18,11 +18,16 @@ import {
 // ordinary transaction.
 export function DuplicatesCard({
   context,
-  onReview,
+  reviewAction,
   onOpen,
 }: {
   context: DuplicateContext | null;
-  onReview: () => void;
+  /**
+   * Where a flagged transaction is resolved, or null when there is nowhere to
+   * send them. The Inbox only covers the personal Space, so the screen offers it
+   * only there and the web's review queue otherwise.
+   */
+  reviewAction: { label: string; onPress: () => void } | null;
   onOpen: (transactionId: string) => void;
 }) {
   if (!context || !hasDuplicateTrail(context)) return null;
@@ -39,7 +44,9 @@ export function DuplicatesCard({
           <Text variant="label" color="textSecondary">
             This transaction is flagged as a possible duplicate.
           </Text>
-          <Button label="Review it" variant="secondary" fullWidth onPress={onReview} />
+          {reviewAction ? (
+            <Button label={reviewAction.label} variant="secondary" fullWidth onPress={reviewAction.onPress} />
+          ) : null}
         </View>
       ) : null}
 

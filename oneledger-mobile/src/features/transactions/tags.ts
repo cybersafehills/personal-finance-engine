@@ -61,12 +61,30 @@ export async function addTag(transactionId: string, workspaceId: string, rawTag:
 }
 
 export async function removeTag(transactionId: string, rawTag: string): Promise<void> {
-  const { error } = await client()
+  const db = client();
+  const tag = normalizeTag(rawTag);
+
+  // Ask for the deleted rows back: under RLS a delete the caller isn't allowed
+  // to make is not an error, it just removes nothing (a household viewer can see
+  // tags but not delete them).
+  const { data, error } = await db
     .from("transaction_tags")
     .delete()
     .eq("transaction_id", transactionId)
-    .eq("tag", normalizeTag(rawTag));
+    .eq("tag", tag)
+    .select("tag");
   if (error) throw new TagError("Couldn't remove that tag. Try again.");
+  if ((data ?? []).length > 0) return;
+
+  // Nothing was deleted. Either it was already gone (removed elsewhere: fine) or
+  // it is still there and this user isn't allowed to remove it.
+  const { data: still, error: readError } = await db
+    .from("transaction_tags")
+    .select("tag")
+    .eq("transaction_id", transactionId)
+    .eq("tag", tag);
+  if (readError) throw new TagError("Couldn't remove that tag. Try again.");
+  if ((still ?? []).length > 0) throw new TagError("You can't change tags on this transaction.");
 }
 
 /** Distinct tags used in a Space, to suggest. */

@@ -275,11 +275,16 @@ not a reason to keep the whole app native.
   Unicode property escape (`\p{L}`), which the app avoids (not verified on
   Hermes), so ASCII symbols are rejected and accented letters pass; that is
   slightly looser than the web for non-ASCII symbols.
-- **Duplicates are a trail, as on the web**: flagged ("Review it" opens the
-  Inbox, which shows both candidates side by side), merged away (opens the kept
-  transaction) and what was merged in (each opens its own). Merging or
-  dismissing stays in the Inbox, where the candidates are visible; the detail
-  screen never resolves one blind.
+- **Duplicates are a trail, as on the web**: flagged, merged away (opens the
+  kept transaction) and what was merged in (each opens its own). Merging or
+  dismissing stays where both candidates are visible; the detail screen never
+  resolves one blind. A flagged *personal-Space* transaction offers "Review it"
+  (the Inbox); anything else offers the web's review queue, because the app's
+  Inbox only covers the personal Space and the item would not be there.
+- A tag removal asks the database for the rows it deleted: under RLS a delete the
+  caller may not make is not an error, it removes nothing (a household viewer
+  can see tags but not delete them), so zero rows is checked against the tag
+  still existing before the chip is dropped.
 - Household lines ("Paid by", "Added by", whose account) show real member names
   when the directory loads and fall back to "You" / "A member" like the web.
 
