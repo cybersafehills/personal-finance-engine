@@ -83,6 +83,19 @@ export default function More() {
       </Card>
 
       <Card style={{ gap: space[3] }}>
+        <Text variant="bodyStrong">People and merchants</Text>
+        <Text variant="label" color="textSecondary">
+          Who you pay and who pays you, grouped from your transactions.
+        </Text>
+        <Button
+          label="Open people and merchants"
+          variant="secondary"
+          fullWidth
+          onPress={() => router.push("/people")}
+        />
+      </Card>
+
+      <Card style={{ gap: space[3] }}>
         <Text variant="bodyStrong">Wallets</Text>
         <Text variant="label" color="textSecondary">
           Your balances, and how sure we are about each one.

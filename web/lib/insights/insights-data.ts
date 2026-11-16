@@ -1,6 +1,11 @@
 import "server-only";
 import { supabaseSession } from "../supabase-session-server";
 import { linkedTransferIdSet } from "../transfer-exclusion";
+import {
+  buildEffectiveMap,
+  type CounterpartyRef,
+  resolveCounterparty,
+} from "../counterparties/effective";
 import type { InsightFact } from "./insights-math";
 
 // Reads the facts the Insights core needs. Session client => RLS-scoped; the
@@ -62,6 +67,16 @@ export async function fetchInsightFacts(
     .eq("status", "linked");
   if (linkError) throw new Error(`fetchInsightFacts links: ${linkError.message}`);
 
+  // Resolve merged counterparties to their survivors so a merge changes the
+  // grouping (and the displayed name), exactly as in the counterparty list.
+  const { data: cps, error: cpError } = await supabase
+    .from("counterparties")
+    .select("id, display_name, merged_into_id")
+    .eq("workspace_id", workspaceId)
+    .limit(10_000);
+  if (cpError) throw new Error(`fetchInsightFacts counterparties: ${cpError.message}`);
+  const effective = buildEffectiveMap((cps ?? []) as CounterpartyRef[]);
+
   return {
     facts: kept.map((r) => ({
       id: r.id,
@@ -70,8 +85,7 @@ export async function fetchInsightFacts(
       feeEffectRwf: Number(r.fee_effect_rwf ?? 0),
       category: r.category,
       transactionType: r.transaction_type,
-      counterpartyId: r.counterparty_id,
-      counterpartyName: r.counterparty_name,
+      ...resolveCounterparty(r.counterparty_id, r.counterparty_name, effective),
       accountId: r.account_id,
       currency: r.currency,
       settlement: settlement(r.settlement_state),

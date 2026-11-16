@@ -23,6 +23,7 @@ import {
   netTone,
 } from "@/features/insights/display";
 import { insightPeriods, type PeriodId } from "@/features/insights/period";
+import { personIdFromKey } from "@/features/people/display";
 import type { CurrencyOverview, Drilldown } from "@/features/insights/types";
 import { useQuery } from "@/hooks/useQuery";
 import { formatDateTime } from "@/lib/kigali-time";
@@ -246,8 +247,10 @@ function CurrencySection({ c, multi }: { c: CurrencyOverview; multi: boolean }) 
       {c.topPeople.length > 0 ? (
         <Card style={{ gap: space[2] }}>
           <Text variant="bodyStrong">People and merchants</Text>
-          {c.topPeople.slice(0, 5).map((p) => (
-            <View key={p.key} style={{ flexDirection: "row", justifyContent: "space-between", gap: space[3] }}>
+          {c.topPeople.slice(0, 5).map((p) => {
+            const personId = personIdFromKey(p.key);
+            const row = (
+            <View style={{ flexDirection: "row", justifyContent: "space-between", gap: space[3] }}>
               <Text variant="label" style={{ flexShrink: 1 }}>
                 {p.displayName}
               </Text>
@@ -257,7 +260,20 @@ function CurrencySection({ c, multi }: { c: CurrencyOverview; multi: boolean }) 
                 {p.receivedMinor > BigInt(0) ? `Got ${m(p.receivedMinor)}` : ""}
               </Text>
             </View>
-          ))}
+            );
+            return personId ? (
+              <Pressable
+                key={p.key}
+                accessibilityRole="button"
+                accessibilityLabel={`${p.displayName}. Open.`}
+                onPress={() => router.push({ pathname: "/person/[id]", params: { id: personId } })}
+              >
+                {row}
+              </Pressable>
+            ) : (
+              <View key={p.key}>{row}</View>
+            );
+          })}
         </Card>
       ) : null}
     </View>

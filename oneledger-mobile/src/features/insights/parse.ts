@@ -155,7 +155,8 @@ export type DrilldownResult =
   | { ok: true; total: number; transactions: DrilldownTransaction[] }
   | ({ ok: false } & BearerFailure);
 
-function tx(raw: unknown): DrilldownTransaction | null {
+/** One transaction row as the API serialises it (drill-down and counterparty detail share it). */
+export function parseTransaction(raw: unknown): DrilldownTransaction | null {
   if (!isRecord(raw) || !str(raw.id) || !str(raw.occurred_at) || !str(raw.transaction_type) || !str(raw.status)) return null;
   if (raw.direction !== "in" && raw.direction !== "out" && raw.direction !== "neutral") return null;
   if (!CURRENCIES.includes(raw.currency as SupportedCurrency)) return null;
@@ -184,6 +185,6 @@ export function parseDrilldownResponse(status: number, body: unknown): Drilldown
   return {
     ok: true,
     total,
-    transactions: body.transactions.map(tx).filter((t): t is DrilldownTransaction => t !== null),
+    transactions: body.transactions.map(parseTransaction).filter((t): t is DrilldownTransaction => t !== null),
   };
 }

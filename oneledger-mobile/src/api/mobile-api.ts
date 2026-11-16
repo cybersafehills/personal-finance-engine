@@ -8,6 +8,13 @@ import {
   type InsightsResult,
 } from "@/features/insights/parse";
 import type { Drilldown } from "@/features/insights/types";
+import {
+  parsePeopleResponse,
+  parsePersonResponse,
+  type PeopleResult,
+  type PersonResult,
+} from "@/features/people/parse";
+import type { PersonKind } from "@/features/people/types";
 import { parseWalletsResponse, type WalletsResult } from "@/features/wallets/parse";
 import { config } from "@/lib/config";
 
@@ -152,4 +159,25 @@ export async function fetchWallets(): Promise<WalletsResult> {
     return { ok: false, ...failureForOutcome(result, "Your wallets") };
   }
   return parseWalletsResponse(result.status, result.body);
+}
+
+/** People and merchants with sent/received/net per currency (all time). */
+export async function fetchPeople(params: { q?: string; kind?: PersonKind; limit?: number }): Promise<PeopleResult> {
+  const q = new URLSearchParams({ limit: String(params.limit ?? 100) });
+  if (params.q && params.q.trim()) q.set("q", params.q.trim().slice(0, 80));
+  if (params.kind) q.set("kind", params.kind);
+  const result = await bearerGet(`/api/mobile/counterparties?${q.toString()}`);
+  if (result.kind !== "response") {
+    return { ok: false, ...failureForOutcome(result, "People and merchants") };
+  }
+  return parsePeopleResponse(result.status, result.body);
+}
+
+/** One person or merchant, with their transactions. */
+export async function fetchPerson(id: string, limit = 50): Promise<PersonResult> {
+  const result = await bearerGet(`/api/mobile/counterparties/${encodeURIComponent(id)}?limit=${limit}`);
+  if (result.kind !== "response") {
+    return { ok: false, ...failureForOutcome(result, "This person") };
+  }
+  return parsePersonResponse(result.status, result.body);
 }
