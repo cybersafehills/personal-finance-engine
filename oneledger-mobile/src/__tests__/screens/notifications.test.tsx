@@ -118,4 +118,33 @@ describe("Notifications screen", () => {
     await fireEvent.press(await screen.findByText("Back"));
     expect(router.back).toHaveBeenCalled();
   });
+
+  it("shows how many are unread", async () => {
+    mockGet.mockResolvedValue([note(), note({ id: "n2", title: "Other" })]);
+    await render(<NotificationsScreen />);
+    expect(await screen.findByText("2 unread")).toBeTruthy();
+  });
+
+  it("folds repeats of the same alert behind Show N earlier", async () => {
+    mockGet.mockResolvedValue([
+      note({ id: "a", body: "newest" }),
+      note({ id: "b", body: "older" }),
+      note({ id: "c", body: "oldest", readAt: "2026-11-13T00:00:00Z" }),
+    ]);
+    await render(<NotificationsScreen />);
+    expect(await screen.findByText("newest")).toBeTruthy();
+    expect(screen.queryByText("older")).toBeNull();
+
+    await fireEvent.press(screen.getByRole("button", { name: "Show 2 earlier (1 unread)" }));
+    expect(screen.getByText("older")).toBeTruthy();
+    expect(screen.getByText("oldest")).toBeTruthy();
+  });
+
+  it("marks one notification read without opening it", async () => {
+    mockGet.mockResolvedValue([note()]);
+    await render(<NotificationsScreen />);
+    await fireEvent.press(await screen.findByRole("button", { name: "Mark read: Budget nearing its limit" }));
+    await waitFor(() => expect(mockMarkRead).toHaveBeenCalledWith("n1"));
+    expect(router.push).not.toHaveBeenCalled();
+  });
 });
