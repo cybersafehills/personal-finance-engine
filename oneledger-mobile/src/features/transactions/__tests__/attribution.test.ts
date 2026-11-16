@@ -67,8 +67,14 @@ describe("split rules (whole basis points)", () => {
     expect(percentTextToBps("100")).toBe(10000);
   });
 
+  it("accepts a comma as the decimal point (a French-locale phone's decimal pad)", () => {
+    expect(percentTextToBps("33,33")).toBe(3333);
+    expect(percentTextToBps("12,5%")).toBe(1250);
+    expect(checkSplit([{ userId: "me", percentText: "33,33" }, { userId: "amy", percentText: "33,33" }, { userId: "bo", percentText: "33,34" }]).ok).toBe(true);
+  });
+
   it("refuses what isn't a usable percentage", () => {
-    for (const text of ["abc", "-5", "101", "12.345", "1e2", "50 50", "--"]) expect(percentTextToBps(text)).toBeNull();
+    for (const text of ["abc", "-5", "101", "12.345", "1e2", "50 50", "--", "1,234", "1,2,3", "12,,5"]) expect(percentTextToBps(text)).toBeNull();
   });
 
   it("formats basis points back to a percentage", () => {

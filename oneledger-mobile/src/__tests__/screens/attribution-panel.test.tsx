@@ -191,4 +191,30 @@ describe("AttributionPanel", () => {
     expect(screen.queryByLabelText("One member")).toBeNull();
     expect(screen.queryByLabelText("Split across members")).toBeNull();
   });
+
+  it("shows fresh data once it arrives, not what was saved before (a change made elsewhere)", async () => {
+    const view = await setup();
+    await open();
+    await fireEvent.press(screen.getByText("Save")); // saved as "shared"
+    expect(await screen.findByText("Shared by the household")).toBeTruthy();
+
+    // Later the screen reloads and someone has since made it Amy's.
+    await view.rerender(
+      <AttributionPanel transactionId="t1" current={{ type: "member", attributedUserId: "amy", splits: [] }} members={members} selfUserId="me" />,
+    );
+    expect(await screen.findByText("Amy")).toBeTruthy();
+    expect(screen.queryByText("Shared by the household")).toBeNull();
+
+    // And Change opens from the fresh value, not the stale one.
+    await fireEvent.press(screen.getByText("Change"));
+    expect(screen.getByLabelText("One member").props.accessibilityState.selected).toBe(true);
+  });
+
+  it("keeps showing what was saved while the screen's data is unchanged", async () => {
+    await setup();
+    await open();
+    await fireEvent.press(screen.getByText("Save"));
+    expect(await screen.findByText("Shared by the household")).toBeTruthy();
+    expect(screen.queryByText("Not decided yet")).toBeNull();
+  });
 });

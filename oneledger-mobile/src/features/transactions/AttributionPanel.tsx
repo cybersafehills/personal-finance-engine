@@ -38,9 +38,13 @@ export function AttributionPanel({
   /** Called after a successful save, so the screen can refresh what depends on it. */
   onSaved?: () => void;
 }) {
-  // What was saved here, until the screen's own data catches up.
-  const [saved, setSaved] = useState<Attribution | null>(null);
-  const shown = saved ?? current;
+  // What was saved here, remembered together with the `current` it was saved
+  // against. It only wins while that `current` is still the screen's data: once
+  // fresh data arrives (a reload after the save, or a change made elsewhere, by
+  // another member or on the web) the screen's own value is shown again, so "Change"
+  // never opens from a stale one.
+  const [savedAgainst, setSavedAgainst] = useState<{ base: Attribution; value: Attribution } | null>(null);
+  const shown = savedAgainst && savedAgainst.base === current ? savedAgainst.value : current;
 
   const [editing, setEditing] = useState(false);
   const [type, setType] = useState<AttributionType>(shown.type ?? "shared");
@@ -81,7 +85,7 @@ export function AttributionPanel({
             ? { type, splits: check.ok ? check.splits : [] }
             : { type },
       );
-      setSaved(result);
+      setSavedAgainst({ base: current, value: result });
       setEditing(false);
       onSaved?.();
     } catch (e) {

@@ -87,7 +87,9 @@ export function formatPercent(bps: number): string {
 
 /** Basis points from what was typed ("33.33", "50", ""), or null when it isn't a usable percentage. */
 export function percentTextToBps(text: string): number | null {
-  const t = text.trim().replace(/%$/, "").trim();
+  // A phone's decimal pad offers the locale's separator, which is a comma in
+  // French, so "33,33" means 33.33.
+  const t = text.trim().replace(/%$/, "").trim().replace(",", ".");
   if (t === "") return 0;
   if (!/^\d{1,3}(\.\d{1,2})?$/.test(t)) return null;
   const bps = Math.round(Number(t) * 100);
