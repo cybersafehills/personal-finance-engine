@@ -5,7 +5,7 @@ const mockAccounts = jest.fn();
 let mockRow: { data: unknown; error: unknown } = { data: null, error: null };
 
 jest.mock("@/api/mobile-api", () => ({ fetchPayConfig: () => mockConfig() }));
-jest.mock("@/features/manual/actions", () => ({ listManualAccounts: () => mockAccounts() }));
+jest.mock("../accounts", () => ({ listPayerAccounts: () => mockAccounts() }));
 jest.mock("@/api/supabase", () => ({
   supabase: {
     from: () => ({
@@ -26,6 +26,7 @@ const acct = (over: Record<string, unknown> = {}) => ({
   name: "MTN MoMo",
   workspaceId: "w1",
   currency: "RWF",
+  provider: "mtn_momo",
   ...over,
 });
 const row = (over: Record<string, unknown> = {}) => ({
@@ -86,7 +87,7 @@ describe("loadPayAgainOffer", () => {
     expect(await loadPayAgainOffer(txn())).toBeNull();
   });
 
-  it("falls back to the first RWF account in the same Space, ignoring other Spaces and currencies", async () => {
+  it("falls back to the first usable RWF account in the same Space, ignoring other Spaces and currencies", async () => {
     mockRow = row({ account_id: "gone" });
     mockAccounts.mockResolvedValue([
       acct({ id: "other-space", workspaceId: "w2" }),
@@ -94,6 +95,39 @@ describe("loadPayAgainOffer", () => {
       acct({ id: "a2", name: "Second" }),
     ]);
     expect((await loadPayAgainOffer(txn()))?.account).toEqual({ id: "a2", name: "Second" });
+  });
+
+  describe("a merchant payment's network comes from the paying account", () => {
+    const merchantTxn = () => txn({ transaction_type: "merchant_payment", counterparty_reference: "123456" });
+
+    it("won't use a bank, cash or Airtel account: the only merchant-pay code is MTN's", async () => {
+      mockAccounts.mockResolvedValue([
+        acct({ id: "bank", name: "Bank", provider: "bank" }),
+        acct({ id: "cash", name: "Cash", provider: "cash" }),
+        acct({ id: "air", name: "Airtel", provider: "airtel_money" }),
+      ]);
+      expect(await loadPayAgainOffer(merchantTxn())).toBeNull();
+    });
+
+    it("skips the transaction's own account when it is a bank account, and uses an MTN one", async () => {
+      mockRow = row({ account_id: "bank" });
+      mockAccounts.mockResolvedValue([acct({ id: "bank", name: "Bank", provider: "bank" }), acct({ id: "mtn", name: "MoMo" })]);
+      expect((await loadPayAgainOffer(merchantTxn()))?.account).toEqual({ id: "mtn", name: "MoMo" });
+    });
+  });
+
+  describe("a person payment's network comes from the recipient's number", () => {
+    it("accepts a mobile-money account, including Airtel, but never a bank or cash one", async () => {
+      mockRow = row({ account_id: "air" });
+      mockAccounts.mockResolvedValue([
+        acct({ id: "bank", provider: "bank" }),
+        acct({ id: "air", name: "Airtel", provider: "airtel_money" }),
+      ]);
+      expect((await loadPayAgainOffer(txn()))?.account).toEqual({ id: "air", name: "Airtel" });
+
+      mockAccounts.mockResolvedValue([acct({ id: "bank", provider: "bank" })]);
+      expect((await loadPayAgainOffer(txn()))?.account).toBeNull();
+    });
   });
 
   it("allows a person payment with no account, but never a merchant payment", async () => {

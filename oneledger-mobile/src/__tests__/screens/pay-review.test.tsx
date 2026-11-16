@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react-nativ
 import { Platform, Share } from "react-native";
 
 import PayReview from "@/app/(app)/pay/[id]";
-import { resetRouterMock, setParams } from "@/test/router-mock";
+import { resetRouterMock, router, setParams } from "@/test/router-mock";
 
 const mockFetch = jest.fn();
 const mockHandoff = jest.fn();
@@ -80,7 +80,14 @@ describe("Pay review screen", () => {
     expect(await screen.findByText("Awaiting verification")).toBeTruthy();
   });
 
-  it("records nothing when the share sheet is dismissed", async () => {
+  it("goes back to where it came from", async () => {
+    await render(<PayReview />);
+    await fireEvent.press(await screen.findByText("Back"));
+    expect(router.back).toHaveBeenCalled();
+  });
+
+  it("records nothing when the share sheet is dismissed (iPhone reports it)", async () => {
+    jest.replaceProperty(Platform, "OS", "ios");
     shareSpy.mockResolvedValue({ action: Share.dismissedAction, activityType: undefined });
     await render(<PayReview />);
     await fireEvent.press(await screen.findByText("Share or copy code"));

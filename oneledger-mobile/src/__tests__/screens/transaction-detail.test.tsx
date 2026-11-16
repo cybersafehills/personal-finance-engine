@@ -112,25 +112,17 @@ describe("Transaction detail screen", () => {
   describe("Pay again", () => {
     const person = { type: "pay_person", msisdn: "250788123456", name: "Jean" } as const;
 
-    it("offers it only when the offer says it can work, and carries the recipient to the form", async () => {
+    it("offers it only when the offer says it can work, and passes only the transaction id", async () => {
       mockGetTransaction.mockResolvedValue(txn({ transaction_type: "send_money", counterparty_reference: "0788123456", counterparty_name: "Jean" }));
       mockOffer.mockResolvedValue({ target: person, account: { id: "acct-1", name: "MTN MoMo" } });
       await render(<TransactionDetail />);
 
       await fireEvent.press(await screen.findByText("Pay Jean again"));
-      expect(router.push).toHaveBeenCalledWith({
-        pathname: "/pay-again",
-        params: {
-          type: "pay_person",
-          recipient: "250788123456",
-          name: "Jean",
-          accountId: "acct-1",
-          accountName: "MTN MoMo",
-        },
-      });
+      // Only the transaction id travels: the form rebuilds the recipient from it.
+      expect(router.push).toHaveBeenCalledWith({ pathname: "/pay-again", params: { txn: "t1" } });
     });
 
-    it("carries a merchant code for a business payment", async () => {
+    it("opens the same form for a business payment", async () => {
       mockGetTransaction.mockResolvedValue(txn());
       mockOffer.mockResolvedValue({
         target: { type: "pay_merchant", merchantCode: "123456", name: null },
@@ -139,11 +131,7 @@ describe("Transaction detail screen", () => {
       await render(<TransactionDetail />);
 
       await fireEvent.press(await screen.findByText("Pay this recipient again"));
-      expect(router.push).toHaveBeenCalledWith(
-        expect.objectContaining({
-          params: expect.objectContaining({ type: "pay_merchant", recipient: "123456", name: "" }),
-        }),
-      );
+      expect(router.push).toHaveBeenCalledWith({ pathname: "/pay-again", params: { txn: "t1" } });
     });
 
     it("is absent when there is no offer (config off, shared Space, unsupported type...)", async () => {

@@ -54,3 +54,22 @@ export function payAgainTarget(txn: TxnLike): PayAgainTarget | null {
   }
   return null;
 }
+
+/**
+ * Which mobile network an account's `provider` string belongs to, or null for a
+ * bank / card / cash account (no mobile-money USSD path). Same rule as the
+ * server's providerNetworkForAccount (web/lib/pay/phone.ts), which is what
+ * decides the merchant payment's network.
+ */
+export function accountNetwork(provider: string | null | undefined): "mtn" | "airtel" | null {
+  const s = (provider ?? "").toLowerCase();
+  if (s.includes("mtn") || s.includes("momo")) return "mtn";
+  if (s.includes("airtel")) return "airtel";
+  return null;
+}
+
+/** `078 123 4567`, the way the web shows a number, from `2507XXXXXXXX`. */
+export function formatLocalMsisdn(normalized: string): string {
+  const local = "0" + normalized.slice(3);
+  return `${local.slice(0, 3)} ${local.slice(3, 6)} ${local.slice(6)}`;
+}

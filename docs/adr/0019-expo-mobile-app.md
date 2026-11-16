@@ -185,9 +185,16 @@ not a reason to keep the whole app native.
   `GET /api/mobile/config` says assisted pay is on (any failure hides it), the
   reference passes the server's own rules (a Rwandan mobile number or a 3-12
   digit merchant code), the transaction lives in the user's personal Space (the
-  server creates intents there), and an RWF paying account exists (required for
-  a merchant, whose network comes from that account). Airtime and bills are
-  excluded for the reasons in the Pay intents note.
+  server creates intents there), and a usable RWF paying account exists. A
+  merchant needs an **MTN** account (the only merchant-pay code in the directory
+  is MTN's, and the network comes from the paying account); a bank, cash or
+  Airtel account would only lead to a draft with no route, so it is skipped.
+  Airtime and bills are excluded for the reasons in the Pay intents note.
+- **Deep links:** the app registers the `oneledger` scheme, so every route is a
+  link target. `/pay-again` therefore takes only a transaction id and rebuilds
+  the recipient, name and paying account from that transaction (re-checked each
+  time); a crafted link cannot choose a recipient. The form shows the whole
+  number, not a masked one: it is the one place to check it before paying.
 - The amount is never prefilled. The request id sent with "Prepare payment" is
   bound to the recipient, account and amount: a retry or double tap returns the
   same draft, an edited amount gets a new id (otherwise it would silently return
@@ -198,8 +205,12 @@ not a reason to keep the whole app native.
   iPhone: no dial button; share or copy the code and dial it in the Phone app,
   because the app has not been run on an iPhone to verify `tel:` USSD handling.
 - Copy uses React Native's built-in share sheet (its "Copy" action), not
-  `expo-clipboard`, so no native module or new build was added. A hand-off is
-  recorded only when the share completes.
+  `expo-clipboard`, so no native module or new build was added. On iPhone a
+  hand-off is recorded only when the share completes; **Android always reports
+  "shared"** (React Native's own docs), so there a dismissed sheet is recorded
+  as well. That is no worse than the web, which records a copy click whether or
+  not the clipboard write worked, and a hand-off only ever means "awaiting
+  verification", never that anything was paid.
 - Not yet run on a physical device.
 
 ## Implementation notes (Budgets)

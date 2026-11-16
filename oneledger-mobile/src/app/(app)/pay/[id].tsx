@@ -33,7 +33,7 @@ export default function PayReview() {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
 
-  const back = <Button label="Back to transactions" variant="ghost" onPress={() => router.replace("/transactions")} />;
+  const back = <Button label="Back" variant="ghost" onPress={() => router.back()} />;
 
   const intent = handedOff ?? (data?.ok ? data.intent : null);
 
@@ -78,7 +78,10 @@ export default function PayReview() {
     setNote(null);
     try {
       const result = await Share.share({ message: instruction.display });
-      // Only a completed share counts; dismissing the sheet is not a hand-off.
+      // On iPhone only a completed share counts (a dismissed sheet is reported).
+      // Android always reports "shared", so there a dismissed sheet is recorded
+      // too: the web records a copy click the same way, and a hand-off is only
+      // ever "awaiting verification", never a claim that anything was paid.
       if (result.action === Share.sharedAction) await report({ method: "copy", outcome: "copied" });
     } catch {
       setNote("Couldn't open the share sheet. Select the code above and copy it.");

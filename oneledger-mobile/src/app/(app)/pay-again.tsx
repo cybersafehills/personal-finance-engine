@@ -1,15 +1,17 @@
 import { router, useLocalSearchParams } from "expo-router";
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { View } from "react-native";
 
 import { createPayIntent } from "@/api/mobile-api";
 import { Button, Card, EmptyState, Screen, ScreenHeader, Text, TextField } from "@/components/ds";
+import { loadPayAgainOffer } from "@/features/pay/context";
 import { createKeyTracker } from "@/features/pay/key";
 import { PAY_COPY } from "@/features/pay/messages";
-import { maskMsisdn, normalizeRwandaMsisdn } from "@/features/pay/target";
+import { formatLocalMsisdn } from "@/features/pay/target";
+import { getTransactionById } from "@/features/transactions/queries";
+import { useQuery } from "@/hooks/useQuery";
 import { space } from "@/theme/tokens";
 
-const MERCHANT_CODE = /^\d{3,12}$/;
 const MAX_RWF = 999_999_999;
 
 /** Whole RWF from what was typed ("5,000" or "5 000"), or null when it isn't a usable amount. */
@@ -20,45 +22,50 @@ function parseAmountRwf(text: string): number | null {
   return n > 0 && n <= MAX_RWF ? n : null;
 }
 
-// Prepare a payment to someone you've paid before. The recipient comes from the
-// transaction and is shown, never edited here; the amount is deliberately NOT
-// prefilled (paying the same amount again should be a decision). Nothing is
-// charged: this creates a draft, and the next screen shows the code to dial.
+// Prepare a payment to someone you've paid before. The ONLY thing this screen
+// takes from its route is the transaction id: the recipient, name and paying
+// account are rebuilt from that transaction (and re-checked) every time, so a
+// crafted deep link can never open this form for a recipient of its choosing.
+// The amount is deliberately not prefilled (paying the same amount again should
+// be a decision). Nothing is charged: this creates a draft, and the next screen
+// shows the code to dial.
 export default function PayAgain() {
-  const params = useLocalSearchParams<{
-    type?: string;
-    recipient?: string;
-    name?: string;
-    accountId?: string;
-    accountName?: string;
-  }>();
+  const { txn } = useLocalSearchParams<{ txn?: string }>();
+  const load = useCallback(async () => {
+    if (!txn) return null;
+    const transaction = await getTransactionById(txn);
+    return transaction ? loadPayAgainOffer(transaction) : null;
+  }, [txn]);
+  const { data: offer, loading } = useQuery(load);
+
   const tracker = useRef(createKeyTracker()).current;
   const inFlight = useRef(false);
-
   const [amountText, setAmountText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const back = <Button label="Cancel" variant="ghost" onPress={() => router.back()} />;
 
-  const type = params.type === "pay_person" || params.type === "pay_merchant" ? params.type : null;
-  const recipient = params.recipient ?? "";
-  const msisdn = type === "pay_person" ? normalizeRwandaMsisdn(recipient) : null;
-  const merchantCode = type === "pay_merchant" && MERCHANT_CODE.test(recipient) ? recipient : null;
-  const accountId = params.accountId || undefined;
-  const name = params.name?.trim() || undefined;
-
-  if (!type || (!msisdn && !merchantCode) || (type === "pay_merchant" && !accountId)) {
+  if (!offer) {
     return (
       <Screen>
         {back}
-        <EmptyState
-          title="We can't prepare this payment"
-          description="Open the transaction and try again."
-        />
+        {loading ? (
+          <Text variant="label" color="textMuted">
+            Loading…
+          </Text>
+        ) : (
+          <EmptyState
+            title="We can't prepare this payment"
+            description="Open the transaction and try again."
+          />
+        )}
       </Screen>
     );
   }
+
+  const { target, account } = offer;
+  const recipientKey = target.type === "pay_person" ? target.msisdn : target.merchantCode;
 
   async function submit() {
     if (inFlight.current) return; // a double tap is one request
@@ -72,15 +79,15 @@ export default function PayAgain() {
     setSubmitting(true);
     // Same request = same id (a retry returns the same draft); an edited amount,
     // recipient or account is a new request and gets a new id.
-    const key = tracker.keyFor([type, msisdn ?? merchantCode, accountId ?? "", amount].join("|"));
+    const key = tracker.keyFor([target.type, recipientKey, account?.id ?? "", amount].join("|"));
     const result = await createPayIntent({
-      paymentType: type!,
+      paymentType: target.type,
       amountMinor: amount,
       idempotencyKey: key,
-      recipientName: name,
-      recipientMsisdn: msisdn ?? undefined,
-      merchantCode: merchantCode ?? undefined,
-      sourceAccountId: accountId,
+      recipientName: target.name ?? undefined,
+      recipientMsisdn: target.type === "pay_person" ? target.msisdn : undefined,
+      merchantCode: target.type === "pay_merchant" ? target.merchantCode : undefined,
+      sourceAccountId: account?.id,
     });
     inFlight.current = false;
     setSubmitting(false);
@@ -95,7 +102,7 @@ export default function PayAgain() {
     <Screen>
       {back}
       <ScreenHeader
-        title={type === "pay_person" ? "Pay a person" : "Pay a business"}
+        title={target.type === "pay_person" ? "Pay a person" : "Pay a business"}
         subtitle={PAY_COPY.feeNotice}
       />
 
@@ -103,13 +110,18 @@ export default function PayAgain() {
         <Text variant="caption" color="textMuted">
           Recipient
         </Text>
-        <Text variant="heading">{name ?? (msisdn ? "This number" : "This merchant")}</Text>
-        <Text variant="label" color="textSecondary" tabular>
-          {msisdn ? maskMsisdn(msisdn) : `Merchant code ${merchantCode}`}
+        <Text variant="heading">
+          {target.name ?? (target.type === "pay_person" ? "This number" : "This merchant")}
         </Text>
-        {params.accountName ? (
+        {/* The whole number, not a masked one: this is the one place to check it before paying. */}
+        <Text variant="label" color="textSecondary" tabular>
+          {target.type === "pay_person"
+            ? formatLocalMsisdn(target.msisdn)
+            : `Merchant code ${target.merchantCode}`}
+        </Text>
+        {account ? (
           <Text variant="label" color="textMuted">
-            Pay from {params.accountName}
+            Pay from {account.name}
           </Text>
         ) : null}
       </Card>

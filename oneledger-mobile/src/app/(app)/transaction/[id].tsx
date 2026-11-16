@@ -119,20 +119,10 @@ export default function TransactionDetail() {
         <Button
           label={`Pay ${payOffer.target.name ?? "this recipient"} again`}
           fullWidth
+          // Only the id travels: the form rebuilds the recipient from the
+          // transaction itself, so a crafted deep link can't choose one.
           onPress={() =>
-            router.push({
-              pathname: "/pay-again",
-              params: {
-                type: payOffer.target.type,
-                recipient:
-                  payOffer.target.type === "pay_person"
-                    ? payOffer.target.msisdn
-                    : payOffer.target.merchantCode,
-                name: payOffer.target.name ?? "",
-                accountId: payOffer.account?.id ?? "",
-                accountName: payOffer.account?.name ?? "",
-              },
-            })
+            router.push({ pathname: "/pay-again", params: { txn: transaction.id } })
           }
         />
       ) : null}

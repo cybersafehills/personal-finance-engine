@@ -1,7 +1,7 @@
 import { createKeyTracker, newRequestId } from "../key";
 import { stateLabel } from "../messages";
 import { parseConfigResponse, parseIntentResponse } from "../parse";
-import { maskMsisdn, normalizeRwandaMsisdn, payAgainTarget } from "../target";
+import { accountNetwork, formatLocalMsisdn, maskMsisdn, normalizeRwandaMsisdn, payAgainTarget } from "../target";
 
 const txn = (over: Record<string, unknown> = {}) => ({
   transaction_type: "send_money",
@@ -23,6 +23,20 @@ describe("normalizeRwandaMsisdn", () => {
   });
   it("masks all but the last four digits", () => {
     expect(maskMsisdn("250788123456")).toBe("•••• ••• 3456");
+  });
+});
+
+describe("accountNetwork / formatLocalMsisdn", () => {
+  it("maps an account provider to a mobile network, and bank/cash/unknown to none", () => {
+    expect(accountNetwork("mtn_momo")).toBe("mtn");
+    expect(accountNetwork("MTN")).toBe("mtn");
+    expect(accountNetwork("airtel_money")).toBe("airtel");
+    for (const provider of ["bank", "card", "cash", "other", "", null, undefined]) {
+      expect(accountNetwork(provider)).toBeNull();
+    }
+  });
+  it("shows the whole number the way the web does", () => {
+    expect(formatLocalMsisdn("250788123456")).toBe("078 812 3456");
   });
 });
 

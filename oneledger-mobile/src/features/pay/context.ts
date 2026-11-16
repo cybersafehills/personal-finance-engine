@@ -1,8 +1,7 @@
 import { fetchPayConfig } from "@/api/mobile-api";
 import { supabase } from "@/api/supabase";
-import { listManualAccounts } from "@/features/manual/actions";
-
-import { payAgainTarget, type PayAgainTarget } from "./target";
+import { listPayerAccounts } from "./accounts";
+import { accountNetwork, payAgainTarget, type PayAgainTarget } from "./target";
 
 // Decides whether a transaction gets a "Pay X again" button, and with which
 // paying account. Every doubt hides the button (a button that cannot work is
@@ -50,15 +49,22 @@ export async function loadPayAgainOffer(txn: TxnLike): Promise<PayAgainOffer | n
     const context = await transactionPaymentContext(txn.id);
     if (!context || !context.personal) return null;
 
-    // Pay from the account this transaction was made from, else the first RWF
-    // account in the same Space (the web form preselects the first as well).
-    const accounts = (await listManualAccounts()).filter(
-      (a) => a.workspaceId === context.workspaceId && a.currency === "RWF",
+    // Pay from the account this transaction was made from when it can do the
+    // job, else the first account in the same Space that can (the web form
+    // preselects the first as well). A merchant payment can only be dialled on
+    // MTN (the only merchant-pay code in the directory) and its network comes
+    // from this account, so a bank, cash or Airtel account is a dead end: skip
+    // it rather than let someone prepare a draft that has no route. A person's
+    // network comes from the recipient's number, so there the account is just
+    // "pay from" and any mobile-money account will do.
+    const usable = (await listPayerAccounts()).filter(
+      (a) =>
+        a.workspaceId === context.workspaceId &&
+        a.currency === "RWF" &&
+        (target.type === "pay_merchant" ? accountNetwork(a.provider) === "mtn" : accountNetwork(a.provider) !== null),
     );
-    const account = accounts.find((a) => a.id === context.accountId) ?? accounts[0] ?? null;
+    const account = usable.find((a) => a.id === context.accountId) ?? usable[0] ?? null;
 
-    // A merchant has no phone number to say which network to dial on, so the
-    // paying account is required (the server reads its network from the row).
     if (target.type === "pay_merchant" && !account) return null;
     return { target, account: account ? { id: account.id, name: account.name } : null };
   } catch {
