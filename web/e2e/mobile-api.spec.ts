@@ -443,12 +443,16 @@ test.describe("mobile API", () => {
       expect(foreign.status()).toBe(422);
       expect((await foreign.json()).error).toBe("invalid_account");
 
-      // Malformed JSON is a 400, not a crash.
+      // Bytes that are not JSON are a 400, not a crash. (A raw Buffer: Playwright
+      // would JSON-encode a string body, which is then valid JSON.)
       const garbage = await api.post("/api/mobile/pay/intents", {
         headers: { ...headers, "content-type": "application/json" },
-        data: "{not json",
+        data: Buffer.from("{not json"),
       });
       expect(garbage.status()).toBe(400);
+      // Valid JSON that is not an object is refused as a bad request, not a 500.
+      const notObject = await api.post("/api/mobile/pay/intents", { headers, data: "just a string" });
+      expect(notObject.status()).toBe(422);
     } finally {
       await api.dispose();
     }
