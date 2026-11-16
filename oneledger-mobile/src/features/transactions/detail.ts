@@ -1,5 +1,7 @@
 import { supabase } from "@/api/supabase";
 
+import { getDuplicateContext, type DuplicateContext } from "./duplicates";
+import { listWorkspaceTags } from "./tags";
 import type {
   AllocationStatus,
   CategoryHistoryEntry,
@@ -103,6 +105,9 @@ export type DetailExtras = {
   context: TransactionContext | null;
   history: CategoryHistoryEntry[];
   tags: string[];
+  /** Tags used elsewhere in the Space, to suggest (empty when unknown). */
+  tagSuggestions: string[];
+  duplicates: DuplicateContext | null;
   members: Member[];
   selfUserId: string | null;
 };
@@ -123,11 +128,13 @@ const settled = async <T,>(work: () => Promise<T>, fallback: T): Promise<T> => {
 export async function loadDetailExtras(id: string): Promise<DetailExtras> {
   const context = await settled(() => getTransactionContext(id), null);
   const household = context?.workspaceKind === "household";
-  const [history, tags, members, selfUserId] = await Promise.all([
+  const [history, tags, tagSuggestions, duplicates, members, selfUserId] = await Promise.all([
     settled(() => getCategoryHistory(id), []),
     settled(() => getTransactionTags(id), []),
+    context ? settled(() => listWorkspaceTags(context.workspaceId), []) : Promise.resolve([]),
+    settled(() => getDuplicateContext(id), null),
     household && context ? settled(() => getSpaceMembers(context.workspaceId), []) : Promise.resolve([]),
     household ? settled(() => getSelfUserId(), null) : Promise.resolve(null),
   ]);
-  return { context, history, tags, members, selfUserId };
+  return { context, history, tags, tagSuggestions, duplicates, members, selfUserId };
 }
