@@ -151,7 +151,7 @@ export function corsHeadersFor(
   return {
     "Access-Control-Allow-Origin": allowed,
     "Access-Control-Allow-Methods": methods,
-    "Access-Control-Allow-Headers": "content-type, authorization",
+    "Access-Control-Allow-Headers": "content-type, authorization, x-workspace-id",
     "Vary": "Origin",
   };
 }
@@ -170,4 +170,18 @@ export function getUserForRequest<R>(
   bearer: string | null,
 ): Promise<R> {
   return bearer ? auth.getUser(bearer) : auth.getUser();
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The Space the app is viewing, from the `X-Workspace-Id` header. Only a
+ * well-formed UUID is accepted (lower-cased); anything else is ignored, so a
+ * malformed header behaves exactly like no header (the personal Space).
+ * Whether the caller may use it is decided later by the membership check in
+ * `getActiveWorkspaceId`, never here.
+ */
+export function workspaceIdFromHeader(value: string | null): string | null {
+  const v = value?.trim() ?? "";
+  return UUID.test(v) ? v.toLowerCase() : null;
 }

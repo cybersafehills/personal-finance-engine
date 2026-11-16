@@ -5,7 +5,7 @@ import {
   ScrollView,
   StyleSheet,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, type Edge } from "react-native-safe-area-context";
 
 import { colors, space } from "@/theme/tokens";
 
@@ -16,13 +16,16 @@ import { colors, space } from "@/theme/tokens";
 export function Screen({
   children,
   centered = false,
+  edges,
 }: {
   children: ReactNode;
   /** Vertically centre the content (sign-in style screens). */
   centered?: boolean;
+  /** Safe-area edges to pad; drop "top" under the app header. */
+  edges?: readonly Edge[];
 }) {
   return (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView style={styles.safe} edges={edges}>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
