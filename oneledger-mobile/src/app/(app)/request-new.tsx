@@ -3,7 +3,7 @@ import { router } from "expo-router";
 import { useState } from "react";
 import { Share, View } from "react-native";
 
-import { Button, Card, Chip, Screen, ScreenHeader, Text, TextField } from "@/components/ds";
+import { Button, Card, Chip, QrCode, Screen, ScreenHeader, Text, TextField } from "@/components/ds";
 import { createRequest } from "@/features/requests/actions";
 import {
   CURRENCIES,
@@ -76,6 +76,7 @@ export default function RequestNew() {
                 {done.url}
               </Text>
             </Card>
+            <QrCode value={done.url} label="QR code for the payment request link" />
             <Button
               label="Share link"
               fullWidth

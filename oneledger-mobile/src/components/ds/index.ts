@@ -12,6 +12,7 @@ export {
 export { EmptyState } from "./EmptyState";
 export { MoneyAmount } from "./MoneyAmount";
 export { ProgressBar, type ProgressTone } from "./ProgressBar";
+export { QrCode } from "./QrCode";
 export { ScreenHeader } from "./ScreenHeader";
 export { StatTile } from "./StatTile";
 export { Text, type TextProps } from "./Text";
