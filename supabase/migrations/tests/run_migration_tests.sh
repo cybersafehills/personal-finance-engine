@@ -691,7 +691,10 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # OneLedger 3.0 S5 (20261225000000) adds payment_requests and
 # payment_request_events (RLS enabled, member SELECT only; writes via RPCs) -
 # 136 tables, 135 with RLS.
-if [ "$TABLE_COUNT" = "136" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# OneLedger 3.0 E4 (20261227000000) adds counterparty_split_events (RLS enabled,
+# member SELECT only; written by split_/undo_counterparty_split) - 137 tables,
+# 136 with RLS.
+if [ "$TABLE_COUNT" = "137" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -840,10 +843,11 @@ AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from inform
 # + counterparty_summaries_v (security_invoker). 168 + 4 = 172.
 # OneLedger 3.0 S5 (20261225000000): SELECT on payment_requests,
 # payment_request_events and payment_requests_v (security_invoker). 172 + 3 = 175.
-if [ "$AUTHENTICATED_GRANT_COUNT" = "175" ]; then
-  pass "authenticated holds exactly the 175 table grants expected, no more"
+# OneLedger 3.0 E4 (20261227000000): SELECT on counterparty_split_events. 175 + 1 = 176.
+if [ "$AUTHENTICATED_GRANT_COUNT" = "176" ]; then
+  pass "authenticated holds exactly the 176 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 175 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 176 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -1045,10 +1049,13 @@ AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_p
 # link_..._transaction (member+-gated) + resolve_payment_request (public,
 # also callable by authenticated). _payment_request_for_update is internal.
 # 125 + 5 = 130.
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "130" ]; then
-  pass "authenticated holds EXECUTE on exactly the 130 functions expected, no more"
+# OneLedger 3.0 E4 (20261227000000): split_counterparty and
+# undo_counterparty_split (member+-gated); _counterparty_txn_key is internal.
+# 130 + 2 = 132.
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "132" ]; then
+  pass "authenticated holds EXECUTE on exactly the 132 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 130 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 132 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -8615,6 +8622,172 @@ if [ "$E1_POST" = "0|0|0|0|0|1|1" ]; then
 else
   fail "E1: post-erasure state wrong ('$E1_POST', want 0|0|0|0|0|1|1)"
 fi
+
+# ===========================================================================
+# OneLedger 3.0 E4: split a counterparty (20261227000000_counterparty_split).
+# ===========================================================================
+echo "=== OneLedger 3.0 E4: counterparty split ==="
+E4_ACCT="00000000-0000-0000-0000-0000000059a1"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "insert into public.accounts (id, workspace_id, name, provider, currency) values ('$E4_ACCT', '$WORKSPACE_A', 'E4 acct', 'mtn_momo', 'RWF');" >/dev/null
+e4_tx() { # nn type dir amount name ref minutes_ago
+  psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+    insert into public.momo_messages (id, raw_message, processing_status) values ('00000000-0000-0000-0000-0000000060$1', 'e4-$1', 'processed');
+    insert into public.transactions
+      (id, momo_message_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at,
+       parser_version, counterparty_name, counterparty_reference, settlement_state, affects_balance, principal_effect_rwf, fee_effect_rwf, effect_reason)
+    values ('00000000-0000-0000-0000-0000000059$1', '00000000-0000-0000-0000-0000000060$1', '$E4_ACCT', '$WORKSPACE_A', '$2', '$3', 'success', $4, 0,
+            now() - interval '$7 minutes', 'test', '$5', $( [ -n "$6" ] && echo "'$6'" || echo null ), 'settled', true,
+            $( [ "$3" = "in" ] && echo "$4" || echo "-$4" ), 0, '$( [ "$3" = "in" ] && echo settled_incoming || echo settled_outgoing_with_fee )');" >/dev/null
+}
+E4_T() { echo "00000000-0000-0000-0000-0000000059$1"; }
+e4_cp() { psql -d pfe_rls -t -A -c "select counterparty_id from public.transactions where id = '$(E4_T "$1")';"; }
+
+# Two phone numbers + one weak-label pair, resolved by the ordinary backfill.
+e4_tx 01 send_money out 1000 "Chris A" "250793000501" 90
+e4_tx 02 send_money out 2000 "Chris A" "250793000501" 80
+e4_tx 03 send_money out 3000 "Chris Alt" "250793000502" 70
+e4_tx 04 send_money out 4000 "Alex Mugabo" "*********111" 60
+e4_tx 05 send_money out 5000 "Alex Mugabo" "*********222" 50
+e4_tx 06 send_money out 6000 "Alex Mugabo" "*********333" 40
+as_user "$USER_A" "select public.backfill_counterparties('$WORKSPACE_A');" >/dev/null
+
+# Legacy-style over-grouping: both numbers ended up on ONE counterparty.
+E4_CP1="$(e4_cp 01)"; E4_CP2="$(e4_cp 03)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  update public.counterparty_identifiers set counterparty_id = '$E4_CP1' where counterparty_id = '$E4_CP2';
+  update public.transactions set counterparty_id = '$E4_CP1' where counterparty_id = '$E4_CP2';
+  update public.counterparties set merged_into_id = '$E4_CP1' where id = '$E4_CP2';" >/dev/null
+E4_ID2="$(psql -d pfe_rls -t -A -c "select id from public.counterparty_identifiers where counterparty_id = '$E4_CP1' and normalized_value = '250793000502';")"
+E4_ID1="$(psql -d pfe_rls -t -A -c "select id from public.counterparty_identifiers where counterparty_id = '$E4_CP1' and normalized_value = '250793000501';")"
+if [ -n "$E4_ID1" ] && [ -n "$E4_ID2" ]; then
+  pass "E4: fixture ready (one counterparty carrying two phone numbers)"
+else
+  fail "E4: fixture wrong (id1='$E4_ID1' id2='$E4_ID2')"
+fi
+
+# --- split by identifier ---------------------------------------------------------
+E4_EV1="$(as_user "$USER_A" "select public.split_counterparty('$E4_CP1', array['$E4_ID2']::uuid[], '{}'::uuid[], null);" | tail -1)"
+E4_NEW1="$(psql -d pfe_rls -t -A -c "select new_id from public.counterparty_split_events where id = '$E4_EV1';")"
+E4_S1="$(psql -d pfe_rls -t -A -c "select (select counterparty_id::text from public.transactions where id = '$(E4_T 03)') = '$E4_NEW1' and (select counterparty_id::text from public.transactions where id = '$(E4_T 01)') = '$E4_CP1' and (select counterparty_id::text from public.counterparty_identifiers where id = '$E4_ID2') = '$E4_NEW1';")"
+E4_S1N="$(psql -d pfe_rls -t -A -c "select display_name || '|' || kind || '|' || confidence from public.counterparties where id = '$E4_NEW1';")"
+if { [ "$E4_S1" = "t" ] || [ "$E4_S1" = "true" ]; } && [ "$E4_S1N" = "Chris Alt|person|high" ]; then
+  pass "E4: splitting an identifier moves it and the transactions that carry it to a new counterparty (named from its latest label, person/high)"
+else
+  fail "E4: identifier split wrong (moved='$E4_S1' new='$E4_S1N')"
+fi
+E4_RAW="$(psql -d pfe_rls -t -A -c "select counterparty_name || '|' || counterparty_reference from public.transactions where id = '$(E4_T 03)';")"
+if [ "$E4_RAW" = "Chris Alt|250793000502" ]; then
+  pass "E4: a split never rewrites the raw transaction label or reference"
+else
+  fail "E4: raw label changed ('$E4_RAW')"
+fi
+
+# New transactions carrying the moved number now resolve to the NEW counterparty.
+e4_tx 07 send_money out 700 "Chris Alt" "0793000502" 5
+as_user "$USER_A" "select public.backfill_counterparties('$WORKSPACE_A');" >/dev/null
+if [ "$(e4_cp 07)" = "$E4_NEW1" ]; then
+  pass "E4: a later transaction with the moved number resolves to the split-off counterparty"
+else
+  fail "E4: later transaction resolved to '$(e4_cp 07)' (want $E4_NEW1)"
+fi
+
+# --- undo (including items that joined after the split) ----------------------------
+as_user "$USER_A" "select public.undo_counterparty_split('$E4_EV1');" >/dev/null
+E4_U="$(psql -d pfe_rls -t -A -c "select (select count(*) from public.transactions where id in ('$(E4_T 01)','$(E4_T 02)','$(E4_T 03)','$(E4_T 07)') and counterparty_id = '$E4_CP1') || '|' || (select count(*) from public.counterparty_identifiers where counterparty_id = '$E4_CP1') || '|' || (select merged_into_id from public.counterparties where id = '$E4_NEW1');")"
+if [ "$E4_U" = "4|2|$E4_CP1" ]; then
+  pass "E4: undo returns everything (even post-split arrivals) to the source and retires the split-off row"
+else
+  fail "E4: undo state wrong ('$E4_U')"
+fi
+if as_user "$USER_A" "select public.undo_counterparty_split('$E4_EV1');" >/dev/null 2>&1; then
+  fail "E4: a split was undone twice"
+else
+  pass "E4: a split cannot be undone twice"
+fi
+
+# --- split by transaction (two people sharing one name label) ------------------------
+E4_CPA="$(e4_cp 04)"
+E4_SAME="$(psql -d pfe_rls -t -A -c "select count(distinct counterparty_id) from public.transactions where id in ('$(E4_T 04)','$(E4_T 05)','$(E4_T 06)');")"
+E4_EV2="$(as_user "$USER_A" "select public.split_counterparty('$E4_CPA', '{}'::uuid[], array['$(E4_T 06)']::uuid[], 'Alex Mugabo (Kigali)');" | tail -1)"
+E4_NEW2="$(psql -d pfe_rls -t -A -c "select new_id from public.counterparty_split_events where id = '$E4_EV2';")"
+E4_S2="$(psql -d pfe_rls -t -A -c "select display_name || '|' || kind || '|' || confidence || '|' || (select count(*) from public.transactions where counterparty_id = c.id) || '|' || (select count(*) from public.counterparty_identifiers where counterparty_id = c.id) from public.counterparties c where id = '$E4_NEW2';")"
+if [ "$E4_SAME" = "1" ] && [ "$E4_S2" = "Alex Mugabo (Kigali)|unknown|user_confirmed|1|0" ] && [ "$(e4_cp 06)" = "$E4_NEW2" ] && [ "$(e4_cp 05)" = "$E4_CPA" ]; then
+  pass "E4: two people who share a name can be separated by transaction; the named result is user-confirmed with no identifiers"
+else
+  fail "E4: transaction split wrong (same=$E4_SAME new='$E4_S2')"
+fi
+
+# --- summaries reflect the split ---------------------------------------------------------
+E4_SUM="$(as_user "$USER_A" "select count(*) || '|' || coalesce(sum(sent_minor),0) from public.counterparty_summaries_v where counterparty_id in ('$E4_CPA', '$E4_NEW2');")"
+if [ "$E4_SUM" = "2|15000" ]; then
+  pass "E4: the summary view shows the two counterparties as separate rows (15,000 sent between them)"
+else
+  fail "E4: summaries wrong ('$E4_SUM')"
+fi
+
+# --- guards -----------------------------------------------------------------------------------
+e4_bad() { # label sql
+  if as_user "$USER_A" "$2" >/dev/null 2>&1; then fail "E4: accepted invalid split: $1"; else pass "E4: rejected invalid split: $1"; fi
+}
+e4_bad "empty request" "select public.split_counterparty('$E4_CP1', '{}'::uuid[], '{}'::uuid[], null);"
+e4_bad "moving every identifier and transaction (would empty the source)" "select public.split_counterparty('$E4_CP1', array['$E4_ID1','$E4_ID2']::uuid[], '{}'::uuid[], null);"
+e4_bad "a transaction that belongs to another counterparty" "select public.split_counterparty('$E4_CPA', '{}'::uuid[], array['$(E4_T 01)']::uuid[], null);"
+e4_bad "an identifier of another counterparty" "select public.split_counterparty('$E4_CPA', array['$E4_ID1']::uuid[], '{}'::uuid[], null);"
+e4_bad "a merged (retired) counterparty" "select public.split_counterparty('$E4_NEW1', '{}'::uuid[], array['$(E4_T 01)']::uuid[], null);"
+e4_bad "a name longer than 120 characters" "select public.split_counterparty('$E4_CPA', '{}'::uuid[], array['$(E4_T 05)']::uuid[], '$(printf 'x%.0s' $(seq 1 121))');"
+
+if as_user "$USER_B" "select public.split_counterparty('$E4_CPA', '{}'::uuid[], array['$(E4_T 05)']::uuid[], null);" >/dev/null 2>&1; then
+  fail "E4: another workspace split this counterparty"
+else
+  pass "E4: another workspace cannot split this counterparty"
+fi
+E4_RO="$(psql -d pfe_rls -t -A -c "select bool_or(has_table_privilege('authenticated','public.counterparty_split_events', p)) from unnest(array['INSERT','UPDATE','DELETE']) p;")"
+E4_INT="$(psql -d pfe_rls -t -A -c "select has_function_privilege('authenticated','public._counterparty_txn_key(text,text,text)','EXECUTE');")"
+if { [ "$E4_RO" = "false" ] || [ "$E4_RO" = "f" ]; } && { [ "$E4_INT" = "false" ] || [ "$E4_INT" = "f" ]; }; then
+  pass "E4: no direct writes on split events; the internal key function is not callable"
+else
+  fail "E4: privileges leaked (write='$E4_RO' internal='$E4_INT')"
+fi
+
+# --- undo refused while the split-off counterparty has been merged on ---------------------------
+E4_OTHER_CP="$(e4_cp 02)"
+as_user "$USER_A" "select public.merge_counterparties('$E4_CPA', array['$E4_NEW2']::uuid[]);" >/dev/null
+if as_user "$USER_A" "select public.undo_counterparty_split('$E4_EV2');" >/dev/null 2>&1; then
+  fail "E4: undid a split whose split-off counterparty was since merged away"
+else
+  pass "E4: a split cannot be undone while its split-off counterparty has been merged (undo the merge first)"
+fi
+
+E4_AUD="$(psql -d pfe_rls -t -A -c "select string_agg(event_type, ',' order by event_type) from (select distinct event_type from public.space_audit_events where workspace_id = '$WORKSPACE_A' and event_type like 'counterparty.split%') x;")"
+if [ "$E4_AUD" = "counterparty.split,counterparty.split_undone" ]; then
+  pass "E4: split and undo are each audited"
+else
+  fail "E4: audit wrong ('$E4_AUD')"
+fi
+
+# --- erasure still works with split events present ---------------------------------------------
+E4_E_U="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('e4-erase@example.com') returning id;" | head -1)"
+E4_E_WS="$(psql -d pfe_rls -t -A -c "select w.id from public.workspaces w join public.workspace_memberships m on m.workspace_id=w.id where m.user_id='$E4_E_U' and w.kind='personal';" | head -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.accounts (id, workspace_id, name, provider, currency) values ('00000000-0000-0000-0000-0000000059e1', '$E4_E_WS', 'E4 erase', 'mtn_momo', 'RWF');
+  insert into public.momo_messages (id, raw_message, processing_status) values ('00000000-0000-0000-0000-0000000060e1', 'e4e', 'processed'), ('00000000-0000-0000-0000-0000000060e2', 'e4f', 'processed');
+  insert into public.transactions (id, momo_message_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version, counterparty_name, counterparty_reference, settlement_state, affects_balance, principal_effect_rwf, fee_effect_rwf, effect_reason)
+  values ('00000000-0000-0000-0000-0000000059e1', '00000000-0000-0000-0000-0000000060e1', '00000000-0000-0000-0000-0000000059e1', '$E4_E_WS', 'send_money', 'out', 'success', 10, 0, now(), 'test', 'Zed', '250793000901', 'settled', true, -10, 0, 'settled_outgoing_with_fee'),
+         ('00000000-0000-0000-0000-0000000059e2', '00000000-0000-0000-0000-0000000060e2', '00000000-0000-0000-0000-0000000059e1', '$E4_E_WS', 'send_money', 'out', 'success', 20, 0, now(), 'test', 'Zed', '0793000901', 'settled', true, -20, 0, 'settled_outgoing_with_fee');" >/dev/null
+as_user "$E4_E_U" "select public.backfill_counterparties('$E4_E_WS');" >/dev/null
+E4_E_C="$(psql -d pfe_rls -t -A -c "select counterparty_id from public.transactions where id = '00000000-0000-0000-0000-0000000059e1';")"
+as_user "$E4_E_U" "select public.split_counterparty('$E4_E_C', '{}'::uuid[], array['00000000-0000-0000-0000-0000000059e2']::uuid[], null);" >/dev/null
+set +e
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; select public.execute_account_deletion('$E4_E_U');" > $ARTIFACT_DIR/pfe_e4e.log 2>&1
+E4_E_RC=$?
+set -e
+E4_E_LEFT="$(psql -d pfe_rls -t -A -c "select (select count(*) from public.counterparty_split_events where workspace_id='$E4_E_WS') + (select count(*) from public.counterparties where workspace_id='$E4_E_WS');")"
+if [ "$E4_E_RC" = "0" ] && [ "$E4_E_LEFT" = "0" ]; then
+  pass "E4: erasing a user whose counterparties were split removes the split events with the Personal Space"
+else
+  fail "E4: erasure with split events failed (rc=$E4_E_RC left=$E4_E_LEFT $(tail -2 $ARTIFACT_DIR/pfe_e4e.log | tr '\n' ' '))"
+fi
+rm -f $ARTIFACT_DIR/pfe_e4e.log
 
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="
