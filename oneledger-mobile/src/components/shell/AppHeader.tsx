@@ -121,7 +121,7 @@ function ProfileMenu({ visible, onClose }: { visible: boolean; onClose(): void }
   const { session, signOut } = useSession();
   const { spaces, active, setActive } = useActiveSpace();
   const go = useCallback(
-    (path: "/notifications" | "/security" | "/create-space") => {
+    (path: "/notifications" | "/security" | "/create-space" | "/space-members") => {
       onClose();
       router.push(path);
     },
@@ -170,6 +170,7 @@ function ProfileMenu({ visible, onClose }: { visible: boolean; onClose(): void }
             </View>
           ) : null}
           <View style={styles.menuActions}>
+            <Button label="Space & members" variant="secondary" fullWidth onPress={() => go("/space-members")} />
             <Button label="Create a Space" variant="secondary" fullWidth onPress={() => go("/create-space")} />
             <Button label="Notifications" variant="secondary" fullWidth onPress={() => go("/notifications")} />
             <Button label="App lock" variant="secondary" fullWidth onPress={() => go("/security")} />
