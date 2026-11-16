@@ -1,4 +1,4 @@
-import { test, expect } from "./fixtures";
+import { test, expect, grantClipboard } from "./fixtures";
 import AxeBuilder from "@axe-core/playwright";
 
 // Pay & Services - Phase 1 (Verified USSD Hub). Covers the persistent
@@ -89,8 +89,8 @@ test("on a desktop browser the dialer is not offered and the copy fallback is", 
   await expect(page.getByText("Dialing isn't available on this device.")).toBeVisible();
 });
 
-test("copying a code reports success in the UI", async ({ page, context }) => {
-  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+test("copying a code reports success in the UI", async ({ page, context, browserName }) => {
+  await grantClipboard(context, browserName);
   await page.goto("/pay/ussd/mtn-momo-menu");
   await page.getByRole("button", { name: "Copy code" }).click();
   await expect(page.getByRole("button", { name: "Copied" })).toBeVisible();

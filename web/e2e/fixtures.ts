@@ -1,4 +1,4 @@
-import { test as base, expect } from "@playwright/test";
+import { test as base, expect, type BrowserContext } from "@playwright/test";
 
 /**
  * Every spec file imports `test`/`expect` from here instead of directly
@@ -50,3 +50,15 @@ export const test = base.extend({
 });
 
 export { expect };
+
+/**
+ * Grants clipboard permissions where the browser supports them. WebKit
+ * rejects "clipboard-write" ("Unknown permission"), which used to fail
+ * every Copy test outright on webkit-desktop / mobile-safari before it
+ * reached the page. Only Chromium needs (and accepts) the grant.
+ */
+export async function grantClipboard(context: BrowserContext, browserName: string) {
+  if (browserName === "chromium") {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  }
+}
