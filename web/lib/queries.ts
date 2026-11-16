@@ -7,7 +7,11 @@ import {
   type CategoryTotal as CategoryTotalRow,
   type TotalsRow,
 } from "./category-totals";
-import { mobileRequestedWorkspaceId } from "./mobile-session-context";
+import { getUserForRequest } from "./mobile-api";
+import {
+  mobileAccessToken,
+  mobileRequestedWorkspaceId,
+} from "./mobile-session-context";
 import { kigaliDateKey, kigaliDayBoundsUtc } from "./kigali-time";
 import {
   aggregateOutflowsByAllocation,
@@ -1113,7 +1117,7 @@ export async function getCanonicalConnectorInstallations(): Promise<
     { data: userData, error: userError },
     { data: installationData, error: installationError },
   ] = await Promise.all([
-    supabase.auth.getUser(),
+    getUserForRequest(supabase.auth, mobileAccessToken()),
     supabase
       .from("connector_installations")
       .select(

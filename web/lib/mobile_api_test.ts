@@ -3,6 +3,7 @@ import {
   allowedCorsOrigin,
   bearerToken,
   corsHeadersFor,
+  getUserForRequest,
   isMobileApiEnabled,
   mfaSatisfied,
   mobileAuthRateLimited,
@@ -109,6 +110,19 @@ Deno.test("rate limiter honours a custom ceiling", () => {
   const t = 5_000_000;
   for (let i = 0; i < 3; i++) assertEquals(mobileAuthRateLimited(ip, t, 3), false);
   assertEquals(mobileAuthRateLimited(ip, t, 3), true);
+});
+
+Deno.test("getUserForRequest asks Auth about the bearer token on mobile", async () => {
+  const calls: Array<string | undefined> = [];
+  const auth = {
+    getUser: (jwt?: string) => {
+      calls.push(jwt);
+      return Promise.resolve("user");
+    },
+  };
+  await getUserForRequest(auth, "tok");
+  await getUserForRequest(auth, null);
+  assertEquals(calls, ["tok", undefined]);
 });
 
 const jwt = (claims: Record<string, unknown>) => {
