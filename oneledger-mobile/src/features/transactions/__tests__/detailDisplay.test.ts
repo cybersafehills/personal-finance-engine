@@ -21,6 +21,8 @@ const ctx = (over: Partial<TransactionContext> = {}): TransactionContext => ({
   ingestionConnectionLabel: "My phone",
   allocationStatus: "allocated",
   categorySource: "rule",
+  attributionType: null,
+  attributedUserId: null,
   ...over,
 });
 const members = [

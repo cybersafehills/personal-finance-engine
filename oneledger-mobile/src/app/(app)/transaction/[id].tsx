@@ -20,6 +20,7 @@ import {
   transactionTypeLabel,
 } from "@/features/transactions/display";
 import { loadDetailExtras } from "@/features/transactions/detail";
+import { AttributionPanel } from "@/features/transactions/AttributionPanel";
 import { DuplicatesCard } from "@/features/transactions/DuplicatesCard";
 import { TransactionTags } from "@/features/transactions/TransactionTags";
 import {
@@ -53,7 +54,7 @@ export default function TransactionDetail() {
   // Where it came from, category history and tags. Each part may be missing on
   // its own; the screen shows whatever loaded.
   const loadExtras = useCallback(() => loadDetailExtras(id), [id]);
-  const { data: extras } = useQuery(loadExtras);
+  const { data: extras, refresh: refreshExtras } = useQuery(loadExtras);
 
   const back = (
     <Button label="Back" variant="ghost" onPress={() => router.back()} />
@@ -226,6 +227,19 @@ export default function TransactionDetail() {
           workspaceId={context?.workspaceId ?? null}
           initialTags={extras?.tags ?? []}
           suggestions={extras?.tagSuggestions ?? []}
+        />
+      ) : null}
+
+      {extras?.attribution ? (
+        <AttributionPanel
+          // A fresh editor per transaction, so an earlier edit never leaks across.
+          key={transaction.id}
+          transactionId={transaction.id}
+          current={extras.attribution}
+          members={extras.members}
+          selfUserId={extras.selfUserId}
+          // The "needs attribution" banner above depends on it: reload once saved.
+          onSaved={refreshExtras}
         />
       ) : null}
 

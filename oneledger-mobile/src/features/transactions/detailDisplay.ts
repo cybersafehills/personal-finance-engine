@@ -17,6 +17,9 @@ export type TransactionContext = {
   ingestionConnectionLabel: string | null;
   allocationStatus: AllocationStatus;
   categorySource: string | null;
+  /** Whose spending a household transaction is: null = never decided. */
+  attributionType: "shared" | "member" | "split" | "unassigned" | null;
+  attributedUserId: string | null;
 };
 
 export type CategoryHistoryEntry = {
