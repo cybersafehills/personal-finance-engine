@@ -682,22 +682,22 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # Mobile push (20261221000000) adds push_devices (RLS enabled, own-row
 # SELECT only; register/unregister run through SECURITY DEFINER functions)
 # - 130 tables, 129 with RLS.
-# OneLedger 3.0 S3 (20261223000000) adds balance_observations (RLS enabled,
+# OneLedger 3.0 S3 (20261224000000) adds balance_observations (RLS enabled,
 # member SELECT only; writes via record_manual_balance_observation) - 131
 # tables, 130 with RLS. (account_balance_baselines_v is a view, not a table.)
-# OneLedger 3.0 S4 (20261224000000) adds counterparties,
+# OneLedger 3.0 S4 (20261225000000) adds counterparties,
 # counterparty_identifiers and counterparty_merge_events (RLS enabled, member
 # SELECT only; writes via RPCs) - 134 tables, 133 with RLS.
-# OneLedger 3.0 S5 (20261225000000) adds payment_requests and
+# OneLedger 3.0 S5 (20261226000000) adds payment_requests and
 # payment_request_events (RLS enabled, member SELECT only; writes via RPCs) -
 # 136 tables, 135 with RLS.
-# OneLedger 3.0 E4 (20261227000000) adds counterparty_split_events (RLS enabled,
+# OneLedger 3.0 E4 (20261228000000) adds counterparty_split_events (RLS enabled,
 # member SELECT only; written by split_/undo_counterparty_split) - 137 tables,
 # 136 with RLS.
-# OneLedger 3.0 E5 (20261228000000) adds transaction_sensitive_details (RLS
+# OneLedger 3.0 E5 (20261229000000) adds transaction_sensitive_details (RLS
 # enabled, NO policy and NO grant for authenticated; service-role write only;
 # read only through reveal_transaction_sensitive_detail) - 138 tables, 137 with RLS.
-# OneLedger 3.0 E7 (20261229000000) adds utility_receipts (RLS enabled, column-
+# OneLedger 3.0 E7 (20261230000000) adds utility_receipts (RLS enabled, column-
 # level SELECT for authenticated that excludes the ciphertext; service-role
 # write) - 139 tables, 138 with RLS.
 if [ "$TABLE_COUNT" = "139" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
@@ -842,14 +842,14 @@ AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from inform
 # authenticated (a user may read their own registered phones; writes go
 # through register_push_device / unregister_push_device, and the sender uses
 # the service role). 165 + 1 = 166.
-# OneLedger 3.0 S3 (20261223000000): balance_observations SELECT (member-read
+# OneLedger 3.0 S3 (20261224000000): balance_observations SELECT (member-read
 # via RLS) + account_balance_baselines_v SELECT (security_invoker view, so the
 # caller's RLS applies). 166 + 2 = 168.
-# OneLedger 3.0 S4 (20261224000000): SELECT on the three counterparty tables
+# OneLedger 3.0 S4 (20261225000000): SELECT on the three counterparty tables
 # + counterparty_summaries_v (security_invoker). 168 + 4 = 172.
-# OneLedger 3.0 S5 (20261225000000): SELECT on payment_requests,
+# OneLedger 3.0 S5 (20261226000000): SELECT on payment_requests,
 # payment_request_events and payment_requests_v (security_invoker). 172 + 3 = 175.
-# OneLedger 3.0 E4 (20261227000000): SELECT on counterparty_split_events. 175 + 1 = 176.
+# OneLedger 3.0 E4 (20261228000000): SELECT on counterparty_split_events. 175 + 1 = 176.
 if [ "$AUTHENTICATED_GRANT_COUNT" = "176" ]; then
   pass "authenticated holds exactly the 176 table grants expected, no more"
 else
@@ -877,7 +877,7 @@ echo "=== function/sequence privilege regression check ==="
 # design must be callable by someone who has an invite link but hasn't
 # signed in yet.
 ANON_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname = 'anon' where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
-# OneLedger 3.0 S5 (20261225000000) adds resolve_payment_request: the public
+# OneLedger 3.0 S5 (20261226000000) adds resolve_payment_request: the public
 # resolver for a shared payment-request link. It takes only a SHA-256 digest and
 # returns the minimum a payer needs. A second, deliberate anon function.
 if [ "$ANON_FN_EXEC_COUNT" = "2" ]; then
@@ -1046,21 +1046,21 @@ AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_p
 # disable_push_devices are service-role only. 117 + 2 = 119.
 # create_manual_transaction (20261222000000) is the one write path for a
 # signed-in user creating a transaction, owner-checked inside. 119 + 1 = 120.
-# OneLedger 3.0 S3 (20261223000000) adds record_manual_balance_observation -
+# OneLedger 3.0 S3 (20261224000000) adds record_manual_balance_observation -
 # authenticated-callable, member+-gated and audited. 120 + 1 = 121.
-# OneLedger 3.0 S4 (20261224000000): backfill_counterparties,
+# OneLedger 3.0 S4 (20261225000000): backfill_counterparties,
 # update_counterparty, merge_counterparties, undo_counterparty_merge - all
 # member+-gated; normalize_msisdn is internal (revoked). 121 + 4 = 125.
-# OneLedger 3.0 S5 (20261225000000): create_/cancel_/mark_..._paid_by_owner/
+# OneLedger 3.0 S5 (20261226000000): create_/cancel_/mark_..._paid_by_owner/
 # link_..._transaction (member+-gated) + resolve_payment_request (public,
 # also callable by authenticated). _payment_request_for_update is internal.
 # 125 + 5 = 130.
-# OneLedger 3.0 E4 (20261227000000): split_counterparty and
+# OneLedger 3.0 E4 (20261228000000): split_counterparty and
 # undo_counterparty_split (member+-gated); _counterparty_txn_key is internal.
 # 130 + 2 = 132.
-# OneLedger 3.0 E5 (20261228000000): reveal_transaction_sensitive_detail
+# OneLedger 3.0 E5 (20261229000000): reveal_transaction_sensitive_detail
 # (member+ and source-visibility gated, rate-limited, audited). 132 + 1 = 133.
-# OneLedger 3.0 E7 (20261229000000): confirm_/unlink_/ignore_utility_receipt
+# OneLedger 3.0 E7 (20261230000000): confirm_/unlink_/ignore_utility_receipt
 # (member+-gated, audited). store_utility_receipt is service-role only and the
 # link helpers are internal. 133 + 3 = 136.
 if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "136" ]; then
@@ -7941,7 +7941,7 @@ else
 fi
 
 # ===========================================================================
-# OneLedger 3.0 S3: balance provenance (20261223000000_balance_observations).
+# OneLedger 3.0 S3: balance provenance (20261224000000_balance_observations).
 # balance_observations is append-only and member-readable; the ONLY write path
 # is record_manual_balance_observation (member+, audited, no existence oracle).
 # account_balance_baselines_v is security_invoker, so RLS applies through it.
@@ -8081,7 +8081,7 @@ else
 fi
 
 # ===========================================================================
-# OneLedger 3.0 S4: counterparties (20261224000000_counterparties).
+# OneLedger 3.0 S4: counterparties (20261225000000_counterparties).
 # Reuses USER_A/WORKSPACE_A, USER_B/WORKSPACE_B, R_MATRIX_HH (+R_VIEWER_USER).
 # ===========================================================================
 echo "=== OneLedger 3.0 S4: counterparties ==="
@@ -8352,7 +8352,7 @@ else
 fi
 
 # ===========================================================================
-# OneLedger 3.0 S5: payment requests, Stage 1 (20261225000000_payment_requests).
+# OneLedger 3.0 S5: payment requests, Stage 1 (20261226000000_payment_requests).
 # Non-custodial. The DB sees only a SHA-256 digest of the token; "paid" only
 # via owner assertion or a human-linked matching settled incoming transaction.
 # ===========================================================================
@@ -8635,7 +8635,7 @@ else
 fi
 
 # ===========================================================================
-# OneLedger 3.0 E4: split a counterparty (20261227000000_counterparty_split).
+# OneLedger 3.0 E4: split a counterparty (20261228000000_counterparty_split).
 # ===========================================================================
 echo "=== OneLedger 3.0 E4: counterparty split ==="
 E4_ACCT="00000000-0000-0000-0000-0000000059a1"
@@ -8801,7 +8801,7 @@ fi
 rm -f $ARTIFACT_DIR/pfe_e4e.log
 
 # ===========================================================================
-# OneLedger 3.0 E5: sensitive details (20261228000000_transaction_sensitive_details).
+# OneLedger 3.0 E5: sensitive details (20261229000000_transaction_sensitive_details).
 # The DB only ever holds ciphertext; reveal is authorised, rate-limited, audited.
 # ===========================================================================
 echo "=== OneLedger 3.0 E5: sensitive details ==="
@@ -8915,7 +8915,7 @@ fi
 rm -f $ARTIFACT_DIR/pfe_e5e.log
 
 # ===========================================================================
-# OneLedger 3.0 E7: utility receipts (20261229000000_utility_receipts).
+# OneLedger 3.0 E7: utility receipts (20261230000000_utility_receipts).
 # ===========================================================================
 echo "=== OneLedger 3.0 E7: utility receipts ==="
 E7_ACCT="00000000-0000-0000-0000-0000000071a1"
@@ -9120,7 +9120,7 @@ else
 fi
 rm -f $ARTIFACT_DIR/pfe_e7e.log
 
-# --- E7: scrub_utility_tokens (20261230000000) --------------------------------
+# --- E7: scrub_utility_tokens (20261231000000) --------------------------------
 S7_ACCT="00000000-0000-0000-0000-0000000075a1"
 psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
   insert into public.accounts (id, workspace_id, name, provider, currency) values ('$S7_ACCT', '$WORKSPACE_A', 'S7 acct', 'mtn_momo', 'RWF');

@@ -2,8 +2,8 @@
 
 - **Status:** Accepted, implemented behind the capture channel
   (`DEVICE_PAIRING_V2`) and, for keeping the token, `UTILITY_TOKEN_CAPTURE_ENABLED`
-  + `SENSITIVE_DATA_KEYRING`. Migrations `20261228000000` (encrypted details),
-  `20261229000000` (receipts), `20261230000000` (one-off scrub).
+  + `SENSITIVE_DATA_KEYRING`. Migrations `20261229000000` (encrypted details),
+  `20261230000000` (receipts), `20261231000000` (one-off scrub).
 - **Date:** 2026-11-16
 - **Supersedes:** the E5 assumption (docs/oneledger-3/e5-utility-tokens.md) that the
   token arrives inside the MoMo payment SMS. Real samples showed otherwise.

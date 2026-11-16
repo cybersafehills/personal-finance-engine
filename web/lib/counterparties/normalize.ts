@@ -1,5 +1,5 @@
 // Counterparty key normalisation (docs/oneledger-3: identity rules in
-// supabase/migrations/20261224000000_counterparties.sql). PURE, zero imports.
+// supabase/migrations/20261225000000_counterparties.sql). PURE, zero imports.
 // Must stay byte-for-byte equivalent to the SQL function normalize_msisdn and
 // the backfill's label/merchant-code rules; both are tested against
 // msisdn-vectors.json (this module in Deno, SQL in run_migration_tests.sh).

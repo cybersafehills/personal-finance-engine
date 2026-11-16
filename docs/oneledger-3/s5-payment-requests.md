@@ -3,7 +3,7 @@
 **Non-custodial.** OneLedger never holds, moves or initiates money. Stage 2 (provider deep links) and Stage 3 (payment execution, callbacks) are **not built and remain gated** on provider terms, legal/regulatory review and your approval.
 
 **Delivered (database + pure library; no route, UI or flag yet):**
-- `supabase/migrations/20261225000000_payment_requests.sql` — `payment_requests`, `payment_request_events`, read view `payment_requests_v` (derives `expired`), RPCs `create_payment_request`, `cancel_payment_request`, `mark_payment_request_paid_by_owner`, `link_payment_request_transaction`, and the public resolver `resolve_payment_request`.
+- `supabase/migrations/20261226000000_payment_requests.sql` — `payment_requests`, `payment_request_events`, read view `payment_requests_v` (derives `expired`), RPCs `create_payment_request`, `cancel_payment_request`, `mark_payment_request_paid_by_owner`, `link_payment_request_transaction`, and the public resolver `resolve_payment_request`.
 - `web/lib/payment-requests/payment-request.ts` (+7 tests): token generation/hashing, link/QR builder and strict parser, input validation, state machine, payer-facing wording.
 - Harness: 35 S5 assertions; counters re-based (tables 136, authenticated table grants 175, authenticated function EXECUTE 130, **anon function EXECUTE 2**).
 

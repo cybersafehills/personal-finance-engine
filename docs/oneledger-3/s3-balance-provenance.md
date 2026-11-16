@@ -1,7 +1,7 @@
 # S3 — Balance provenance (2026-11-15)
 
 **Delivered (not yet wired into UI/API/flag):**
-- `supabase/migrations/20261223000000_balance_observations.sql` — additive: `balance_observations`, `record_manual_balance_observation()`, `account_balance_baselines_v`.
+- `supabase/migrations/20261224000000_balance_observations.sql` — additive: `balance_observations`, `record_manual_balance_observation()`, `account_balance_baselines_v`.
 - `web/lib/balance-status.ts` (+10 tests) — pure derivation of Confirmed / Estimated / Stale / Unavailable.
 - Migration harness: new S3 block (15 assertions) and the three privilege/RLS tripwire counts updated (tables 131, authenticated table grants 168, authenticated function EXECUTE 121).
 

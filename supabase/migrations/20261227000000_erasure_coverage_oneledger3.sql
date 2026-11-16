@@ -31,4 +31,4 @@ alter table public.payment_requests
     foreign key (created_by) references auth.users (id) on delete cascade;
 
 comment on column public.payment_requests.created_by is
-  'Creator. ON DELETE CASCADE by design: the request holds the creator''s own destination and name, so account erasure removes it everywhere (see 20261226000000).';
+  'Creator. ON DELETE CASCADE by design: the request holds the creator''s own destination and name, so account erasure removes it everywhere (see 20261227000000).';

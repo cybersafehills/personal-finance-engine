@@ -1,6 +1,6 @@
 # E4 — Counterparty split (2026-11-16)
 
-**Delivered:** migration `20261227000000_counterparty_split.sql` — `split_counterparty`, `undo_counterparty_split`, `counterparty_split_events`, internal `_counterparty_txn_key` — and 19 harness assertions (counters: tables 137, authenticated table grants 176, authenticated function EXECUTE 132).
+**Delivered:** migration `20261228000000_counterparty_split.sql` — `split_counterparty`, `undo_counterparty_split`, `counterparty_split_events`, internal `_counterparty_txn_key` — and 19 harness assertions (counters: tables 137, authenticated table grants 176, authenticated function EXECUTE 132).
 
 **Verified:** full `run_migration_tests.sh` on disposable PostgreSQL 17 — **667 passed, 0 failed** (including the two-fresh-application reproducibility check and erasure with split events present). **Not verified:** CI, a Supabase branch apply, volume (5,000-transaction cap per call is untested at size), any UI (there is no counterparty UI in web or mobile yet — only the mobile API from #211; the RPCs are listed in `docs/mobile-api.md`).
 

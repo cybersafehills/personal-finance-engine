@@ -1,5 +1,5 @@
 // Payment requests, Stage 1 (NON-CUSTODIAL). Pure helpers; the database
-// (20261225000000_payment_requests.sql) re-validates everything - this module
+// (20261226000000_payment_requests.sql) re-validates everything - this module
 // is for early UX validation, token handling and QR/link safety, never a
 // security boundary. Imports only the pure msisdn normaliser.
 //

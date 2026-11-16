@@ -1,6 +1,6 @@
 # E1 — Erasure and data-export coverage for the 3.0 tables (2026-11-15)
 
-**Delivered:** migration `20261226000000_erasure_coverage_oneledger3.sql`, a failing-first erasure test in the migration harness (4 assertions), and the self-serve data export extended to schemaVersion 2 (`web/lib/account-data.ts`).
+**Delivered:** migration `20261227000000_erasure_coverage_oneledger3.sql`, a failing-first erasure test in the migration harness (4 assertions), and the self-serve data export extended to schemaVersion 2 (`web/lib/account-data.ts`).
 
 ## A real defect, found by test
 Before this change, **erasing a user whose Personal Space held a matched payment request aborted** (`payment_requests_matched_consistent` was violated when the FK nulled `matched_transaction_id` while deleting the transaction). Reproduced first (2 harness failures), then fixed (648 pass, 0 fail). Because the account-deletion cron is dark (`ACCOUNT_DELETION_EXECUTE_ENABLED`), nothing in production could have hit it, but it would have broken erasure as soon as the 3.0 stack shipped.

@@ -1,7 +1,7 @@
 # S4 — Counterparty identity layer (2026-11-15)
 
 **Delivered (not wired into UI/API/flag):**
-- `supabase/migrations/20261224000000_counterparties.sql` — additive: `counterparties`, `counterparty_identifiers`, `counterparty_merge_events`, nullable `transactions.counterparty_id`; RPCs `backfill_counterparties`, `update_counterparty`, `merge_counterparties`, `undo_counterparty_merge`; internal `normalize_msisdn`; view `counterparty_summaries_v`.
+- `supabase/migrations/20261225000000_counterparties.sql` — additive: `counterparties`, `counterparty_identifiers`, `counterparty_merge_events`, nullable `transactions.counterparty_id`; RPCs `backfill_counterparties`, `update_counterparty`, `merge_counterparties`, `undo_counterparty_merge`; internal `normalize_msisdn`; view `counterparty_summaries_v`.
 - `web/lib/counterparties/normalize.ts` (+ shared `msisdn-vectors.json`, 4 tests) — TS mirror of the SQL key rules; SQL is asserted against the same vectors.
 - Harness: 28 S4 assertions; counters re-based (tables 134, authenticated table grants 172, function EXECUTE 125).
 
