@@ -24,6 +24,13 @@ import {
 } from "@/features/reports/parse";
 import { parseInboxResponse, type InboxResult } from "@/features/inbox/parse";
 import { parseSpacesEnabled } from "@/features/spaces/config";
+import type { InviteRole, MemberRole } from "@/features/spaces/members";
+import {
+  parseInviteResponse,
+  parseSimpleWrite,
+  type WriteFailure,
+  type WriteResult,
+} from "@/features/spaces/members-parse";
 import { config } from "@/lib/config";
 
 // Client for the web app's /api/mobile/* endpoints (ADR 0019): operations
@@ -243,4 +250,37 @@ export async function fetchReportDownload(id: string): Promise<ReportDownloadRes
     return { ok: false, reason: f.reason, message: f.message };
   }
   return parseReportDownloadResponse(result.status, result.body);
+}
+
+// --- Space & members writes (POST /api/mobile/spaces/..., docs/mobile-api.md) ---
+// Each names its Space explicitly; the server never falls back to Personal for a write.
+
+const spaceFailure = (outcome: Exclude<Awaited<ReturnType<typeof bearerGet>>, { kind: "response" }>): WriteFailure => {
+  const f = failureForOutcome(outcome, "That");
+  return { ok: false, reason: f.reason, message: f.message };
+};
+
+export async function setMemberRole(workspaceId: string, membershipId: string, role: MemberRole): Promise<WriteResult> {
+  const r = await bearerPost("/api/mobile/spaces/members/role", { workspaceId, membershipId, role });
+  return r.kind === "response" ? parseSimpleWrite(r.status, r.body) : spaceFailure(r);
+}
+
+export async function removeMember(workspaceId: string, membershipId: string): Promise<WriteResult> {
+  const r = await bearerPost("/api/mobile/spaces/members/remove", { workspaceId, membershipId });
+  return r.kind === "response" ? parseSimpleWrite(r.status, r.body) : spaceFailure(r);
+}
+
+/** The returned link is shown once and never stored. */
+export async function inviteMember(
+  workspaceId: string,
+  email: string,
+  role: InviteRole,
+): Promise<WriteResult<{ link: string | null; emailSent: boolean }>> {
+  const r = await bearerPost("/api/mobile/spaces/invites", { workspaceId, email, role });
+  return r.kind === "response" ? parseInviteResponse(r.status, r.body) : spaceFailure(r);
+}
+
+export async function revokeInvite(workspaceId: string, inviteId: string): Promise<WriteResult> {
+  const r = await bearerPost("/api/mobile/spaces/invites/revoke", { workspaceId, inviteId });
+  return r.kind === "response" ? parseSimpleWrite(r.status, r.body) : spaceFailure(r);
 }
