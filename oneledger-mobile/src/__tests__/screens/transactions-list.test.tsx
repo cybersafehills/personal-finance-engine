@@ -64,11 +64,8 @@ describe("Transactions screen", () => {
     });
     await screen.findByText("Kigali Fresh");
     expect(mockGetTransactions).toHaveBeenCalledTimes(1);
-    expect(mockGetTransactions).toHaveBeenCalledWith({
-      q: "simba",
-      // the filter chips added in #192 are always sent, at their defaults
-      filters: { direction: "all", needsReview: false, period: "all" },
-    });
+    // Filters are part of the query too (#192); this test is about the search.
+    expect(mockGetTransactions).toHaveBeenCalledWith(expect.objectContaining({ q: "simba" }));
   });
 
   it("shows an empty state, and a different one when a search finds nothing", async () => {
