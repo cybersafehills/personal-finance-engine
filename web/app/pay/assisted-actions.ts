@@ -2,16 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 import { supabaseSession } from "../../lib/supabase-session-server";
-import { supabaseServer } from "../../lib/supabase-server";
 import { getActiveWorkspaceId } from "../../lib/queries";
 import {
   assertAssistedPayEnabled,
   assertPaymentIntentSurfaceEnabled,
   FeatureDisabledError,
   isPaymentTemplatesEnabled,
-  isSmsReconciliationEnabled,
   isTrustedRecipientsEnabled,
-  smsReconciliationMode,
 } from "../../lib/pay/gate";
 import {
   guessProvider,
@@ -19,6 +16,7 @@ import {
   normalizeRwandaMsisdn,
 } from "../../lib/pay/phone";
 import { isSessionFresh } from "../../lib/pay/intents";
+import { recordPaymentHandoff } from "../../lib/pay/handoff";
 import {
   createPaymentIntent,
   type DraftInput,
@@ -125,43 +123,9 @@ export async function recordHandoff(
   try {
     const { supabase, workspaceId } = await ctx();
     assertPaymentIntentSurfaceEnabled(workspaceId);
-
-    await supabase.rpc("record_payment_attempt", {
-      p_intent_id: id,
-      p_method: method,
-      p_outcome: outcome,
-    });
-    // draft -> initiated -> awaiting_verification. Ignore "invalid_transition"
-    // when the intent is already past draft (a second handoff gesture).
-    await supabase.rpc("transition_payment_intent", {
-      p_id: id,
-      p_to_state: "initiated",
-      p_reason: null,
-      p_evidence: { method },
-    });
-    await supabase.rpc("transition_payment_intent", {
-      p_id: id,
-      p_to_state: "awaiting_verification",
-      p_reason: null,
-      p_evidence: {},
-    });
-
-    // Phase 2b: the payment SMS may already have been ingested (the user
-    // dialed, paid, and came back before we got here). Best-effort,
-    // opt-in, non-fatal. Uses the service-role client because the
-    // matcher RPC is service_role-only (system actor) - the single,
-    // isolated place an assisted-pay action reaches for it.
-    if (isSmsReconciliationEnabled(workspaceId)) {
-      try {
-        await supabaseServer().rpc("reconcile_payment_intent", {
-          p_intent_id: id,
-          p_mode: smsReconciliationMode(),
-        });
-      } catch {
-        /* non-fatal */
-      }
-    }
-
+    // The shared core (lib/pay/handoff.ts) does the work. Like before, the web
+    // does not surface an attempt error: the panel just refreshes.
+    await recordPaymentHandoff({ supabase, workspaceId, id, method, outcome });
     revalidatePath(`/pay/${id}`);
     revalidatePath("/pay/activity");
     return { ok: true };
