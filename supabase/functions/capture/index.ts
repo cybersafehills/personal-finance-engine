@@ -49,6 +49,49 @@ const pairLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
 const testLimiter = createRateLimiter({ windowMs: 60_000, max: 30 });
 const captureLimiter = createRateLimiter({ windowMs: 60_000, max: 60 });
 
+// Immediate-processing kick. capture only QUEUES evidence (ADR 0009); the
+// pg_cron tick (>= 1 minute, manually activated) used to be the only thing
+// that turned it into a transaction, so a message landed in the DB up to a
+// minute+ late - or never, if the cron was never activated. After a
+// successful queue we now ping process-raw-events right away, in the
+// background, so the response to the phone is not delayed. The cron stays as
+// the retry/backstop path; the processor is idempotent (SKIP LOCKED claims).
+// Needs RAW_EVENTS_PROCESSOR_SECRET in capture's own env (same value the
+// processor and the Vault entry use); without it this is a quiet no-op.
+const PROCESSOR_SECRET = (Deno.env.get("RAW_EVENTS_PROCESSOR_SECRET") ?? "")
+  .trim();
+
+function kickProcessor(): void {
+  if (PROCESSOR_SECRET.length < 32) {
+    console.warn(JSON.stringify({ event: "processor_kick_skipped_no_secret" }));
+    return;
+  }
+  const work = fetch(`${SUPABASE_URL}/functions/v1/process-raw-events`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-processor-secret": PROCESSOR_SECRET,
+      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+    },
+    body: "{}",
+    signal: AbortSignal.timeout(25_000),
+  }).then(async (res) => {
+    if (!res.ok) {
+      console.error(JSON.stringify({
+        event: "processor_kick_failed",
+        status: res.status,
+      }));
+    }
+    await res.body?.cancel();
+  }).catch(() => {
+    console.error(JSON.stringify({ event: "processor_kick_error" }));
+  });
+  // Keep the isolate alive until the processor call settles.
+  // deno-lint-ignore no-explicit-any
+  const rt = (globalThis as any).EdgeRuntime;
+  if (rt?.waitUntil) rt.waitUntil(work);
+}
+
 function clientIp(req: Request): string {
   return (req.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() ||
     "unknown";
@@ -246,7 +289,10 @@ Deno.serve(async (req: Request) => {
             .select("id")
             .maybeSingle();
 
-          if (data?.id) return { outcome: "queued", eventId: data.id };
+          if (data?.id) {
+            kickProcessor();
+            return { outcome: "queued", eventId: data.id };
+          }
 
           if (error?.code === "23505") {
             const { data: existing } = await supabase
@@ -258,6 +304,9 @@ Deno.serve(async (req: Request) => {
               )
               .eq("payload_hash", args.payloadHash)
               .maybeSingle();
+            // A re-delivery of something still unprocessed (e.g. the first
+            // kick failed) should also get a prompt retry.
+            kickProcessor();
             return {
               outcome: "duplicate",
               eventId: (existing?.id as string | null) ?? null,

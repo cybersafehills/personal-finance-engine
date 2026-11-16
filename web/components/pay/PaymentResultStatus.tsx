@@ -1,0 +1,120 @@
+"use client";
+
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+
+type Phase = "waiting" | "success" | "failure";
+
+const WAITING_STATES = new Set(["initiated", "awaiting_verification", "processing"]);
+const FAILURE_STATES = new Set(["failed", "expired", "reversed"]);
+const POLL_MS = 4000;
+
+function phaseOf(state: string): Phase | null {
+  if (state === "successful") return "success";
+  if (FAILURE_STATES.has(state)) return "failure";
+  if (WAITING_STATES.has(state)) return "waiting";
+  return null; // draft / cancelled / requires_reconciliation: no live mark
+}
+
+/**
+ * Minimal live result for a hand-off payment: a spinning circle while we wait
+ * for provider evidence, which resolves into a green tick (sent) or a red X
+ * (didn't go through). Honest by construction - a tick is shown only for the
+ * `successful` state (SMS-verified or confirmed by the user), never for a mere
+ * hand-off (ADR 0002). While waiting it refreshes the server data every few
+ * seconds, so the mark flips without a manual reload even if Realtime is down.
+ */
+export function PaymentResultStatus({
+  state,
+  verified,
+  amountLabel,
+  recipient,
+}: {
+  state: string;
+  verified: boolean;
+  amountLabel: string;
+  recipient: string | null;
+}) {
+  const router = useRouter();
+  const phase = phaseOf(state);
+
+  useEffect(() => {
+    if (phase !== "waiting") return;
+    const tick = () => {
+      if (document.visibilityState === "visible") router.refresh();
+    };
+    const id = setInterval(tick, POLL_MS);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, [phase, router]);
+
+  if (!phase) return null;
+
+  const copy = {
+    waiting: {
+      title: "Waiting for confirmation",
+      body: "We'll update this page the moment your provider confirms.",
+      color: "var(--color-accent, #f5c400)",
+    },
+    success: {
+      title: verified ? "Money sent" : "Marked as sent",
+      body: verified
+        ? `${amountLabel}${recipient ? ` to ${recipient}` : ""} - confirmed by your provider.`
+        : `${amountLabel}${recipient ? ` to ${recipient}` : ""} - you confirmed this payment.`,
+      color: "#16a34a",
+    },
+    failure: {
+      title: state === "reversed" ? "Payment reversed" : "Payment didn't go through",
+      body:
+        state === "expired"
+          ? "No confirmation arrived in time. No money has been recorded as sent."
+          : "No money was sent. You can try again.",
+      color: "#dc2626",
+    },
+  }[phase];
+
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      data-testid="payment-result"
+      data-phase={phase}
+      className="flex flex-col items-center gap-3 rounded-card border border-border-subtle bg-surface px-6 py-8 text-center"
+    >
+      <svg
+        key={phase}
+        width="72"
+        height="72"
+        viewBox="0 0 72 72"
+        fill="none"
+        stroke={copy.color}
+        strokeWidth="4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className={phase === "waiting" ? undefined : "pay-mark-pop"}
+        aria-hidden="true"
+      >
+        {phase === "waiting" ? (
+          <>
+            <circle cx="36" cy="36" r="30" opacity=".18" />
+            <path className="pay-mark-spin" d="M36 6a30 30 0 0 1 30 30" />
+          </>
+        ) : (
+          <>
+            <circle className="pay-mark-ring" cx="36" cy="36" r="30" transform="rotate(-90 36 36)" />
+            {phase === "success" ? (
+              <path className="pay-mark-glyph" d="M22 37l10 10 18-21" />
+            ) : (
+              <path className="pay-mark-glyph" d="M25 25l22 22M47 25L25 47" />
+            )}
+          </>
+        )}
+      </svg>
+      <p className="text-base font-semibold text-text-primary">{copy.title}</p>
+      <p className="max-w-xs text-sm text-text-muted">{copy.body}</p>
+    </div>
+  );
+}
