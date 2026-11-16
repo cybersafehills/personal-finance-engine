@@ -257,16 +257,29 @@ not a reason to keep the whole app native.
 ## Implementation notes (Transaction detail parity)
 
 - The detail screen follows the web page's block order: a centred hero (who, how
-  much, when), the Pay-again button, an attention banner, "Where this came from",
-  the detail rows, Category (with why, and history once there is more than one
-  change) and Tags. It is **read-only**: tags and attribution are edited on the
-  web (the existing "Edit on the web" button), and splits and duplicate handling
-  are not here yet.
-- Everything is a plain read under the signed-in user's RLS, ported from the web
-  queries (`getTransactionSpaceContext`, `getCategoryHistory`, tags, and the
-  `space_member_directory` function for household names): no new `/api/mobile`
-  route. Each part loads and fails on its own (`loadDetailExtras`), so a failed
-  read removes only its own block, never the whole screen.
+  much, when), the Pay-again button, an attention banner, Duplicates, "Where this
+  came from", the detail rows, Category (with why, and history once there is
+  more than one change) and Tags. Splits and the household attribution panel are
+  not here yet; they stay on the web (the existing "Edit on the web" button).
+- Reads are plain queries under the signed-in user's RLS, ported from the web
+  queries (`getTransactionSpaceContext`, `getCategoryHistory`,
+  `getTransactionDuplicateContext`, tags, and the `space_member_directory`
+  function for household names): no new `/api/mobile` route. Each part loads and
+  fails on its own (`loadDetailExtras`), so a failed read removes only its own
+  block, never the whole screen.
+- **Tags are editable** (add, remove, one-tap suggestions from the Space). The
+  web does these as plain inserts and deletes with no MFA step, and the policies
+  enforce the `member` role, `created_by = auth.uid()` and a matching workspace,
+  so the app writes directly under RLS as well; the only server-side rule
+  (1-40 characters) is also a table check. The web's character rule uses a
+  Unicode property escape (`\p{L}`), which the app avoids (not verified on
+  Hermes), so ASCII symbols are rejected and accented letters pass; that is
+  slightly looser than the web for non-ASCII symbols.
+- **Duplicates are a trail, as on the web**: flagged ("Review it" opens the
+  Inbox, which shows both candidates side by side), merged away (opens the kept
+  transaction) and what was merged in (each opens its own). Merging or
+  dismissing stays in the Inbox, where the candidates are visible; the detail
+  screen never resolves one blind.
 - Household lines ("Paid by", "Added by", whose account) show real member names
   when the directory loads and fall back to "You" / "A member" like the web.
 

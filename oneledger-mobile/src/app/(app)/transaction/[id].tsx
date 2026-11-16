@@ -20,6 +20,8 @@ import {
   transactionTypeLabel,
 } from "@/features/transactions/display";
 import { loadDetailExtras } from "@/features/transactions/detail";
+import { DuplicatesCard } from "@/features/transactions/DuplicatesCard";
+import { TransactionTags } from "@/features/transactions/TransactionTags";
 import {
   attentionMessage,
   categoryReason,
@@ -87,7 +89,6 @@ export default function TransactionDetail() {
   const attention = attentionMessage(context?.allocationStatus);
   const latestReason = extras?.history[0]?.decision_reason ?? null;
   const history = extras?.history ?? [];
-  const tags = extras?.tags ?? [];
 
   return (
     <Screen>
@@ -131,6 +132,12 @@ export default function TransactionDetail() {
           </Text>
         </Card>
       ) : null}
+
+      <DuplicatesCard
+        context={extras?.duplicates ?? null}
+        onReview={() => router.push("/inbox")}
+        onOpen={(txnId) => router.push({ pathname: "/transaction/[id]", params: { id: txnId } })}
+      />
 
       {where.length > 0 ? (
         <Card style={{ gap: space[3] }}>
@@ -199,22 +206,15 @@ export default function TransactionDetail() {
         ) : null}
       </Card>
 
-      {tags.length > 0 ? (
-        <Card style={{ gap: space[2] }}>
-          <Text variant="caption" color="textMuted" accessibilityRole="header">
-            TAGS
-          </Text>
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space[2] }}>
-            {tags.map((tag) => (
-              <Badge key={tag} variant="neutral">
-                {tag}
-              </Badge>
-            ))}
-          </View>
-          <Text variant="caption" color="textMuted">
-            Free-form labels for your own filtering. Edit them on the web.
-          </Text>
-        </Card>
+      {context || (extras?.tags.length ?? 0) > 0 ? (
+        <TransactionTags
+          // A fresh editor per transaction (and per load), so edits never leak across.
+          key={`${transaction.id}:${extras ? "loaded" : "pending"}`}
+          transactionId={transaction.id}
+          workspaceId={context?.workspaceId ?? null}
+          initialTags={extras?.tags ?? []}
+          suggestions={extras?.tagSuggestions ?? []}
+        />
       ) : null}
 
       {config.apiBaseUrl ? (

@@ -15,6 +15,10 @@ jest.mock("@/features/transactions/queries", () => ({
 }));
 jest.mock("@/lib/config", () => ({ config: { apiBaseUrl: "https://app.example.test" } }));
 jest.mock("@/features/transactions/detail", () => ({ loadDetailExtras: (id: string) => mockExtras(id) }));
+jest.mock("@/features/transactions/tags", () => {
+  const actual = jest.requireActual("@/features/transactions/tags");
+  return { ...actual, addTag: jest.fn(), removeTag: jest.fn() };
+});
 jest.mock("@/features/pay/context", () => ({ loadPayAgainOffer: (t: unknown) => mockOffer(t) }));
 jest.mock("expo-linking", () => ({ openURL: (url: string) => mockOpenUrl(url) }));
 
@@ -37,7 +41,7 @@ const txn = (over: Partial<TransactionRow> = {}): TransactionRow => ({
   ...over,
 });
 
-const noExtras = { context: null, history: [], tags: [], members: [], selfUserId: null };
+const noExtras = { context: null, history: [], tags: [], tagSuggestions: [], duplicates: null, members: [], selfUserId: null };
 const context = (over: Record<string, unknown> = {}) => ({
   workspaceId: "w1",
   workspaceName: "Personal",
@@ -267,22 +271,100 @@ describe("Transaction detail screen", () => {
       expect(screen.getByText("Uncategorized → Food")).toBeTruthy();
     });
 
-    it("shows tags as labels, read-only", async () => {
+    it("shows tags as labels with an editor once the Space is known", async () => {
       mockGetTransaction.mockResolvedValue(txn());
-      mockExtras.mockResolvedValue({ ...noExtras, tags: ["work", "trip"] });
+      mockExtras.mockResolvedValue({ ...noExtras, context: context(), tags: ["work", "trip"] });
       await render(<TransactionDetail />);
       expect(await screen.findByText("TAGS")).toBeTruthy();
       expect(screen.getByText("work")).toBeTruthy();
       expect(screen.getByText("trip")).toBeTruthy();
-      expect(screen.getByText(/Edit them on the web/)).toBeTruthy();
+      expect(screen.getByLabelText("Add a tag")).toBeTruthy();
     });
 
-    it("shows no tags card when there are none", async () => {
+    it("shows read-only tags when the Space couldn't be read, with no editor", async () => {
+      mockGetTransaction.mockResolvedValue(txn());
+      mockExtras.mockResolvedValue({ ...noExtras, context: null, tags: ["work"] });
+      await render(<TransactionDetail />);
+      expect(await screen.findByText("work")).toBeTruthy();
+      expect(screen.queryByLabelText("Add a tag")).toBeNull();
+    });
+
+    it("offers an empty editor when there are no tags yet", async () => {
+      mockGetTransaction.mockResolvedValue(txn());
+      mockExtras.mockResolvedValue({ ...noExtras, context: context() });
+      await render(<TransactionDetail />);
+      expect(await screen.findByText("No tags yet.")).toBeTruthy();
+      expect(screen.getByLabelText("Add a tag")).toBeTruthy();
+    });
+
+    it("shows no tags card at all when there is nothing to show or edit", async () => {
       mockGetTransaction.mockResolvedValue(txn());
       mockExtras.mockResolvedValue(noExtras);
       await render(<TransactionDetail />);
       await screen.findByText("CATEGORY");
       expect(screen.queryByText("TAGS")).toBeNull();
+    });
+
+    describe("duplicates", () => {
+      const dup = (over: Record<string, unknown> = {}) => ({
+        dedupeState: "unique",
+        mergedInto: null,
+        mergedDuplicates: [],
+        ...over,
+      });
+
+      it("says nothing for an ordinary transaction", async () => {
+        mockGetTransaction.mockResolvedValue(txn());
+        mockExtras.mockResolvedValue({ ...noExtras, duplicates: dup() });
+        await render(<TransactionDetail />);
+        await screen.findByText("CATEGORY");
+        expect(screen.queryByText("DUPLICATES")).toBeNull();
+      });
+
+      it("flags a possible duplicate and sends you to the Inbox to resolve it", async () => {
+        mockGetTransaction.mockResolvedValue(txn());
+        mockExtras.mockResolvedValue({ ...noExtras, duplicates: dup({ dedupeState: "possible_duplicate" }) });
+        await render(<TransactionDetail />);
+
+        expect(await screen.findByText("This transaction is flagged as a possible duplicate.")).toBeTruthy();
+        await fireEvent.press(screen.getByText("Review it"));
+        expect(router.push).toHaveBeenCalledWith("/inbox");
+      });
+
+      it("explains a merged-away transaction and opens the one that was kept", async () => {
+        mockGetTransaction.mockResolvedValue(txn());
+        mockExtras.mockResolvedValue({
+          ...noExtras,
+          duplicates: dup({
+            dedupeState: "merged",
+            mergedInto: { id: "keep-1", occurredAt: "2026-11-14T10:00:00Z", counterparty: "Kigali Fresh" },
+          }),
+        });
+        await render(<TransactionDetail />);
+
+        expect(await screen.findByText(/no longer counted/)).toBeTruthy();
+        await fireEvent.press(screen.getByText("Open the kept transaction"));
+        expect(router.push).toHaveBeenCalledWith({ pathname: "/transaction/[id]", params: { id: "keep-1" } });
+      });
+
+      it("lists what was merged into this one, each opening its own transaction", async () => {
+        mockGetTransaction.mockResolvedValue(txn());
+        mockExtras.mockResolvedValue({
+          ...noExtras,
+          duplicates: dup({
+            mergedDuplicates: [
+              { id: "d1", occurredAt: "2026-11-14T10:00:00Z", counterparty: "Kigali Fresh", source: "statement" },
+              { id: "d2", occurredAt: "2026-11-14T10:05:00Z", counterparty: null, source: "manual" },
+            ],
+          }),
+        });
+        await render(<TransactionDetail />);
+
+        expect(await screen.findByText(/2 duplicates were merged into this transaction/)).toBeTruthy();
+        expect(screen.getByText("Imported statement · Nov 14, 12:00")).toBeTruthy();
+        await fireEvent.press(screen.getByLabelText("Open Kigali Fresh"));
+        expect(router.push).toHaveBeenCalledWith({ pathname: "/transaction/[id]", params: { id: "d1" } });
+      });
     });
 
     it("still shows everything that loaded when the extras couldn't", async () => {
