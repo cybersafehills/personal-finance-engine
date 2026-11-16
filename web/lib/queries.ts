@@ -1,6 +1,7 @@
 import "server-only";
 import { cookies } from "next/headers";
 import { supabaseSession } from "./supabase-session-server";
+import { mobileRequestedWorkspaceId } from "./mobile-session-context";
 import { kigaliDateKey, kigaliDayBoundsUtc } from "./kigali-time";
 import {
   aggregateOutflowsByAllocation,
@@ -880,7 +881,10 @@ export async function getCategorySuggestions(): Promise<string[]> {
 export async function getActiveWorkspaceId(): Promise<string | null> {
   const cookieStore = await cookies();
   const supabase = await supabaseSession();
-  const requestedId = cookieStore.get("active_workspace_id")?.value;
+  // The web sends a cookie; the mobile app (no cookie) sends X-Workspace-Id.
+  // Either way it is only a request: membership is checked below.
+  const requestedId = cookieStore.get("active_workspace_id")?.value ??
+    mobileRequestedWorkspaceId() ?? undefined;
 
   if (requestedId) {
     const { data } = await supabase
