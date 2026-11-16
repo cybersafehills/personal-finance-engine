@@ -115,16 +115,26 @@ The app's data layer and design tokens already mirror the web
      stored in `mobile-session-context.ts`, and honoured by
      `getActiveWorkspaceId()` when no cookie exists (same membership check, same
      personal fallback). Never trust the header without the membership check.
-   - app: `ActiveSpaceProvider` (persisted choice, SecureStore/AsyncStorage per
-     AGENTS.md), `GET` the Space list from `workspace_memberships` joined to
-     `workspaces` (name, kind: personal / household / organization), and a
-     **workspace filter on every direct Supabase query** in
-     `src/features/*/queries.ts` (today they have none and rely on RLS across all
-     memberships, which mixes Spaces once the user is in several; confirm against
-     the web's per-query workspace filtering before choosing `.eq("workspace_id", …)`).
+   - app: `ActiveSpaceProvider` (choice stored per user id, cleared on sign-out,
+     validated against memberships with a Personal fallback), the Space list from
+     `workspace_memberships` joined to `workspaces` (name, kind), and the header sent
+     on every `/api/mobile/*` request (not on direct Supabase reads).
+   - **DO NOT add `workspace_id` filters to the transaction, balance, budget or
+     statement list queries.** The web deliberately has none (`web/lib/queries.ts`
+     lines 24-35: RLS is the boundary; a manual filter would mask RLS bugs), and the
+     design doc says switching "just sets the cookie". So Home and Transactions look
+     the same in every Space, exactly as on the web. What follows the active Space
+     is only what the web's `getActiveWorkspaceId()` callers use: category mappings,
+     categorization policies, duplicate review, learned suggestions, default
+     currency, report preferences, the household spending card, and the server
+     read models behind `/api/mobile/*` (Inbox, config, ...). Port a query to the
+     active Space only if the web scopes it that way.
+   - Another session's PR (#211) uses an explicit per-request `workspace_id`
+     parameter on new mobile endpoints (member of the workspace, else 404). Keep both
+     compatible: the header sets the default, an explicit parameter wins.
    - switcher UI as in the profile menu: Personal, households, organizations with
      kind tags, "Create a Space" (native create form; see step 10).
-   - invalidate every cached query on switch; re-register push per Space if needed.
+   - reload data on switch through the query hook (not by remounting the navigator).
    - Household-only surfaces appear when the active Space is a household: Home
      Space-spending card, attribution on detail, Review queue attributions.
    - This changes the data contract of every step: do it as **Step 1b, right
