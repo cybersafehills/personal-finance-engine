@@ -1,5 +1,7 @@
 import { useFocusEffect } from "expo-router";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+import { useActiveSpace } from "@/features/spaces/ActiveSpaceProvider";
 
 export type QueryState<T> = {
   data: T | null;
@@ -50,6 +52,15 @@ export function useQuery<T>(load: () => Promise<T>): QueryState<T> {
       run(false);
     }, [run]),
   );
+
+  // Switching Space reloads (the focus effect above only fires on focus).
+  const { activeId } = useActiveSpace();
+  const lastSpace = useRef(activeId);
+  useEffect(() => {
+    if (lastSpace.current === activeId) return;
+    lastSpace.current = activeId;
+    run(false);
+  }, [activeId, run]);
 
   const refresh = useCallback(() => {
     run(true);

@@ -1,5 +1,7 @@
 import { supabase } from "@/api/supabase";
 import { config } from "@/lib/config";
+import { getRequestedWorkspace } from "@/features/spaces/request-space";
+import { echoMatches } from "@/features/spaces/spaces";
 
 // GET helper for the web app's bearer-authenticated, read-only /api/mobile
 // endpoints (inbox, budgets). Sends the user's own Supabase access token; the
@@ -10,6 +12,8 @@ export type BearerResponse =
   /** No session, no API base configured, or the network failed. */
   | { kind: "no_session" }
   | { kind: "unconfigured" }
+  /** The server did not confirm the requested Space (older server, or access revoked). */
+  | { kind: "space_unsupported" }
   | { kind: "network" };
 
 export async function bearerGet(path: string): Promise<BearerResponse> {
@@ -17,11 +21,16 @@ export async function bearerGet(path: string): Promise<BearerResponse> {
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
   if (!token) return { kind: "no_session" };
+  // Personal (the server default) sends no header.
+  const workspaceId = getRequestedWorkspace();
 
   let response: Response;
   try {
     response = await fetch(`${config.apiBaseUrl}${path}`, {
-      headers: { authorization: `Bearer ${token}` },
+      headers: {
+        authorization: `Bearer ${token}`,
+        ...(workspaceId ? { "x-workspace-id": workspaceId } : {}),
+      },
     });
   } catch {
     return { kind: "network" };
@@ -31,6 +40,9 @@ export async function bearerGet(path: string): Promise<BearerResponse> {
     body = await response.json();
   } catch {
     // Non-JSON error page; the status alone decides.
+  }
+  if (response.status === 200 && !echoMatches(workspaceId, body)) {
+    return { kind: "space_unsupported" };
   }
   return { kind: "response", status: response.status, body };
 }
@@ -69,6 +81,11 @@ export function failureForOutcome(
       return { reason: "unavailable", message: `${what} isn't available yet.` };
     case "no_session":
       return { reason: "unauthorized", message: "Please sign in again." };
+    case "space_unsupported":
+      return {
+        reason: "unavailable",
+        message: `${what} can't be shown for this Space yet.`,
+      };
     case "network":
       return {
         reason: "error",
