@@ -166,10 +166,18 @@ plus the USSD instruction to hand off with.
   code, and the idempotent, membership-checked `create_payment_intent` RPC.
   On top of that this route checks the assisted-pay gate and that any
   `sourceAccountId` belongs to the workspace (the RPC does not).
-- **Body:** `{ paymentType: pay_person | buy_airtime | pay_merchant | pay_bill,
-  amountMinor, idempotencyKey (UUID, required), recipientMsisdn | merchantCode |
-  billingReference (whichever the type needs), recipientName?, sourceAccountId? }`.
-  Nothing else is read (no note, category, budget or trusted-recipient ids).
+- **Body:** `{ paymentType: pay_person | pay_merchant, amountMinor,
+  idempotencyKey (UUID, required), recipientMsisdn (person) | merchantCode
+  (merchant), recipientName?, sourceAccountId (required for a merchant) }`.
+  Nothing else is read (no note, category, budget, provider or
+  trusted-recipient ids). Only these two types have a genuine verified USSD
+  route: airtime is deliberately not offered (the directory resolves
+  `buy_airtime` to the *send-money* code, which would transfer money rather than
+  buy airtime) and bill payments have no route yet.
+- **Which network to dial:** a person payment uses the recipient's number; a
+  merchant has no number, so the **paying account's own network** decides. It is
+  read from the account row server-side (`providerNetworkForAccount`), never from
+  the client, exactly the fallback the web form applies in the browser.
 - **Double taps:** the client generates `idempotencyKey` once per attempt; the
   same key returns the same intent with `existed: true`.
 - **Session freshness:** recorded on the intent from the access token's `iat`,
@@ -195,7 +203,23 @@ A payment intent with its prepared instruction, for the review screen.
   The full phone number appears only inside the instruction, never as a field.
 - The instruction is built by `lib/pay/instruction.ts`, the same function the
   web review panel uses (extracted from it), so the two cannot disagree.
-- Recording the handoff (dialled / copied) is not here yet.
+
+## `POST /api/mobile/pay/intents/:id/handoff`
+
+Record that the user opened the dialer or copied the code. Moves the intent
+`draft -> initiated -> awaiting_verification` so the payment SMS can later be
+matched to it; without this an app-created intent would stay a draft forever.
+A navigation event, never a claim the payment succeeded.
+
+- **Body:** `{ method: "dialer", outcome: "dialer_opened" | "dialer_unsupported" }`
+  or `{ method: "copy", outcome: "copied" | "fallback_shown" }`. `qr` is not
+  accepted from the app, and an outcome that doesn't fit the method is refused.
+- `200 { ok: true, intent }` (the refreshed intent), `404 not_found` (unknown id,
+  or one in a workspace the user is not in; the first database call is checked so
+  this is reported), `422 invalid_request`, `403 feature_disabled`, plus the
+  guard's usual codes. Same guard as the create route (own rate-limit bucket).
+- Shares `lib/pay/handoff.ts` with the web action (the optional SMS-reconciliation
+  step uses the service role there; the web's behaviour is unchanged).
 
 ## Rollout
 

@@ -5,7 +5,12 @@ import { getServiceCodeForPayment } from "../ussd/queries";
 import { type ParamSpec, redactUssdForAnalytics } from "../ussd/capability";
 import { supabaseSession } from "../supabase-session-server";
 import { paymentIntentTtlHours } from "./gate";
-import { guessProvider, maskMsisdn, normalizeRwandaMsisdn } from "./phone";
+import {
+  guessProvider,
+  maskMsisdn,
+  normalizeRwandaMsisdn,
+  providerNetworkForAccount,
+} from "./phone";
 
 // Creating a draft payment intent, shared by the web server action
 // (app/pay/assisted-actions.ts, which adds the cookie MFA step-up, the feature
@@ -79,8 +84,15 @@ export async function createPaymentIntent(args: {
   input: DraftInput;
   /** Advisory "recent sign-in" signal recorded on the intent. */
   sessionFresh: boolean;
+  /**
+   * The paying account's `provider` (e.g. `mtn_momo`), read server-side. A
+   * merchant / bill payment has no recipient number to guess a network from, so
+   * the account's own network (the SIM the USSD is dialled on) is the fallback,
+   * exactly as the web form does in the browser.
+   */
+  accountProvider?: string | null;
 }): Promise<PayIntentResult> {
-  const { supabase, workspaceId, input, sessionFresh } = args;
+  const { supabase, workspaceId, input, sessionFresh, accountProvider } = args;
   if (!isPaymentType(input.paymentType)) {
     return { ok: false, error: "Unknown payment type." };
   }
@@ -99,7 +111,7 @@ export async function createPaymentIntent(args: {
   }
 
   const providerGuess = input.provider ?? guessProvider(norm.normalized) ??
-    null;
+    providerNetworkForAccount(accountProvider) ?? null;
 
   // Give the intent a real USSD template to hand off with, resolved
   // from the published directory (never a hard-coded string). Only the

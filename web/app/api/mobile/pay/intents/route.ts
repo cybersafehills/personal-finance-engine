@@ -20,7 +20,7 @@ import { supabaseSession } from "../../../../../lib/supabase-session-server";
 // It shares lib/pay/create-intent.ts with the web server action, so validation,
 // the directory service code and the idempotent create_payment_intent RPC
 // (membership-checked, deduped on (workspace, idempotency_key)) are one code
-// path. On top of the shared bearer guard (flag, rate limit, token validated,
+// path. The paying account's network comes from its own row. On top of the shared bearer guard (flag, rate limit, token validated,
 // second factor complete = the web's MFA step-up) this checks the assisted-pay
 // gate and that any source account belongs to the workspace, which the RPC does
 // not. The client sends a request id, so a double tap returns the same intent.
@@ -46,16 +46,20 @@ export function POST(request: NextRequest) {
     const supabase = await supabaseSession();
 
     // The RPC only checks workspace membership, so make sure the paying
-    // account is one of this workspace's own.
+    // account is one of this workspace's own - and read its network from the
+    // row, never from the client: a merchant payment has no phone number to say
+    // which network's USSD to dial, so the paying account's own network decides.
+    let accountProvider: string | null = null;
     if (req.sourceAccountId) {
       const { data } = await supabase
         .from("accounts")
-        .select("id")
+        .select("id, provider")
         .eq("id", req.sourceAccountId)
         .eq("workspace_id", workspaceId)
         .eq("is_active", true)
         .maybeSingle();
       if (!data) throw new MobileApiError(422, "invalid_account", "That account isn't available.");
+      accountProvider = (data as { provider: string | null }).provider;
     }
 
     const created = await createPaymentIntent({
@@ -67,10 +71,10 @@ export function POST(request: NextRequest) {
         recipientName: req.recipientName,
         recipientMsisdn: req.recipientMsisdn,
         merchantCode: req.merchantCode,
-        billingReference: req.billingReference,
         sourceAccountId: req.sourceAccountId,
         idempotencyKey: req.idempotencyKey,
       },
+      accountProvider,
       sessionFresh: mobileSessionFresh(token, paymentSessionFreshnessMinutes()),
     });
     if (!created.ok) throw new MobileApiError(422, "could_not_prepare", created.error);
