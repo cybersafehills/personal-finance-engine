@@ -195,3 +195,14 @@ textarea {
  * logo that had already finished animating before it painted. Keeping the
  * rules inline guarantees they apply on the first frame.
  */
+
+/* Payment result mark (components/pay/PaymentResultStatus.tsx): a circle that
+   spins while we wait, then draws itself into a tick (sent) or an X (failed).
+   The global reduced-motion rule above collapses these to their end state. */
+@keyframes pay-spin { to { transform: rotate(360deg); } }
+@keyframes pay-draw { to { stroke-dashoffset: 0; } }
+@keyframes pay-pop { 0% { transform: scale(.85); } 60% { transform: scale(1.06); } 100% { transform: scale(1); } }
+.pay-mark-spin { transform-origin: 50% 50%; animation: pay-spin 1.1s linear infinite; }
+.pay-mark-ring { stroke-dasharray: 189; stroke-dashoffset: 189; animation: pay-draw .55s ease-out forwards; }
+.pay-mark-glyph { stroke-dasharray: 60; stroke-dashoffset: 60; animation: pay-draw .4s .45s ease-out forwards; }
+.pay-mark-pop { transform-origin: 50% 50%; animation: pay-pop .5s ease-out; }

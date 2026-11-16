@@ -45,6 +45,7 @@ export function LiveDataSync({ workspaceId }: { workspaceId: string | null }) {
     const supabase = supabaseBrowser();
     const channel = supabase.channel(`live-data-sync:${workspaceId}`);
     let cancelled = false;
+    let fallbackPoll: ReturnType<typeof setInterval> | null = null;
 
     const scheduleRefresh = (payload: unknown) => {
       // eslint-disable-next-line no-console
@@ -70,17 +71,48 @@ export function LiveDataSync({ workspaceId }: { workspaceId: string | null }) {
     // silently yields a channel that never receives events instead of an
     // error, since RLS just sees an unauthenticated request and drops
     // everything. Waiting for the session first avoids that race.
+    // Silent-stall guards. (1) The realtime socket authorizes with the JWT it
+    // was given; when Supabase rotates it (hourly) a stale token makes the
+    // channel quietly stop delivering. Push every new token through.
+    // (2) Backgrounded/sleeping tabs drop the websocket and miss events, so
+    // catch up with a refresh whenever the tab becomes visible again.
+    const { data: authSub } = supabase.auth.onAuthStateChange((_evt, session) => {
+      if (session?.access_token) supabase.realtime.setAuth(session.access_token);
+    });
+    const onVisible = () => {
+      if (document.visibilityState === "visible") scheduleRefresh("visibility");
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("online", onVisible);
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (cancelled) return;
       if (session) supabase.realtime.setAuth(session.access_token);
       channel.subscribe((status, err) => {
         // eslint-disable-next-line no-console
         console.debug("[LiveDataSync] channel status:", status, err ?? "");
+        // On a dropped/errored channel, fall back to polling until the
+        // client's own reconnect restores SUBSCRIBED.
+        if (status === "SUBSCRIBED") {
+          if (fallbackPoll) clearInterval(fallbackPoll);
+          fallbackPoll = null;
+        } else if (
+          (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") &&
+          !fallbackPoll && !cancelled
+        ) {
+          fallbackPoll = setInterval(() => {
+            if (document.visibilityState === "visible") router.refresh();
+          }, 15000);
+        }
       });
     });
 
     return () => {
       cancelled = true;
+      if (fallbackPoll) clearInterval(fallbackPoll);
+      authSub.subscription.unsubscribe();
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("online", onVisible);
       if (refreshTimeout.current) clearTimeout(refreshTimeout.current);
       supabase.removeChannel(channel);
     };

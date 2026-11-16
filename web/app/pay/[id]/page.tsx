@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
 import { PageHeader } from "../../../components/PageHeader";
 import { EmptyState } from "../../../components/EmptyState";
+import { ussdAmountMajor } from "../../../lib/pay/instruction";
+import { PaymentResultStatus } from "../../../components/pay/PaymentResultStatus";
 import { PaymentIntentPanel } from "../../../components/pay/PaymentIntentPanel";
 import { getAccounts, getActiveWorkspaceId, getBudgets } from "../../../lib/queries";
 import { isPaymentIntentSurfaceEnabled } from "../../../lib/pay/gate";
@@ -42,14 +44,23 @@ export default async function PaymentIntentPage({
     !intent.linked_transaction_id &&
     ["initiated", "awaiting_verification", "requires_reconciliation"].includes(intent.state);
 
+  // Secondary lookups only decorate the page. A failure in any of them must
+  // not take down the whole screen right after a payment succeeded.
+  const soft = <T,>(p: Promise<T>, fallback: T): Promise<T> =>
+    p.catch((err) => {
+      console.error("pay/[id] secondary fetch failed:", err);
+      return fallback;
+    });
   const [accounts, budgets, recipients, serviceCode, sessionFresh, unlinkedTransactions] =
     await Promise.all([
-      getAccounts(),
-      getBudgets(),
-      getTrustedRecipients(),
-      intent.service_code_id ? getServiceCodeById(intent.service_code_id) : Promise.resolve(null),
-      isSessionFresh(),
-      needsLinkPicker ? getUnlinkedRecentTransactions(id) : Promise.resolve([]),
+      soft(getAccounts(), []),
+      soft(getBudgets(), []),
+      soft(getTrustedRecipients(), []),
+      intent.service_code_id
+        ? soft(getServiceCodeById(intent.service_code_id), null)
+        : Promise.resolve(null),
+      soft(isSessionFresh(), false),
+      needsLinkPicker ? soft(getUnlinkedRecentTransactions(id), []) : Promise.resolve([]),
     ]);
 
   const sourceAccountName =
@@ -64,6 +75,15 @@ export default async function PaymentIntentPage({
         backHref="/pay/activity"
         backLabel={messages().pay.assisted.activityTitle}
       />
+
+      <div className="mb-5">
+        <PaymentResultStatus
+          state={intent.state}
+          verified={!!intent.verified_at}
+          amountLabel={`${ussdAmountMajor(intent).toLocaleString()} ${intent.currency}`}
+          recipient={intent.recipient_name}
+        />
+      </div>
 
       <PaymentIntentPanel
         intent={intent}

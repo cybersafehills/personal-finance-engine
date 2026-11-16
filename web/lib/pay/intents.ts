@@ -136,21 +136,30 @@ export async function getPaymentIntent(id: string): Promise<
   | null
 > {
   const supabase = await supabaseSession();
-  const { data, error } = await supabase
-    .from("payment_intents")
-    .select(
-      `${INTENT_COLUMNS},
+  const fetchOnce = () =>
+    supabase
+      .from("payment_intents")
+      .select(
+        `${INTENT_COLUMNS},
        events:payment_events(id, event_type, from_state, to_state, actor_type, reason, created_at),
        attempts:payment_attempts(id, attempt_no, handoff_method, capability_outcome, started_at),
        reconciliations:payment_reconciliations(id, transaction_id, match_method, status, applied_at, matched_on, rejected_reason, created_at)`,
-    )
-    .eq("id", id)
-    .maybeSingle();
+      )
+      .eq("id", id)
+      .maybeSingle();
 
-  if (error || !data) {
-    if (error) console.error("getPaymentIntent failed:", error.message);
-    return null;
+  let { data, error } = await fetchOnce();
+  if (error) {
+    // A transient failure (token refresh racing a live refresh, a dropped
+    // connection) must not masquerade as "page not found" for a payment that
+    // exists. Retry once, then THROW so the route's error boundary retries
+    // instead of 404ing a successful payment.
+    console.error("getPaymentIntent failed, retrying:", error.message);
+    await new Promise((r) => setTimeout(r, 250));
+    ({ data, error } = await fetchOnce());
+    if (error) throw new Error(`getPaymentIntent failed: ${error.message}`);
   }
+  if (!data) return null;
   const row = data as Record<string, unknown>;
   const events = ((row.events as PaymentEventRow[]) ?? []).sort(
     (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
