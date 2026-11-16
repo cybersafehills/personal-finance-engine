@@ -21,6 +21,8 @@ const ctx = (over: Partial<TransactionContext> = {}): TransactionContext => ({
   ingestionConnectionLabel: "My phone",
   allocationStatus: "allocated",
   categorySource: "rule",
+  attributionType: null,
+  attributedUserId: null,
   ...over,
 });
 const members = [
@@ -51,7 +53,7 @@ describe("directionLabel / attentionMessage", () => {
   it("only speaks up when something is unsettled", () => {
     expect(attentionMessage("allocated")).toBeNull();
     expect(attentionMessage(null)).toBeNull();
-    expect(attentionMessage("needs_attribution")).toMatch(/needs an attribution/);
+    expect(attentionMessage("needs_attribution")).toBe("This household transaction needs an attribution. Say whose spending it was below.");
     expect(attentionMessage("needs_space")).toMatch(/Space couldn't be determined/);
   });
 });

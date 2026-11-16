@@ -14,6 +14,8 @@ jest.mock("@/api/supabase", () => ({
       chain.eq = () => chain;
       chain.order = () => result();
       chain.maybeSingle = () => result();
+      // Awaited directly (no order/limit), like the split-rows read.
+      chain.then = (resolve: (v: unknown) => unknown) => result().then(resolve);
       return chain;
     },
     rpc: () => Promise.resolve(mockRpcResult),
@@ -27,6 +29,8 @@ const contextRow = (kind: string) => ({
   record_created_by_user_id: "me",
   allocation_status: "allocated",
   category_source: "rule",
+  attribution_type: null as string | null,
+  attributed_user_id: null as string | null,
   workspaces: { name: "Home", kind },
   financial_sources: [{ display_name: "MTN", provider: "mtn_momo", masked_identifier: "•••• 1", owner_user_id: "me" }],
   ingestion_connections: { label: "My phone" },
@@ -84,5 +88,48 @@ describe("loadDetailExtras", () => {
     const extras = await loadDetailExtras("t1");
     expect(extras.context).toBeNull();
     expect(extras.tags).toEqual(["work", "trip"]);
+  });
+
+  describe("attribution (household only)", () => {
+    const household = (type: string | null, userId: string | null = null) => ({
+      data: { ...contextRow("household"), attribution_type: type, attributed_user_id: userId },
+      error: null,
+    });
+
+    it("a split reads its rows", async () => {
+      mockTables.transactions = household("split");
+      mockTables.transaction_member_attributions = {
+        data: [{ user_id: "me", share_bps: 6000 }, { user_id: "amy", share_bps: 4000 }],
+        error: null,
+      };
+      const extras = await loadDetailExtras("t1");
+      expect(extras.attribution).toEqual({
+        type: "split",
+        attributedUserId: null,
+        splits: [{ userId: "me", shareBps: 6000 }, { userId: "amy", shareBps: 4000 }],
+      });
+    });
+
+    it("a member attribution carries who, and reads no split rows", async () => {
+      mockTables.transactions = household("member", "amy");
+      mockTables.transaction_member_attributions = { data: null, error: { message: "must not be read" } };
+      expect((await loadDetailExtras("t1")).attribution).toEqual({ type: "member", attributedUserId: "amy", splits: [] });
+    });
+
+    it("an undecided transaction has a null type", async () => {
+      mockTables.transactions = household(null);
+      expect((await loadDetailExtras("t1")).attribution).toEqual({ type: null, attributedUserId: null, splits: [] });
+    });
+
+    it("has no panel (null) when a split's rows can't be read, rather than a false 'not decided yet'", async () => {
+      mockTables.transactions = household("split");
+      mockTables.transaction_member_attributions = { data: null, error: { message: "denied" } };
+      expect((await loadDetailExtras("t1")).attribution).toBeNull();
+    });
+
+    it("has no attribution at all for a personal transaction", async () => {
+      mockTables.transactions = { data: { ...contextRow("personal"), attribution_type: "shared" }, error: null };
+      expect((await loadDetailExtras("t1")).attribution).toBeNull();
+    });
   });
 });

@@ -308,8 +308,7 @@ not a reason to keep the whole app native.
 - The detail screen follows the web page's block order: a centred hero (who, how
   much, when), the Pay-again button, an attention banner, Duplicates, "Where this
   came from", the detail rows, Category (with why, and history once there is
-  more than one change) and Tags. Splits and the household attribution panel are
-  not here yet; they stay on the web (the existing "Edit on the web" button).
+  more than one change) and Tags. Budget-allocation splits are not here yet; they stay on the web (the existing "Edit on the web" button).
 - Reads are plain queries under the signed-in user's RLS, ported from the web
   queries (`getTransactionSpaceContext`, `getCategoryHistory`,
   `getTransactionDuplicateContext`, tags, and the `space_member_directory`
@@ -332,6 +331,21 @@ not a reason to keep the whole app native.
   caller may not make is not an error, it removes nothing (a household viewer
   can see tags but not delete them), so zero rows is checked against the tag
   still existing before the chip is dropped.
+- **Household attribution ("Whose spending")** is editable for a household
+  transaction: shared, one member, a percentage split, or not sure yet. The web
+  action is a thin wrapper over the `set_transaction_attribution` database
+  function (no MFA step; it only adds an analytics event and revalidation), and
+  that function enforces household-only, source visibility, the
+  `transaction.categorize` capability, active members and the 10000-basis-point
+  total, so the app calls it directly under RLS like tags and category changes. It
+  changes how an expense is *counted* in household reports; no money moves. A
+  split is edited as one percentage box per member (so a member cannot appear
+  twice) and totalled in whole basis points (summing percentages as floats makes
+  three equal thirds miss 100). The database's own refusals are plain sentences
+  raised with `raise exception` (`P0001`) and shown as they are; any other error
+  gets a generic message. If a split's rows cannot be read there is no panel
+  rather than a false "Not decided yet". The web's analytics event
+  (`transaction_attributed`) is not sent from the app.
 - Household lines ("Paid by", "Added by", whose account) show real member names
   when the directory loads and fall back to "You" / "A member" like the web.
 

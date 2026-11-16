@@ -1,5 +1,6 @@
 import { supabase } from "@/api/supabase";
 
+import { type Attribution, getMemberSplits } from "./attribution";
 import { getDuplicateContext, type DuplicateContext } from "./duplicates";
 import { listWorkspaceTags } from "./tags";
 import type {
@@ -28,6 +29,8 @@ type ContextRow = {
   record_created_by_user_id: string | null;
   allocation_status: AllocationStatus;
   category_source: string | null;
+  attribution_type: TransactionContext["attributionType"];
+  attributed_user_id: string | null;
   workspaces: { name: string; kind: WorkspaceKind } | { name: string; kind: WorkspaceKind }[] | null;
   financial_sources:
     | { display_name: string; provider: string; masked_identifier: string | null; owner_user_id: string }
@@ -42,7 +45,7 @@ export async function getTransactionContext(id: string): Promise<TransactionCont
   const { data, error } = await client()
     .from("transactions")
     .select(
-      "workspace_id, performed_by_user_id, record_created_by_user_id, allocation_status, category_source, workspaces(name, kind), financial_sources(display_name, provider, masked_identifier, owner_user_id), ingestion_connections(label)",
+      "workspace_id, performed_by_user_id, record_created_by_user_id, allocation_status, category_source, attribution_type, attributed_user_id, workspaces(name, kind), financial_sources(display_name, provider, masked_identifier, owner_user_id), ingestion_connections(label)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -63,6 +66,8 @@ export async function getTransactionContext(id: string): Promise<TransactionCont
     ingestionConnectionLabel: one(row.ingestion_connections)?.label ?? null,
     allocationStatus: row.allocation_status,
     categorySource: row.category_source,
+    attributionType: row.attribution_type,
+    attributedUserId: row.attributed_user_id,
   };
 }
 
@@ -110,6 +115,12 @@ export type DetailExtras = {
   duplicates: DuplicateContext | null;
   members: Member[];
   selfUserId: string | null;
+  /**
+   * Whose spending a HOUSEHOLD transaction is. null when it isn't a household
+   * transaction, or when a split's rows couldn't be read (showing "Not decided
+   * yet" over a split we failed to load would be false, so there is no panel).
+   */
+  attribution: Attribution | null;
 };
 
 const settled = async <T,>(work: () => Promise<T>, fallback: T): Promise<T> => {
@@ -136,5 +147,14 @@ export async function loadDetailExtras(id: string): Promise<DetailExtras> {
     household && context ? settled(() => getSpaceMembers(context.workspaceId), []) : Promise.resolve([]),
     household ? settled(() => getSelfUserId(), null) : Promise.resolve(null),
   ]);
-  return { context, history, tags, tagSuggestions, duplicates, members, selfUserId };
+
+  let attribution: Attribution | null = null;
+  if (household && context) {
+    const splits = context.attributionType === "split" ? await settled(() => getMemberSplits(id), null) : [];
+    if (splits !== null) {
+      attribution = { type: context.attributionType, attributedUserId: context.attributedUserId, splits };
+    }
+  }
+
+  return { context, history, tags, tagSuggestions, duplicates, members, selfUserId, attribution };
 }

@@ -21,6 +21,8 @@ type ActiveSpaceValue = {
   /** Changes with every switch; data hooks reload when it does. */
   activeId: string | null;
   setActive(id: string): void;
+  /** After creating a Space: reload the list and switch to it. */
+  activateCreated(id: string): Promise<void>;
 };
 
 const Context = createContext<ActiveSpaceValue>({
@@ -28,6 +30,7 @@ const Context = createContext<ActiveSpaceValue>({
   active: null,
   activeId: null,
   setActive: () => {},
+  activateCreated: async () => {},
 });
 
 /**
@@ -91,9 +94,27 @@ export function ActiveSpaceProvider({ children }: { children: ReactNode }) {
     [spaces, userId],
   );
 
+  const activateCreated = useCallback(
+    async (id: string) => {
+      if (!userId) return;
+      // The new Space is not in the list yet: read it, then switch to it. If
+      // the read fails the Space still exists; it shows up on the next load.
+      try {
+        const list = await getSpaces();
+        const next = list.find((s) => s.id === id) ?? resolveActiveSpace(list, null);
+        void deviceStore.set(storageKey(userId), next?.id ?? id);
+        setRequestedWorkspace(requestedWorkspaceId(next));
+        setLoaded({ userId, spaces: list, active: next });
+      } catch {
+        // Keep the current Space; nothing was lost.
+      }
+    },
+    [userId],
+  );
+
   const value = useMemo(
-    () => ({ spaces, active, activeId: active?.id ?? null, setActive }),
-    [spaces, active, setActive],
+    () => ({ spaces, active, activeId: active?.id ?? null, setActive, activateCreated }),
+    [spaces, active, setActive, activateCreated],
   );
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react-native";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react-native";
 
 import TransactionDetail from "@/app/(app)/transaction/[id]";
 import type { TransactionRow } from "@/features/transactions/queries";
@@ -9,6 +9,7 @@ const mockOpenUrl = jest.fn();
 const mockOffer = jest.fn();
 const mockExtras = jest.fn();
 const mockActive = jest.fn();
+const mockSetAttribution = jest.fn();
 
 jest.mock("expo-router", () => jest.requireActual("@/test/router-mock"));
 jest.mock("@/features/transactions/queries", () => ({
@@ -22,6 +23,10 @@ jest.mock("@/features/spaces/ActiveSpaceProvider", () => ({
     return { spaces: [], active, activeId: active?.id ?? null, setActive: () => {} };
   },
 }));
+jest.mock("@/features/transactions/attribution", () => {
+  const actual = jest.requireActual("@/features/transactions/attribution");
+  return { ...actual, setAttribution: (...args: unknown[]) => mockSetAttribution(...args) };
+});
 jest.mock("@/features/transactions/tags", () => {
   const actual = jest.requireActual("@/features/transactions/tags");
   return { ...actual, addTag: jest.fn(), removeTag: jest.fn() };
@@ -48,7 +53,7 @@ const txn = (over: Partial<TransactionRow> = {}): TransactionRow => ({
   ...over,
 });
 
-const noExtras = { context: null, history: [], tags: [], tagSuggestions: [], duplicates: null, members: [], selfUserId: null };
+const noExtras = { context: null, history: [], tags: [], tagSuggestions: [], duplicates: null, members: [], selfUserId: null, attribution: null };
 const context = (over: Record<string, unknown> = {}) => ({
   workspaceId: "w1",
   workspaceName: "Personal",
@@ -62,6 +67,8 @@ const context = (over: Record<string, unknown> = {}) => ({
   ingestionConnectionLabel: "My phone",
   allocationStatus: "allocated",
   categorySource: "rule",
+  attributionType: null,
+  attributedUserId: null,
   ...over,
 });
 const entry = (id: string, prev: string | null, next: string | null, actor = "user") => ({
@@ -84,6 +91,7 @@ beforeEach(() => {
   mockExtras.mockResolvedValue(noExtras); // no extra blocks unless a test says so
   mockActive.mockReset();
   mockActive.mockReturnValue(null); // no active Space loaded: the server default (Personal)
+  mockSetAttribution.mockReset();
 });
 
 describe("Transaction detail screen", () => {
@@ -467,6 +475,66 @@ describe("Transaction detail screen", () => {
       withContext({ workspaceId: "p1", workspaceKind: "personal" });
       await render(<TransactionDetail />);
       expect(await screen.findByText("Review it")).toBeTruthy();
+    });
+  });
+
+  describe("household attribution", () => {
+    const members = [{ userId: "me", displayName: "Yves" }, { userId: "amy", displayName: "Amy" }];
+    const undecided = { type: null, attributedUserId: null, splits: [] };
+    const household = (over: Record<string, unknown> = {}) => context({ workspaceKind: "household", workspaceName: "Home", ...over });
+
+    it("shows 'whose spending' for a household transaction", async () => {
+      mockGetTransaction.mockResolvedValue(txn());
+      mockExtras.mockResolvedValue({ ...noExtras, context: household(), members, selfUserId: "me", attribution: undecided });
+      await render(<TransactionDetail />);
+
+      expect(await screen.findByText("WHOSE SPENDING")).toBeTruthy();
+      expect(screen.getByText("Not decided yet")).toBeTruthy();
+      expect(screen.getByText("Needs attribution")).toBeTruthy();
+    });
+
+    it("shows nothing about it for a personal transaction", async () => {
+      mockGetTransaction.mockResolvedValue(txn());
+      mockExtras.mockResolvedValue({ ...noExtras, context: context(), attribution: null });
+      await render(<TransactionDetail />);
+      await screen.findByText("CATEGORY");
+      expect(screen.queryByText("WHOSE SPENDING")).toBeNull();
+    });
+
+    it("shows no panel when the current decision couldn't be read (rather than a false 'not decided')", async () => {
+      mockGetTransaction.mockResolvedValue(txn());
+      mockExtras.mockResolvedValue({ ...noExtras, context: household(), members, selfUserId: "me", attribution: null });
+      await render(<TransactionDetail />);
+      await screen.findByText("CATEGORY");
+      expect(screen.queryByText("WHOSE SPENDING")).toBeNull();
+    });
+
+    it("saving a decision reloads the page, so the 'needs an attribution' banner goes away", async () => {
+      mockGetTransaction.mockResolvedValue(txn());
+      mockSetAttribution.mockResolvedValue({ type: "shared", attributedUserId: null, splits: [] });
+      mockExtras.mockResolvedValueOnce({
+        ...noExtras,
+        context: household({ allocationStatus: "needs_attribution" }),
+        members,
+        selfUserId: "me",
+        attribution: undecided,
+      });
+      mockExtras.mockResolvedValue({
+        ...noExtras,
+        context: household({ allocationStatus: "allocated", attributionType: "shared" }),
+        members,
+        selfUserId: "me",
+        attribution: { type: "shared", attributedUserId: null, splits: [] },
+      });
+      await render(<TransactionDetail />);
+
+      expect(await screen.findByText(/needs an attribution/)).toBeTruthy();
+      await fireEvent.press(screen.getByText("Change"));
+      await fireEvent.press(screen.getByText("Save"));
+
+      await waitFor(() => expect(mockSetAttribution).toHaveBeenCalledWith("t1", { type: "shared" }));
+      await waitFor(() => expect(screen.queryByText(/needs an attribution/)).toBeNull());
+      expect(screen.getByText("Shared by the household")).toBeTruthy();
     });
   });
 });

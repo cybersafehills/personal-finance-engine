@@ -23,6 +23,7 @@ import {
   type ReportsResult,
 } from "@/features/reports/parse";
 import { parseInboxResponse, type InboxResult } from "@/features/inbox/parse";
+import { parseSpacesEnabled } from "@/features/spaces/config";
 import { config } from "@/lib/config";
 
 // Client for the web app's /api/mobile/* endpoints (ADR 0019): operations
@@ -198,6 +199,12 @@ export async function recordPayHandoff(
   const result = await bearerPost(`/api/mobile/pay/intents/${encodeURIComponent(id)}/handoff`, body);
   if (result.kind !== "response") return intentFailure(result);
   return parseIntentResponse(result.status, result.body);
+}
+
+/** Whether households are on for this user. Any failure means "not offered". */
+export async function fetchSpacesEnabled(): Promise<boolean> {
+  const result = await bearerGet("/api/mobile/config");
+  return result.kind === "response" && parseSpacesEnabled(result.status, result.body);
 }
 
 /** All-time spending per category, from the web's canonical totals (the app never recomputes them). */
