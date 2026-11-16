@@ -6,10 +6,11 @@ import { cookies } from "next/headers";
 import { supabaseSession } from "../../../lib/supabase-session-server";
 import { generateInviteToken } from "../../../lib/credentials";
 import { sendInviteEmail } from "../../../lib/emails";
+import { createWorkspaceInvite } from "../../../lib/spaces/invites";
 import { siteUrl } from "../../../lib/site-url";
 import { isSpacesEnabled } from "../../../lib/spaces/gate";
 import { trackSpacesEvent } from "../../../lib/spaces/analytics";
-import { getActiveWorkspaceId, type WorkspaceRole } from "../../../lib/queries";
+import { getActiveWorkspaceId } from "../../../lib/queries";
 import { logSpacesError } from "../../../lib/spaces/monitoring";
 import { requireMfaForSensitiveAction } from "../../../lib/auth/assurance";
 
@@ -138,8 +139,6 @@ export async function createInvite(
     return { ok: false, error: "Choose a valid role." };
   }
 
-  const token = await generateInviteToken();
-
   const supabase = await supabaseSession();
   const {
     data: { user },
@@ -149,34 +148,18 @@ export async function createInvite(
     return { ok: false, error: "You must be signed in to invite someone." };
   }
 
-  // workspace_invites_insert_owner's RLS check requires invited_by =
-  // auth.uid() - there's no column default, so this must be set
-  // explicitly or every insert is rejected.
-  const { error } = await supabase.from("workspace_invites").insert({
-    workspace_id: workspaceId,
-    email: trimmedEmail,
-    role: role as WorkspaceRole,
-    token_hash: token.hash,
-    token_prefix: token.prefix,
-    invited_by: user.id,
-  });
-
-  if (error) {
-    logSpacesError("invite", error);
-    return { ok: false, error: "Could not create the invite." };
-  }
-
-  trackSpacesEvent("member_invited", { role });
-
-  const link = `${siteUrl()}/invite/${token.secret}`;
-  const { ok: emailSent } = await sendInviteEmail({
-    to: trimmedEmail,
-    workspaceName,
-    role,
-    link,
-    invitedByEmail: user.email ?? null,
+  // One code path with the mobile route: lib/spaces/invites.ts.
+  const created = await createWorkspaceInvite({
+    supabase,
     workspaceId,
+    userId: user.id,
+    userEmail: user.email ?? null,
+    email: trimmedEmail,
+    role,
+    workspaceNameHint: workspaceName,
   });
+  if (!created.ok) return created;
+  const { link, emailSent } = created;
 
   revalidatePath("/settings/workspace");
   return { ok: true, link, emailSent };

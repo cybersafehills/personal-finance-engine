@@ -533,6 +533,89 @@ test.describe("mobile API", () => {
     }
   });
 
+  test("X-Workspace-Id: a member's Space is echoed, anything else falls back to Personal", async () => {
+    const api = await playwrightRequest.newContext({ baseURL: BASE_URL });
+    try {
+      const signIn = await api.post("/api/mobile/auth/sign-in", {
+        data: { email: E2E_USER.email, password: E2E_USER.password },
+      });
+      expect(signIn.status()).toBe(200);
+      const auth = { authorization: `Bearer ${(await signIn.json()).access_token}` };
+      const { workspaceId: personalId } = await ensureWorkspaceAndAccount(adminClient());
+
+      // No header: no echo, the personal Space as before.
+      const plain = await (await api.get("/api/mobile/config", { headers: auth })).json();
+      expect(plain.workspace_id).toBeUndefined();
+
+      // A Space the user belongs to is honoured and echoed.
+      const own = await api.get("/api/mobile/config", {
+        headers: { ...auth, "x-workspace-id": personalId },
+      });
+      expect(own.status()).toBe(200);
+      expect((await own.json()).workspace_id).toBe(personalId);
+
+      // A Space they are not in is only a request: it falls back to Personal
+      // and the echo says so, so the app never shows it as that Space's.
+      const stranger = "00000000-0000-4000-8000-0000000000aa";
+      const other = await api.get("/api/mobile/config", {
+        headers: { ...auth, "x-workspace-id": stranger },
+      });
+      expect(other.status()).toBe(200);
+      expect((await other.json()).workspace_id).toBe(personalId);
+
+      // A malformed value is ignored (no echo at all).
+      const junk = await api.get("/api/mobile/config", {
+        headers: { ...auth, "x-workspace-id": "personal" },
+      });
+      expect((await junk.json()).workspace_id).toBeUndefined();
+    } finally {
+      await api.dispose();
+    }
+  });
+
+  test("Space & members writes refuse a bad body, a Space they are not in, and a personal Space", async () => {
+    const api = await playwrightRequest.newContext({ baseURL: BASE_URL });
+    try {
+      const signIn = await api.post("/api/mobile/auth/sign-in", {
+        data: { email: E2E_USER.email, password: E2E_USER.password },
+      });
+      expect(signIn.status()).toBe(200);
+      const headers = { authorization: `Bearer ${(await signIn.json()).access_token}` };
+      const { workspaceId: personalId } = await ensureWorkspaceAndAccount(adminClient());
+      const stranger = "00000000-0000-4000-8000-0000000000aa";
+      const member = "00000000-0000-4000-8000-0000000000bb";
+
+      // Malformed: no explicit Space, a role that does not exist, an owner invite.
+      expect((await api.post("/api/mobile/spaces/members/role", { headers, data: { membershipId: member, role: "admin" } })).status()).toBe(422);
+      expect((await api.post("/api/mobile/spaces/members/role", { headers, data: { workspaceId: stranger, membershipId: member, role: "root" } })).status()).toBe(422);
+      expect((await api.post("/api/mobile/spaces/invites", { headers, data: { workspaceId: stranger, email: "a@b.co", role: "owner" } })).status()).toBe(422);
+
+      // A Space they are not in: 404, never a write somewhere else.
+      for (const [path, data] of [
+        ["/api/mobile/spaces/members/role", { workspaceId: stranger, membershipId: member, role: "admin" }],
+        ["/api/mobile/spaces/members/remove", { workspaceId: stranger, membershipId: member }],
+        ["/api/mobile/spaces/invites", { workspaceId: stranger, email: "a@b.co", role: "member" }],
+        ["/api/mobile/spaces/invites/revoke", { workspaceId: stranger, inviteId: member }],
+      ] as const) {
+        const res = await api.post(path, { headers, data });
+        expect(res.status(), path).toBe(404);
+        const body = await res.json();
+        expect(body.error).toBe("not_found");
+        expect(JSON.stringify(body)).not.toContain("workspace_memberships");
+      }
+
+      // Their own personal Space has no other members to manage or invite.
+      const res = await api.post("/api/mobile/spaces/invites", {
+        headers,
+        data: { workspaceId: personalId, email: "a@b.co", role: "member" },
+      });
+      expect(res.status()).toBe(422);
+      expect((await res.json()).error).toBe("personal_space");
+    } finally {
+      await api.dispose();
+    }
+  });
+
   test("the Inbox refuses a missing, malformed or invalid token", async () => {
     const api = await playwrightRequest.newContext({ baseURL: BASE_URL });
     try {
@@ -555,6 +638,14 @@ test.describe("mobile API", () => {
       expect(
         (await api.get("/api/mobile/statements/00000000-0000-4000-8000-000000000000/document")).status(),
       ).toBe(401);
+      for (const path of [
+        "/api/mobile/spaces/members/role",
+        "/api/mobile/spaces/members/remove",
+        "/api/mobile/spaces/invites",
+        "/api/mobile/spaces/invites/revoke",
+      ]) {
+        expect((await api.post(path, { data: {} })).status(), path).toBe(401);
+      }
       expect(
         (await api.get("/api/mobile/inbox", { headers: { authorization: "Basic abc" } })).status(),
       ).toBe(401);

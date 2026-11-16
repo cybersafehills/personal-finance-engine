@@ -78,6 +78,34 @@ app's Inbox tab. Read-only.
   under the user's session (confirm / dismiss a category, merge / dismiss a
   duplicate). Every other item opens its web page.
 
+## Space & members (`POST /api/mobile/spaces/...`)
+
+Writes the web guards with a second-factor step-up in the server action (not in
+the database), so the app reaches them **only** through these routes: the bearer
+guard (flag, per-IP limit, token validated with Supabase Auth, second factor
+complete when the user has one) is that step-up. Reads (members, pending
+invites, names via `space_member_directory`) are plain `supabase-js` under RLS.
+
+Every write names its Space explicitly in the body (`workspaceId`) and **never**
+falls back to the personal Space: unlike a read, a write landing in the wrong
+Space would be silent. A Space the caller is not an active member of is `404`.
+A personal Space is `422 personal_space` (it has no other members).
+
+| Route | Body | Authority |
+|---|---|---|
+| `members/role` | `{ workspaceId, membershipId, role }` (`owner`/`admin`/`member`/`viewer`) | `set_member_role`: owners only; never leaves a Space without an owner |
+| `members/remove` | `{ workspaceId, membershipId }` | `remove_member`: owners only; never the last owner |
+| `invites` | `{ workspaceId, email, role }` (`admin`/`member`/`viewer`; never owner) | `workspace_invites` insert policy (a manager of that Space, `invited_by` = caller) |
+| `invites/revoke` | `{ workspaceId, inviteId }` | `workspace_invites` update policy; must be pending in that Space |
+
+- `200 { ok: true }`; `invites` also returns `{ link, emailSent }`. **The link is
+  shown once** (only its hash is stored); the app must not keep or log it.
+- Errors carry a fixed sentence in `message`, never database text:
+  `403 owner_only`, `409 last_owner`, `404 not_found`, `403 could_not_invite`,
+  `422 invalid_request`, `403 could_not_revoke`, `422 could_not_update`.
+- Invites share `lib/spaces/invites.ts` with the web action (one code path).
+- Not included: resending an invite (it rotates the token; later).
+
 ## `GET /api/mobile/budgets`
 
 The user's **active budgets** with their actuals, for the app's Budget screen
