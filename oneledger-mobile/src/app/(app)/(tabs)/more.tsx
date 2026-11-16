@@ -70,6 +70,19 @@ export default function More() {
       <NotificationsCard />
 
       <Card style={{ gap: space[3] }}>
+        <Text variant="bodyStrong">Reports</Text>
+        <Text variant="label" color="textSecondary">
+          Your daily financial reports.
+        </Text>
+        <Button
+          label="Open reports"
+          variant="secondary"
+          fullWidth
+          onPress={() => router.push("/reports")}
+        />
+      </Card>
+
+      <Card style={{ gap: space[3] }}>
         <Text variant="bodyStrong">Statements</Text>
         <Text variant="label" color="textSecondary">
           Your generated statements, to view or download.
