@@ -46,7 +46,7 @@ For a period with only plain settled income and spending, Insights equals `repor
 
 - "Wallet" is the financial source (`transactions.financial_source_id`), the same key the Transactions filter uses. Rows without one are shown as "Not linked to a wallet" so the table still adds up. The filter takes one wallet in the UI (the URL accepts several).
 - People and merchants are grouped by the name written on the transaction (labelled as such on the page) until the S4 counterparty layer is merged; top 10 are shown.
-- Amounts are whole currency units (the ledger's legacy `*_rwf` integer columns); there is no minor-unit scale yet.
+- Amounts are the ledger's integer **minor units** (the legacy `*_rwf` columns hold cents for USD/EUR; RWF has none) and are formatted with the currency's decimal places. A currency `lib/money.ts` does not know is shown exactly as recorded, with a notice. (Corrected 2026-11-17: the first version formatted every currency as whole units, which overstated USD/EUR figures 100×; RWF was unaffected.)
 - The trend lists only buckets that have counted activity.
 - Split transactions are attributed to the transaction's own category; `transaction_splits` are not read (budgets do honour them).
 - A drill-down can be opened per person/merchant, but there is no person/merchant *filter* for the whole page yet.

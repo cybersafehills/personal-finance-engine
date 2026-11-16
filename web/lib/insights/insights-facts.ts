@@ -12,6 +12,7 @@ import {
   type CurrencyOverview,
   type InsightFact,
 } from "./insights-math.ts";
+import { isSupportedCurrency, minorUnitsPerMajor } from "../money.ts";
 
 export type InsightRow = {
   id: string;
@@ -129,9 +130,20 @@ const grouping = new Intl.NumberFormat("en-RW", {
 });
 
 /**
- * "12,345 RWF" / "−12,345 RWF". Amounts are whole units of `currency` (the
- * ledger stores no minor units today), formatted from the bigint directly -
- * never through a float.
+ * The ledger's integer amounts are MINOR units of the row's currency (cents
+ * for USD/EUR; RWF has none) - create_manual_transaction stores
+ * p_amount_minor straight into the legacy "*_rwf" columns. True for the
+ * currencies lib/money.ts knows; for any other currency the scale is not
+ * known, so the page must say so rather than guess.
+ */
+export function hasKnownScale(currency: string): boolean {
+  return isSupportedCurrency(currency);
+}
+
+/**
+ * "12,345 RWF" / "−25.00 USD". Formatted from the bigint by digit
+ * arithmetic - never through a float. An unknown currency is shown exactly
+ * as recorded (no decimal point invented).
  */
 export function formatMoney(
   amount: bigint,
@@ -139,7 +151,15 @@ export function formatMoney(
   opts: { signed?: boolean } = {},
 ): string {
   const negative = amount < 0n;
-  const magnitude = grouping.format(negative ? -amount : amount);
+  const abs = negative ? -amount : amount;
+  const per = isSupportedCurrency(currency)
+    ? BigInt(minorUnitsPerMajor(currency))
+    : 1n;
+  let magnitude = grouping.format(abs / per);
+  if (per > 1n) {
+    const places = per.toString().length - 1;
+    magnitude += `.${(abs % per).toString().padStart(places, "0")}`;
+  }
   const sign = negative ? "−" : opts.signed && amount > 0n ? "+" : "";
   return `${sign}${magnitude} ${currency}`;
 }

@@ -15,6 +15,7 @@ import {
   excludedTotal,
   formatBps,
   formatMoney,
+  hasKnownScale,
   historyCoverage,
   type HistoryCoverage,
   unassignedAccountRemainder,
@@ -233,6 +234,13 @@ function CurrencySection({
   return (
     <section aria-label={`${cur} insights`} className="flex flex-col gap-4">
       <h2 className="text-base font-semibold text-text-primary">{cur}</h2>
+      {!hasKnownScale(cur) && (
+        <p role="note" className="rounded-card bg-attention-bg p-3 text-sm text-attention">
+          OneLedger doesn’t yet know how {cur}{" "}
+          amounts are divided (for example, into cents), so these figures are
+          shown exactly as they were recorded.
+        </p>
+      )}
 
       <div className="grid gap-3 sm:grid-cols-3">
         <HeadlineCard
