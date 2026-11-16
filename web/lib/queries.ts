@@ -1,6 +1,12 @@
 import "server-only";
 import { cookies } from "next/headers";
 import { supabaseSession } from "./supabase-session-server";
+import {
+  aggregateCategoryTotals,
+  collectPages,
+  type CategoryTotal as CategoryTotalRow,
+  type TotalsRow,
+} from "./category-totals";
 import { kigaliDateKey, kigaliDayBoundsUtc } from "./kigali-time";
 import {
   aggregateOutflowsByAllocation,
@@ -728,48 +734,43 @@ export async function getTransactionDuplicateContext(
   return { dedupeState: row.dedupe_state, mergedInto, mergedDuplicates };
 }
 
-export type CategoryTotal = {
-  category: string; // "Uncategorized" for null
-  totalRwf: number;
-  transactionCount: number;
-};
+export type { CategoryTotal } from "./category-totals";
 
-export async function getCategoryTotals(): Promise<CategoryTotal[]> {
+/**
+ * Every settled outgoing transaction's category total, read a page at a time:
+ * the REST API returns at most `max_rows` (1000) per request, so a single
+ * request silently dropped everything past the first 1000 and the totals were
+ * wrong with no error. `truncated` is true only if the safety cap (50 pages,
+ * 50k rows) was reached, so callers can say the figures are incomplete.
+ */
+export async function getCategoryTotalsComplete(): Promise<
+  { totals: CategoryTotalRow[]; truncated: boolean }
+> {
   const supabase = await supabaseSession();
-  const { data, error } = await supabase
-    .from("transactions")
-    .select("category, principal_effect_rwf, fee_effect_rwf")
-    .eq("direction", "out")
-    .eq("settlement_state", "settled")
-    // Phase U: exclude rows merged into a canonical duplicate.
-    .neq("dedupe_state", "merged");
-
-  if (error) {
-    console.error("getCategoryTotals failed:", error.message);
-    return [];
-  }
-
-  const totals = new Map<string, { total: number; count: number }>();
-
-  for (const row of data ?? []) {
-    const key = row.category ?? "Uncategorized";
-    const effect = Math.abs(
-      Number(row.principal_effect_rwf) + Number(row.fee_effect_rwf),
-    );
-    const existing = totals.get(key) ?? { total: 0, count: 0 };
-    totals.set(key, {
-      total: existing.total + effect,
-      count: existing.count + 1,
+  try {
+    const { rows, truncated } = await collectPages<TotalsRow>(async (from, to) => {
+      const { data, error } = await supabase
+        .from("transactions")
+        .select("category, principal_effect_rwf, fee_effect_rwf")
+        .eq("direction", "out")
+        .eq("settlement_state", "settled")
+        // Phase U: exclude rows merged into a canonical duplicate.
+        .neq("dedupe_state", "merged")
+        // A stable order, or pages can overlap or skip rows.
+        .order("id", { ascending: true })
+        .range(from, to);
+      if (error) throw new Error(error.message);
+      return (data ?? []) as TotalsRow[];
     });
+    return { totals: aggregateCategoryTotals(rows), truncated };
+  } catch (error) {
+    console.error("getCategoryTotals failed:", (error as Error).message);
+    return { totals: [], truncated: false };
   }
+}
 
-  return Array.from(totals.entries())
-    .map(([category, { total, count }]) => ({
-      category,
-      totalRwf: total,
-      transactionCount: count,
-    }))
-    .sort((a, b) => b.totalRwf - a.totalRwf);
+export async function getCategoryTotals(): Promise<CategoryTotalRow[]> {
+  return (await getCategoryTotalsComplete()).totals;
 }
 
 // ===========================================================================

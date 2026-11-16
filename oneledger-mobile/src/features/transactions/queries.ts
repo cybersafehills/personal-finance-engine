@@ -79,12 +79,15 @@ export async function getTransactions({
   limit = TRANSACTIONS_PAGE_SIZE,
   q,
   filters = NO_FILTERS,
+  category,
   nowIso = new Date().toISOString(),
 }: {
   offset?: number;
   limit?: number;
   q?: string;
   filters?: TransactionFilters;
+  /** Exactly this category; "Uncategorized" means none, like the web's ?category=. */
+  category?: string;
   nowIso?: string;
 } = {}): Promise<TransactionRow[]> {
   let query = client()
@@ -94,6 +97,9 @@ export async function getTransactions({
     .order("occurred_at", { ascending: false })
     .range(offset, offset + limit - 1);
 
+  if (category) {
+    query = category === "Uncategorized" ? query.is("category", null) : query.eq("category", category);
+  }
   if (filters.direction !== "all") query = query.eq("direction", filters.direction);
   if (filters.needsReview) query = query.in("category_decision_status", REVIEW_STATUSES);
   const since = periodStartUtc(filters.period, nowIso);

@@ -202,6 +202,25 @@ A navigation event, never a claim the payment succeeded.
 - Shares `lib/pay/handoff.ts` with the web action (the optional SMS-reconciliation
   step uses the service role there; the web's behaviour is unchanged).
 
+## `GET /api/mobile/categories`
+
+Where the money has gone, all time, per category: the web's Categories page, for
+the app's Categories screen. Read-only; same guard as the others.
+
+- `200 { ok: true, categories: [{ category, totalRwf, transactionCount }],
+  truncated }`, largest total first. `"Uncategorized"` stands for a null
+  category. The figures come from `getCategoryTotalsComplete`
+  (`lib/category-totals.ts` holds the pure parts); the app never recomputes them.
+- Covers every Space the user belongs to (no Space filter), exactly like the web
+  page; settled outgoing transactions only, merged duplicates excluded.
+- **Why it pages:** the REST API returns at most `max_rows` (1000) per request,
+  so reading all rows in one request silently dropped everything past the first
+  1000 and the totals were wrong with no error. It now reads a page at a time
+  until the table ends (a stable `id` order, 50 pages at most). `truncated` is
+  true only if that cap was reached, so the app can say the totals are
+  incomplete. This also fixes the web Categories page, which used the same query.
+- Amounts are whole RWF.
+
 ## Rollout
 
 1. Deploy web with the route (dark).

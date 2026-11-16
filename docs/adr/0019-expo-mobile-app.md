@@ -230,6 +230,27 @@ not a reason to keep the whole app native.
 - The Home budget card loads independently of the rest of Home and respects
   privacy mode, so a slow or unavailable budget service never delays Home.
 
+## Implementation notes (Categories)
+
+- A read-only Categories screen (More -> Categories): all-time spending per
+  category with a share bar and transaction count; tapping a category opens the
+  Transactions list filtered to it ("Uncategorized" means no category, like the
+  web), with a chip to clear the filter.
+- The totals come from `GET /api/mobile/categories`, served by the web's one
+  canonical aggregation (`getCategoryTotalsComplete`), not recomputed in the app.
+  Like the web page it covers every Space the user belongs to.
+- **The aggregation used to be silently wrong.** It read every settled outgoing
+  transaction in one request, and the REST API returns at most `max_rows` (1000)
+  per request, so anyone with a longer history got totals that dropped
+  everything past the first 1000, with no error. It now pages (stable `id`
+  order, 50 pages at most) and reports `truncated` if the cap is reached, which
+  the screen turns into a visible warning. This also fixes the web Categories
+  page, which shared the query. Other all-rows aggregations may have the same
+  problem; this PR does not audit them.
+- The tap-through filters on category only, as the web does. The totals count
+  settled outgoing transactions, so the list can also include money in and
+  unsettled rows for that category; the direction chip narrows it.
+
 ## Implementation notes (Add transaction)
 
 - **Signed-in users cannot INSERT into `transactions`.** Phase B made

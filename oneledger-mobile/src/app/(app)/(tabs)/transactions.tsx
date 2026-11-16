@@ -1,4 +1,4 @@
-import { router, useFocusEffect } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshControl, SectionList, View } from "react-native";
 
@@ -27,6 +27,10 @@ const SEARCH_DEBOUNCE_MS = 350;
 // The full ledger: newest first, grouped by day, searchable, loaded a page
 // at a time. Amounts here are never masked (a deliberate destination).
 export default function Transactions() {
+  // Set when opened from the Categories screen: show only that category (like the web's ?category=).
+  const params = useLocalSearchParams<{ category?: string | string[] }>();
+  const category = (Array.isArray(params.category) ? params.category[0] : params.category) || undefined;
+
   const [input, setInput] = useState("");
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState<TransactionFilters>(NO_FILTERS);
@@ -50,7 +54,7 @@ export default function Transactions() {
       const id = ++requestId.current;
       if (userInitiated) setRefreshing(true);
       try {
-        const page = await getTransactions({ q: query, filters });
+        const page = await getTransactions({ q: query, filters, category });
         if (id !== requestId.current) return;
         setRows(page);
         setHasMore(page.length === TRANSACTIONS_PAGE_SIZE);
@@ -66,7 +70,7 @@ export default function Transactions() {
         }
       }
     },
-    [query, filters],
+    [query, filters, category],
   );
 
   // Reloads on focus and whenever the applied search changes.
@@ -81,7 +85,7 @@ export default function Transactions() {
     const id = requestId.current;
     setLoadingMore(true);
     try {
-      const page = await getTransactions({ q: query, filters, offset: rows.length });
+      const page = await getTransactions({ q: query, filters, category, offset: rows.length });
       // A refresh or new search started meanwhile: this page is stale.
       if (id !== requestId.current) return;
       const seen = new Set(rows.map((row) => row.id));
@@ -127,6 +131,14 @@ export default function Transactions() {
               returnKeyType="search"
               clearButtonMode="while-editing"
             />
+            {category ? (
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: space[2] }}>
+                <Text variant="label" color="textSecondary" style={{ flex: 1 }}>
+                  {`Category: ${category}`}
+                </Text>
+                <Button label="Clear" variant="ghost" onPress={() => router.replace("/transactions")} />
+              </View>
+            ) : null}
             <FilterChips value={filters} onChange={setFilters} />
           </View>
         }
@@ -159,9 +171,9 @@ export default function Transactions() {
             />
           ) : (
             <EmptyState
-              title={query.trim() || activeFilterCount(filters) ? "Nothing matches that search" : "No transactions yet"}
+              title={query.trim() || activeFilterCount(filters) || category ? "Nothing matches that search" : "No transactions yet"}
               description={
-                query.trim() || activeFilterCount(filters)
+                query.trim() || activeFilterCount(filters) || category
                   ? "Try a different name, reference or category, or clear the filters."
                   : "They appear here as OneLedger records them."
               }
