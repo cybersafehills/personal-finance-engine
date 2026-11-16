@@ -75,6 +75,14 @@ describe("loadDetailExtras", () => {
     expect(extras.context?.workspaceName).toBe("Home"); // the rest is intact
   });
 
+  it("an unreadable Space is unknown, never assumed to be personal", async () => {
+    mockTables.transactions = { data: { ...contextRow("personal"), workspaces: null }, error: null };
+    const extras = await loadDetailExtras("t1");
+    expect(extras.context?.workspaceKind).toBeNull();
+    expect(extras.context?.workspaceName).toBeNull();
+    expect(extras.context?.workspaceId).toBe("w1"); // the id is still known
+  });
+
   it("has no context when the transaction row can't be read, without throwing", async () => {
     mockTables.transactions = { data: null, error: { message: "denied" } };
     const extras = await loadDetailExtras("t1");

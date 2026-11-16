@@ -8,6 +8,7 @@ const mockGetTransaction = jest.fn();
 const mockOpenUrl = jest.fn();
 const mockOffer = jest.fn();
 const mockExtras = jest.fn();
+const mockActive = jest.fn();
 const mockSetAttribution = jest.fn();
 
 jest.mock("expo-router", () => jest.requireActual("@/test/router-mock"));
@@ -16,6 +17,12 @@ jest.mock("@/features/transactions/queries", () => ({
 }));
 jest.mock("@/lib/config", () => ({ config: { apiBaseUrl: "https://app.example.test" } }));
 jest.mock("@/features/transactions/detail", () => ({ loadDetailExtras: (id: string) => mockExtras(id) }));
+jest.mock("@/features/spaces/ActiveSpaceProvider", () => ({
+  useActiveSpace: () => {
+    const active = mockActive();
+    return { spaces: [], active, activeId: active?.id ?? null, setActive: () => {} };
+  },
+}));
 jest.mock("@/features/transactions/attribution", () => {
   const actual = jest.requireActual("@/features/transactions/attribution");
   return { ...actual, setAttribution: (...args: unknown[]) => mockSetAttribution(...args) };
@@ -82,6 +89,8 @@ beforeEach(() => {
   mockOffer.mockResolvedValue(null); // no "Pay again" unless a test says so
   mockExtras.mockReset();
   mockExtras.mockResolvedValue(noExtras); // no extra blocks unless a test says so
+  mockActive.mockReset();
+  mockActive.mockReturnValue(null); // no active Space loaded: the server default (Personal)
   mockSetAttribution.mockReset();
 });
 
@@ -411,6 +420,61 @@ describe("Transaction detail screen", () => {
       expect(await screen.findByText("Kigali Fresh")).toBeTruthy();
       expect(screen.getByText("Change category")).toBeTruthy();
       expect(screen.queryByText("WHERE THIS CAME FROM")).toBeNull();
+    });
+  });
+
+  describe("'Review it' follows the active Space (the Inbox covers the Space the server is using)", () => {
+    const flagged = { dedupeState: "possible_duplicate", mergedInto: null, mergedDuplicates: [] };
+    const space = (id: string, kind: string) => ({ id, name: kind, kind, role: "owner" });
+    const withContext = (over: Record<string, unknown>) => {
+      mockGetTransaction.mockResolvedValue(txn());
+      mockExtras.mockResolvedValue({ ...noExtras, context: context(over), duplicates: flagged });
+    };
+
+    it("opens the Inbox for a transaction in the active household", async () => {
+      mockActive.mockReturnValue(space("H1", "household"));
+      withContext({ workspaceId: "H1", workspaceKind: "household" });
+      await render(<TransactionDetail />);
+      await fireEvent.press(await screen.findByText("Review it"));
+      expect(router.push).toHaveBeenCalledWith("/inbox");
+    });
+
+    it("sends a household transaction to the web while the personal Space is active", async () => {
+      mockActive.mockReturnValue(space("p1", "personal"));
+      withContext({ workspaceId: "H1", workspaceKind: "household" });
+      await render(<TransactionDetail />);
+      expect(await screen.findByText("Review on the web")).toBeTruthy();
+      expect(screen.queryByText("Review it")).toBeNull();
+    });
+
+    it("sends a personal transaction to the web while a household is active", async () => {
+      mockActive.mockReturnValue(space("H1", "household"));
+      withContext({ workspaceId: "p1", workspaceKind: "personal" });
+      await render(<TransactionDetail />);
+      expect(await screen.findByText("Review on the web")).toBeTruthy();
+      expect(screen.queryByText("Review it")).toBeNull();
+    });
+
+    it("sends a transaction in another household to the web", async () => {
+      mockActive.mockReturnValue(space("H1", "household"));
+      withContext({ workspaceId: "H2", workspaceKind: "household" });
+      await render(<TransactionDetail />);
+      expect(await screen.findByText("Review on the web")).toBeTruthy();
+    });
+
+    it("an unreadable Space is never taken for the personal one: it goes to the web", async () => {
+      mockActive.mockReturnValue(null);
+      withContext({ workspaceId: "p1", workspaceKind: null });
+      await render(<TransactionDetail />);
+      expect(await screen.findByText("Review on the web")).toBeTruthy();
+      expect(screen.queryByText("Review it")).toBeNull();
+    });
+
+    it("with no Space loaded, a personal transaction still opens the Inbox (the server default)", async () => {
+      mockActive.mockReturnValue(null);
+      withContext({ workspaceId: "p1", workspaceKind: "personal" });
+      await render(<TransactionDetail />);
+      expect(await screen.findByText("Review it")).toBeTruthy();
     });
   });
 

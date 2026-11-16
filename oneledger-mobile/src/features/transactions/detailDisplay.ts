@@ -7,7 +7,8 @@ export type WorkspaceKind = "personal" | "household" | "organization";
 export type TransactionContext = {
   workspaceId: string;
   workspaceName: string | null;
-  workspaceKind: WorkspaceKind;
+  /** null when the Space could not be read: never assumed to be personal. */
+  workspaceKind: WorkspaceKind | null;
   sourceName: string | null;
   sourceProvider: string | null;
   sourceMaskedIdentifier: string | null;

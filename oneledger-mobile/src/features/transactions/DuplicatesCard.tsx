@@ -24,7 +24,7 @@ export function DuplicatesCard({
   context: DuplicateContext | null;
   /**
    * Where a flagged transaction is resolved, or null when there is nowhere to
-   * send them. The Inbox only covers the personal Space, so the screen offers it
+   * send them. The Inbox covers the active Space, so the screen offers it
    * only there and the web's review queue otherwise.
    */
   reviewAction: { label: string; onPress: () => void } | null;

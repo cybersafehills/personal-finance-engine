@@ -20,7 +20,7 @@ Status: **sign-in only (PR 2).** Dark unless `MOBILE_API_ENABLED=true`.
 ## Active Space (`X-Workspace-Id`)
 
 The web picks the active Space from an `active_workspace_id` cookie; the app has
-no cookie, so every `GET` below may carry `X-Workspace-Id: <workspace uuid>`.
+no cookie, so every request below (`GET` and `POST` alike) may carry `X-Workspace-Id: <workspace uuid>`.
 
 - It is a **request, not a grant.** `getActiveWorkspaceId()` (`lib/queries.ts`)
   still requires an active membership in that workspace and otherwise falls back
@@ -121,8 +121,7 @@ required, request-scoped session, `no-store`).
 - `200 { ok: true, budgets: [...] }` (empty when there is no active budget; at
   most 3; budgets in a currency the apps cannot format are left out),
   `401`, `403 mfa_required`, `404` flag off, `429`, `500`.
-- Scoped to the user's personal workspace (no session cookie, so the web's
-  cookie-less default), like the Inbox.
+- Scoped to the active Space (`X-Workspace-Id`, else the personal Space), like the Inbox.
 - Amounts are integer minor units of the budget's currency.
 
 ## `GET /api/mobile/statements`
@@ -139,8 +138,8 @@ packs, schedules and provider documents stay on the web.
   credits, debits, fees, `reconciles`). The app does no statement maths and shows
   an unreconciled statement as such. Rows with an unknown status, timezone or
   currency are left out rather than shown wrongly.
-- Scoped to the user's personal workspace (like the Inbox and Budgets); a bare
-  query would also return households' statements.
+- Scoped to the active Space (like the Inbox and Budgets); a bare query would
+  also return every other Space's statements.
 - Amounts are integer minor units of each total's currency.
 
 ## `GET /api/mobile/statements/:id/document?format=pdf|csv`
@@ -172,7 +171,7 @@ Read-only; same guard as the others.
   statements, insights, bills, spaces, integrations, businessSurfaces } }`, all
   booleans. No env values, allowlists or ids are exposed. `401`, `403
   mfa_required`, `404` flag off, `429`, `500` as for the other endpoints.
-- Resolved for the user's personal workspace (no session cookie), like the Inbox.
+- Resolved for the active Space (`X-Workspace-Id`, else the personal Space), like the Inbox. The pay flags are per Space, so this is the answer for the Space a draft would be created in.
 - It reports availability only; the endpoints it describes still enforce their
   own gates, so a stale `config` can never grant anything.
 
@@ -214,7 +213,7 @@ plus the USSD instruction to hand off with.
   Errors: `403 feature_disabled`, `422 invalid_request | invalid_account |
   could_not_prepare` (with a user-safe `message`), `400 invalid_request` (not
   JSON), `413 too_large`, plus the guard's `401`, `403 mfa_required`, `404`, `429`.
-- Created in the user's personal workspace (no session cookie), like the others.
+- Created in the **active Space** (`X-Workspace-Id`, else the personal Space): the `POST` honours the header like the reads, and the paying account is checked against that Space. The app therefore only offers "Pay again" for a transaction that lives in the active Space.
 
 ## `GET /api/mobile/pay/intents/:id`
 

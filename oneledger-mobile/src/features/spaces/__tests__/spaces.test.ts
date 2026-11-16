@@ -1,4 +1,5 @@
 import {
+  isInRequestedSpace,
   echoMatches,
   kindLabel,
   requestedWorkspaceId,
@@ -61,5 +62,30 @@ describe("labels and keys", () => {
 
   it("keys the remembered choice per user", () => {
     expect(storageKey("u1")).not.toBe(storageKey("u2"));
+  });
+});
+
+describe("isInRequestedSpace", () => {
+  const personal = { workspaceId: "p1", workspaceKind: "personal" };
+  const homeA = { workspaceId: "H1", workspaceKind: "household" };
+
+  it("with no Space requested the server uses the personal Space", () => {
+    expect(isInRequestedSpace(personal, null)).toBe(true);
+    expect(isInRequestedSpace(homeA, null)).toBe(false);
+    expect(isInRequestedSpace({ workspaceId: "o1", workspaceKind: "organization" }, null)).toBe(false);
+  });
+
+  it("with a Space requested only a transaction in that Space qualifies", () => {
+    expect(isInRequestedSpace(homeA, "H1")).toBe(true);
+    expect(isInRequestedSpace(personal, "H1")).toBe(false); // a personal one viewed while a household is active
+    expect(isInRequestedSpace({ workspaceId: "H2", workspaceKind: "household" }, "H1")).toBe(false); // another household
+  });
+
+  it("compares ids case-insensitively (a UUID is the same id in either case)", () => {
+    expect(isInRequestedSpace({ workspaceId: "ABC-1", workspaceKind: "household" }, "abc-1")).toBe(true);
+  });
+
+  it("an unknown Space kind is never taken for the personal Space", () => {
+    expect(isInRequestedSpace({ workspaceId: "x", workspaceKind: "unknown" }, null)).toBe(false);
   });
 });
