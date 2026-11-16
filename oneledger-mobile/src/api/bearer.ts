@@ -35,6 +35,32 @@ export async function bearerGet(path: string): Promise<BearerResponse> {
   return { kind: "response", status: response.status, body };
 }
 
+/** POST helper (JSON in, JSON out) for the bearer-authenticated /api/mobile mutations. */
+export async function bearerPost(path: string, payload: unknown): Promise<BearerResponse> {
+  if (!supabase || !config.apiBaseUrl) return { kind: "unconfigured" };
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  if (!token) return { kind: "no_session" };
+
+  let response: Response;
+  try {
+    response = await fetch(`${config.apiBaseUrl}${path}`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  } catch {
+    return { kind: "network" };
+  }
+  let body: unknown = null;
+  try {
+    body = await response.json();
+  } catch {
+    // Non-JSON error page; the status alone decides.
+  }
+  return { kind: "response", status: response.status, body };
+}
+
 export type BearerFailure = {
   /** `unavailable`: the endpoint is off or the app isn't configured. */
   reason: "unavailable" | "unauthorized" | "mfa_required" | "error";

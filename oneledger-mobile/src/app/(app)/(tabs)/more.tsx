@@ -96,6 +96,19 @@ export default function More() {
       </Card>
 
       <Card style={{ gap: space[3] }}>
+        <Text variant="bodyStrong">Payment requests</Text>
+        <Text variant="label" color="textSecondary">
+          Ask someone to pay you with a link. You confirm the payment yourself.
+        </Text>
+        <Button
+          label="Open payment requests"
+          variant="secondary"
+          fullWidth
+          onPress={() => router.push("/requests")}
+        />
+      </Card>
+
+      <Card style={{ gap: space[3] }}>
         <Text variant="bodyStrong">Wallets</Text>
         <Text variant="label" color="textSecondary">
           Your balances, and how sure we are about each one.
