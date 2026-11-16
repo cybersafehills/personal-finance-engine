@@ -6,12 +6,14 @@ import { resetRouterMock, router, setParams } from "@/test/router-mock";
 
 const mockGetTransaction = jest.fn();
 const mockOpenUrl = jest.fn();
+const mockOffer = jest.fn();
 
 jest.mock("expo-router", () => jest.requireActual("@/test/router-mock"));
 jest.mock("@/features/transactions/queries", () => ({
   getTransactionById: (id: string) => mockGetTransaction(id),
 }));
 jest.mock("@/lib/config", () => ({ config: { apiBaseUrl: "https://app.example.test" } }));
+jest.mock("@/features/pay/context", () => ({ loadPayAgainOffer: (t: unknown) => mockOffer(t) }));
 jest.mock("expo-linking", () => ({ openURL: (url: string) => mockOpenUrl(url) }));
 
 const txn = (over: Partial<TransactionRow> = {}): TransactionRow => ({
@@ -38,6 +40,8 @@ beforeEach(() => {
   setParams({ id: "t1" });
   mockGetTransaction.mockReset();
   mockOpenUrl.mockReset();
+  mockOffer.mockReset();
+  mockOffer.mockResolvedValue(null); // no "Pay again" unless a test says so
 });
 
 describe("Transaction detail screen", () => {
@@ -103,5 +107,52 @@ describe("Transaction detail screen", () => {
     await render(<TransactionDetail />);
     await fireEvent.press(await screen.findByText("Back"));
     expect(router.back).toHaveBeenCalled();
+  });
+
+  describe("Pay again", () => {
+    const person = { type: "pay_person", msisdn: "250788123456", name: "Jean" } as const;
+
+    it("offers it only when the offer says it can work, and carries the recipient to the form", async () => {
+      mockGetTransaction.mockResolvedValue(txn({ transaction_type: "send_money", counterparty_reference: "0788123456", counterparty_name: "Jean" }));
+      mockOffer.mockResolvedValue({ target: person, account: { id: "acct-1", name: "MTN MoMo" } });
+      await render(<TransactionDetail />);
+
+      await fireEvent.press(await screen.findByText("Pay Jean again"));
+      expect(router.push).toHaveBeenCalledWith({
+        pathname: "/pay-again",
+        params: {
+          type: "pay_person",
+          recipient: "250788123456",
+          name: "Jean",
+          accountId: "acct-1",
+          accountName: "MTN MoMo",
+        },
+      });
+    });
+
+    it("carries a merchant code for a business payment", async () => {
+      mockGetTransaction.mockResolvedValue(txn());
+      mockOffer.mockResolvedValue({
+        target: { type: "pay_merchant", merchantCode: "123456", name: null },
+        account: { id: "acct-1", name: "MTN MoMo" },
+      });
+      await render(<TransactionDetail />);
+
+      await fireEvent.press(await screen.findByText("Pay this recipient again"));
+      expect(router.push).toHaveBeenCalledWith(
+        expect.objectContaining({
+          params: expect.objectContaining({ type: "pay_merchant", recipient: "123456", name: "" }),
+        }),
+      );
+    });
+
+    it("is absent when there is no offer (config off, shared Space, unsupported type...)", async () => {
+      mockGetTransaction.mockResolvedValue(txn());
+      mockOffer.mockResolvedValue(null);
+      await render(<TransactionDetail />);
+
+      await screen.findByText("Change category");
+      expect(screen.queryByText(/again$/)).toBeNull();
+    });
   });
 });

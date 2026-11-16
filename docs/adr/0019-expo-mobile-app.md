@@ -178,6 +178,30 @@ not a reason to keep the whole app native.
   (docs/oneledger-capture-shortcut.md) guarantees (exact Shortcut names,
   Run Immediately, trigger word RWF, one-time codes).
 
+## Implementation notes (Pay again, app)
+
+- "Pay {name} again" on a transaction's detail, only for `send_money` (a person)
+  and `merchant_payment` (a business). It is **absent** unless every check holds:
+  `GET /api/mobile/config` says assisted pay is on (any failure hides it), the
+  reference passes the server's own rules (a Rwandan mobile number or a 3-12
+  digit merchant code), the transaction lives in the user's personal Space (the
+  server creates intents there), and an RWF paying account exists (required for
+  a merchant, whose network comes from that account). Airtime and bills are
+  excluded for the reasons in the Pay intents note.
+- The amount is never prefilled. The request id sent with "Prepare payment" is
+  bound to the recipient, account and amount: a retry or double tap returns the
+  same draft, an edited amount gets a new id (otherwise it would silently return
+  the old draft).
+- The review screen shows the code the server built and never claims success
+  (states the app doesn't recognise read "In progress"). It never dials by
+  itself. Android: an explicit "Open phone dialer" tap opens the `tel:` link.
+  iPhone: no dial button; share or copy the code and dial it in the Phone app,
+  because the app has not been run on an iPhone to verify `tel:` USSD handling.
+- Copy uses React Native's built-in share sheet (its "Copy" action), not
+  `expo-clipboard`, so no native module or new build was added. A hand-off is
+  recorded only when the share completes.
+- Not yet run on a physical device.
+
 ## Implementation notes (Budgets)
 
 - Budget figures are computed by the web's canonical `getBudgetActuals`

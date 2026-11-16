@@ -19,6 +19,7 @@ import {
   signedAmountRwf,
   transactionTypeLabel,
 } from "@/features/transactions/display";
+import { loadPayAgainOffer } from "@/features/pay/context";
 import { getTransactionById } from "@/features/transactions/queries";
 import { useQuery } from "@/hooks/useQuery";
 import { config } from "@/lib/config";
@@ -30,6 +31,14 @@ export default function TransactionDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const load = useCallback(() => getTransactionById(id), [id]);
   const { data: transaction, loading, error, refresh } = useQuery(load);
+
+  // "Pay X again": only when it can honestly work (see features/pay/context.ts).
+  // Any doubt - config off, shared Space, odd reference - and the button is absent.
+  const loadOffer = useCallback(
+    () => (transaction ? loadPayAgainOffer(transaction) : Promise.resolve(null)),
+    [transaction],
+  );
+  const { data: payOffer } = useQuery(loadOffer);
 
   const back = (
     <Button label="Back" variant="ghost" onPress={() => router.back()} />
@@ -105,6 +114,28 @@ export default function TransactionDetail() {
           }
         />
       )}
+
+      {payOffer ? (
+        <Button
+          label={`Pay ${payOffer.target.name ?? "this recipient"} again`}
+          fullWidth
+          onPress={() =>
+            router.push({
+              pathname: "/pay-again",
+              params: {
+                type: payOffer.target.type,
+                recipient:
+                  payOffer.target.type === "pay_person"
+                    ? payOffer.target.msisdn
+                    : payOffer.target.merchantCode,
+                name: payOffer.target.name ?? "",
+                accountId: payOffer.account?.id ?? "",
+                accountName: payOffer.account?.name ?? "",
+              },
+            })
+          }
+        />
+      ) : null}
 
       {config.apiBaseUrl ? (
         <Button
