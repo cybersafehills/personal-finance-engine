@@ -161,6 +161,12 @@ not a reason to keep the whole app native.
   are the safety net for that refactor.
 - The app never builds a USSD string itself: it shows and dials what the server
   returns, and treats `instruction: null` as "no verified route".
+- Only person and merchant payments are offered. Airtime is excluded because the
+  web directory maps `buy_airtime` to the send-money code (it would transfer
+  money, not buy airtime; a web-side quirk, left unchanged), and bills have no
+  verified route. A merchant's network comes from the paying account's row.
+- Recording the handoff has its own route so an intent leaves `draft`; it reuses
+  the web action's logic via `lib/pay/handoff.ts`.
 
 ## Implementation notes (iPhone health)
 
