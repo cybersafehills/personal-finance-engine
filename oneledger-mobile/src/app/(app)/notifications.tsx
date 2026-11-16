@@ -1,5 +1,5 @@
 import { router } from "expo-router";
-import { useCallback } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { FlatList, Pressable, RefreshControl, View } from "react-native";
 
 import {
@@ -16,6 +16,7 @@ import {
   markNotificationRead,
   type NotificationRow,
 } from "@/features/notifications/queries";
+import { groupByTitle, type NotificationGroup } from "@/features/notifications/grouping";
 import { pushTarget } from "@/features/push/push-routing";
 import { useQuery } from "@/hooks/useQuery";
 import { formatDateTime } from "@/lib/kigali-time";
@@ -24,7 +25,9 @@ import { colors, radii, space } from "@/theme/tokens";
 export default function NotificationsScreen() {
   const load = useCallback(() => getNotifications(), []);
   const { data, loading, refreshing, error, refresh } = useQuery(load);
-  const hasUnread = (data ?? []).some((row) => row.readAt === null);
+  const unreadCount = (data ?? []).filter((row) => row.readAt === null).length;
+  const hasUnread = unreadCount > 0;
+  const groups = useMemo(() => groupByTitle(data ?? []), [data]);
 
   async function open(row: NotificationRow) {
     if (row.readAt === null) await markNotificationRead(row.id);
@@ -37,11 +40,16 @@ export default function NotificationsScreen() {
     else router.push(target);
   }
 
+  async function markRead(row: NotificationRow) {
+    await markNotificationRead(row.id);
+    refresh();
+  }
+
   return (
     <ListScreen>
       <FlatList
-        data={data ?? []}
-        keyExtractor={(row) => row.id}
+        data={groups}
+        keyExtractor={(group) => group.first.id}
         contentContainerStyle={listContentStyle}
         ItemSeparatorComponent={() => <View style={{ height: space[2] }} />}
         refreshControl={
@@ -53,6 +61,11 @@ export default function NotificationsScreen() {
               title="Notifications"
               action={<Button label="Back" variant="ghost" onPress={() => router.back()} />}
             />
+            {hasUnread ? (
+              <Text variant="label" color="textMuted" style={{ marginBottom: space[2] }}>
+                {unreadCount} unread
+              </Text>
+            ) : null}
             {hasUnread ? (
               <Button
                 label="Mark all as read"
@@ -66,35 +79,9 @@ export default function NotificationsScreen() {
             ) : null}
           </View>
         }
-        renderItem={({ item }) => {
-          const unread = item.readAt === null;
-          return (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`${unread ? "Unread. " : ""}${item.title}`}
-              onPress={() => open(item)}
-              style={{
-                backgroundColor: colors.surface,
-                borderRadius: radii.card,
-                borderWidth: 1,
-                borderColor: unread ? colors.accent : colors.borderSubtle,
-                padding: space[4],
-                gap: space[1],
-              }}
-            >
-              <Text variant="bodyStrong">{item.title}</Text>
-              {item.body ? (
-                <Text variant="label" color="textSecondary">
-                  {item.body}
-                </Text>
-              ) : null}
-              <Text variant="caption" color="textMuted">
-                {unread ? "New · " : ""}
-                {formatDateTime(item.createdAt)}
-              </Text>
-            </Pressable>
-          );
-        }}
+        renderItem={({ item }) => (
+          <GroupItem group={item} onOpen={open} onMarkRead={markRead} />
+        )}
         ListEmptyComponent={
           loading ? (
             <Text variant="label" color="textMuted">
@@ -115,5 +102,85 @@ export default function NotificationsScreen() {
         }
       />
     </ListScreen>
+  );
+}
+
+function GroupItem({
+  group,
+  onOpen,
+  onMarkRead,
+}: {
+  group: NotificationGroup;
+  onOpen: (row: NotificationRow) => void;
+  onMarkRead: (row: NotificationRow) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const unreadRest = group.rest.filter((row) => row.readAt === null).length;
+  return (
+    <View style={{ gap: space[2] }}>
+      <Row row={group.first} onOpen={onOpen} onMarkRead={onMarkRead} />
+      {group.rest.length > 0 && !expanded ? (
+        <Button
+          label={`Show ${group.rest.length} earlier${unreadRest > 0 ? ` (${unreadRest} unread)` : ""}`}
+          variant="ghost"
+          onPress={() => setExpanded(true)}
+        />
+      ) : null}
+      {expanded
+        ? group.rest.map((row) => (
+            <Row key={row.id} row={row} onOpen={onOpen} onMarkRead={onMarkRead} />
+          ))
+        : null}
+    </View>
+  );
+}
+
+function Row({
+  row,
+  onOpen,
+  onMarkRead,
+}: {
+  row: NotificationRow;
+  onOpen: (row: NotificationRow) => void;
+  onMarkRead: (row: NotificationRow) => void;
+}) {
+  const unread = row.readAt === null;
+  return (
+    <View
+      style={{
+        backgroundColor: colors.surface,
+        borderRadius: radii.card,
+        borderWidth: 1,
+        borderColor: unread ? colors.accent : colors.borderSubtle,
+        padding: space[4],
+        gap: space[1],
+      }}
+    >
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${unread ? "Unread. " : ""}${row.title}`}
+        onPress={() => onOpen(row)}
+        style={{ gap: space[1] }}
+      >
+        <Text variant="bodyStrong">{row.title}</Text>
+        {row.body ? (
+          <Text variant="label" color="textSecondary">
+            {row.body}
+          </Text>
+        ) : null}
+        <Text variant="caption" color="textMuted">
+          {unread ? "New · " : ""}
+          {formatDateTime(row.createdAt)}
+        </Text>
+      </Pressable>
+      {unread ? (
+        <Button
+          label="Mark read"
+          variant="ghost"
+          accessibilityLabel={`Mark read: ${row.title}`}
+          onPress={() => onMarkRead(row)}
+        />
+      ) : null}
+    </View>
   );
 }
