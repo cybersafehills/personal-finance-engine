@@ -274,7 +274,12 @@ function CurrencySection({
           <h3 className="mb-2 text-sm font-semibold text-text-primary">
             Where money went
           </h3>
-          <div className="overflow-x-auto">
+          <div
+            className="overflow-x-auto"
+            tabIndex={0}
+            role="region"
+            aria-label={`Money out by category table, {cur} (scrolls sideways)`}
+          >
             <table className="w-full min-w-[420px] text-sm">
               <caption className="sr-only">
                 Money out by category, {cur}
@@ -322,7 +327,12 @@ function CurrencySection({
           <h3 className="mb-2 text-sm font-semibold text-text-primary">
             By wallet
           </h3>
-          <div className="overflow-x-auto">
+          <div
+            className="overflow-x-auto"
+            tabIndex={0}
+            role="region"
+            aria-label={`Money by wallet table, {cur} (scrolls sideways)`}
+          >
             <table className="w-full min-w-[420px] text-sm">
               <caption className="sr-only">
                 Money in and out by wallet, {cur}
@@ -400,7 +410,12 @@ function CurrencySection({
             people with the same name will appear together, and one person
             with several names will appear separately.
           </p>
-          <div className="overflow-x-auto">
+          <div
+            className="overflow-x-auto"
+            tabIndex={0}
+            role="region"
+            aria-label={`People and merchants table, {cur} (scrolls sideways)`}
+          >
             <table className="w-full min-w-[420px] text-sm">
               <caption className="sr-only">
                 Top people and merchants by amount, {cur}
@@ -461,7 +476,12 @@ function CurrencySection({
           <h3 className="mb-2 text-sm font-semibold text-text-primary">
             Trend by {granularity}
           </h3>
-          <div className="overflow-x-auto">
+          <div
+            className="overflow-x-auto"
+            tabIndex={0}
+            role="region"
+            aria-label={`Trend table, {cur} (scrolls sideways)`}
+          >
             <table className="w-full min-w-[460px] text-sm">
               <caption className="sr-only">
                 Money in, money out and net by {granularity}, {cur}. Periods

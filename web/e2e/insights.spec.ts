@@ -112,3 +112,17 @@ test("Insights has no serious/critical automated accessibility violations", asyn
   );
   expect(seriousOrWorse, JSON.stringify(seriousOrWorse, null, 2)).toEqual([]);
 });
+
+test("Insights at phone width has no serious/critical accessibility violations", async ({ page }) => {
+  // The tables scroll sideways on a phone; that scroll area must be
+  // keyboard-reachable (caught by the mobile-safari run, pinned here so the
+  // blocking chromium project covers it too).
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`/insights?${PERIOD}`);
+  await expect(page.getByRole("region", { name: "RWF insights" })).toBeVisible();
+  const results = await new AxeBuilder({ page }).analyze();
+  const seriousOrWorse = results.violations.filter(
+    (v) => v.impact === "serious" || v.impact === "critical",
+  );
+  expect(seriousOrWorse, JSON.stringify(seriousOrWorse, null, 2)).toEqual([]);
+});
