@@ -8,6 +8,7 @@ import {
   mobileAuthRateLimited,
   parseSignInBody,
   tokenAal,
+  workspaceIdFromHeader,
 } from "./mobile-api.ts";
 
 Deno.test("mobile API is dark unless the flag is exactly 'true'", () => {
@@ -96,7 +97,7 @@ Deno.test("a verified second factor must be completed (aal2)", () => {
 Deno.test("corsHeadersFor allows the Authorization header for allowlisted origins only", () => {
   const h = corsHeadersFor("http://localhost:8081", "http://localhost:8081", "GET, OPTIONS");
   assertEquals(h["Access-Control-Allow-Origin"], "http://localhost:8081");
-  assertEquals(h["Access-Control-Allow-Headers"], "content-type, authorization");
+  assertEquals(h["Access-Control-Allow-Headers"], "content-type, authorization, x-workspace-id");
   assertEquals(corsHeadersFor("https://evil.example", "http://localhost:8081", "GET"), {});
   assertEquals(corsHeadersFor("http://localhost:8081", undefined, "GET"), {});
 });
@@ -106,4 +107,19 @@ Deno.test("rate limiter honours a custom ceiling", () => {
   const t = 5_000_000;
   for (let i = 0; i < 3; i++) assertEquals(mobileAuthRateLimited(ip, t, 3), false);
   assertEquals(mobileAuthRateLimited(ip, t, 3), true);
+});
+
+Deno.test("workspaceIdFromHeader accepts only a well-formed UUID", () => {
+  const id = "AAAAAAAA-1111-4222-8333-444444444444";
+  assertEquals(workspaceIdFromHeader(id), id.toLowerCase());
+  assertEquals(workspaceIdFromHeader(` ${id} `), id.toLowerCase());
+  assertEquals(workspaceIdFromHeader(null), null);
+  assertEquals(workspaceIdFromHeader(""), null);
+  assertEquals(workspaceIdFromHeader("personal"), null);
+  assertEquals(workspaceIdFromHeader(`${id}; drop table`), null);
+});
+
+Deno.test("CORS allows the workspace header for allowlisted origins", () => {
+  const h = corsHeadersFor("http://localhost:8081", "http://localhost:8081", "GET");
+  assertEquals(h["Access-Control-Allow-Headers"].includes("x-workspace-id"), true);
 });

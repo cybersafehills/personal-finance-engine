@@ -9,7 +9,9 @@ import {
   mfaSatisfied,
   mobileAuthRateLimited,
   tokenAal,
+  workspaceIdFromHeader,
 } from "./mobile-api";
+import { getActiveWorkspaceId } from "./queries";
 import { runWithMobileSession } from "./mobile-session-context";
 
 // The shared guard for bearer-authenticated, read-only mobile endpoints
@@ -77,7 +79,17 @@ export async function mobileGet(
   }
 
   try {
-    const body = await runWithMobileSession(token, handler);
+    // The Space the app is viewing. Only a request: getActiveWorkspaceId()
+    // checks membership and falls back to the personal Space.
+    const requested = workspaceIdFromHeader(request.headers.get("x-workspace-id"));
+    const body = await runWithMobileSession(token, async () => {
+      const out = await handler();
+      // Echo the Space actually used, so an app talking to a server that
+      // ignores the header (or a revoked membership) can tell.
+      return requested
+        ? { ...out, workspace_id: await getActiveWorkspaceId() }
+        : out;
+    }, requested);
     return json(request, { ok: true, ...body }, 200);
   } catch {
     return json(request, { ok: false, error: "server_error" }, 500);
