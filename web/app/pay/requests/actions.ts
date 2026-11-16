@@ -3,17 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { supabaseSession } from "../../../lib/supabase-session-server";
 import { getActiveWorkspaceId } from "../../../lib/queries";
-import { siteUrl } from "../../../lib/site-url";
 import { requireMfaForSensitiveAction } from "../../../lib/auth/assurance";
 import {
-  buildPublicUrl,
-  generateToken,
-  hashToken,
-  validateCreateInput,
-} from "../../../lib/payment-requests/payment-request";
+  type CreateResult,
+  createPaymentRequestCore,
+} from "../../../lib/payment-requests/create";
 import {
   friendlyRequestError,
-  isAllowedExpiryHours,
   isPaymentRequestsEnabledForWorkspace,
   parseAmountMinor,
 } from "../../../lib/payment-requests/owner";
@@ -23,10 +19,7 @@ import {
 // server. The database is the authority (RLS + the RPC's own role checks);
 // nothing here marks anything "paid" on a payer's behalf.
 
-export type CreateResult =
-  | { ok: true; id: string; url: string; replayed: false }
-  | { ok: true; id: string; url: null; replayed: true }
-  | { ok: false; error: string };
+export type { CreateResult };
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
 async function ctx() {
@@ -44,7 +37,6 @@ async function ctx() {
 }
 
 const OFF = { ok: false, error: "Payment requests aren't available for your account." } as const;
-const IDEM = /^[A-Za-z0-9-]{8,100}$/;
 
 export async function createPaymentRequestAction(input: {
   amountText: string;
@@ -62,67 +54,21 @@ export async function createPaymentRequestAction(input: {
 
   const amountMinor = parseAmountMinor(input.amountText, input.currency);
   if (amountMinor === null) return { ok: false, error: "Enter an amount greater than zero." };
-  if (input.destinationType !== "momo_phone" && input.destinationType !== "merchant_code") {
-    return { ok: false, error: "Choose where the money should be sent." };
-  }
-  if (!isAllowedExpiryHours(input.expiresInHours)) {
-    return { ok: false, error: "Choose how long the request stays valid." };
-  }
-  if (!IDEM.test(input.idempotencyKey)) return { ok: false, error: "Please reload the page and try again." };
 
-  const expiresAt = new Date(Date.now() + input.expiresInHours * 3_600_000);
-  const errors = validateCreateInput(
-    {
-      amountMinor,
-      currency: input.currency,
-      destinationType: input.destinationType,
-      destinationValue: input.destinationValue,
-      recipientDisplay: input.recipientDisplay,
-      reference: input.reference,
-      expiresAt,
-    },
-    new Date(),
-  );
-  if (errors.length > 0) {
-    return { ok: false, error: friendlyRequestError(errors.includes("invalid_destination") ? "invalid_destination" : errors.includes("invalid_expiry") ? "invalid_expiry" : "invalid_payment_request") };
-  }
-
-  let origin: string;
-  try {
-    origin = new URL(siteUrl()).origin;
-    buildPublicUrl(origin, "0".repeat(64)); // fails unless a bare https origin
-  } catch {
-    return { ok: false, error: "Sharing links isn't configured yet (SITE_URL must be an https address)." };
-  }
-
-  // A double-submit with the same key returns the original request. The token
-  // exists only in this process and the one response, so it can't be re-shown.
-  const { data: existing } = await supabase
-    .from("payment_requests")
-    .select("id")
-    .eq("workspace_id", workspaceId)
-    .eq("idempotency_key", input.idempotencyKey)
-    .maybeSingle();
-  if (existing) return { ok: true, id: existing.id, url: null, replayed: true };
-
-  const token = generateToken();
-  const { data, error } = await supabase.rpc("create_payment_request", {
-    p_workspace_id: workspaceId,
-    p_amount_minor: amountMinor.toString(),
-    p_currency: input.currency,
-    p_destination_type: input.destinationType,
-    p_destination_value: input.destinationValue,
-    p_recipient_display: input.recipientDisplay,
-    p_reference: input.reference.trim() === "" ? null : input.reference,
-    p_expires_at: expiresAt.toISOString(),
-    p_token_hash: await hashToken(token),
-    p_idempotency_key: input.idempotencyKey,
+  const res = await createPaymentRequestCore({
+    supabase,
+    workspaceId,
+    amountMinor,
+    currency: input.currency,
+    destinationType: input.destinationType,
+    destinationValue: input.destinationValue,
+    recipientDisplay: input.recipientDisplay,
+    reference: input.reference,
+    expiresInHours: input.expiresInHours,
+    idempotencyKey: input.idempotencyKey,
   });
-  if (error || typeof data !== "string") {
-    return { ok: false, error: friendlyRequestError(error?.message) };
-  }
-  revalidatePath("/pay/requests");
-  return { ok: true, id: data, url: buildPublicUrl(origin, token), replayed: false };
+  if (res.ok) revalidatePath("/pay/requests");
+  return res;
 }
 
 async function simple(

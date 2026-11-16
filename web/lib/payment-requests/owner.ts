@@ -140,3 +140,58 @@ export function statusBadge(
       return { label: status, variant: "neutral" };
   }
 }
+
+// ------------------------- mobile create request body ----------------------
+
+export type MobileCreateBody = {
+  amountMinor: bigint;
+  currency: string;
+  destinationType: string;
+  destinationValue: string;
+  recipientDisplay: string;
+  reference: string;
+  expiresInHours: number;
+  idempotencyKey: string;
+};
+
+/** Strict shape check for POST /api/mobile/payment-requests. The DB re-validates everything. */
+export function parseMobileCreateBody(body: unknown): MobileCreateBody | null {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return null;
+  }
+  const b = body as Record<string, unknown>;
+  const str = (k: string, max: number): string | null =>
+    typeof b[k] === "string" && (b[k] as string).length <= max
+      ? (b[k] as string)
+      : null;
+
+  const amount = str("amount_minor", 20);
+  if (amount === null || !/^[1-9][0-9]{0,18}$/.test(amount)) return null;
+  const currency = str("currency", 3);
+  const destinationType = str("destination_type", 20);
+  const destinationValue = str("destination_value", 40);
+  const recipientDisplay = str("recipient_display", 80);
+  const idempotencyKey = str("idempotency_key", 100);
+  const reference = b.reference === undefined || b.reference === null
+    ? ""
+    : str("reference", 64);
+  const hours = b.expires_in_hours;
+  if (
+    currency === null || destinationType === null ||
+    destinationValue === null ||
+    recipientDisplay === null || idempotencyKey === null ||
+    reference === null ||
+    typeof hours !== "number" || !Number.isInteger(hours)
+  ) return null;
+
+  return {
+    amountMinor: BigInt(amount),
+    currency,
+    destinationType,
+    destinationValue,
+    recipientDisplay,
+    reference,
+    expiresInHours: hours,
+    idempotencyKey,
+  };
+}

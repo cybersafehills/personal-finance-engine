@@ -102,3 +102,44 @@ Deno.test("status badges: only attested states read as paid, and 'by you' is exp
   assertEquals(/paid/i.test(statusBadge("open").label), false);
   assertEquals(/paid/i.test(statusBadge("expired").label), false);
 });
+
+Deno.test("parseMobileCreateBody: strict shape, amounts as digit strings", async () => {
+  const { parseMobileCreateBody } = await import("./owner.ts");
+  const ok = {
+    amount_minor: "5000",
+    currency: "RWF",
+    destination_type: "momo_phone",
+    destination_value: "0793000439",
+    recipient_display: "Sam",
+    reference: "Rent",
+    expires_in_hours: 168,
+    idempotency_key: "abcdefgh-1234",
+  };
+  const v = parseMobileCreateBody(ok)!;
+  assertEquals([v.amountMinor, v.currency, v.expiresInHours], [
+    5000n,
+    "RWF",
+    168,
+  ]);
+  assertEquals(
+    parseMobileCreateBody({ ...ok, reference: undefined })?.reference,
+    "",
+  );
+  for (
+    const bad of [
+      null,
+      [],
+      "x",
+      { ...ok, amount_minor: 5000 },
+      { ...ok, amount_minor: "0" },
+      { ...ok, amount_minor: "-5" },
+      { ...ok, amount_minor: "1.5" },
+      { ...ok, amount_minor: "01" },
+      { ...ok, currency: undefined },
+      { ...ok, expires_in_hours: "168" },
+      { ...ok, expires_in_hours: 1.5 },
+      { ...ok, recipient_display: "x".repeat(81) },
+      { ...ok, idempotency_key: undefined },
+    ]
+  ) assertEquals(parseMobileCreateBody(bad), null, JSON.stringify(bad));
+});

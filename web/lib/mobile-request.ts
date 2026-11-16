@@ -20,7 +20,7 @@ import { runWithMobileSession } from "./mobile-session-context";
 // ordinary read models execute as the user under RLS. Never logs the token or
 // the response; every response is `no-store`.
 
-const METHODS = "GET, OPTIONS";
+const METHODS = "GET, POST, OPTIONS";
 
 function cors(request: NextRequest) {
   return corsHeadersFor(
@@ -28,6 +28,17 @@ function cors(request: NextRequest) {
     process.env.MOBILE_API_CORS_ORIGINS,
     METHODS,
   );
+}
+
+/**
+ * Thrown by a handler to return a specific, safe error (never a raw database
+ * message). `code` is a stable machine string the app can switch on.
+ */
+export class MobileApiError extends Error {
+  /** `message` is a safe, user-facing sentence (never raw database text). */
+  constructor(public status: number, public code: string, public userMessage?: string) {
+    super(code);
+  }
 }
 
 function json(request: NextRequest, body: unknown, status: number) {
@@ -45,7 +56,24 @@ export function mobileOptions(request: NextRequest) {
 }
 
 /** `name` keys the rate limiter so one endpoint cannot starve another. */
-export async function mobileGet(
+export function mobileGet(
+  request: NextRequest,
+  name: string,
+  handler: () => Promise<Record<string, unknown>>,
+): Promise<NextResponse> {
+  return mobileHandle(request, name, handler);
+}
+
+/** Same guard as mobileGet, for a JSON-body mutation (the handler reads the body). */
+export function mobilePost(
+  request: NextRequest,
+  name: string,
+  handler: () => Promise<Record<string, unknown>>,
+): Promise<NextResponse> {
+  return mobileHandle(request, `${name}:post`, handler);
+}
+
+async function mobileHandle(
   request: NextRequest,
   name: string,
   handler: () => Promise<Record<string, unknown>>,
@@ -79,7 +107,16 @@ export async function mobileGet(
   try {
     const body = await runWithMobileSession(token, handler);
     return json(request, { ok: true, ...body }, 200);
-  } catch {
+  } catch (e) {
+    if (e instanceof MobileApiError) {
+      return json(
+        request,
+        e.userMessage
+          ? { ok: false, error: e.code, message: e.userMessage }
+          : { ok: false, error: e.code },
+        e.status,
+      );
+    }
     return json(request, { ok: false, error: "server_error" }, 500);
   }
 }

@@ -24,7 +24,9 @@ export type OwnerRequest = {
 const COLUMNS =
   "id, workspace_id, amount_minor, currency, destination_type, destination_value, recipient_display, reference, expires_at, status, matched_transaction_id, created_at, paid_marked_at, cancelled_at";
 
-export async function listPaymentRequests(workspaceId: string): Promise<OwnerRequest[]> {
+export async function listPaymentRequests(
+  workspaceId: string,
+): Promise<OwnerRequest[]> {
   const supabase = await supabaseSession();
   const { data, error } = await supabase
     .from("payment_requests_v")
@@ -85,7 +87,9 @@ export type MatchCandidate = {
  * has claimed - the only ones link_payment_request_transaction will accept.
  * (Transactions are RWF-only today, so other currencies get none.)
  */
-export async function getMatchCandidates(r: OwnerRequest): Promise<MatchCandidate[]> {
+export async function getMatchCandidates(
+  r: OwnerRequest,
+): Promise<MatchCandidate[]> {
   if (r.currency !== "RWF") return [];
   const supabase = await supabaseSession();
   const { data } = await supabase
