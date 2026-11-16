@@ -221,6 +221,32 @@ A navigation event, never a claim the payment succeeded.
 - Shares `lib/pay/handoff.ts` with the web action (the optional SMS-reconciliation
   step uses the service role there; the web's behaviour is unchanged).
 
+## `GET /api/mobile/categories`
+
+Where the money has gone, all time, per category: the web's Categories page, for
+the app's Categories screen. Read-only; same guard as the others.
+
+- `200 { ok: true, categories: [{ category, totalRwf, transactionCount }],
+  truncated }`, largest total first. `"Uncategorized"` stands for a null
+  category. The figures come from `getCategoryTotalsComplete`
+  (`lib/category-totals.ts` holds the pure parts); the app never recomputes them.
+- Covers every Space the user belongs to (no Space filter), exactly like the web
+  page; settled outgoing transactions only, merged duplicates excluded.
+- **Why it pages:** the REST API returns at most `max_rows` per request (1000 in
+  `supabase/config.toml`; production's value was not checked), so reading all rows
+  in one request would silently drop everything past the cap and show wrong totals
+  with no error. It reads a page at a time, advancing by the rows it actually
+  received and stopping only on an empty page (so a lower server cap cannot cut it
+  short), in a stable `id` order, 50 pages at most. `truncated` is true only if that
+  cap was reached, so the app can say the totals are incomplete. The web Categories
+  page uses the same function.
+- **Errors are errors:** a failed read throws, so this answers `500` and the app
+  offers a retry, instead of a 200 that says "no spending yet".
+- Home's "top spending category" and the category-name suggestions still use the
+  old one-request `getCategoryTotals` on purpose (they run on every load and must
+  stay one cheap request), so they keep the old row ceiling.
+- Amounts are whole RWF.
+
 ## Rollout
 
 1. Deploy web with the route (dark).

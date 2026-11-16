@@ -13,6 +13,7 @@ import {
   type PayConfigResult,
   type PayIntentResult,
 } from "@/features/pay/parse";
+import { parseCategoriesResponse, type CategoriesResult } from "@/features/categories/parse";
 import { parseInboxResponse, type InboxResult } from "@/features/inbox/parse";
 import { config } from "@/lib/config";
 
@@ -189,4 +190,13 @@ export async function recordPayHandoff(
   const result = await bearerPost(`/api/mobile/pay/intents/${encodeURIComponent(id)}/handoff`, body);
   if (result.kind !== "response") return intentFailure(result);
   return parseIntentResponse(result.status, result.body);
+}
+
+/** All-time spending per category, from the web's canonical totals (the app never recomputes them). */
+export async function fetchCategories(): Promise<CategoriesResult> {
+  const result = await bearerGet("/api/mobile/categories");
+  if (result.kind !== "response") {
+    return { ok: false, ...failureForOutcome(result, "Your categories") };
+  }
+  return parseCategoriesResponse(result.status, result.body);
 }
