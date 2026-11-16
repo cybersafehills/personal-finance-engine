@@ -3,20 +3,11 @@ import { useCallback } from "react";
 import { RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import {
-  Badge,
-  Button,
-  Card,
-  EmptyState,
-  MoneyAmount,
-  ScreenHeader,
-  StatTile,
-  Text,
-} from "@/components/ds";
+import { Badge, Button, Card, EmptyState, MoneyAmount, Text } from "@/components/ds";
 import { fetchBudgets } from "@/api/mobile-api";
-import { statusDisplay, totals, worstStatus } from "@/features/budgets/display";
 import { captureSupported, getCaptureHealth } from "@/features/capture/capture";
-import { usePrivacy } from "@/features/privacy/PrivacyProvider";
+import { BalanceCard } from "@/features/home/BalanceCard";
+import { BudgetStatusCard } from "@/features/home/BudgetStatusCard";
 import {
   getCurrentBalance,
   getReviewQueueCount,
@@ -25,24 +16,27 @@ import {
 } from "@/features/transactions/queries";
 import { TransactionItem } from "@/features/transactions/TransactionItem";
 import { useQuery } from "@/hooks/useQuery";
-import { formatDateTime } from "@/lib/kigali-time";
-import { formatMoney, formatRwf } from "@/lib/money";
 import { colors, space } from "@/theme/tokens";
+
+// Home shows the six most recent, as the web does.
+const RECENT_LIMIT = 6;
 
 async function loadHome() {
   const nowIso = new Date().toISOString();
   const [balance, today, recent, reviewCount, health] = await Promise.all([
     getCurrentBalance(),
     getTodayTotals(nowIso),
-    getTransactions({ limit: 8 }),
+    getTransactions({ limit: RECENT_LIMIT }),
     getReviewQueueCount(),
     getCaptureHealth(),
   ]);
-  return { balance, today, recent, reviewCount, health };
+  return { balance, today, recent, reviewCount, health, nowIso };
 }
 
+// Same order as the web's Home on a phone: balance, today's totals, budget
+// status, then recent transactions. The app adds two cards the web does not
+// have on Home (recording needs setup, transactions to review) below the budget.
 export default function Home() {
-  const { amountsHidden, toggleAmountsHidden } = usePrivacy();
   // `loadHome` is a module-level function, so its identity is stable.
   const { data, loading, refreshing, error, refresh } = useQuery(loadHome);
   // Server-computed, so it loads on its own: a slow or unavailable budget
@@ -50,7 +44,6 @@ export default function Home() {
   const loadBudgets = useCallback(() => fetchBudgets(), []);
   const { data: budgetResult } = useQuery(loadBudgets);
   const budget = budgetResult?.ok ? (budgetResult.budgets[0] ?? null) : null;
-  const budgetSummary = budget ? totals(budget.allocations) : null;
 
   // Recording is "not working" when the engine exists but is not healthy.
   const recordingNeedsSetup =
@@ -68,17 +61,6 @@ export default function Home() {
           <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.accent} />
         }
       >
-        <ScreenHeader
-          title="Home"
-          action={
-            <Button
-              label={amountsHidden ? "Show amounts" : "Hide amounts"}
-              variant="ghost"
-              onPress={toggleAmountsHidden}
-            />
-          }
-        />
-
         {error && !data ? (
           <EmptyState
             variant="setup"
@@ -89,36 +71,14 @@ export default function Home() {
 
         {data ? (
           <>
-            <Card>
-              <Text variant="caption" color="textMuted">
-                MoMo balance
-              </Text>
-              {data.balance ? (
-                <>
-                  <MoneyBalance amountRwf={data.balance.amountRwf} hidden={amountsHidden} />
-                  <Text variant="caption" color="textMuted">
-                    As of {formatDateTime(data.balance.asOfIso)}, from your last
-                    MoMo message
-                  </Text>
-                </>
-              ) : (
-                <Text variant="label" color="textSecondary" style={{ marginTop: space[1] }}>
-                  No balance yet. It appears after your first recorded MoMo
-                  message.
-                </Text>
-              )}
-            </Card>
+            <BalanceCard balance={data.balance} nowIso={data.nowIso} />
 
             <View style={styles.row}>
-              <StatTile
-                label="In today"
-                value={amountsHidden ? "••••••" : formatRwf(data.today.receivedRwf)}
-              />
-              <StatTile
-                label="Out today"
-                value={amountsHidden ? "••••••" : formatRwf(data.today.spentRwf)}
-              />
+              <Tile label="Received today" amountRwf={data.today.receivedRwf} />
+              <Tile label="Spent today" amountRwf={-data.today.spentRwf} />
             </View>
+
+            {budget ? <BudgetStatusCard budget={budget} nowIso={data.nowIso} /> : null}
 
             {recordingNeedsSetup ? (
               <Card style={styles.stack}>
@@ -128,30 +88,6 @@ export default function Home() {
                   so you don&apos;t have to type them in.
                 </Text>
                 <Button label="Set it up" fullWidth onPress={() => router.push("/connect")} />
-              </Card>
-            ) : null}
-
-            {budget && budgetSummary ? (
-              <Card style={styles.stack}>
-                <View style={styles.cardHeader}>
-                  <Text variant="bodyStrong">{budget.name}</Text>
-                  <Badge variant={statusDisplay(worstStatus(budget.allocations)).variant}>
-                    {statusDisplay(worstStatus(budget.allocations)).label}
-                  </Badge>
-                </View>
-                <Text variant="label" color="textSecondary" tabular>
-                  {amountsHidden
-                    ? "•••••• left this period"
-                    : budgetSummary.remainingMinor >= 0
-                      ? `${formatMoney(BigInt(Math.round(budgetSummary.remainingMinor)), budget.currency)} left this period`
-                      : `${formatMoney(BigInt(Math.round(-budgetSummary.remainingMinor)), budget.currency)} over this period`}
-                </Text>
-                <Button
-                  label="See your budget"
-                  variant="secondary"
-                  fullWidth
-                  onPress={() => router.push("/budgets")}
-                />
               </Card>
             ) : null}
 
@@ -171,15 +107,15 @@ export default function Home() {
 
             <Card style={{ paddingHorizontal: space[1], paddingVertical: space[2] }}>
               <View style={styles.cardHeader}>
-                <Text variant="label" color="textSecondary">
-                  Recent activity
+                <Text variant="caption" color="textMuted" style={styles.kicker}>
+                  RECENT TRANSACTIONS
                 </Text>
                 <Button label="See all" variant="ghost" onPress={() => router.push("/transactions")} />
               </View>
               {data.recent.length === 0 ? (
                 <EmptyState
                   title="No transactions yet"
-                  description="They appear here as OneLedger records them."
+                  description="New MoMo transactions will appear here automatically."
                 />
               ) : (
                 data.recent.map((transaction) => (
@@ -198,13 +134,15 @@ export default function Home() {
   );
 }
 
-/** The balance is a level, not a movement, so it carries no +/− sign. */
-function MoneyBalance({ amountRwf, hidden }: { amountRwf: number; hidden: boolean }) {
-  if (hidden) return <MoneyAmount amountRwf={0} size="xl" masked />;
+/** One of today's totals. Signed, coloured and masked like every other amount. */
+function Tile({ label, amountRwf }: { label: string; amountRwf: number }) {
   return (
-    <Text variant="display" tabular>
-      {formatRwf(amountRwf)}
-    </Text>
+    <Card style={styles.tile}>
+      <Text variant="caption" color="textMuted">
+        {label}
+      </Text>
+      <MoneyAmount amountRwf={amountRwf} size="lg" />
+    </Card>
   );
 }
 
@@ -218,6 +156,7 @@ const styles = StyleSheet.create({
     alignSelf: "center",
   },
   row: { flexDirection: "row", gap: space[3] },
+  tile: { flex: 1, paddingVertical: space[3], gap: space[1] },
   stack: { gap: space[3] },
   cardHeader: {
     flexDirection: "row",
@@ -225,4 +164,5 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingLeft: space[3],
   },
+  kicker: { letterSpacing: 0.6 },
 });

@@ -22,7 +22,7 @@ jest.mock("@/features/capture/capture", () => ({
 jest.mock("@/features/transactions/queries", () => ({
   getCurrentBalance: () => mockBalance(),
   getTodayTotals: () => mockToday(),
-  getTransactions: () => mockRecent(),
+  getTransactions: (options: unknown) => mockRecent(options),
   getReviewQueueCount: () => mockReviewCount(),
 }));
 
@@ -90,41 +90,58 @@ beforeEach(() => {
 });
 
 describe("Home screen", () => {
-  it("shows the balance, today's totals and recent activity", async () => {
+  it("shows the balance, today's totals and recent transactions", async () => {
     await renderHome();
-    expect(await screen.findByText("250,000 RWF")).toBeTruthy();
+    expect(await screen.findByText("Current balance")).toBeTruthy();
+    expect(screen.getByText("250,000 RWF")).toBeTruthy();
+    expect(screen.getByText("MTN Mobile Money")).toBeTruthy();
+    expect(screen.getByText("Received today")).toBeTruthy();
+    expect(screen.getByText("+5,000 RWF")).toBeTruthy();
+    expect(screen.getByText("Spent today")).toBeTruthy();
+    // The tile, and the same payment in the list below.
+    expect(screen.getAllByText("−4,200 RWF").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText("RECENT TRANSACTIONS")).toBeTruthy();
     expect(screen.getByText("Kigali Fresh")).toBeTruthy();
-    expect(screen.getByText("5,000 RWF")).toBeTruthy();
   });
 
-  it("hides every amount in privacy mode", async () => {
+  it("asks for six recent transactions, like the web", async () => {
+    await renderHome();
+    await screen.findByText("Kigali Fresh");
+    expect(mockRecent).toHaveBeenCalledWith({ limit: 6 });
+  });
+
+  it("hides every amount with the eye on the balance card", async () => {
     await renderHome();
     await screen.findByText("250,000 RWF");
-    await fireEvent.press(screen.getByText("Hide amounts"));
+    await fireEvent.press(screen.getByLabelText("Hide current balance"));
     expect(screen.queryByText("250,000 RWF")).toBeNull();
-    expect(screen.queryByText("5,000 RWF")).toBeNull();
-    expect(screen.getByText("Show amounts")).toBeTruthy();
+    expect(screen.queryByText("+5,000 RWF")).toBeNull();
+    expect(screen.queryByText("−4,200 RWF")).toBeNull();
+    expect(screen.getByLabelText("Show current balance")).toBeTruthy();
   });
 
-  it("shows the budget card with what is left, and opens the budget", async () => {
+  it("shows the budget status card, and opens the budget", async () => {
     mockFetchBudgets.mockResolvedValue({ ok: true, budgets: [budget] });
     await renderHome();
 
-    expect(await screen.findByText("November")).toBeTruthy();
+    expect(await screen.findByText("BUDGET STATUS")).toBeTruthy();
     expect(screen.getByText("On track")).toBeTruthy();
-    expect(screen.getByText("RWF 60,000 left this period")).toBeTruthy();
+    expect(screen.getByText("40,000 RWF of 100,000 RWF used")).toBeTruthy();
+    expect(screen.getByText("Remaining")).toBeTruthy();
+    expect(screen.getByText("60,000 RWF")).toBeTruthy();
 
-    await fireEvent.press(screen.getByText("See your budget"));
+    await fireEvent.press(screen.getByLabelText(/Open budget/));
     expect(router.push).toHaveBeenCalledWith("/budgets");
   });
 
-  it("masks the budget amount in privacy mode", async () => {
+  it("masks the budget amounts in privacy mode, but not the status", async () => {
     mockFetchBudgets.mockResolvedValue({ ok: true, budgets: [budget] });
     await renderHome();
-    await screen.findByText("RWF 60,000 left this period");
-    await fireEvent.press(screen.getByText("Hide amounts"));
+    await screen.findByText("60,000 RWF");
+    await fireEvent.press(screen.getByLabelText("Hide current balance"));
     expect(screen.queryByText(/60,000/)).toBeNull();
-    expect(screen.getByText("•••••• left this period")).toBeTruthy();
+    expect(screen.getByText("••••• of ••••• used")).toBeTruthy();
+    expect(screen.getByText("On track")).toBeTruthy();
   });
 
   it("says over, not a negative amount, when the budget is exceeded", async () => {
@@ -138,14 +155,16 @@ describe("Home screen", () => {
       ],
     });
     await renderHome();
-    expect(await screen.findByText("RWF 20,000 over this period")).toBeTruthy();
+    expect(await screen.findByText("Over by")).toBeTruthy();
+    expect(screen.getByText("20,000 RWF")).toBeTruthy();
+    expect(screen.getByText("Over budget")).toBeTruthy();
   });
 
   it("hides the budget card when budgets are unavailable, without breaking Home", async () => {
     mockFetchBudgets.mockResolvedValue({ ok: false, reason: "unavailable", message: "Your budget isn't available yet." });
     await renderHome();
     expect(await screen.findByText("250,000 RWF")).toBeTruthy();
-    expect(screen.queryByText("See your budget")).toBeNull();
+    expect(screen.queryByText("BUDGET STATUS")).toBeNull();
   });
 
   it("offers a way to review transactions when some need it", async () => {
