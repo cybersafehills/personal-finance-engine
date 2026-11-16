@@ -18,6 +18,7 @@ import {
 import {
   actionKey,
   canPickCategory,
+  fallbackNotice,
   kindLabel,
   transactionIdFromHref,
   webUrl,
@@ -52,7 +53,7 @@ function runAction(action: InboxInlineAction): Promise<void> {
 // Everything that needs a decision, in the order the web ranks it. The list
 // is computed by the web app (it owns the feature flags and cross-domain
 // read models); simple decisions are made here, the rest open the web.
-// If the server endpoint is off or unreachable the tab falls back to the
+// If the server endpoint is off, failing or unreachable the tab falls back to the
 // direct category-review queue, so a category check is never out of reach.
 export default function Inbox() {
   const load = useCallback(() => fetchInbox(), []);
@@ -84,8 +85,10 @@ export default function Inbox() {
     [refresh],
   );
 
-  if (data && !data.ok && data.reason === "unavailable") {
-    return <ReviewList notice="Category checks (the full inbox isn't available yet)" />;
+  const notice = fallbackNotice(data);
+  if (notice) {
+    // The retry reloads the full inbox; if it now succeeds this branch ends.
+    return <ReviewList notice={notice} onRetryFullInbox={refresh} />;
   }
 
   const items = data?.ok ? data.inbox.items.filter((i) => !decided.has(i.id)) : [];
@@ -93,7 +96,7 @@ export default function Inbox() {
   const high = items.filter((i) => i.priority === "high").length;
 
   return (
-    <ListScreen>
+    <ListScreen edges={["left", "right"]}>
       <FlatList
         data={items}
         keyExtractor={(item) => item.id}

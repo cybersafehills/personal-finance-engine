@@ -137,14 +137,25 @@ describe("Inbox screen", () => {
     expect(await screen.findByText(/REVIEW FALLBACK/)).toBeTruthy();
   });
 
-  it("shows a retry for a transient failure, not the fallback", async () => {
+  it("falls back to category checks when the server errors, instead of a dead end", async () => {
     mockFetchInbox.mockResolvedValue({
       ok: false,
       reason: "error",
       message: "Couldn't load your inbox. Check your connection and try again.",
     });
     await render(<Inbox />);
-    expect(await screen.findByText("Try again")).toBeTruthy();
+    expect(await screen.findByText(/REVIEW FALLBACK: Category checks only/)).toBeTruthy();
+  });
+
+  it("keeps a sign-in problem as a message with a retry, not the fallback", async () => {
+    mockFetchInbox.mockResolvedValue({
+      ok: false,
+      reason: "unauthorized",
+      message: "Please sign in again.",
+    });
+    await render(<Inbox />);
+    expect(await screen.findByText("Please sign in again.")).toBeTruthy();
+    expect(screen.getByText("Try again")).toBeTruthy();
     expect(screen.queryByText(/REVIEW FALLBACK/)).toBeNull();
   });
 

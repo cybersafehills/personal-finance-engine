@@ -19,7 +19,14 @@ import { colors, space } from "@/theme/tokens";
 // accepted or rejected right here (the same database functions the web calls).
 // A decided row leaves the list immediately; if saving fails it stays, with
 // the reason, so a decision is never silently lost.
-export function ReviewList({ notice }: { notice?: string }) {
+export function ReviewList({
+  notice,
+  onRetryFullInbox,
+}: {
+  notice?: string;
+  /** When shown as a fallback: reload the full inbox. */
+  onRetryFullInbox?: () => void;
+}) {
   const load = useCallback(() => getReviewQueue(), []);
   const { data, loading, refreshing, error, refresh } = useQuery(load);
   const [decided, setDecided] = useState<ReadonlySet<string>>(new Set());
@@ -52,7 +59,7 @@ export function ReviewList({ notice }: { notice?: string }) {
   const rows = (data ?? []).filter((row) => !decided.has(row.id));
 
   return (
-    <ListScreen>
+    <ListScreen edges={["left", "right"]}>
       <FlatList
         data={rows}
         keyExtractor={(row) => row.id}
@@ -66,6 +73,9 @@ export function ReviewList({ notice }: { notice?: string }) {
               title="Inbox"
               subtitle={notice ?? "Transactions that need a category check"}
             />
+            {onRetryFullInbox ? (
+              <Button label="Try the full inbox again" variant="secondary" onPress={onRetryFullInbox} />
+            ) : null}
           </View>
         }
         renderItem={({ item }) => (

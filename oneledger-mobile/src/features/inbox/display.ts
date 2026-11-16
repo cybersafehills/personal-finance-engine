@@ -1,3 +1,4 @@
+import type { InboxResult } from "./parse";
 import type { InboxInlineAction, InboxItem } from "./types";
 
 const KIND_LABELS: Record<string, string> = {
@@ -40,4 +41,22 @@ export function actionKey(action: InboxInlineAction): string {
   return action.type === "merge_duplicate"
     ? `${action.type}:${action.duplicateId}`
     : `${action.type}:${action.transactionId}`;
+}
+
+/**
+ * When the full Inbox can't be shown, the tab falls back to the direct
+ * category-review queue so a category check is never out of reach. Returns
+ * the line to show above that list, or null when the full Inbox (or a
+ * sign-in / two-step problem, which needs its own message) applies.
+ * A server error falls back too: the app can still read the queue itself.
+ */
+export function fallbackNotice(result: InboxResult | null): string | null {
+  if (!result || result.ok) return null;
+  if (result.reason === "unavailable") {
+    return "Category checks (the full inbox isn't available yet)";
+  }
+  if (result.reason === "error") {
+    return "Category checks only (the full inbox couldn't load)";
+  }
+  return null;
 }
