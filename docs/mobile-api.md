@@ -129,6 +129,55 @@ Read-only; same guard as the others.
 - It reports availability only; the endpoints it describes still enforce their
   own gates, so a stale `config` can never grant anything.
 
+## `POST /api/mobile/pay/intents`
+
+Prepare a **draft payment** ("Pay X again") for the app. The first mobile
+mutation that goes through a route rather than the database directly, because
+the assisted-pay gate lives in server env and the web action has checks the
+database does not enforce. It never charges anything: the result is a `draft`
+plus the USSD instruction to hand off with.
+
+- **Guard:** `mobilePost` in `lib/mobile-request.ts`, the same authentication as
+  the GETs (flag, per-IP limit, token validated with Supabase Auth, **second
+  factor complete**, which is exactly the web's `requireMfaForSensitiveAction`),
+  a stricter limit (20/min/IP), and a JSON body of at most 8 KB. The handler runs
+  under the caller's token, so RLS is still the boundary.
+- **One code path:** `lib/pay/create-intent.ts` is shared with the web server
+  action (`createDraftIntent`): validation, the directory's published service
+  code, and the idempotent, membership-checked `create_payment_intent` RPC.
+  On top of that this route checks the assisted-pay gate and that any
+  `sourceAccountId` belongs to the workspace (the RPC does not).
+- **Body:** `{ paymentType: pay_person | buy_airtime | pay_merchant | pay_bill,
+  amountMinor, idempotencyKey (UUID, required), recipientMsisdn | merchantCode |
+  billingReference (whichever the type needs), recipientName?, sourceAccountId? }`.
+  Nothing else is read (no note, category, budget or trusted-recipient ids).
+- **Double taps:** the client generates `idempotencyKey` once per attempt; the
+  same key returns the same intent with `existed: true`.
+- **Session freshness:** recorded on the intent from the access token's `iat`,
+  as the web does from the session. It is advisory (never blocks), like the web.
+- `200 { ok: true, intent, existed }` where `intent` is the shape below.
+  Errors: `403 feature_disabled`, `422 invalid_request | invalid_account |
+  could_not_prepare` (with a user-safe `message`), `400 invalid_request` (not
+  JSON), `413 too_large`, plus the guard's `401`, `403 mfa_required`, `404`, `429`.
+- Created in the user's personal workspace (no session cookie), like the others.
+
+## `GET /api/mobile/pay/intents/:id`
+
+A payment intent with its prepared instruction, for the review screen.
+
+- `200 { ok: true, intent }` or `200 { ok: true, intent: null, reason }` with
+  `reason` `unavailable` (pay surface off) or `not_found` (no such intent for
+  this user, or a malformed id; RLS makes another user's id indistinguishable).
+- `intent`: `id, state, paymentType, provider, currency, amountMinor,
+  recipientName, recipientMasked, merchantCode, billingReference, expiresAt,
+  createdAt, instruction`. `instruction` is `null` when there is no verified USSD
+  route (the app must say so, not offer a dial), `{ ok: true, display, telHref }`
+  (the filled string and a `tel:` link with `#` encoded), or `{ ok: false, error }`.
+  The full phone number appears only inside the instruction, never as a field.
+- The instruction is built by `lib/pay/instruction.ts`, the same function the
+  web review panel uses (extracted from it), so the two cannot disagree.
+- Recording the handoff (dialled / copied) is not here yet.
+
 ## Rollout
 
 1. Deploy web with the route (dark).

@@ -93,6 +93,7 @@ async function ensureActiveBudget(): Promise<{ created: boolean }> {
 test.describe("mobile API", () => {
   let transactionId: string;
   let createdBudget = false;
+  const createdIntentIds: string[] = [];
 
   test.beforeAll(async () => {
     const admin = adminClient();
@@ -111,6 +112,13 @@ test.describe("mobile API", () => {
   });
 
   test.afterAll(async () => {
+    // Payment intents made through the pay endpoint (events first: they
+    // reference the intent). Best effort - a leftover draft is harmless.
+    if (createdIntentIds.length > 0) {
+      const admin = adminClient();
+      await admin.from("payment_events").delete().in("payment_intent_id", createdIntentIds);
+      await admin.from("payment_intents").delete().in("id", createdIntentIds);
+    }
     await cleanupSeededTransactions(TAG);
     if (createdBudget) {
       await adminClient().from("budgets").delete().eq("name", BUDGET_NAME);
@@ -342,6 +350,110 @@ test.describe("mobile API", () => {
     }
   });
 
+  test("pay: prepare a draft intent, retry safely, and read it back", async () => {
+    const api = await playwrightRequest.newContext({ baseURL: BASE_URL });
+    try {
+      const signIn = await api.post("/api/mobile/auth/sign-in", {
+        data: { email: E2E_USER.email, password: E2E_USER.password },
+      });
+      expect(signIn.status()).toBe(200);
+      const headers = { authorization: `Bearer ${(await signIn.json()).access_token}` };
+
+      // Assisted pay is on by default in this suite (pay-assisted.spec.ts relies on it).
+      const key = crypto.randomUUID();
+      const payload = {
+        paymentType: "pay_person",
+        amountMinor: 1500,
+        recipientName: "E2E Mobile Recipient",
+        recipientMsisdn: "0788123456",
+        idempotencyKey: key,
+      };
+
+      const first = await api.post("/api/mobile/pay/intents", { headers, data: payload });
+      expect(first.status()).toBe(200);
+      expect(first.headers()["cache-control"]).toContain("no-store");
+      const created = await first.json();
+      expect(created.ok).toBe(true);
+      expect(created.existed).toBe(false);
+      createdIntentIds.push(created.intent.id);
+      expect(created.intent.state).toBe("draft");
+      expect(created.intent.amountMinor).toBe(1500);
+      expect(created.intent.recipientMasked).toContain("3456");
+      // The full number only ever appears inside the dialable instruction.
+      const { instruction, ...rest } = created.intent;
+      expect(JSON.stringify(rest)).not.toContain("0788123456");
+      expect(JSON.stringify(rest)).not.toContain("250788123456");
+      if (instruction) {
+        // A route is either ready to dial (with `#` encoded) or says why not.
+        if (instruction.ok) {
+          expect(instruction.display).toContain("0788123456");
+          expect(instruction.telHref.startsWith("tel:")).toBe(true);
+          expect(instruction.telHref).not.toContain("#");
+        } else {
+          expect(typeof instruction.error).toBe("string");
+        }
+      }
+
+      // The same request id again (a double tap, a retry) is the same intent.
+      const again = await api.post("/api/mobile/pay/intents", { headers, data: payload });
+      expect(again.status()).toBe(200);
+      const repeat = await again.json();
+      expect(repeat.existed).toBe(true);
+      expect(repeat.intent.id).toBe(created.intent.id);
+
+      // Read it back by id.
+      const read = await api.get(`/api/mobile/pay/intents/${created.intent.id}`, { headers });
+      expect(read.status()).toBe(200);
+      const readBody = await read.json();
+      expect(readBody.intent.id).toBe(created.intent.id);
+      expect(readBody.intent.state).toBe("draft");
+
+      // An unknown or malformed id has no intent.
+      for (const id of ["00000000-0000-4000-8000-000000000000", "not-a-uuid"]) {
+        const miss = await api.get(`/api/mobile/pay/intents/${id}`, { headers });
+        expect(miss.status()).toBe(200);
+        const missBody = await miss.json();
+        expect(missBody.intent).toBeNull();
+        expect(missBody.reason).toBe("not_found");
+      }
+
+      // Bad requests are refused before anything is written.
+      const bad = [
+        { ...payload, idempotencyKey: crypto.randomUUID(), amountMinor: 0 },
+        { ...payload, idempotencyKey: crypto.randomUUID(), paymentType: "government" },
+        { ...payload, idempotencyKey: "not-a-uuid" },
+        { ...payload, idempotencyKey: crypto.randomUUID(), recipientMsisdn: undefined },
+        { ...payload, idempotencyKey: crypto.randomUUID(), recipientMsisdn: "12345" },
+      ];
+      for (const data of bad) {
+        const res = await api.post("/api/mobile/pay/intents", { headers, data });
+        expect(res.status(), JSON.stringify(data)).toBe(422);
+        expect((await res.json()).ok).toBe(false);
+      }
+
+      // A paying account that is not this workspace's is refused.
+      const foreign = await api.post("/api/mobile/pay/intents", {
+        headers,
+        data: {
+          ...payload,
+          idempotencyKey: crypto.randomUUID(),
+          sourceAccountId: "00000000-0000-4000-8000-000000000000",
+        },
+      });
+      expect(foreign.status()).toBe(422);
+      expect((await foreign.json()).error).toBe("invalid_account");
+
+      // Malformed JSON is a 400, not a crash.
+      const garbage = await api.post("/api/mobile/pay/intents", {
+        headers: { ...headers, "content-type": "application/json" },
+        data: "{not json",
+      });
+      expect(garbage.status()).toBe(400);
+    } finally {
+      await api.dispose();
+    }
+  });
+
   test("the Inbox refuses a missing, malformed or invalid token", async () => {
     const api = await playwrightRequest.newContext({ baseURL: BASE_URL });
     try {
@@ -349,6 +461,12 @@ test.describe("mobile API", () => {
       expect((await api.get("/api/mobile/budgets")).status()).toBe(401);
       expect((await api.get("/api/mobile/statements")).status()).toBe(401);
       expect((await api.get("/api/mobile/config")).status()).toBe(401);
+      expect(
+        (await api.post("/api/mobile/pay/intents", { data: { paymentType: "pay_person" } })).status(),
+      ).toBe(401);
+      expect(
+        (await api.get("/api/mobile/pay/intents/00000000-0000-4000-8000-000000000000")).status(),
+      ).toBe(401);
       expect(
         (await api.get("/api/mobile/statements/00000000-0000-4000-8000-000000000000/document")).status(),
       ).toBe(401);
