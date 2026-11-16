@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react-native";
 
+import { NO_FILTERS } from "@/features/transactions/filters";
 import Transactions from "@/app/(app)/(tabs)/transactions";
 import type { TransactionRow } from "@/features/transactions/queries";
 import { resetRouterMock, router } from "@/test/router-mock";
@@ -64,7 +65,8 @@ describe("Transactions screen", () => {
     });
     await screen.findByText("Kigali Fresh");
     expect(mockGetTransactions).toHaveBeenCalledTimes(1);
-    expect(mockGetTransactions).toHaveBeenCalledWith({ q: "simba" });
+    // #192 added the filters to this call; an untouched list sends the defaults.
+    expect(mockGetTransactions).toHaveBeenCalledWith({ q: "simba", filters: NO_FILTERS });
   });
 
   it("shows an empty state, and a different one when a search finds nothing", async () => {
