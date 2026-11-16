@@ -41,7 +41,8 @@ describe("Categories screen", () => {
     await render(<Categories />);
 
     await fireEvent.press(await screen.findByLabelText(/^Food, 52,000 RWF, 12 transactions/));
-    expect(router.push).toHaveBeenCalledWith({ pathname: "/transactions", params: { category: "Food" } });
+    expect(router.navigate).toHaveBeenCalledWith({ pathname: "/transactions", params: { category: "Food" } });
+    expect(router.push).not.toHaveBeenCalled(); // a tab is navigated to, never pushed onto the stack
   });
 
   it("describes each row's share for a screen reader", async () => {

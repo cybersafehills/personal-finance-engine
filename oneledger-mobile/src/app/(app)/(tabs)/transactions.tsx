@@ -136,7 +136,7 @@ export default function Transactions() {
                 <Text variant="label" color="textSecondary" style={{ flex: 1 }}>
                   {`Category: ${category}`}
                 </Text>
-                <Button label="Clear" variant="ghost" onPress={() => router.replace("/transactions")} />
+                <Button label="Clear" variant="ghost" onPress={() => router.setParams({ category: undefined })} />
               </View>
             ) : null}
             <FilterChips value={filters} onChange={setFilters} />

@@ -9,6 +9,10 @@ export const router = {
   push: jest.fn(),
   replace: jest.fn(),
   back: jest.fn(),
+  /** Go to a route (a tab, say) rather than stacking another copy of it. */
+  navigate: jest.fn(),
+  /** Update the CURRENT route's params; `undefined` removes one. (Distinct from the setParams() helper below, which sets what useLocalSearchParams returns.) */
+  setParams: jest.fn(),
 };
 
 let params: Record<string, string> = {};
@@ -20,6 +24,8 @@ export function resetRouterMock() {
   router.push.mockReset();
   router.replace.mockReset();
   router.back.mockReset();
+  router.navigate.mockReset();
+  router.setParams.mockReset();
 }
 
 export function useLocalSearchParams() {

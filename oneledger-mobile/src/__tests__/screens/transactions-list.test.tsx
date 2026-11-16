@@ -102,7 +102,8 @@ describe("Transactions screen", () => {
       await render(<Transactions />);
 
       await fireEvent.press(await screen.findByText("Clear"));
-      expect(router.replace).toHaveBeenCalledWith("/transactions");
+      expect(router.setParams).toHaveBeenCalledWith({ category: undefined });
+      expect(router.replace).not.toHaveBeenCalled();
     });
 
     it("has no category chip when opened normally", async () => {

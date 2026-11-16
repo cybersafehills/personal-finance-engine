@@ -55,7 +55,9 @@ export default function Categories() {
                 key={c.category}
                 accessibilityRole="button"
                 accessibilityLabel={`${c.category}, ${formatRwf(c.totalRwf)}, ${countLabel(c.transactionCount)}. ${shareLabel(c.totalRwf, grand)}`}
-                onPress={() => router.push({ pathname: "/transactions", params: { category: c.category } })}
+                // navigate, not push: Transactions is a tab, and pushing it from a stacked
+                // screen could stack a second copy of the tab shell.
+                onPress={() => router.navigate({ pathname: "/transactions", params: { category: c.category } })}
               >
                 <Card style={{ gap: space[2] }}>
                   <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: space[2] }}>

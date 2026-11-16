@@ -742,35 +742,53 @@ export type { CategoryTotal } from "./category-totals";
  * request silently dropped everything past the first 1000 and the totals were
  * wrong with no error. `truncated` is true only if the safety cap (50 pages,
  * 50k rows) was reached, so callers can say the figures are incomplete.
+ * THROWS on a failed read (a caller that shows "no spending" for an error would
+ * be stating something false); used by the Categories page and the mobile API.
  */
 export async function getCategoryTotalsComplete(): Promise<
   { totals: CategoryTotalRow[]; truncated: boolean }
 > {
   const supabase = await supabaseSession();
-  try {
-    const { rows, truncated } = await collectPages<TotalsRow>(async (from, to) => {
-      const { data, error } = await supabase
-        .from("transactions")
-        .select("category, principal_effect_rwf, fee_effect_rwf")
-        .eq("direction", "out")
-        .eq("settlement_state", "settled")
-        // Phase U: exclude rows merged into a canonical duplicate.
-        .neq("dedupe_state", "merged")
-        // A stable order, or pages can overlap or skip rows.
-        .order("id", { ascending: true })
-        .range(from, to);
-      if (error) throw new Error(error.message);
-      return (data ?? []) as TotalsRow[];
-    });
-    return { totals: aggregateCategoryTotals(rows), truncated };
-  } catch (error) {
-    console.error("getCategoryTotals failed:", (error as Error).message);
-    return { totals: [], truncated: false };
-  }
+  const { rows, truncated } = await collectPages<TotalsRow>(async (from, to) => {
+    const { data, error } = await supabase
+      .from("transactions")
+      .select("category, principal_effect_rwf, fee_effect_rwf")
+      .eq("direction", "out")
+      .eq("settlement_state", "settled")
+      // Phase U: exclude rows merged into a canonical duplicate.
+      .neq("dedupe_state", "merged")
+      // A stable order, or pages can overlap or skip rows.
+      .order("id", { ascending: true })
+      .range(from, to);
+    if (error) throw new Error(error.message);
+    return (data ?? []) as TotalsRow[];
+  });
+  return { totals: aggregateCategoryTotals(rows), truncated };
 }
 
+/**
+ * ONE bounded request (at most `max_rows`, 1000, rows), kept as it always was for
+ * the hot paths that call it on every load: Home's "top spending category" and
+ * the category-name suggestions on every transaction page. Those must stay one
+ * cheap request, so they still share the 1000-row ceiling that
+ * getCategoryTotalsComplete exists to avoid. Use that one wherever the totals
+ * themselves are shown (the Categories page, the mobile API).
+ */
 export async function getCategoryTotals(): Promise<CategoryTotalRow[]> {
-  return (await getCategoryTotalsComplete()).totals;
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("transactions")
+    .select("category, principal_effect_rwf, fee_effect_rwf")
+    .eq("direction", "out")
+    .eq("settlement_state", "settled")
+    // Phase U: exclude rows merged into a canonical duplicate.
+    .neq("dedupe_state", "merged");
+
+  if (error) {
+    console.error("getCategoryTotals failed:", error.message);
+    return [];
+  }
+  return aggregateCategoryTotals((data ?? []) as TotalsRow[]);
 }
 
 // ===========================================================================

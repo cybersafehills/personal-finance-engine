@@ -37,10 +37,17 @@ export function aggregateCategoryTotals(rows: readonly TotalsRow[]): CategoryTot
 export type PagedRows<T> = { rows: T[]; truncated: boolean };
 
 /**
- * Reads `fetchPage(from, to)` (inclusive range) page by page until a short page
- * ends the data. Stops at `maxPages`; if the last page was still full, more
- * data may exist and `truncated` is true. A failing page throws, so a partial
- * result is never returned as if it were complete.
+ * Reads `fetchPage(from, to)` (inclusive range) until the data runs out.
+ *
+ * It advances by the rows it actually RECEIVED and stops only on an EMPTY page.
+ * It must not treat a short page as the end: that is only true if the server's
+ * row cap (`max_rows`) is at least `pageSize`, and a lower cap (unverified for
+ * production) would make the first page "short" and stop early, reporting a
+ * partial result as complete. The price is one extra, empty request at the end.
+ *
+ * Stops at `maxPages`; if rows were still coming, `truncated` is true so the
+ * caller can say the result is incomplete. A failing page throws, so a partial
+ * result is never returned as if it were whole.
  */
 export async function collectPages<T>(
   fetchPage: (from: number, to: number) => Promise<T[]>,
@@ -48,11 +55,12 @@ export async function collectPages<T>(
   maxPages = 50,
 ): Promise<PagedRows<T>> {
   const rows: T[] = [];
+  let from = 0;
   for (let page = 0; page < maxPages; page++) {
-    const from = page * pageSize;
     const batch = await fetchPage(from, from + pageSize - 1);
+    if (batch.length === 0) return { rows, truncated: false };
     rows.push(...batch);
-    if (batch.length < pageSize) return { rows, truncated: false };
+    from += batch.length;
   }
   return { rows, truncated: true };
 }

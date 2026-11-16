@@ -47,20 +47,35 @@ Deno.test("reads every row of a table longer than one page (the 1000-row cap)", 
   assertEquals(rows[0], 0);
   assertEquals(rows[2499], 2499);
   assertEquals(truncated, false);
-  assertEquals(t.calls, [[0, 999], [1000, 1999], [2000, 2999]]);
+  // Three data pages, then one empty page that proves the end.
+  assertEquals(t.calls, [[0, 999], [1000, 1999], [2000, 2999], [2500, 3499]]);
 });
 
-Deno.test("a short table is one request", async () => {
+Deno.test("a server cap LOWER than the page size cannot cut the result short", async () => {
+  // PostgREST caps each response at 500 rows although 1000 were asked for. A
+  // loop that stopped at the first short page would return 500 and call it done.
+  const t = table(1700, 500);
+  const { rows, truncated } = await collectPages(t.fetchPage, 1000, 50);
+  assertEquals(rows.length, 1700);
+  assertEquals(rows[1699], 1699);
+  assertEquals(new Set(rows).size, 1700); // no row twice, none skipped
+  assertEquals(truncated, false);
+});
+
+Deno.test("an even smaller cap still reads everything", async () => {
+  const { rows, truncated } = await collectPages(table(95, 10).fetchPage, 1000, 50);
+  assertEquals([rows.length, truncated], [95, false]);
+});
+
+Deno.test("a short table is two requests: its rows, then the empty page", async () => {
   const t = table(10);
   assertEquals((await collectPages(t.fetchPage)).rows.length, 10);
-  assertEquals(t.calls.length, 1);
+  assertEquals(t.calls.length, 2);
 });
 
-Deno.test("an exact multiple of the page size needs one empty page to know it is done", async () => {
-  const t = table(2000);
-  const { rows, truncated } = await collectPages(t.fetchPage, 1000, 50);
+Deno.test("an exact multiple of the page size needs no special case", async () => {
+  const { rows, truncated } = await collectPages(table(2000).fetchPage, 1000, 50);
   assertEquals([rows.length, truncated], [2000, false]);
-  assertEquals(t.calls.length, 3);
 });
 
 Deno.test("an empty table is empty, not truncated", async () => {
@@ -70,6 +85,11 @@ Deno.test("an empty table is empty, not truncated", async () => {
 Deno.test("hitting the safety cap says so instead of returning a partial total as complete", async () => {
   const { rows, truncated } = await collectPages(table(10_000).fetchPage, 1000, 3);
   assertEquals(rows.length, 3000);
+  assertEquals(truncated, true);
+});
+
+Deno.test("data that ends exactly at the safety cap is still reported as truncated (it can't be known to be whole)", async () => {
+  const { truncated } = await collectPages(table(3000).fetchPage, 1000, 3);
   assertEquals(truncated, true);
 });
 

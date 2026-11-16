@@ -213,12 +213,19 @@ the app's Categories screen. Read-only; same guard as the others.
   (`lib/category-totals.ts` holds the pure parts); the app never recomputes them.
 - Covers every Space the user belongs to (no Space filter), exactly like the web
   page; settled outgoing transactions only, merged duplicates excluded.
-- **Why it pages:** the REST API returns at most `max_rows` (1000) per request,
-  so reading all rows in one request silently dropped everything past the first
-  1000 and the totals were wrong with no error. It now reads a page at a time
-  until the table ends (a stable `id` order, 50 pages at most). `truncated` is
-  true only if that cap was reached, so the app can say the totals are
-  incomplete. This also fixes the web Categories page, which used the same query.
+- **Why it pages:** the REST API returns at most `max_rows` per request (1000 in
+  `supabase/config.toml`; production's value was not checked), so reading all rows
+  in one request would silently drop everything past the cap and show wrong totals
+  with no error. It reads a page at a time, advancing by the rows it actually
+  received and stopping only on an empty page (so a lower server cap cannot cut it
+  short), in a stable `id` order, 50 pages at most. `truncated` is true only if that
+  cap was reached, so the app can say the totals are incomplete. The web Categories
+  page uses the same function.
+- **Errors are errors:** a failed read throws, so this answers `500` and the app
+  offers a retry, instead of a 200 that says "no spending yet".
+- Home's "top spending category" and the category-name suggestions still use the
+  old one-request `getCategoryTotals` on purpose (they run on every load and must
+  stay one cheap request), so they keep the old row ceiling.
 - Amounts are whole RWF.
 
 ## Rollout
