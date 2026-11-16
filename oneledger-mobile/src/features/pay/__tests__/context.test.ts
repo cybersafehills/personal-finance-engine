@@ -1,3 +1,5 @@
+import { setRequestedWorkspace } from "@/features/spaces/request-space";
+
 import { loadPayAgainOffer } from "../context";
 
 const mockConfig = jest.fn();
@@ -38,7 +40,9 @@ beforeEach(() => {
   mockConfig.mockReset().mockResolvedValue({ ok: true, pay: true, assistedPay: true });
   mockAccounts.mockReset().mockResolvedValue([acct()]);
   mockRow = row();
+  setRequestedWorkspace(null);
 });
+afterEach(() => setRequestedWorkspace(null));
 
 describe("loadPayAgainOffer", () => {
   it("offers a person payment from the transaction's own account", async () => {
@@ -141,5 +145,48 @@ describe("loadPayAgainOffer", () => {
   it("hides on any failure rather than throwing into the detail screen", async () => {
     mockAccounts.mockRejectedValue(new Error("boom"));
     expect(await loadPayAgainOffer(txn())).toBeNull();
+  });
+
+  describe("the Space the server will create the draft in (the active one)", () => {
+    const household = (over: Record<string, unknown> = {}) =>
+      row({ workspace_id: "H1", workspaces: { kind: "household" }, ...over });
+
+    it("offers it for a transaction in the active household, paying from that household's account", async () => {
+      setRequestedWorkspace("H1");
+      mockRow = household();
+      mockAccounts.mockResolvedValue([acct({ id: "home-acct", name: "Home MoMo", workspaceId: "H1" }), acct({ id: "mine", workspaceId: "w1" })]);
+
+      const offer = await loadPayAgainOffer(txn());
+      expect(offer?.account).toEqual({ id: "home-acct", name: "Home MoMo" });
+    });
+
+    it("hides it for a personal transaction while a household is active (its draft would land in the wrong Space)", async () => {
+      setRequestedWorkspace("H1");
+      mockRow = row(); // a personal-Space transaction
+      expect(await loadPayAgainOffer(txn())).toBeNull();
+    });
+
+    it("hides it for a transaction in a different household than the active one", async () => {
+      setRequestedWorkspace("H1");
+      mockRow = household({ workspace_id: "H2" });
+      expect(await loadPayAgainOffer(txn())).toBeNull();
+    });
+
+    it("hides it for a household transaction while the personal Space is active", async () => {
+      setRequestedWorkspace(null);
+      mockRow = household();
+      expect(await loadPayAgainOffer(txn())).toBeNull();
+    });
+
+    it("matches the active Space by id even if its kind couldn't be read, but never guesses 'personal'", async () => {
+      setRequestedWorkspace("H1");
+      mockRow = { data: { account_id: "a1", workspace_id: "H1", workspaces: null }, error: null };
+      mockAccounts.mockResolvedValue([acct({ workspaceId: "H1" })]);
+      expect(await loadPayAgainOffer(txn())).not.toBeNull();
+
+      setRequestedWorkspace(null);
+      mockRow = { data: { account_id: "a1", workspace_id: "w1", workspaces: null }, error: null };
+      expect(await loadPayAgainOffer(txn())).toBeNull(); // unknown kind with no Space requested: any doubt hides it
+    });
   });
 });

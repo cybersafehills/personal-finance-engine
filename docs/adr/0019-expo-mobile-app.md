@@ -190,8 +190,7 @@ not a reason to keep the whole app native.
   and `merchant_payment` (a business). It is **absent** unless every check holds:
   `GET /api/mobile/config` says assisted pay is on (any failure hides it), the
   reference passes the server's own rules (a Rwandan mobile number or a 3-12
-  digit merchant code), the transaction lives in the user's personal Space (the
-  server creates intents there), and a usable RWF paying account exists. A
+  digit merchant code), the transaction lives in the **active Space** (the server creates the draft in the Space named by `X-Workspace-Id`, else the personal Space, and checks the paying account against it), and a usable RWF paying account exists. A
   merchant needs an **MTN** account (the only merchant-pay code in the directory
   is MTN's, and the network comes from the paying account); a bank, cash or
   Airtel account would only lead to a draft with no route, so it is skipped.
@@ -328,9 +327,7 @@ not a reason to keep the whole app native.
 - **Duplicates are a trail, as on the web**: flagged, merged away (opens the
   kept transaction) and what was merged in (each opens its own). Merging or
   dismissing stays where both candidates are visible; the detail screen never
-  resolves one blind. A flagged *personal-Space* transaction offers "Review it"
-  (the Inbox); anything else offers the web's review queue, because the app's
-  Inbox only covers the personal Space and the item would not be there.
+  resolves one blind. A flagged transaction in the **active Space** offers "Review it" (the Inbox covers the Space the server is using); anything else offers the web's review queue, because the Inbox would not have the item.
 - A tag removal asks the database for the rows it deleted: under RLS a delete the
   caller may not make is not an error, it removes nothing (a household viewer
   can see tags but not delete them), so zero rows is checked against the tag

@@ -1,12 +1,15 @@
 import { fetchPayConfig } from "@/api/mobile-api";
 import { supabase } from "@/api/supabase";
+import { getRequestedWorkspace } from "@/features/spaces/request-space";
+import { isInRequestedSpace } from "@/features/spaces/spaces";
 import { listPayerAccounts } from "./accounts";
 import { accountNetwork, payAgainTarget, type PayAgainTarget } from "./target";
 
 // Decides whether a transaction gets a "Pay X again" button, and with which
 // paying account. Every doubt hides the button (a button that cannot work is
-// worse than none): config off or unreachable, a transaction in a shared Space,
-// a reference the server would refuse, or no usable RWF account.
+// worse than none): config off or unreachable, a transaction that isn't in the
+// Space the server will create the draft in, a reference the server would
+// refuse, or no usable RWF account.
 
 export type PayAgainOffer = {
   target: PayAgainTarget;
@@ -16,13 +19,16 @@ export type PayAgainOffer = {
 type TxnLike = Parameters<typeof payAgainTarget>[0] & { id: string };
 
 /**
- * The server creates intents in the user's personal Space, so only a
- * transaction that lives there can honestly offer this. (When the app gains an
- * active-Space switch, compare against that Space instead.)
+ * The server creates the draft in the ACTIVE Space (the one named by
+ * `X-Workspace-Id`, else the user's personal Space) and checks the paying
+ * account against it. So only a transaction that lives in that Space can honestly
+ * offer this: a personal transaction viewed while a household is active would
+ * otherwise put its draft in the household, and a household one is fine while that
+ * household is active.
  */
 async function transactionPaymentContext(
   id: string,
-): Promise<{ accountId: string | null; workspaceId: string; personal: boolean } | null> {
+): Promise<{ accountId: string | null; workspaceId: string; workspaceKind: string | undefined } | null> {
   if (!supabase) return null;
   const { data, error } = await supabase
     .from("transactions")
@@ -36,7 +42,7 @@ async function transactionPaymentContext(
     workspaces: { kind: string } | { kind: string }[] | null;
   };
   const kind = Array.isArray(row.workspaces) ? row.workspaces[0]?.kind : row.workspaces?.kind;
-  return { accountId: row.account_id, workspaceId: row.workspace_id, personal: kind === "personal" };
+  return { accountId: row.account_id, workspaceId: row.workspace_id, workspaceKind: kind };
 }
 
 export async function loadPayAgainOffer(txn: TxnLike): Promise<PayAgainOffer | null> {
@@ -47,7 +53,10 @@ export async function loadPayAgainOffer(txn: TxnLike): Promise<PayAgainOffer | n
     if (!config.ok || !config.pay || !config.assistedPay) return null;
 
     const context = await transactionPaymentContext(txn.id);
-    if (!context || !context.personal) return null;
+    // An unreadable Space kind is "not personal": any doubt hides the button.
+    if (!context || !isInRequestedSpace({ workspaceId: context.workspaceId, workspaceKind: context.workspaceKind ?? "unknown" }, getRequestedWorkspace())) {
+      return null;
+    }
 
     // Pay from the account this transaction was made from when it can do the
     // job, else the first account in the same Space that can (the web form

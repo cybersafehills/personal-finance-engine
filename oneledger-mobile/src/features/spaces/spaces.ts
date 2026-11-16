@@ -67,3 +67,20 @@ export function echoMatches(requested: string | null, body: unknown): boolean {
 export function storageKey(userId: string): string {
   return `oneledger.activeSpace.${userId}`;
 }
+
+/**
+ * Whether a transaction lives in the Space the server will use for the next
+ * request: the one named by `X-Workspace-Id` when one is sent, else the user's
+ * personal Space (the server default, which is also what an app that couldn't
+ * load its Space list gets). Things the server does for "the active Space" (the
+ * Inbox's duplicate review, the Pay drafts it creates) only make sense for a
+ * transaction in that Space.
+ */
+export function isInRequestedSpace(
+  transaction: { workspaceId: string; workspaceKind: SpaceKind | string },
+  requestedId: string | null,
+): boolean {
+  return requestedId === null
+    ? transaction.workspaceKind === "personal"
+    : transaction.workspaceId.toLowerCase() === requestedId.toLowerCase();
+}

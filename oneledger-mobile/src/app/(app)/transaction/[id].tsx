@@ -30,6 +30,8 @@ import {
   whereFromRows,
 } from "@/features/transactions/detailDisplay";
 import { loadPayAgainOffer } from "@/features/pay/context";
+import { useActiveSpace } from "@/features/spaces/ActiveSpaceProvider";
+import { isInRequestedSpace, requestedWorkspaceId } from "@/features/spaces/spaces";
 import { getTransactionById } from "@/features/transactions/queries";
 import { useQuery } from "@/hooks/useQuery";
 import { config } from "@/lib/config";
@@ -39,6 +41,7 @@ import { colors, space } from "@/theme/tokens";
 
 export default function TransactionDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const { active } = useActiveSpace();
   const load = useCallback(() => getTransactionById(id), [id]);
   const { data: transaction, loading, error, refresh } = useQuery(load);
 
@@ -90,10 +93,11 @@ export default function TransactionDetail() {
   const latestReason = extras?.history[0]?.decision_reason ?? null;
   const history = extras?.history ?? [];
 
-  // The Inbox only covers the personal Space, so a flagged transaction anywhere
-  // else (or whose Space we couldn't read) is resolved in the web's review queue.
+  // The Inbox covers the ACTIVE Space (the one the server is using), so a flagged
+  // transaction anywhere else (or whose Space we couldn't read) is resolved in
+  // the web's review queue instead.
   const duplicateReviewAction =
-    context?.workspaceKind === "personal"
+    context && isInRequestedSpace(context, requestedWorkspaceId(active))
       ? { label: "Review it", onPress: () => router.push("/inbox") }
       : config.apiBaseUrl
         ? {
