@@ -313,7 +313,7 @@ export async function fetchBills(status?: string): Promise<BillsResult> {
   const query = status ? `?status=${encodeURIComponent(status)}` : "";
   const result = await bearerGet(`/api/mobile/bills${query}`);
   if (result.kind !== "response") {
-    return { ok: false, ...failureForOutcome(result, "Your documents") };
+    return { ok: false, ...failureForOutcome(result, "Bills") };
   }
   return parseBillsResponse(result.status, result.body);
 }

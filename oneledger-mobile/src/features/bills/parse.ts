@@ -104,7 +104,7 @@ export function parseBillsResponse(status: number, body: unknown): BillsResult {
     return { ok: true, bills: body.bills.map(parseItem).filter(notNull), hasMore: body.hasMore === true };
   }
   if (status === 200) return { ok: false, reason: "error", message: "The documents response wasn't understood." };
-  return { ok: false, ...failureForStatus(status, "Your documents") };
+  return { ok: false, ...failureForStatus(status, "Bills") };
 }
 
 export type BillResult =

@@ -57,9 +57,9 @@ describe("Bills screen", () => {
     await render(<Bills />);
     expect(await screen.findByText("Try again")).toBeTruthy();
 
-    mockFetch.mockResolvedValue({ ok: false, reason: "unavailable", message: "Your documents isn't available yet." });
+    mockFetch.mockResolvedValue({ ok: false, reason: "unavailable", message: "Bills isn't available yet." });
     await fireEvent.press(screen.getByText("Try again"));
-    expect(await screen.findByText("Your documents isn't available yet.")).toBeTruthy();
+    expect(await screen.findByText("Bills isn't available yet.")).toBeTruthy();
     expect(screen.queryByText("Try again")).toBeNull();
   });
 });
