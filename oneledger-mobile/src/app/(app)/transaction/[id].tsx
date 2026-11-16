@@ -19,13 +19,21 @@ import {
   signedAmountRwf,
   transactionTypeLabel,
 } from "@/features/transactions/display";
+import { loadDetailExtras } from "@/features/transactions/detail";
+import {
+  attentionMessage,
+  categoryReason,
+  directionLabel,
+  historyLine,
+  whereFromRows,
+} from "@/features/transactions/detailDisplay";
 import { loadPayAgainOffer } from "@/features/pay/context";
 import { getTransactionById } from "@/features/transactions/queries";
 import { useQuery } from "@/hooks/useQuery";
 import { config } from "@/lib/config";
 import { formatFullDateTime } from "@/lib/kigali-time";
 import { formatRwf } from "@/lib/money";
-import { space } from "@/theme/tokens";
+import { colors, space } from "@/theme/tokens";
 
 export default function TransactionDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -39,6 +47,11 @@ export default function TransactionDetail() {
     [transaction],
   );
   const { data: payOffer } = useQuery(loadOffer);
+
+  // Where it came from, category history and tags. Each part may be missing on
+  // its own; the screen shows whatever loaded.
+  const loadExtras = useCallback(() => loadDetailExtras(id), [id]);
+  const { data: extras } = useQuery(loadExtras);
 
   const back = (
     <Button label="Back" variant="ghost" onPress={() => router.back()} />
@@ -69,51 +82,35 @@ export default function TransactionDetail() {
   }
 
   const failed = isFailed(transaction);
+  const context = extras?.context ?? null;
+  const where = context ? whereFromRows(context, extras?.members ?? [], extras?.selfUserId ?? null) : [];
+  const attention = attentionMessage(context?.allocationStatus);
+  const latestReason = extras?.history[0]?.decision_reason ?? null;
+  const history = extras?.history ?? [];
+  const tags = extras?.tags ?? [];
 
   return (
     <Screen>
       {back}
 
-      <Card style={{ gap: space[2] }}>
-        <Text variant="caption" color="textMuted">
+      {/* Centred hero, like the web: who, how much, when. */}
+      <Card style={{ gap: space[2], alignItems: "center" }}>
+        <Text variant="caption" color="textMuted" style={{ textAlign: "center" }}>
           {transactionTypeLabel(transaction.transaction_type)}
         </Text>
-        <Text variant="heading">{displayName(transaction)}</Text>
+        <Text variant="heading" style={{ textAlign: "center" }}>
+          {displayName(transaction)}
+        </Text>
         {/* The detail view is a deliberate destination: never masked. */}
         <MoneyAmount amountRwf={signedAmountRwf(transaction)} size="xl" masked={false} />
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space[2] }}>
+        <Text variant="label" color="textMuted" style={{ textAlign: "center" }}>
+          {formatFullDateTime(transaction.occurred_at)}
+        </Text>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: space[2] }}>
           {failed ? <Badge variant="attention">Failed: no money moved</Badge> : null}
           {needsReview(transaction) ? <Badge variant="attention">Needs review</Badge> : null}
         </View>
       </Card>
-
-      <Card style={{ gap: space[3] }}>
-        <Row label="When" value={formatFullDateTime(transaction.occurred_at)} />
-        <Row label="Category" value={transaction.category ?? "Uncategorized"} />
-        {transaction.subcategory ? (
-          <Row label="Subcategory" value={transaction.subcategory} />
-        ) : null}
-        {needsReview(transaction) && transaction.suggested_category ? (
-          <Row label="Suggested" value={transaction.suggested_category} />
-        ) : null}
-        <Row label="Fee" value={formatRwf(transaction.fee_rwf)} />
-        {transaction.balance_after_rwf !== null ? (
-          <Row label="Balance after" value={formatRwf(transaction.balance_after_rwf)} />
-        ) : null}
-        {transaction.counterparty_reference ? (
-          <Row label="Reference" value={transaction.counterparty_reference} />
-        ) : null}
-      </Card>
-
-      {failed ? null : (
-        <Button
-          label={transaction.category ? "Change category" : "Choose a category"}
-          fullWidth
-          onPress={() =>
-            router.push({ pathname: "/category/[id]", params: { id: transaction.id } })
-          }
-        />
-      )}
 
       {payOffer ? (
         <Button
@@ -125,6 +122,99 @@ export default function TransactionDetail() {
             router.push({ pathname: "/pay-again", params: { txn: transaction.id } })
           }
         />
+      ) : null}
+
+      {attention ? (
+        <Card style={{ backgroundColor: colors.attentionBg }}>
+          <Text variant="label" color="attention" accessibilityRole="alert">
+            {attention}
+          </Text>
+        </Card>
+      ) : null}
+
+      {where.length > 0 ? (
+        <Card style={{ gap: space[3] }}>
+          <Text variant="caption" color="textMuted" accessibilityRole="header">
+            WHERE THIS CAME FROM
+          </Text>
+          {where.map((row) => (
+            <Row key={row.label} label={row.label} value={row.value} />
+          ))}
+        </Card>
+      ) : null}
+
+      <Card style={{ gap: space[3] }}>
+        <Row label="Amount" value={formatRwf(transaction.amount_rwf)} />
+        {transaction.fee_rwf > 0 ? <Row label="Fee" value={formatRwf(transaction.fee_rwf)} /> : null}
+        <Row label="Direction" value={directionLabel(transaction.direction)} />
+        {transaction.balance_after_rwf !== null ? (
+          <Row label="Balance after" value={formatRwf(transaction.balance_after_rwf)} />
+        ) : null}
+        <Row label="Type" value={transaction.transaction_type.replace(/_/g, " ")} />
+        {transaction.counterparty_reference ? (
+          <Row label="Reference" value={transaction.counterparty_reference} />
+        ) : null}
+      </Card>
+
+      <Card style={{ gap: space[2] }}>
+        <Text variant="caption" color="textMuted" accessibilityRole="header">
+          CATEGORY
+        </Text>
+        <Text variant="bodyStrong">
+          {transaction.category ?? "Uncategorized"}
+          {transaction.subcategory ? ` · ${transaction.subcategory}` : ""}
+        </Text>
+        {needsReview(transaction) && transaction.suggested_category ? (
+          <Row label="Suggested" value={transaction.suggested_category} />
+        ) : null}
+        <Text variant="label" color="textMuted">
+          {categoryReason(latestReason, context?.categorySource ?? null)}
+        </Text>
+
+        {failed ? null : (
+          <Button
+            label={transaction.category ? "Change category" : "Choose a category"}
+            fullWidth
+            onPress={() =>
+              router.push({ pathname: "/category/[id]", params: { id: transaction.id } })
+            }
+          />
+        )}
+
+        {history.length > 1 ? (
+          <View style={{ gap: space[2], marginTop: space[2] }}>
+            <Text variant="caption" color="textMuted" accessibilityRole="header">
+              CATEGORY HISTORY
+            </Text>
+            {history.map((entry) => {
+              const line = historyLine(entry);
+              return (
+                <Text key={entry.id} variant="label" color="textMuted">
+                  <Text variant="label">{line.change}</Text>
+                  {` · ${line.actor} · ${formatFullDateTime(entry.created_at)}`}
+                </Text>
+              );
+            })}
+          </View>
+        ) : null}
+      </Card>
+
+      {tags.length > 0 ? (
+        <Card style={{ gap: space[2] }}>
+          <Text variant="caption" color="textMuted" accessibilityRole="header">
+            TAGS
+          </Text>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space[2] }}>
+            {tags.map((tag) => (
+              <Badge key={tag} variant="neutral">
+                {tag}
+              </Badge>
+            ))}
+          </View>
+          <Text variant="caption" color="textMuted">
+            Free-form labels for your own filtering. Edit them on the web.
+          </Text>
+        </Card>
       ) : null}
 
       {config.apiBaseUrl ? (

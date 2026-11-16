@@ -7,12 +7,14 @@ import { resetRouterMock, router, setParams } from "@/test/router-mock";
 const mockGetTransaction = jest.fn();
 const mockOpenUrl = jest.fn();
 const mockOffer = jest.fn();
+const mockExtras = jest.fn();
 
 jest.mock("expo-router", () => jest.requireActual("@/test/router-mock"));
 jest.mock("@/features/transactions/queries", () => ({
   getTransactionById: (id: string) => mockGetTransaction(id),
 }));
 jest.mock("@/lib/config", () => ({ config: { apiBaseUrl: "https://app.example.test" } }));
+jest.mock("@/features/transactions/detail", () => ({ loadDetailExtras: (id: string) => mockExtras(id) }));
 jest.mock("@/features/pay/context", () => ({ loadPayAgainOffer: (t: unknown) => mockOffer(t) }));
 jest.mock("expo-linking", () => ({ openURL: (url: string) => mockOpenUrl(url) }));
 
@@ -35,6 +37,31 @@ const txn = (over: Partial<TransactionRow> = {}): TransactionRow => ({
   ...over,
 });
 
+const noExtras = { context: null, history: [], tags: [], members: [], selfUserId: null };
+const context = (over: Record<string, unknown> = {}) => ({
+  workspaceId: "w1",
+  workspaceName: "Personal",
+  workspaceKind: "personal",
+  sourceName: "MTN account",
+  sourceProvider: "mtn_momo",
+  sourceMaskedIdentifier: "•••• 4567",
+  sourceOwnerUserId: "me",
+  performedByUserId: "me",
+  recordCreatedByUserId: "me",
+  ingestionConnectionLabel: "My phone",
+  allocationStatus: "allocated",
+  categorySource: "rule",
+  ...over,
+});
+const entry = (id: string, prev: string | null, next: string | null, actor = "user") => ({
+  id,
+  previous_category: prev,
+  new_category: next,
+  decision_reason: null,
+  actor_type: actor,
+  created_at: "2026-11-14T10:00:00Z",
+});
+
 beforeEach(() => {
   resetRouterMock();
   setParams({ id: "t1" });
@@ -42,6 +69,8 @@ beforeEach(() => {
   mockOpenUrl.mockReset();
   mockOffer.mockReset();
   mockOffer.mockResolvedValue(null); // no "Pay again" unless a test says so
+  mockExtras.mockReset();
+  mockExtras.mockResolvedValue(noExtras); // no extra blocks unless a test says so
 });
 
 describe("Transaction detail screen", () => {
@@ -141,6 +170,129 @@ describe("Transaction detail screen", () => {
 
       await screen.findByText("Change category");
       expect(screen.queryByText(/again$/)).toBeNull();
+    });
+  });
+
+  describe("the blocks beyond the basics", () => {
+    it("shows the date in the hero and the web's detail rows", async () => {
+      mockGetTransaction.mockResolvedValue(txn({ fee_rwf: 0, balance_after_rwf: null, direction: "out" }));
+      await render(<TransactionDetail />);
+
+      expect(await screen.findByText("Money out")).toBeTruthy();
+      expect(screen.getByText("Direction")).toBeTruthy();
+      expect(screen.getByText("merchant payment")).toBeTruthy();
+      expect(screen.queryByText("Fee")).toBeNull(); // no fee, no row
+      expect(screen.queryByText("Balance after")).toBeNull();
+    });
+
+    it("shows where it came from", async () => {
+      mockGetTransaction.mockResolvedValue(txn());
+      mockExtras.mockResolvedValue({ ...noExtras, context: context() });
+      await render(<TransactionDetail />);
+
+      expect(await screen.findByText("WHERE THIS CAME FROM")).toBeTruthy();
+      expect(screen.getByText("MTN MoMo · •••• 4567")).toBeTruthy();
+      expect(screen.getByText("My phone")).toBeTruthy();
+      expect(screen.getByText("Personal")).toBeTruthy();
+    });
+
+    it("names who paid in a household, with real names", async () => {
+      mockGetTransaction.mockResolvedValue(txn());
+      mockExtras.mockResolvedValue({
+        context: context({ workspaceKind: "household", workspaceName: "Home", sourceOwnerUserId: "amy", performedByUserId: "amy" }),
+        history: [],
+        tags: [],
+        members: [{ userId: "amy", displayName: "Amy" }],
+        selfUserId: "me",
+      });
+      await render(<TransactionDetail />);
+
+      expect(await screen.findByText("Paid by")).toBeTruthy();
+      expect(screen.getByText("Amy")).toBeTruthy();
+      expect(screen.getByText("MTN MoMo · •••• 4567 · Amy's account")).toBeTruthy();
+    });
+
+    it("warns when a household transaction needs an attribution, and points to the web", async () => {
+      mockGetTransaction.mockResolvedValue(txn());
+      mockExtras.mockResolvedValue({ ...noExtras, context: context({ workspaceKind: "household", allocationStatus: "needs_attribution" }) });
+      await render(<TransactionDetail />);
+      expect(await screen.findByText(/needs an attribution/)).toBeTruthy();
+    });
+
+    it("says nothing about attribution when everything is settled", async () => {
+      mockGetTransaction.mockResolvedValue(txn());
+      mockExtras.mockResolvedValue({ ...noExtras, context: context() });
+      await render(<TransactionDetail />);
+      await screen.findByText("WHERE THIS CAME FROM");
+      expect(screen.queryByText(/needs an attribution/)).toBeNull();
+    });
+
+    it("explains why the category is what it is", async () => {
+      mockGetTransaction.mockResolvedValue(txn());
+      mockExtras.mockResolvedValue({ ...noExtras, context: context({ categorySource: "manual" }) });
+      await render(<TransactionDetail />);
+      expect(await screen.findByText("You corrected this category.")).toBeTruthy();
+    });
+
+    it("prefers the latest recorded reason", async () => {
+      mockGetTransaction.mockResolvedValue(txn());
+      mockExtras.mockResolvedValue({
+        ...noExtras,
+        context: context(),
+        history: [{ ...entry("h2", "Food", "Transport"), decision_reason: "Matched your Bolt rule" }],
+      });
+      await render(<TransactionDetail />);
+      expect(await screen.findByText("Matched your Bolt rule")).toBeTruthy();
+    });
+
+    // One render per test: unmounting and re-rendering inside a test leaks state
+    // into the next one with this renderer.
+    it("lists no category history for a single change", async () => {
+      mockGetTransaction.mockResolvedValue(txn());
+      mockExtras.mockResolvedValue({ ...noExtras, history: [entry("h1", null, "Food")] });
+      await render(<TransactionDetail />);
+      await screen.findByText("CATEGORY");
+      expect(screen.queryByText("CATEGORY HISTORY")).toBeNull();
+    });
+
+    it("lists category history once there is more than one change", async () => {
+      mockGetTransaction.mockResolvedValue(txn());
+      mockExtras.mockResolvedValue({
+        ...noExtras,
+        history: [entry("h2", "Food", "Transport"), entry("h1", null, "Food", "rule")],
+      });
+      await render(<TransactionDetail />);
+      expect(await screen.findByText("CATEGORY HISTORY")).toBeTruthy();
+      expect(screen.getByText("Food → Transport")).toBeTruthy();
+      expect(screen.getByText("Uncategorized → Food")).toBeTruthy();
+    });
+
+    it("shows tags as labels, read-only", async () => {
+      mockGetTransaction.mockResolvedValue(txn());
+      mockExtras.mockResolvedValue({ ...noExtras, tags: ["work", "trip"] });
+      await render(<TransactionDetail />);
+      expect(await screen.findByText("TAGS")).toBeTruthy();
+      expect(screen.getByText("work")).toBeTruthy();
+      expect(screen.getByText("trip")).toBeTruthy();
+      expect(screen.getByText(/Edit them on the web/)).toBeTruthy();
+    });
+
+    it("shows no tags card when there are none", async () => {
+      mockGetTransaction.mockResolvedValue(txn());
+      mockExtras.mockResolvedValue(noExtras);
+      await render(<TransactionDetail />);
+      await screen.findByText("CATEGORY");
+      expect(screen.queryByText("TAGS")).toBeNull();
+    });
+
+    it("still shows everything that loaded when the extras couldn't", async () => {
+      mockGetTransaction.mockResolvedValue(txn());
+      mockExtras.mockRejectedValue(new Error("offline"));
+      await render(<TransactionDetail />);
+
+      expect(await screen.findByText("Kigali Fresh")).toBeTruthy();
+      expect(screen.getByText("Change category")).toBeTruthy();
+      expect(screen.queryByText("WHERE THIS CAME FROM")).toBeNull();
     });
   });
 });

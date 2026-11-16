@@ -254,6 +254,22 @@ not a reason to keep the whole app native.
 - Category is chosen afterwards on the transaction's detail screen (the web
   form's optional category is applied through the existing category-correction
   function after creation).
+## Implementation notes (Transaction detail parity)
+
+- The detail screen follows the web page's block order: a centred hero (who, how
+  much, when), the Pay-again button, an attention banner, "Where this came from",
+  the detail rows, Category (with why, and history once there is more than one
+  change) and Tags. It is **read-only**: tags and attribution are edited on the
+  web (the existing "Edit on the web" button), and splits and duplicate handling
+  are not here yet.
+- Everything is a plain read under the signed-in user's RLS, ported from the web
+  queries (`getTransactionSpaceContext`, `getCategoryHistory`, tags, and the
+  `space_member_directory` function for household names): no new `/api/mobile`
+  route. Each part loads and fails on its own (`loadDetailExtras`), so a failed
+  read removes only its own block, never the whole screen.
+- Household lines ("Paid by", "Added by", whose account) show real member names
+  when the directory loads and fall back to "You" / "A member" like the web.
+
 ## Implementation notes (Statements)
 
 - A read-only viewer: list the statements and download a PDF/CSV. The list is
