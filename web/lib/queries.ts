@@ -372,6 +372,35 @@ export async function getTransactionById(
   return data;
 }
 
+/**
+ * Display rows for a known set of ids (Insights drill-down), newest first.
+ * Read through RLS like getTransactionById; chunked so the id list never
+ * makes an over-long request URL. Throws on error - a drill-down must not
+ * show a silently shorter list than the total it explains.
+ */
+export async function getTransactionsByIds(
+  ids: readonly string[],
+): Promise<TransactionRow[]> {
+  if (ids.length === 0) return [];
+  const supabase = await supabaseSession();
+  const rows: TransactionRow[] = [];
+  for (let i = 0; i < ids.length; i += 100) {
+    const { data, error } = await supabase
+      .from("transactions")
+      .select(TRANSACTION_COLUMNS)
+      .in("id", ids.slice(i, i + 100));
+    if (error) throw new Error(`getTransactionsByIds failed: ${error.message}`);
+    rows.push(...(data ?? []));
+  }
+  return rows.sort((a, b) =>
+    a.occurred_at === b.occurred_at
+      ? a.id.localeCompare(b.id)
+      : a.occurred_at < b.occurred_at
+      ? 1
+      : -1
+  );
+}
+
 // ===========================================================================
 // Space provenance + attribution for one transaction (household ledger).
 // See Phase Q/S migrations: transactions gained financial_source_id /

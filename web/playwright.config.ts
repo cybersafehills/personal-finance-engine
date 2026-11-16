@@ -81,6 +81,10 @@ export default defineConfig({
       // Financial Statements: opens /reports/statements + its actions for
       // statements.spec.ts. Inert for every other spec.
       FINANCIAL_STATEMENTS_ENABLED: "true",
+      // Insights Center (/insights, OneLedger 3.0): dark unless exactly
+      // "true"; insights.spec.ts needs it. Adds no navigation entry, only a
+      // link on /reports, so it is inert for every other spec.
+      INSIGHTS_CENTER_ENABLED: "true",
       // Integrations: the base area + Import Studio + Export Center for
       // integrations-nav.spec.ts / integrations-import.spec.ts. These
       // default on ("on unless exactly false"); set explicitly so the
