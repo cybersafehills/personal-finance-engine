@@ -1,4 +1,4 @@
-import { test, expect } from "./fixtures";
+import { test, expect, grantClipboard } from "./fixtures";
 import AxeBuilder from "@axe-core/playwright";
 
 // Pay & Services - Phase 2a (Assisted Quick Pay). Non-custodial: the
@@ -17,19 +17,6 @@ async function prepareAPersonPayment(page: import("@playwright/test").Page) {
   await expect(page).toHaveURL(/\/pay\/[0-9a-f-]{36}$/);
 }
 
-// WebKit rejects "clipboard-write" ("Unknown permission"), which failed
-// these tests outright on webkit-desktop / mobile-safari. The grant is
-// only needed for Chromium; the panel's Copy handler swallows a clipboard
-// error and records the handoff either way.
-async function grantClipboard(
-  context: import("@playwright/test").BrowserContext,
-  browserName: string,
-) {
-  if (browserName === "chromium") {
-    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-  }
-}
-
 // Clicks "I've confirmed this with my provider" and waits until the
 // server action has committed. Before the click the button's hint already
 // reads "Marks this as manually confirmed. OneLedger hasn't independently
@@ -45,7 +32,10 @@ async function confirmManually(page: import("@playwright/test").Page) {
 
 test("the launcher's payment actions are live and route to a typed draft", async ({ page }) => {
   await page.goto("/");
-  await page.locator("header").getByRole("button", { name: "Pay", exact: true }).click();
+  // The global Pay action is a header pill from lg (1024px) up and the
+  // centre button of the bottom nav below it (AppShell / PayTrigger); only
+  // one is ever visible. Scoping to <header> timed out on mobile-safari.
+  await page.getByRole("button", { name: "Pay", exact: true }).filter({ visible: true }).click();
   await page.getByRole("button", { name: "Pay a person" }).click();
   await expect(page).toHaveURL(/\/pay\/new\/pay_person$/);
   await expect(page.getByRole("heading", { name: "Pay a person" })).toBeVisible();

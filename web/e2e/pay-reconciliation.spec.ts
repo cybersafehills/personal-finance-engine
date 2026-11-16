@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { test, expect } from "./fixtures";
+import { test, expect, grantClipboard } from "./fixtures";
 import AxeBuilder from "@axe-core/playwright";
 import { assertNotProductionSupabaseUrl } from "./production-guard";
 import { E2E_USER } from "./test-users";
@@ -127,8 +127,9 @@ test.afterEach(async () => {
 test("an ingested transaction reconciled in apply mode links + verifies the intent", async ({
   page,
   context,
+  browserName,
 }) => {
-  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await grantClipboard(context, browserName);
   const db = admin();
   const intentId = await prepareAndHandOff(page, "0781112233", "6500");
 
@@ -151,8 +152,9 @@ test("an ingested transaction reconciled in apply mode links + verifies the inte
 test("manual link: the user picks a ledger transaction and the intent becomes Verified", async ({
   page,
   context,
+  browserName,
 }) => {
-  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await grantClipboard(context, browserName);
   const db = admin();
   const intentId = await prepareAndHandOff(page, "0782223344", "4200");
 
