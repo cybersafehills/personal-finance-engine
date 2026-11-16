@@ -93,7 +93,7 @@ export default function Inbox() {
   const high = items.filter((i) => i.priority === "high").length;
 
   return (
-    <ListScreen>
+    <ListScreen edges={["left", "right"]}>
       <FlatList
         data={items}
         keyExtractor={(item) => item.id}

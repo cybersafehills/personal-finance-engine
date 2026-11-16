@@ -52,7 +52,7 @@ export function ReviewList({ notice }: { notice?: string }) {
   const rows = (data ?? []).filter((row) => !decided.has(row.id));
 
   return (
-    <ListScreen>
+    <ListScreen edges={["left", "right"]}>
       <FlatList
         data={rows}
         keyExtractor={(row) => row.id}

@@ -17,6 +17,25 @@ Status: **sign-in only (PR 2).** Dark unless `MOBILE_API_ENABLED=true`.
   for the Expo web development preview). Unset in production.
 - Pure logic lives in `web/lib/mobile-api.ts` (`mobile_api_test.ts`).
 
+## Active Space (`X-Workspace-Id`)
+
+The web picks the active Space from an `active_workspace_id` cookie; the app has
+no cookie, so every `GET` below may carry `X-Workspace-Id: <workspace uuid>`.
+
+- It is a **request, not a grant.** `getActiveWorkspaceId()` (`lib/queries.ts`)
+  still requires an active membership in that workspace and otherwise falls back
+  to the user's personal Space, exactly as for the cookie. A malformed value is
+  ignored (same as no header).
+- With no header the endpoints below use the personal Space (unchanged).
+- When the header is sent, the response carries `workspace_id`: the Space actually
+  used. An app talking to a server that predates this header (or whose membership
+  was revoked) sees a different `workspace_id` or none, and must not present the
+  data as that Space's.
+- Only what the web scopes by the active Space follows it (Inbox read models,
+  config flags, ...). The transaction, balance and budget list queries are
+  **not** filtered by Space on the web (RLS is the boundary), and are not here.
+- CORS allows the header for allowlisted development origins.
+
 ## `POST /api/mobile/auth/sign-in`
 
 Body: `{ "email": string, "password": string }`.
