@@ -135,6 +135,18 @@ not a reason to keep the whole app native.
 - The Inbox tab falls back to the direct category-review queue when the
   endpoint is off or the app is not configured, so category checks never
   depend on the server route.
+## Implementation notes (Goals)
+
+- A read-only Goals screen (More → Goals). It reads `financial_goals` under RLS
+  and calls the database's `goal_progress()` per active goal (SECURITY DEFINER,
+  checks Space membership itself, granted to `authenticated`), so the percent,
+  the required monthly saving and the projected date are the database's, not
+  client maths, and no `/api/mobile` route is needed.
+- Like the web's goals list there is no workspace filter, so goals from a
+  household Space the user belongs to are listed with their own.
+- A failed progress call drops only that goal's pace lines. Creating goals and
+  adding contributions stay on the web.
+
 ## Implementation notes (Pay intents)
 
 - Preparing a payment is the first mobile **mutation through a route**: the
@@ -213,6 +225,14 @@ not a reason to keep the whole app native.
   path and one audit event for both clients.
 - Generating statements, packs, schedules and provider documents stay on the
   web; the screen links there when there are none.
+## Implementation notes (Transaction filters)
+
+- The Transactions tab filters by direction, period and "needs review" on top
+  of the existing text search. All of it is a read under RLS (`direction`,
+  `occurred_at`, `category_decision_status`), so there is no `/api/mobile`
+  route. Periods are Kigali calendar days (last 7 days = today plus six);
+  the bounds live in `features/transactions/filters.ts` and are unit-tested.
+- Filters are screen state, not persisted: reopening the tab shows everything.
 
 ## Consequences
 

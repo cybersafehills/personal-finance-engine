@@ -17,6 +17,8 @@ import {
   TRANSACTIONS_PAGE_SIZE,
   type TransactionRow,
 } from "@/features/transactions/queries";
+import { FilterChips } from "@/features/transactions/FilterChips";
+import { activeFilterCount, NO_FILTERS, type TransactionFilters } from "@/features/transactions/filters";
 import { TransactionItem } from "@/features/transactions/TransactionItem";
 import { colors, space } from "@/theme/tokens";
 
@@ -27,6 +29,7 @@ const SEARCH_DEBOUNCE_MS = 350;
 export default function Transactions() {
   const [input, setInput] = useState("");
   const [query, setQuery] = useState("");
+  const [filters, setFilters] = useState<TransactionFilters>(NO_FILTERS);
   const [rows, setRows] = useState<TransactionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -47,7 +50,7 @@ export default function Transactions() {
       const id = ++requestId.current;
       if (userInitiated) setRefreshing(true);
       try {
-        const page = await getTransactions({ q: query });
+        const page = await getTransactions({ q: query, filters });
         if (id !== requestId.current) return;
         setRows(page);
         setHasMore(page.length === TRANSACTIONS_PAGE_SIZE);
@@ -63,7 +66,7 @@ export default function Transactions() {
         }
       }
     },
-    [query],
+    [query, filters],
   );
 
   // Reloads on focus and whenever the applied search changes.
@@ -78,7 +81,7 @@ export default function Transactions() {
     const id = requestId.current;
     setLoadingMore(true);
     try {
-      const page = await getTransactions({ q: query, offset: rows.length });
+      const page = await getTransactions({ q: query, filters, offset: rows.length });
       // A refresh or new search started meanwhile: this page is stale.
       if (id !== requestId.current) return;
       const seen = new Set(rows.map((row) => row.id));
@@ -124,6 +127,7 @@ export default function Transactions() {
               returnKeyType="search"
               clearButtonMode="while-editing"
             />
+            <FilterChips value={filters} onChange={setFilters} />
           </View>
         }
         renderSectionHeader={({ section }) => (
@@ -155,10 +159,10 @@ export default function Transactions() {
             />
           ) : (
             <EmptyState
-              title={query.trim() ? "Nothing matches that search" : "No transactions yet"}
+              title={query.trim() || activeFilterCount(filters) ? "Nothing matches that search" : "No transactions yet"}
               description={
-                query.trim()
-                  ? "Try a different name, reference or category."
+                query.trim() || activeFilterCount(filters)
+                  ? "Try a different name, reference or category, or clear the filters."
                   : "They appear here as OneLedger records them."
               }
             />

@@ -1,6 +1,7 @@
 import { supabase } from "@/api/supabase";
 import { kigaliDateKey, kigaliDayBoundsUtc } from "@/lib/kigali-time";
 
+import { NO_FILTERS, periodStartUtc, type TransactionFilters } from "./filters";
 import { pickPlausibleBalance, safeSearchTerm, sumTodayTotals } from "./display";
 
 // Read queries, ported from web/lib/queries.ts. Like the web, every query
@@ -77,13 +78,26 @@ export async function getTransactions({
   offset = 0,
   limit = TRANSACTIONS_PAGE_SIZE,
   q,
-}: { offset?: number; limit?: number; q?: string } = {}): Promise<TransactionRow[]> {
+  filters = NO_FILTERS,
+  nowIso = new Date().toISOString(),
+}: {
+  offset?: number;
+  limit?: number;
+  q?: string;
+  filters?: TransactionFilters;
+  nowIso?: string;
+} = {}): Promise<TransactionRow[]> {
   let query = client()
     .from("transactions")
     .select(COLUMNS)
     .neq("dedupe_state", "merged")
     .order("occurred_at", { ascending: false })
     .range(offset, offset + limit - 1);
+
+  if (filters.direction !== "all") query = query.eq("direction", filters.direction);
+  if (filters.needsReview) query = query.in("category_decision_status", REVIEW_STATUSES);
+  const since = periodStartUtc(filters.period, nowIso);
+  if (since) query = query.gte("occurred_at", since);
 
   const term = q ? safeSearchTerm(q) : "";
   if (term) {

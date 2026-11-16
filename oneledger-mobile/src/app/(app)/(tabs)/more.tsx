@@ -96,6 +96,19 @@ export default function More() {
       </Card>
 
       <Card style={{ gap: space[3] }}>
+        <Text variant="bodyStrong">Goals</Text>
+        <Text variant="label" color="textSecondary">
+          See how your savings goals are going.
+        </Text>
+        <Button
+          label="Open goals"
+          variant="secondary"
+          fullWidth
+          onPress={() => router.push("/goals")}
+        />
+      </Card>
+
+      <Card style={{ gap: space[3] }}>
         <Text variant="bodyStrong">Security</Text>
         <Button
           label="App lock"
