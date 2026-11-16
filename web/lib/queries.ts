@@ -3295,7 +3295,7 @@ const REPORT_RUN_SUMMARY_COLUMNS =
  * mixing another workspace's reports in there would misleadingly suggest
  * they belong to the one being configured).
  */
-export async function getReportRuns(
+export async function getReportRunsStrict(
   limit = 30,
   workspaceId?: string,
 ): Promise<ReportRunSummary[]> {
@@ -3311,13 +3311,21 @@ export async function getReportRuns(
   }
 
   const { data, error } = await query;
+  if (error) throw new Error(error.message);
+  return (data ?? []) as unknown as ReportRunSummary[];
+}
 
-  if (error) {
-    console.error("getReportRuns failed:", error.message);
+/** The web's view: a failed read is logged and shows no reports, as it always has. */
+export async function getReportRuns(
+  limit = 30,
+  workspaceId?: string,
+): Promise<ReportRunSummary[]> {
+  try {
+    return await getReportRunsStrict(limit, workspaceId);
+  } catch (error) {
+    console.error("getReportRuns failed:", (error as Error).message);
     return [];
   }
-
-  return data ?? [];
 }
 
 export type ReportRunDetail = ReportRunSummary & {
@@ -3326,7 +3334,12 @@ export type ReportRunDetail = ReportRunSummary & {
   error_message: string | null;
 };
 
-export async function getReportRunById(
+/**
+ * THROWS on a failed read; null only when there genuinely is no such report (or
+ * it isn't the caller's, which RLS makes indistinguishable). The mobile API uses
+ * this so a database hiccup is an error the app can retry, not "not found".
+ */
+export async function getReportRunByIdStrict(
   id: string,
 ): Promise<ReportRunDetail | null> {
   const supabase = await supabaseSession();
@@ -3338,12 +3351,20 @@ export async function getReportRunById(
     .eq("id", id)
     .maybeSingle();
 
-  if (error) {
-    console.error("getReportRunById failed:", error.message);
+  if (error) throw new Error(error.message);
+  return data as unknown as ReportRunDetail | null;
+}
+
+/** The web's view: a failed read is logged and reads as "not found", as it always has. */
+export async function getReportRunById(
+  id: string,
+): Promise<ReportRunDetail | null> {
+  try {
+    return await getReportRunByIdStrict(id);
+  } catch (error) {
+    console.error("getReportRunById failed:", (error as Error).message);
     return null;
   }
-
-  return data as unknown as ReportRunDetail | null;
 }
 
 export type ReportPreferencesRow = {
