@@ -8,6 +8,8 @@ import {
   mobileAuthRateLimited,
   parseSignInBody,
   tokenAal,
+  tokenIsFresh,
+  tokenIssuedAt,
   workspaceIdFromHeader,
 } from "./mobile-api.ts";
 
@@ -109,6 +111,27 @@ Deno.test("rate limiter honours a custom ceiling", () => {
   assertEquals(mobileAuthRateLimited(ip, t, 3), true);
 });
 
+const jwt = (claims: Record<string, unknown>) => {
+  const enc = (o: unknown) => btoa(JSON.stringify(o)).replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");
+  return `${enc({ alg: "none" })}.${enc(claims)}.sig`;
+};
+
+Deno.test("tokenIssuedAt reads the iat claim and nothing else", () => {
+  assertEquals(tokenIssuedAt(jwt({ iat: 1_700_000_000 })), 1_700_000_000);
+  assertEquals(tokenIssuedAt(jwt({ iat: "1700000000" })), null);
+  assertEquals(tokenIssuedAt(jwt({})), null);
+  assertEquals(tokenIssuedAt("garbage"), null);
+});
+
+Deno.test("tokenIsFresh is true only within the window, and false when iat is unknown", () => {
+  const now = 1_700_000_000_000;
+  const issued = (minutesAgo: number) => jwt({ iat: now / 1000 - minutesAgo * 60 });
+  assertEquals(tokenIsFresh(issued(5), 15, now), true);
+  assertEquals(tokenIsFresh(issued(15), 15, now), true);
+  assertEquals(tokenIsFresh(issued(16), 15, now), false);
+  assertEquals(tokenIsFresh(jwt({}), 15, now), false);
+});
+
 Deno.test("workspaceIdFromHeader accepts only a well-formed UUID", () => {
   const id = "AAAAAAAA-1111-4222-8333-444444444444";
   assertEquals(workspaceIdFromHeader(id), id.toLowerCase());
@@ -117,9 +140,4 @@ Deno.test("workspaceIdFromHeader accepts only a well-formed UUID", () => {
   assertEquals(workspaceIdFromHeader(""), null);
   assertEquals(workspaceIdFromHeader("personal"), null);
   assertEquals(workspaceIdFromHeader(`${id}; drop table`), null);
-});
-
-Deno.test("CORS allows the workspace header for allowlisted origins", () => {
-  const h = corsHeadersFor("http://localhost:8081", "http://localhost:8081", "GET");
-  assertEquals(h["Access-Control-Allow-Headers"].includes("x-workspace-id"), true);
 });

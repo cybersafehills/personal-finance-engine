@@ -96,6 +96,38 @@ export function tokenAal(token: string): "aal1" | "aal2" | null {
 }
 
 /**
+ * The `iat` (issued-at, unix seconds) claim of an access token. Same caveat as
+ * `tokenAal`: read only after Supabase Auth validated the token. Used for the
+ * advisory "recent sign-in" signal, matching the web's isSessionFresh (which
+ * also measures the current access token's age).
+ */
+export function tokenIssuedAt(token: string): number | null {
+  const part = token.split(".")[1];
+  if (!part) return null;
+  try {
+    const b64 = part.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
+    const claims = JSON.parse(atob(padded)) as { iat?: unknown };
+    return typeof claims.iat === "number" && Number.isFinite(claims.iat)
+      ? claims.iat
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** True when the token was issued within `maxMinutes` of `nowMs`. */
+export function tokenIsFresh(
+  token: string,
+  maxMinutes: number,
+  nowMs: number = Date.now(),
+): boolean {
+  const iat = tokenIssuedAt(token);
+  if (iat === null) return false;
+  return (nowMs - iat * 1000) / 60000 <= maxMinutes;
+}
+
+/**
  * A user who has a verified second factor must have completed it. A session
  * that only passed the password step (aal1) is not enough, so a stolen or
  * half-finished sign-in cannot read the Inbox.
