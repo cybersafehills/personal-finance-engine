@@ -5,12 +5,16 @@ import { EmptyState } from "../../components/EmptyState";
 import { ReportStatusBadge } from "../../components/ReportStatusBadge";
 import { StatementsTabs } from "../../components/StatementsTabs";
 import { isFinancialStatementsEnabled } from "../../lib/financial-statements";
+import { isInsightsCenterEnabled } from "../../lib/insights/insights-page-data";
 import { formatZonedDate, formatZonedDateTime } from "../../lib/format";
 
 export const dynamic = "force-dynamic";
 
 export default async function ReportsPage() {
-  const reports = await getReportRuns();
+  const [reports, insightsEnabled] = await Promise.all([
+    getReportRuns(),
+    isInsightsCenterEnabled(),
+  ]);
   const statementsEnabled = isFinancialStatementsEnabled();
 
   return (
@@ -20,12 +24,22 @@ export default async function ReportsPage() {
         title="Reports"
         subtitle="Your daily financial reports"
         action={
-          <Link
-            href="/settings/reports"
-            className="text-sm font-medium text-accent hover:underline"
-          >
-            Settings
-          </Link>
+          <div className="flex items-center gap-4">
+            {insightsEnabled && (
+              <Link
+                href="/insights"
+                className="text-sm font-medium text-accent hover:underline"
+              >
+                Insights
+              </Link>
+            )}
+            <Link
+              href="/settings/reports"
+              className="text-sm font-medium text-accent hover:underline"
+            >
+              Settings
+            </Link>
+          </div>
         }
       />
 
