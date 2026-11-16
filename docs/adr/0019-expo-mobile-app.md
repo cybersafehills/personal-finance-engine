@@ -147,6 +147,21 @@ not a reason to keep the whole app native.
 - A failed progress call drops only that goal's pace lines. Creating goals and
   adding contributions stay on the web.
 
+## Implementation notes (Pay intents)
+
+- Preparing a payment is the first mobile **mutation through a route**: the
+  assisted-pay flags live in server env (a direct RPC call would bypass them)
+  and the web action carries an MFA step-up. `mobilePost` shares the GET guard's
+  authentication, whose completed-second-factor rule is the same condition as
+  `requireMfaForSensitiveAction`, so a mobile mutation is never weaker than its
+  server action.
+- `lib/pay/create-intent.ts` (creation) and `lib/pay/instruction.ts` (the USSD
+  string) were extracted from the web action and review panel so web and app
+  run one implementation. `pay-assisted`, `pay-again` and `pay-merchant` e2e
+  are the safety net for that refactor.
+- The app never builds a USSD string itself: it shows and dials what the server
+  returns, and treats `instruction: null` as "no verified route".
+
 ## Implementation notes (iPhone health)
 
 - iOS gives the app no view of the Shortcut, so the only honest health signal
