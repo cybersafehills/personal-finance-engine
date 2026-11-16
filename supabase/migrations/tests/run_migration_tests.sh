@@ -694,7 +694,10 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # OneLedger 3.0 E4 (20261227000000) adds counterparty_split_events (RLS enabled,
 # member SELECT only; written by split_/undo_counterparty_split) - 137 tables,
 # 136 with RLS.
-if [ "$TABLE_COUNT" = "137" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# OneLedger 3.0 E5 (20261228000000) adds transaction_sensitive_details (RLS
+# enabled, NO policy and NO grant for authenticated; service-role write only;
+# read only through reveal_transaction_sensitive_detail) - 138 tables, 137 with RLS.
+if [ "$TABLE_COUNT" = "138" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -1052,10 +1055,12 @@ AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_p
 # OneLedger 3.0 E4 (20261227000000): split_counterparty and
 # undo_counterparty_split (member+-gated); _counterparty_txn_key is internal.
 # 130 + 2 = 132.
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "132" ]; then
-  pass "authenticated holds EXECUTE on exactly the 132 functions expected, no more"
+# OneLedger 3.0 E5 (20261228000000): reveal_transaction_sensitive_detail
+# (member+ and source-visibility gated, rate-limited, audited). 132 + 1 = 133.
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "133" ]; then
+  pass "authenticated holds EXECUTE on exactly the 133 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 132 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 133 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -8788,6 +8793,120 @@ else
   fail "E4: erasure with split events failed (rc=$E4_E_RC left=$E4_E_LEFT $(tail -2 $ARTIFACT_DIR/pfe_e4e.log | tr '\n' ' '))"
 fi
 rm -f $ARTIFACT_DIR/pfe_e4e.log
+
+# ===========================================================================
+# OneLedger 3.0 E5: sensitive details (20261228000000_transaction_sensitive_details).
+# The DB only ever holds ciphertext; reveal is authorised, rate-limited, audited.
+# ===========================================================================
+echo "=== OneLedger 3.0 E5: sensitive details ==="
+E5_ACCT="00000000-0000-0000-0000-0000000061a1"
+E5_HH_ACCT="00000000-0000-0000-0000-0000000061a2"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.accounts (id, workspace_id, name, provider, currency) values
+    ('$E5_ACCT', '$WORKSPACE_A', 'E5 acct', 'mtn_momo', 'RWF'),
+    ('$E5_HH_ACCT', '$R_MATRIX_HH', 'E5 hh acct', 'mtn_momo', 'RWF');
+  insert into public.momo_messages (id, raw_message, processing_status) values
+    ('00000000-0000-0000-0000-0000000062a1', 'e5a', 'processed'), ('00000000-0000-0000-0000-0000000062a2', 'e5b', 'processed');
+  -- A household transaction is only visible to members when its source is
+  -- shared into the Space (can_view_source_in_space), exactly as for RLS reads.
+  insert into public.financial_sources (id, owner_user_id, provider, source_type, display_name, currency)
+  values ('00000000-0000-0000-0000-0000000061b1', '$R_ADMIN_USER', 'mtn_momo', 'mobile_money', 'E5 shared src', 'RWF');
+  insert into public.source_space_links (financial_source_id, workspace_id, visibility_mode, status)
+  values ('00000000-0000-0000-0000-0000000061b1', '$R_MATRIX_HH', 'share_transactions', 'active');
+  insert into public.transactions (id, momo_message_id, account_id, workspace_id, financial_source_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at,
+     parser_version, counterparty_name, settlement_state, affects_balance, principal_effect_rwf, fee_effect_rwf, effect_reason)
+  values ('00000000-0000-0000-0000-0000000063a1', '00000000-0000-0000-0000-0000000062a1', '$E5_ACCT', '$WORKSPACE_A', null, 'merchant_payment', 'out', 'success', 5000, 0, now(), 'test', 'EUCL', 'settled', true, -5000, 0, 'settled_outgoing_with_fee'),
+         ('00000000-0000-0000-0000-0000000063a2', '00000000-0000-0000-0000-0000000062a2', '$E5_HH_ACCT', '$R_MATRIX_HH', '00000000-0000-0000-0000-0000000061b1', 'merchant_payment', 'out', 'success', 5000, 0, now(), 'test', 'EUCL', 'settled', true, -5000, 0, 'settled_outgoing_with_fee');
+  set role service_role;
+  insert into public.transaction_sensitive_details (transaction_id, workspace_id, kind, key_id, nonce, ciphertext) values
+    ('00000000-0000-0000-0000-0000000063a1', '$WORKSPACE_A', 'utility_token', 'k1', 'bm9uY2Vub25jZQ==', 'Y2lwaGVydGV4dC1ibG9iLW5vdC1hLXRva2Vu'),
+    ('00000000-0000-0000-0000-0000000063a2', '$R_MATRIX_HH', 'utility_token', 'k1', 'bm9uY2Vub25jZQ==', 'Y2lwaGVydGV4dC1ibG9iLW5vdC1hLXRva2Vu');" >/dev/null
+E5_T1="00000000-0000-0000-0000-0000000063a1"
+
+E5_PRIV="$(psql -d pfe_rls -t -A -c "select bool_or(has_table_privilege(r, 'public.transaction_sensitive_details', p)) from unnest(array['authenticated','anon']) r, unnest(array['SELECT','INSERT','UPDATE','DELETE']) p;")"
+if [ "$E5_PRIV" = "false" ] || [ "$E5_PRIV" = "f" ]; then
+  pass "E5: neither authenticated nor anon holds any privilege on the sensitive-details table"
+else
+  fail "E5: sensitive-details table is reachable by a client role ('$E5_PRIV')"
+fi
+
+E5_R="$(as_user "$USER_A" "select key_id || '|' || ciphertext from public.reveal_transaction_sensitive_detail('$E5_T1');" | tail -1)"
+if [ "$E5_R" = "k1|Y2lwaGVydGV4dC1ibG9iLW5vdC1hLXRva2Vu" ]; then
+  pass "E5: a workspace member reveals the SEALED value (key id + ciphertext) for a transaction they can see"
+else
+  fail "E5: reveal wrong ('$E5_R')"
+fi
+E5_AUD="$(psql -d pfe_rls -t -A -c "select count(*) || '|' || coalesce(max(new_value::text), '') from public.space_audit_events where event_type = 'transaction.sensitive_revealed' and resource_id = '$E5_T1';")"
+if [ "$E5_AUD" = '1|{"kind": "utility_token"}' ]; then
+  pass "E5: every reveal is audited, and the audit row carries neither the ciphertext nor any value"
+else
+  fail "E5: reveal audit wrong ('$E5_AUD')"
+fi
+
+e5_denied() { # label sql_user sql
+  if as_user "$2" "$3" >/dev/null 2>$ARTIFACT_DIR/pfe_e5.log; then
+    fail "E5: reveal allowed: $1"
+  elif grep -q "sensitive_detail_not_found" $ARTIFACT_DIR/pfe_e5.log; then
+    pass "E5: reveal refused with the generic not-found error: $1"
+  else
+    fail "E5: reveal refused with an unexpected error ($1): $(cat $ARTIFACT_DIR/pfe_e5.log)"
+  fi
+  rm -f $ARTIFACT_DIR/pfe_e5.log
+}
+e5_denied "another workspace's member" "$USER_B" "select * from public.reveal_transaction_sensitive_detail('$E5_T1');"
+e5_denied "a viewer in the same Space" "$R_VIEWER_USER" "select * from public.reveal_transaction_sensitive_detail('00000000-0000-0000-0000-0000000063a2');"
+e5_denied "a transaction with no sensitive value" "$USER_A" "select * from public.reveal_transaction_sensitive_detail('$(E4_T 01)');"
+e5_denied "a transaction that does not exist" "$USER_A" "select * from public.reveal_transaction_sensitive_detail('00000000-0000-0000-0000-00000000dead');"
+E5_M="$(as_user "$R_MEMBER_USER" "select count(*) from public.reveal_transaction_sensitive_detail('00000000-0000-0000-0000-0000000063a2');" | tail -1)"
+if [ "$E5_M" = "1" ]; then
+  pass "E5: a household member (not just the owner) can reveal for a Space transaction they can see"
+else
+  fail "E5: household member reveal wrong ('$E5_M')"
+fi
+
+# Rate limit: 20 successful reveals / user / hour (USER_A has done 1 already).
+if as_user "$USER_A" "select count(*) from (select public.reveal_transaction_sensitive_detail('$E5_T1') from generate_series(1, 19)) x;" >/dev/null 2>&1; then
+  pass "E5: reveals up to the hourly limit are allowed"
+else
+  fail "E5: reveals below the limit were refused"
+fi
+if as_user "$USER_A" "select * from public.reveal_transaction_sensitive_detail('$E5_T1');" >/dev/null 2>$ARTIFACT_DIR/pfe_e5rl.log; then
+  fail "E5: the 21st reveal in an hour was allowed"
+elif grep -q "rate_limited" $ARTIFACT_DIR/pfe_e5rl.log; then
+  pass "E5: the 21st reveal in an hour is rate limited"
+else
+  fail "E5: 21st reveal failed for another reason: $(cat $ARTIFACT_DIR/pfe_e5rl.log)"
+fi
+rm -f $ARTIFACT_DIR/pfe_e5rl.log
+
+# Malformed rows are rejected by the table itself.
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.transaction_sensitive_details (transaction_id, workspace_id, kind, key_id, nonce, ciphertext) values ('00000000-0000-0000-0000-0000000063a1', '$WORKSPACE_A', 'password', 'k1', 'bm9uY2Vub25jZQ==', 'Y2lwaGVydGV4dC1ibG9iLW5vdC1hLXRva2Vu');" >/dev/null 2>&1; then
+  fail "E5: an unknown kind was accepted"
+else
+  pass "E5: only known kinds can be stored"
+fi
+
+# Erasure: a sensitive row leaves with its transaction / Space.
+E5_E_U="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('e5-erase@example.com') returning id;" | head -1)"
+E5_E_WS="$(psql -d pfe_rls -t -A -c "select w.id from public.workspaces w join public.workspace_memberships m on m.workspace_id=w.id where m.user_id='$E5_E_U' and w.kind='personal';" | head -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.accounts (id, workspace_id, name, provider, currency) values ('00000000-0000-0000-0000-0000000061e1', '$E5_E_WS', 'E5 erase', 'mtn_momo', 'RWF');
+  insert into public.momo_messages (id, raw_message, processing_status) values ('00000000-0000-0000-0000-0000000062e1', 'e5e', 'processed');
+  insert into public.transactions (id, momo_message_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version, counterparty_name, settlement_state, affects_balance, principal_effect_rwf, fee_effect_rwf, effect_reason)
+  values ('00000000-0000-0000-0000-0000000063e1', '00000000-0000-0000-0000-0000000062e1', '00000000-0000-0000-0000-0000000061e1', '$E5_E_WS', 'merchant_payment', 'out', 'success', 10, 0, now(), 'test', 'EUCL', 'settled', true, -10, 0, 'settled_outgoing_with_fee');
+  set role service_role;
+  insert into public.transaction_sensitive_details (transaction_id, workspace_id, kind, key_id, nonce, ciphertext) values ('00000000-0000-0000-0000-0000000063e1', '$E5_E_WS', 'utility_token', 'k1', 'bm9uY2Vub25jZQ==', 'Y2lwaGVydGV4dC1ibG9iLW5vdC1hLXRva2Vu');" >/dev/null
+set +e
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; select public.execute_account_deletion('$E5_E_U');" > $ARTIFACT_DIR/pfe_e5e.log 2>&1
+E5_E_RC=$?
+set -e
+E5_E_LEFT="$(psql -d pfe_rls -t -A -c "select count(*) from public.transaction_sensitive_details where workspace_id = '$E5_E_WS';")"
+if [ "$E5_E_RC" = "0" ] && [ "$E5_E_LEFT" = "0" ]; then
+  pass "E5: account erasure removes the user's sensitive details with their transactions"
+else
+  fail "E5: erasure with sensitive details failed (rc=$E5_E_RC left=$E5_E_LEFT $(tail -2 $ARTIFACT_DIR/pfe_e5e.log | tr '\n' ' '))"
+fi
+rm -f $ARTIFACT_DIR/pfe_e5e.log
 
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="

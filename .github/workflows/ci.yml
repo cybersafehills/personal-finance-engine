@@ -135,6 +135,11 @@ jobs:
         # root, so it must be passed explicitly.
         run: deno test --config web/lib/deno.json web/lib
 
+      - name: sensitive-crypto copies match
+        # The Edge Function runtime and the Next app cannot share a module, so
+        # the AES-GCM helper exists twice; they must stay byte-identical.
+        run: diff -u supabase/functions/_shared/sensitive-crypto.ts web/lib/sensitive-crypto.ts
+
   web-quality:
     name: Web lint + production build
     runs-on: ubuntu-24.04

@@ -32,6 +32,13 @@ export type ParsedTransaction = {
   counterparty_reference: string | null;
   occurred_at: string;
   metadata: Record<string, unknown>;
+  /**
+   * Bearer values extracted from the message (e.g. a prepaid-electricity token).
+   * NEVER copy into metadata, logs, labels or any API response; the only
+   * consumer is the encrypted-storage step (sensitive-crypto.ts). Absent for
+   * almost every message.
+   */
+  sensitive?: { utility_token?: string };
 };
 
 export type DecisionStatus =

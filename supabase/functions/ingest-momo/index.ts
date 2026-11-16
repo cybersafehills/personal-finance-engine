@@ -1,6 +1,8 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { evaluatePolicies } from "./policy-engine.ts";
 import { parseMomoMessage } from "./parser.ts";
+import { type Keyring, parseKeyring } from "../_shared/sensitive-crypto.ts";
+import { storeUtilityToken } from "./sensitive-store.ts";
 import { normalizeMessage, sha256 } from "./parser-utils.ts";
 import { jsonResponse } from "./responses.ts";
 import { computeAccountingEffect } from "../_shared/accounting.ts";
@@ -45,7 +47,23 @@ const MTN_MOMO_ADAPTER_ENABLED = mtnMomoAdapterEnabled(
   Deno.env.get("ONELEDGER_MTN_MOMO_ADAPTER"),
 );
 
-const PARSER_VERSION = "momo-parser-v1.1";
+// v1.2: a utility token ("with token ...") is stripped from the merchant label
+// and carried separately (see utility-token.ts); labels of ordinary payments
+// are unchanged.
+const PARSER_VERSION = "momo-parser-v1.2";
+
+// Encrypted capture of utility tokens (prepaid electricity). OFF unless
+// UTILITY_TOKEN_CAPTURE_ENABLED === "true" AND SENSITIVE_DATA_KEYRING holds a
+// valid keyring; without both the token is simply not kept (it is still removed
+// from every display field by the parser).
+const UTILITY_TOKEN_CAPTURE_ENABLED =
+  Deno.env.get("UTILITY_TOKEN_CAPTURE_ENABLED") === "true";
+let SENSITIVE_RING: Keyring | null = null;
+try {
+  SENSITIVE_RING = await parseKeyring(Deno.env.get("SENSITIVE_DATA_KEYRING"));
+} catch {
+  console.error(JSON.stringify({ event: "sensitive_keyring_invalid" }));
+}
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   auth: {
@@ -1124,6 +1142,23 @@ Deno.serve(async (req: Request) => {
           rawEventFinalizeError,
         );
       }
+    }
+
+    // ========================================================
+    // UTILITY TOKEN (best-effort, non-fatal): encrypted, never logged.
+    // ========================================================
+
+    if (parsed.sensitive?.utility_token) {
+      const outcome = await storeUtilityToken({
+        client: supabase,
+        enabled: UTILITY_TOKEN_CAPTURE_ENABLED,
+        ring: SENSITIVE_RING,
+        transactionId: insertedTransaction.id,
+        workspaceId: resolvedWorkspaceId,
+        token: parsed.sensitive.utility_token,
+      });
+      // Outcome only - never the value.
+      console.log(JSON.stringify({ event: "utility_token_capture", outcome }));
     }
 
     // ========================================================

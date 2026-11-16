@@ -7,6 +7,10 @@ import {
   parseNumber,
   parseOccurredAt,
 } from "./parser-utils.ts";
+import {
+  extractUtilityTokenDetails,
+  redactTokenFromLabel,
+} from "./utility-token.ts";
 
 /**
  * Deterministic MTN Rwanda Mobile Money SMS parser.
@@ -144,7 +148,16 @@ export function parseMomoMessage(
   );
 
   if (merchantPayment) {
-    const merchantRaw = merchantPayment[2].trim();
+    // A utility token ("... with token 1234-5678-...") is a bearer value. It is
+    // stripped from the label BEFORE the reference is derived (a bare 20-digit
+    // token would otherwise be taken as the reference) so it can never reach
+    // counterparty_name / counterparty_reference / metadata / any display field.
+    // It travels separately in `sensitive` for encrypted storage. See
+    // utility-token.ts for the (synthetic-fixture-only) format assumptions.
+    const details = extractUtilityTokenDetails(message);
+    const merchantRaw = details.tokenMentioned
+      ? redactTokenFromLabel(merchantPayment[2].trim())
+      : merchantPayment[2].trim();
 
     const referenceMatch = merchantRaw.match(/\s([0-9]{5,})$/);
 
@@ -167,7 +180,11 @@ export function parseMomoMessage(
       occurred_at: parseOccurredAt(merchantPayment[3], merchantPayment[4]),
       metadata: {
         parser_pattern: "merchant_payment",
+        // Non-sensitive facts only - never the token itself.
+        ...(details.tokenMentioned ? { utility_token_present: true } : {}),
+        ...(details.kwh ? { kwh: details.kwh } : {}),
       },
+      ...(details.token ? { sensitive: { utility_token: details.token } } : {}),
     };
   }
 

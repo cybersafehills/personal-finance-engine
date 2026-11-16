@@ -28,6 +28,8 @@ import {
   getWorkspaceTags,
 } from "../../../lib/transaction-tags";
 import { TransactionDuplicateSection } from "../../../components/TransactionDuplicateSection";
+import { UtilityTokenReveal } from "../../../components/UtilityTokenReveal";
+import { getUtilityTokenMeta, utilityTokenFeatureOn } from "../../../lib/sensitive/utility-token";
 
 export const dynamic = "force-dynamic";
 
@@ -79,6 +81,12 @@ export default async function TransactionDetailPage({
   const workspaceTagSuggestions = activeWorkspaceId
     ? await getWorkspaceTags(activeWorkspaceId)
     : [];
+  // Prepaid-electricity token: only the existence and kWh are read here; the
+  // token itself is fetched, decrypted and shown only on an explicit, audited
+  // request (UtilityTokenReveal).
+  const tokenMeta = utilityTokenFeatureOn()
+    ? await getUtilityTokenMeta(id)
+    : { present: false, kwh: null };
   const isHousehold = spaceContext?.workspaceKind === "household";
   const [selfUserId, spaceMembers] = isHousehold
     ? await Promise.all([
@@ -330,6 +338,10 @@ export default async function TransactionDetailPage({
           </div>
         )}
       </section>
+
+      {tokenMeta.present && (
+        <UtilityTokenReveal transactionId={transaction.id} kwh={tokenMeta.kwh} />
+      )}
 
       <section
         aria-label="Tags"
