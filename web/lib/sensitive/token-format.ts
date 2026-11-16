@@ -26,3 +26,13 @@ export function friendlyRevealError(raw: string | null | undefined): string {
   }
   return "Something went wrong. Please try again.";
 }
+
+/** kWh x 1000 (an integer) -> "11.9": trailing zeros trimmed, no floating-point surprises for display. */
+export function kwhText(milli: number): string {
+  const whole = Math.trunc(milli / 1000);
+  const frac = String(Math.abs(milli) % 1000).padStart(3, "0").replace(
+    /0+$/,
+    "",
+  );
+  return frac ? `${whole}.${frac}` : String(whole);
+}

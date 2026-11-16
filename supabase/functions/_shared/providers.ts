@@ -59,7 +59,29 @@ function looksLikeMtnMomo(message: string): boolean {
     MTN_VERBS.some((r) => r.test(message));
 }
 
+// Prepaid-electricity ("Cash Power") receipts. These come from the electricity
+// VENDOR's own SMS sender - NOT from MTN MoMo - in two real wordings: English
+// ("Cashpower Token: NNNN-NNNN-NNNN-NNNN-NNNN / Purchased 11.90 KWh for 5,000
+// RWF ...") and Kinyarwanda ("Tokeni: NNNN-... / Konteri: ... / 1,000 RWF =
+// 2.4 kWh ..."). Detection needs all three of: a labelled 20-digit token, the
+// word kWh, and an RWF amount. An OTP or promo with digit groups has no kWh and
+// is turned away. This matcher MUST come before MTN: the English receipt
+// contains "TxID:", which MTN's marker list would otherwise claim.
+const UTILITY_TOKEN_LINE =
+  /\b(?:cash\s?power\s+token|tokeni)\s*:?\s*\d{4}(?:[-\s]\d{4}){4}(?!\d)/i;
+
+function looksLikeUtilityReceipt(message: string): boolean {
+  return UTILITY_TOKEN_LINE.test(message) && /\bkwh\b/i.test(message) &&
+    /\bRWF\b/i.test(message);
+}
+
 export const PROVIDER_MATCHERS: ProviderMatcher[] = [
+  {
+    providerKey: "utility_receipt",
+    connectorKey: "utility_receipt_sms_v1",
+    channel: "sms",
+    detect: looksLikeUtilityReceipt,
+  },
   {
     providerKey: "mtn_momo",
     connectorKey: "mtn_momo_sms_v1",

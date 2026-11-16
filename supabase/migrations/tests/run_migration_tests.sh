@@ -697,7 +697,10 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # OneLedger 3.0 E5 (20261228000000) adds transaction_sensitive_details (RLS
 # enabled, NO policy and NO grant for authenticated; service-role write only;
 # read only through reveal_transaction_sensitive_detail) - 138 tables, 137 with RLS.
-if [ "$TABLE_COUNT" = "138" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# OneLedger 3.0 E7 (20261229000000) adds utility_receipts (RLS enabled, column-
+# level SELECT for authenticated that excludes the ciphertext; service-role
+# write) - 139 tables, 138 with RLS.
+if [ "$TABLE_COUNT" = "139" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -1057,10 +1060,13 @@ AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_p
 # 130 + 2 = 132.
 # OneLedger 3.0 E5 (20261228000000): reveal_transaction_sensitive_detail
 # (member+ and source-visibility gated, rate-limited, audited). 132 + 1 = 133.
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "133" ]; then
-  pass "authenticated holds EXECUTE on exactly the 133 functions expected, no more"
+# OneLedger 3.0 E7 (20261229000000): confirm_/unlink_/ignore_utility_receipt
+# (member+-gated, audited). store_utility_receipt is service-role only and the
+# link helpers are internal. 133 + 3 = 136.
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "136" ]; then
+  pass "authenticated holds EXECUTE on exactly the 136 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 133 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 136 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -8907,6 +8913,269 @@ else
   fail "E5: erasure with sensitive details failed (rc=$E5_E_RC left=$E5_E_LEFT $(tail -2 $ARTIFACT_DIR/pfe_e5e.log | tr '\n' ' '))"
 fi
 rm -f $ARTIFACT_DIR/pfe_e5e.log
+
+# ===========================================================================
+# OneLedger 3.0 E7: utility receipts (20261229000000_utility_receipts).
+# ===========================================================================
+echo "=== OneLedger 3.0 E7: utility receipts ==="
+E7_ACCT="00000000-0000-0000-0000-0000000071a1"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "insert into public.accounts (id, workspace_id, name, provider, currency) values ('$E7_ACCT', '$WORKSPACE_A', 'E7 acct', 'mtn_momo', 'RWF');" >/dev/null
+e7_tx() { # nn type amount minutes_ago [direction]
+  local dir="${5:-out}"
+  psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+    insert into public.momo_messages (id, raw_message, processing_status) values ('00000000-0000-0000-0000-0000000072$1', 'e7-$1', 'processed');
+    insert into public.transactions
+      (id, momo_message_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at,
+       parser_version, counterparty_name, settlement_state, affects_balance, principal_effect_rwf, fee_effect_rwf, effect_reason)
+    values ('00000000-0000-0000-0000-0000000073$1', '00000000-0000-0000-0000-0000000072$1', '$E7_ACCT', '$WORKSPACE_A', '$2', '$dir', 'success', $3, 0,
+            now() - interval '$4 minutes', 'test', 'EUCL', 'settled', true, $( [ "$dir" = "in" ] && echo "$3" || echo "-$3" ), 0,
+            '$( [ "$dir" = "in" ] && echo settled_incoming || echo settled_outgoing_with_fee )');" >/dev/null
+}
+E7_T() { echo "00000000-0000-0000-0000-0000000073$1"; }
+E7_H() { printf '%064d' "$1"; }
+e7_store() { # idx amount minutes_ago [with_token]
+  local id="00000000-0000-0000-0000-0000000074$1"
+  local tok="null, null, null"
+  [ "${4:-1}" = "1" ] && tok="'k1', 'bm9uY2Vub25jZQ==', 'Y2lwaGVydGV4dC1ibG9iLW5vdC1hLXRva2Vu'"
+  psql -d pfe_rls -t -A -F'|' -c "set role service_role; select status || '|' || created from public.store_utility_receipt('$id', '$WORKSPACE_A', 'cashpower_en', $2, 11900, '0001', '$(E7_H "$1")', now() - interval '$3 minutes', $tok);" | grep -v '^SET$'
+}
+E7_R() { echo "00000000-0000-0000-0000-0000000074$1"; }
+e7_status() { psql -d pfe_rls -t -A -c "select status || '|' || coalesce(transaction_id::text, '-') || '|' || coalesce(matched_by, '-') || '|' || candidate_count from public.utility_receipts where id = '$(E7_R "$1")';"; }
+
+# 1. receipt first, payment not seen yet -> unmatched; the payment arriving links it
+if [ "$(e7_store 01 7101 0)" = "unmatched|true" ]; then pass "E7: a receipt with no payment yet is stored as unmatched"; else fail "E7: store wrong"; fi
+e7_tx 01 merchant_payment 7101 3
+if [ "$(e7_status 01)" = "matched|$(E7_T 01)|auto|1" ]; then
+  pass "E7: when the MoMo payment arrives later it is linked to the waiting receipt automatically"
+else
+  fail "E7: late payment did not link ('$(e7_status 01)')"
+fi
+
+# 2. payment first, then receipt -> matched immediately
+e7_tx 02 merchant_payment 7102 20
+if [ "$(e7_store 02 7102 0)" = "matched|true" ] && [ "$(e7_status 02)" = "matched|$(E7_T 02)|auto|1" ]; then
+  pass "E7: a receipt arriving after its payment links at once"
+else
+  fail "E7: receipt-after-payment wrong ('$(e7_status 02)')"
+fi
+
+# 3. idempotent re-delivery
+if [ "$(e7_store 02 7102 0)" = "matched|false" ] && [ "$(psql -d pfe_rls -t -A -c "select count(*) from public.utility_receipts where vendor_ref_hash = '$(E7_H 02)';")" = "1" ]; then
+  pass "E7: a re-delivered receipt (same vendor reference) creates nothing new"
+else
+  fail "E7: duplicate handling wrong"
+fi
+
+# 4. what is NOT a candidate: person-to-person send, wrong amount, outside the window, already claimed
+e7_tx 03 send_money 7103 5
+e7_tx 04 merchant_payment 7104 5
+e7_tx 05 merchant_payment 7103 3000
+e7_store 03 7103 0 >/dev/null
+if [ "$(e7_status 03)" = "unmatched|-|-|0" ]; then
+  pass "E7: a send-money, a different amount and a payment days earlier are never matched"
+else
+  fail "E7: wrongly matched ('$(e7_status 03)')"
+fi
+e7_store 04 7101 0 >/dev/null
+if [ "$(e7_status 04)" = "unmatched|-|-|0" ]; then
+  pass "E7: a payment already claimed by another receipt is not offered again"
+else
+  fail "E7: claimed payment re-matched ('$(e7_status 04)')"
+fi
+
+# 5. two plausible payments -> ambiguous; the user chooses; the second receipt takes the other
+e7_tx 06 merchant_payment 7105 30
+e7_tx 07 merchant_payment 7105 10
+e7_store 05 7105 0 >/dev/null
+if [ "$(e7_status 05)" = "ambiguous|-|-|2" ]; then
+  pass "E7: two plausible payments make the receipt ambiguous (never a guess)"
+else
+  fail "E7: ambiguity wrong ('$(e7_status 05)')"
+fi
+if as_user "$USER_A" "select public.confirm_utility_receipt('$(E7_R 05)', '$(E7_T 06)');" >/dev/null 2>&1 && [ "$(e7_status 05)" = "matched|$(E7_T 06)|user|2" ]; then
+  pass "E7: the user confirms which payment it was"
+else
+  fail "E7: confirm wrong ('$(e7_status 05)')"
+fi
+
+# 6. guards on user actions
+e7_tx 08 merchant_payment 7106 5
+e7_store 06 7107 0 >/dev/null
+e7_denied() { # label user sql
+  if as_user "$2" "$3" >/dev/null 2>&1; then fail "E7: allowed: $1"; else pass "E7: refused: $1"; fi
+}
+e7_denied "confirming a payment of a different amount" "$USER_A" "select public.confirm_utility_receipt('$(E7_R 06)', '$(E7_T 08)');"
+e7_denied "confirming an already-claimed payment" "$USER_A" "select public.confirm_utility_receipt('$(E7_R 06)', '$(E7_T 06)');"
+e7_denied "another workspace confirming" "$USER_B" "select public.confirm_utility_receipt('$(E7_R 06)', '$(E7_T 08)');"
+e7_denied "ignoring or unlinking from another workspace" "$USER_B" "select public.ignore_utility_receipt('$(E7_R 06)');"
+
+# 7. unlink a wrong auto-match: it is not silently re-linked
+as_user "$USER_A" "select public.unlink_utility_receipt('$(E7_R 02)');" >/dev/null
+e7_tx 09 merchant_payment 7102 10
+if [ "$(e7_status 02)" = "unmatched|-|-|0" ]; then
+  pass "E7: un-linking a wrong match frees the payment and does not re-link behind the user's back"
+else
+  fail "E7: unlink wrong ('$(e7_status 02)')"
+fi
+as_user "$USER_A" "select public.confirm_utility_receipt('$(E7_R 02)', '$(E7_T 09)');" >/dev/null
+if [ "$(e7_status 02)" = "matched|$(E7_T 09)|user|0" ]; then
+  pass "E7: the user can re-link to the right payment"
+else
+  fail "E7: relink wrong ('$(e7_status 02)')"
+fi
+
+# 8. ignore
+as_user "$USER_A" "select public.ignore_utility_receipt('$(E7_R 06)');" >/dev/null
+if [ "$(psql -d pfe_rls -t -A -c "select status from public.utility_receipts where id = '$(E7_R 06)';")" = "ignored" ]; then
+  pass "E7: a receipt can be ignored"
+else
+  fail "E7: ignore wrong"
+fi
+
+# 9. privacy: the ciphertext is invisible to clients; nothing but the last 4 of the meter is stored
+E7_COLS="$(psql -d pfe_rls -t -A -c "select string_agg(column_name, ',') from information_schema.column_privileges where table_schema = 'public' and table_name = 'utility_receipts' and grantee = 'authenticated' and privilege_type = 'SELECT';")"
+if echo "$E7_COLS" | grep -q "token_" ; then
+  fail "E7: a token column is selectable by authenticated ($E7_COLS)"
+else
+  pass "E7: authenticated has no privilege on any token column of utility_receipts"
+fi
+if as_user "$USER_A" "select token_ciphertext from public.utility_receipts limit 1;" >/dev/null 2>&1; then
+  fail "E7: authenticated selected token_ciphertext"
+else
+  pass "E7: selecting token_ciphertext as a client fails"
+fi
+E7_OWN="$(as_user "$USER_A" "select count(*) from public.utility_receipts;" | tail -1)"
+E7_OTHER="$(as_user "$USER_B" "select count(*) from public.utility_receipts;" | tail -1)"
+if [ "$E7_OWN" -ge 5 ] && [ "$E7_OTHER" = "0" ]; then
+  pass "E7: a member sees their workspace's receipts; another workspace sees none (RLS)"
+else
+  fail "E7: RLS wrong (own=$E7_OWN other=$E7_OTHER)"
+fi
+E7_SVC="$(psql -d pfe_rls -t -A -c "select has_function_privilege('authenticated','public.store_utility_receipt(uuid,uuid,text,bigint,bigint,text,text,timestamptz,text,text,text)','EXECUTE') or has_function_privilege('authenticated','public._link_utility_receipt(uuid)','EXECUTE');")"
+if [ "$E7_SVC" = "false" ] || [ "$E7_SVC" = "f" ]; then
+  pass "E7: clients cannot call the ingest or the internal linking functions"
+else
+  fail "E7: ingest/link functions callable by authenticated"
+fi
+
+# 11. a failing link must never fail the payment's own insert
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; select public.store_utility_receipt('00000000-0000-0000-0000-0000000074f1', '$WORKSPACE_A', 'cashpower_en', 7777, 1000, null, '$(E7_H 99)', now(), null, null, null);" >/dev/null
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+    insert into public.momo_messages (id, raw_message, processing_status) values ('00000000-0000-0000-0000-0000000072f1', 'e7-f1', 'processed');
+    insert into public.transactions (id, momo_message_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version, counterparty_name, settlement_state, affects_balance, principal_effect_rwf, fee_effect_rwf, effect_reason)
+    values ('00000000-0000-0000-0000-0000000073f1', '00000000-0000-0000-0000-0000000072f1', '$E7_ACCT', '$WORKSPACE_A', 'merchant_payment', 'out', 'success', 7777, 0, now(), 'test', 'EUCL', 'settled', true, -7777, 0, 'settled_outgoing_with_fee');" >/dev/null 2>&1; then
+  pass "E7: inserting a payment that a receipt is waiting for succeeds (linking is best-effort)"
+else
+  fail "E7: the payment insert failed"
+fi
+
+# 12. audit + erasure
+E7_AUD="$(psql -d pfe_rls -t -A -c "select string_agg(event_type, ',' order by event_type) from (select distinct event_type from public.space_audit_events where workspace_id = '$WORKSPACE_A' and event_type like 'utility_receipt.%') x;")"
+if [ "$E7_AUD" = "utility_receipt.confirmed,utility_receipt.ignored,utility_receipt.unlinked" ]; then
+  pass "E7: confirm, unlink and ignore are each audited"
+else
+  fail "E7: audit wrong ('$E7_AUD')"
+fi
+E7_E_U="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('e7-erase@example.com') returning id;" | head -1)"
+E7_E_WS="$(psql -d pfe_rls -t -A -c "select w.id from public.workspaces w join public.workspace_memberships m on m.workspace_id=w.id where m.user_id='$E7_E_U' and w.kind='personal';" | head -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.accounts (id, workspace_id, name, provider, currency) values ('00000000-0000-0000-0000-0000000071e1', '$E7_E_WS', 'E7 erase', 'mtn_momo', 'RWF');
+  insert into public.momo_messages (id, raw_message, processing_status) values ('00000000-0000-0000-0000-0000000072e1', 'e7e', 'processed');
+  insert into public.transactions (id, momo_message_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version, counterparty_name, settlement_state, affects_balance, principal_effect_rwf, fee_effect_rwf, effect_reason)
+  values ('00000000-0000-0000-0000-0000000073e1', '00000000-0000-0000-0000-0000000072e1', '00000000-0000-0000-0000-0000000071e1', '$E7_E_WS', 'merchant_payment', 'out', 'success', 5000, 0, now(), 'test', 'EUCL', 'settled', true, -5000, 0, 'settled_outgoing_with_fee');
+  set role service_role;
+  select public.store_utility_receipt('00000000-0000-0000-0000-0000000074e1', '$E7_E_WS', 'tokeni_rw', 5000, 11900, '0002', '$(E7_H 98)', now(), 'k1', 'bm9uY2Vub25jZQ==', 'Y2lwaGVydGV4dC1ibG9iLW5vdC1hLXRva2Vu');" >/dev/null
+# 10. reveal through a matched receipt (fresh user: the reveal limit is per user)
+E7_REV="$(as_user "$E7_E_U" "select source || '|' || row_id || '|' || key_id from public.reveal_transaction_sensitive_detail('00000000-0000-0000-0000-0000000073e1');" | tail -1)"
+if [ "$E7_REV" = "receipt|00000000-0000-0000-0000-0000000074e1|k1" ]; then
+  pass "E7: the token of a matched receipt is revealed through the audited path and names its source row"
+else
+  fail "E7: receipt reveal wrong ('$E7_REV')"
+fi
+e7_denied "another workspace revealing a receipt token" "$USER_B" "select * from public.reveal_transaction_sensitive_detail('00000000-0000-0000-0000-0000000073e1');"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.momo_messages (id, raw_message, processing_status) values ('00000000-0000-0000-0000-0000000072e2', 'e7e2', 'processed');
+  insert into public.transactions (id, momo_message_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version, counterparty_name, settlement_state, affects_balance, principal_effect_rwf, fee_effect_rwf, effect_reason)
+  values ('00000000-0000-0000-0000-0000000073e2', '00000000-0000-0000-0000-0000000072e2', '00000000-0000-0000-0000-0000000071e1', '$E7_E_WS', 'merchant_payment', 'out', 'success', 6100, 0, now(), 'test', 'EUCL', 'settled', true, -6100, 0, 'settled_outgoing_with_fee');
+  set role service_role;
+  select public.store_utility_receipt('00000000-0000-0000-0000-0000000074e2', '$E7_E_WS', 'cashpower_en', 6100, 1000, null, '$(E7_H 97)', now(), null, null, null);" >/dev/null
+if as_user "$E7_E_U" "select * from public.reveal_transaction_sensitive_detail('00000000-0000-0000-0000-0000000073e2');" >/dev/null 2>$ARTIFACT_DIR/pfe_e7n.log; then
+  fail "E7: revealed a token that was never captured"
+elif grep -q "sensitive_detail_not_found" $ARTIFACT_DIR/pfe_e7n.log; then
+  pass "E7: a matched receipt with no captured token reveals nothing (generic not-found)"
+else
+  fail "E7: unexpected error for token-less receipt: $(cat $ARTIFACT_DIR/pfe_e7n.log)"
+fi
+rm -f $ARTIFACT_DIR/pfe_e7n.log
+
+set +e
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; select public.execute_account_deletion('$E7_E_U');" > $ARTIFACT_DIR/pfe_e7e.log 2>&1
+E7_E_RC=$?
+set -e
+E7_E_LEFT="$(psql -d pfe_rls -t -A -c "select count(*) from public.utility_receipts where workspace_id = '$E7_E_WS';")"
+if [ "$E7_E_RC" = "0" ] && [ "$E7_E_LEFT" = "0" ]; then
+  pass "E7: account erasure removes the user's receipts (even matched ones) with their transactions"
+else
+  fail "E7: erasure with receipts failed (rc=$E7_E_RC left=$E7_E_LEFT $(tail -2 $ARTIFACT_DIR/pfe_e7e.log | tr '\n' ' '))"
+fi
+rm -f $ARTIFACT_DIR/pfe_e7e.log
+
+# --- E7: scrub_utility_tokens (20261230000000) --------------------------------
+S7_ACCT="00000000-0000-0000-0000-0000000075a1"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.accounts (id, workspace_id, name, provider, currency) values ('$S7_ACCT', '$WORKSPACE_A', 'S7 acct', 'mtn_momo', 'RWF');
+  insert into public.momo_messages (id, raw_message, processing_status) values
+    ('00000000-0000-0000-0000-0000000076a1', 'Your payment of 100 RWF to EUCL with token 0000-1111-2222-3333-4444 was completed', 'processed'),
+    ('00000000-0000-0000-0000-0000000076a2', 'Your payment of 100 RWF to KMLVIO SHOP 093011 was completed', 'processed');
+  insert into public.transactions (id, momo_message_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version, counterparty_name, counterparty_reference, metadata, settlement_state, affects_balance, principal_effect_rwf, fee_effect_rwf, effect_reason)
+  values
+   ('00000000-0000-0000-0000-0000000077a1','00000000-0000-0000-0000-0000000076a1','$S7_ACCT','$WORKSPACE_A','merchant_payment','out','success',100,0,now(),'test','EUCL with token 0000-1111-2222-3333-4444','00001111222233334444','{\"original_counterparty_name\":\"EUCL with token 0000-1111-2222-3333-4444\"}','settled',true,-100,0,'settled_outgoing_with_fee'),
+   ('00000000-0000-0000-0000-0000000077a2','00000000-0000-0000-0000-0000000076a2','$S7_ACCT','$WORKSPACE_A','merchant_payment','out','success',100,0,now(),'test','KMLVIO CENTER AND MILK ZONE SHOP','093011','{\"original_counterparty_name\":\"KMLVIO CENTER AND MILK ZONE SHOP\"}','settled',true,-100,0,'settled_outgoing_with_fee');" >/dev/null
+S7_DRY="$(psql -d pfe_rls -t -A -c "set role service_role; select public.scrub_utility_tokens(true)->>'transaction_labels';" | grep -v '^SET$')"
+S7_BEFORE="$(psql -d pfe_rls -t -A -c "select counterparty_name from public.transactions where id = '00000000-0000-0000-0000-0000000077a1';")"
+if [ "$S7_DRY" = "1" ] && [ "$S7_BEFORE" = "EUCL with token 0000-1111-2222-3333-4444" ]; then
+  pass "E7 scrub: a dry run counts the leaky label and changes nothing"
+else
+  fail "E7 scrub: dry run wrong (count='$S7_DRY' label='$S7_BEFORE')"
+fi
+psql -d pfe_rls -t -A -c "set role service_role; select public.scrub_utility_tokens(false);" >/dev/null
+S7_AFTER="$(psql -d pfe_rls -t -A -c "select coalesce(counterparty_name,'-') || '|' || coalesce(counterparty_reference,'-') || '|' || (metadata->>'original_counterparty_name') from public.transactions where id = '00000000-0000-0000-0000-0000000077a1';")"
+S7_RAW="$(psql -d pfe_rls -t -A -c "select raw_message from public.momo_messages where id = '00000000-0000-0000-0000-0000000076a1';")"
+S7_OK="$(psql -d pfe_rls -t -A -c "select counterparty_name || '|' || counterparty_reference from public.transactions where id = '00000000-0000-0000-0000-0000000077a2';")"
+if [ "$S7_AFTER" = "EUCL|-|EUCL" ] && ! echo "$S7_RAW" | grep -q "0000-1111" && [ "$S7_OK" = "KMLVIO CENTER AND MILK ZONE SHOP|093011" ]; then
+  pass "E7 scrub: tokens are removed from labels, references, metadata and raw evidence; ordinary rows are untouched"
+else
+  fail "E7 scrub: apply wrong (after='$S7_AFTER' raw='$S7_RAW' ordinary='$S7_OK')"
+fi
+S7_AGAIN="$(psql -d pfe_rls -t -A -c "set role service_role; select (public.scrub_utility_tokens(true)->>'transaction_labels') || '|' || (public.scrub_utility_tokens(true)->>'momo_messages');" | grep -v '^SET$')"
+if [ "$S7_AGAIN" = "0|0" ]; then
+  pass "E7 scrub: running it again finds nothing (idempotent)"
+else
+  fail "E7 scrub: not idempotent ('$S7_AGAIN')"
+fi
+S7_PRIV="$(psql -d pfe_rls -t -A -c "select has_function_privilege('authenticated','public.scrub_utility_tokens(boolean)','EXECUTE');")"
+if [ "$S7_PRIV" = "false" ] || [ "$S7_PRIV" = "f" ]; then
+  pass "E7 scrub: clients cannot run the scrub"
+else
+  fail "E7 scrub: callable by authenticated"
+fi
+
+# --- E7 end to end: real processor + real encryption + real DB + real reveal ---
+# Needs Deno (the CI migration job has it; a developer machine may not).
+if command -v deno >/dev/null 2>&1; then
+  E7E_OUT="$(E2E_DB=pfe_rls deno run -A supabase/migrations/tests/e2e_utility_receipts.ts 2>&1)" && E7E_RC=0 || E7E_RC=$?
+  while IFS= read -r line; do
+    case "$line" in
+      PASS:*) pass "E7 e2e: ${line#PASS: }" ;;
+      FAIL:*) fail "E7 e2e: ${line#FAIL: }" ;;
+    esac
+  done < <(echo "$E7E_OUT" | grep -E '^(PASS|FAIL):')
+  if [ "$E7E_RC" != "0" ] && ! echo "$E7E_OUT" | grep -q '^FAIL:'; then
+    fail "E7 e2e: the end-to-end script crashed: $(echo "$E7E_OUT" | tail -3 | tr '\n' ' ')"
+  fi
+else
+  echo "SKIP: E7 end-to-end (deno not installed)"
+fi
 
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="

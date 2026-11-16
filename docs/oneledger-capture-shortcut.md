@@ -101,6 +101,11 @@ In **Shortcuts → Automation → New → Message**:
 match - some networks do show a stable sender name, and the app's guide adds
 that as an *additional* Sender filter when it's set, on top of the RWF match.
 
+**Prepaid-electricity receipts need no extra automation.** The vendor's receipt
+SMS ("Cashpower Token: …" / "Tokeni: …") also contains "RWF", so this same automation
+already forwards it; the backend now recognises it (`utility_receipt`, ADR 0020)
+instead of turning it away as `UNKNOWN_PROVIDER`. Nothing to change on the phone.
+
 OneLedger cannot create this automation for the user; the app guides it
 step-by-step with screenshots and a confirmation check.
 

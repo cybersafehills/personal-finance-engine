@@ -3,6 +3,7 @@ import {
   formatUtilityToken,
   friendlyRevealError,
   isUtilityTokenFeatureEnabled,
+  kwhText,
 } from "./token-format.ts";
 
 Deno.test("formatUtilityToken groups digits in fours", () => {
@@ -40,4 +41,13 @@ Deno.test("reveal errors never echo raw text", () => {
       .includes("secretvalue"),
     false,
   );
+});
+
+Deno.test("kwhText shows integer thousandths exactly", () => {
+  assertEquals(kwhText(11900), "11.9");
+  assertEquals(kwhText(2400), "2.4");
+  assertEquals(kwhText(23805), "23.805");
+  assertEquals(kwhText(7000), "7");
+  assertEquals(kwhText(500), "0.5");
+  assertEquals(kwhText(1), "0.001");
 });

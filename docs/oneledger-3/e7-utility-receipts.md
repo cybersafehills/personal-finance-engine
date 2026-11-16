@@ -19,7 +19,10 @@ Meter numbers are 11 digits in most samples and 13 in one.
 `supabase/functions/ingest-momo/utility-receipt.ts`: a pure, strict parser for exactly these two formats (+ `tests/utility_receipt_test.ts`, 6 tests). It returns the token (20 digits), kWh, amount, meter, the vendor's own transaction reference and, for the Kinyarwanda format, the date; **it never extracts the meter owner's name**; any missing or malformed required field → `null` (no guessing). **Not wired into any ingestion path.**
 The tests use **synthetic values in the same layout** — the real tokens, meter numbers, names and transaction ids from the screenshots were deliberately **not** copied anywhere in the repository. Those tokens are bearer values (and may or may not have been used); treat the screenshots as sensitive and delete them from anywhere shared.
 
-## Why it is not wired in, and what you need to decide
+## Update (same day): now wired in end to end
+The decisions below were taken (recommended options) and built — see **ADR 0020** (`docs/adr/0020-utility-receipts.md`). The section below is kept as the reasoning that led there.
+
+## Why it was not wired in, and the decisions that were needed
 Today a vendor SMS would only reach OneLedger if your iPhone Shortcut / Android capture forwards it, and both are set up to forward the **MoMo sender** only. Wiring it in is a product decision with real design work:
 1. **How do these messages get in?** Extend the Shortcut/Android capture to also forward the vendor senders, or add a "paste a Cash Power SMS" action in the app, or both. (Forwarding any extra sender needs an updated Shortcut and, on Android, a notification-listener allowlist.)
 2. **How is a receipt tied to the MoMo payment?** Proposed: same workspace, amount equal, and a time window (the MoMo confirmation and the vendor SMS arrive minutes apart; the Kinyarwanda format also carries a date). When there is more than one candidate, ask the user rather than guess. The vendor's own reference is stored but is **not** the MoMo TxId, so it can't be the join key.

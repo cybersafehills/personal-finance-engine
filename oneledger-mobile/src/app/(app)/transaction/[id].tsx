@@ -20,6 +20,7 @@ import {
   transactionTypeLabel,
 } from "@/features/transactions/display";
 import { getTransactionById } from "@/features/transactions/queries";
+import { ReceiptCard } from "@/features/receipts/ReceiptCard";
 import { useQuery } from "@/hooks/useQuery";
 import { config } from "@/lib/config";
 import { formatFullDateTime } from "@/lib/kigali-time";
@@ -95,6 +96,8 @@ export default function TransactionDetail() {
           <Row label="Reference" value={transaction.counterparty_reference} />
         ) : null}
       </Card>
+
+      <ReceiptCard transactionId={transaction.id} />
 
       {failed ? null : (
         <Button

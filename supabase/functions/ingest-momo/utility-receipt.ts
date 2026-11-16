@@ -116,3 +116,36 @@ export function parseUtilityReceipt(rawMessage: string): UtilityReceipt | null {
       : null,
   };
 }
+
+// ------------------------------------------------------------------------
+// Helpers for storing a receipt (used by process-raw-events).
+// ------------------------------------------------------------------------
+
+/** "11.9" -> 11900 (kWh x 1000, exact integer, no floats). null if it would lose precision. */
+export function kwhToMilli(kwh: string): number | null {
+  const m = /^(\d{1,7})(?:\.(\d{1,3}))?$/.exec(kwh);
+  if (!m) return null;
+  const n = Number(m[1]) * 1000 + Number((m[2] ?? "").padEnd(3, "0"));
+  return Number.isSafeInteger(n) && n > 0 ? n : null;
+}
+
+/** Last four digits of a meter number (the only part we keep), or null. */
+export function meterLast4(meter: string | null): string | null {
+  return meter && /^\d{8,14}$/.test(meter) ? meter.slice(-4) : null;
+}
+
+/**
+ * Replace any 20-digit token (5 groups of 4) with a marker, so the raw evidence
+ * row no longer holds a bearer value once the receipt has been processed.
+ */
+export function redactUtilityToken(message: string): string {
+  return message.replace(/\d{4}(?:[-\s]\d{4}){4}(?!\d)/g, "[token removed]");
+}
+
+/** sha256 hex of the vendor's own reference (or the token when there is none): a re-delivered SMS is then a no-op. */
+export async function vendorRefHash(r: UtilityReceipt): Promise<string> {
+  const data = new TextEncoder().encode(`utility:${r.vendorTxId ?? r.token}`);
+  const d = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(d), (b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
