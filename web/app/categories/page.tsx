@@ -1,6 +1,6 @@
 import Link from "next/link";
 import {
-  getCategoryTotals,
+  getCategoryTotalsComplete,
   getSpaceCategoryManagement,
 } from "../../lib/queries";
 import { PageHeader } from "../../components/PageHeader";
@@ -11,8 +11,13 @@ import { EmptyState } from "../../components/EmptyState";
 export const dynamic = "force-dynamic";
 
 export default async function CategoriesPage() {
-  const [categories, spaceCategories] = await Promise.all([
-    getCategoryTotals(),
+  // The complete, paged totals (a single request silently stopped at 1000 rows).
+  // A failed read still shows an empty list here, as it always has.
+  const [{ totals: categories }, spaceCategories] = await Promise.all([
+    getCategoryTotalsComplete().catch((error: Error) => {
+      console.error("getCategoryTotals failed:", error.message);
+      return { totals: [], truncated: false };
+    }),
     getSpaceCategoryManagement(true),
   ]);
   const grandTotal = categories.reduce((sum, c) => sum + c.totalRwf, 0);

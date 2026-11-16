@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 
 import { mobileGet, mobileOptions } from "../../../../lib/mobile-request";
 import { type MobileReportListItem, toMobileReportListItem } from "../../../../lib/mobile-reports";
-import { getReportRuns } from "../../../../lib/queries";
+import { getReportRunsStrict } from "../../../../lib/queries";
 
 // GET /api/mobile/reports - the user's daily report runs, newest first, for the
 // mobile app (ADR 0019). A report belongs to its recipient (RLS:
@@ -14,7 +14,9 @@ export const OPTIONS = mobileOptions;
 
 export function GET(request: NextRequest) {
   return mobileGet(request, "reports", async () => {
-    const runs = await getReportRuns(30);
+    // Throws on a failed read (so the answer is a retryable error, never an
+    // empty list that would read as "no reports yet").
+    const runs = await getReportRunsStrict(30);
     const reports = runs
       .map(toMobileReportListItem)
       .filter((r): r is MobileReportListItem => r !== null);

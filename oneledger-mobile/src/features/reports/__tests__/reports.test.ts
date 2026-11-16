@@ -53,6 +53,10 @@ describe("parseReportsResponse", () => {
     expect(r.ok && r.reports).toHaveLength(1);
   });
 
+  it("a server error is an error to retry, never an empty list", () => {
+    expect(parseReportsResponse(500, { ok: false, error: "server_error" })).toMatchObject({ ok: false, reason: "error" });
+  });
+
   it("maps failures", () => {
     expect(parseReportsResponse(404, null)).toMatchObject({ ok: false, reason: "unavailable" });
     expect(parseReportsResponse(403, null)).toMatchObject({ ok: false, reason: "mfa_required" });
@@ -99,6 +103,11 @@ describe("parseReportResponse", () => {
   it("treats an unknown alert tone as neutral rather than alarming", () => {
     const r = parseReportResponse(200, { ok: true, report: report({ alerts: [{ id: "a", tone: "weird", message: "m" }] }) });
     expect(r.ok && r.report.alerts[0].tone).toBe("neutral");
+  });
+
+  it("a server error is an error to retry, never 'not found'", () => {
+    expect(parseReportResponse(500, { ok: false, error: "server_error" })).toMatchObject({ ok: false, reason: "error" });
+    expect(parseReportDownloadResponse(500, { ok: false, error: "server_error" })).toMatchObject({ ok: false, reason: "error" });
   });
 
   it("maps failures", () => {

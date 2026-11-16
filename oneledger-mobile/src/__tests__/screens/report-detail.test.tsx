@@ -158,6 +158,13 @@ describe("Report detail", () => {
     expect(screen.queryByText("Download PDF")).toBeNull();
   });
 
+  it("offers a retry when loading fails (a failed read is not 'not found')", async () => {
+    mockFetch.mockResolvedValue({ ok: false, reason: "error", message: "Couldn't load that report. Check your connection and try again." });
+    await render(<ReportDetail />);
+    expect(await screen.findByText(/Couldn't load that report/)).toBeTruthy();
+    expect(screen.getByText("Try again")).toBeTruthy();
+  });
+
   it("explains a report that can't be found, with no retry", async () => {
     mockFetch.mockResolvedValue({ ok: false, reason: "not_found", message: "That report couldn't be found." });
     await render(<ReportDetail />);

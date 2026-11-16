@@ -230,6 +230,37 @@ not a reason to keep the whole app native.
 - The Home budget card loads independently of the rest of Home and respects
   privacy mode, so a slow or unavailable budget service never delays Home.
 
+## Implementation notes (Categories)
+
+- A read-only Categories screen (More -> Categories): all-time spending per
+  category with a share bar and transaction count; tapping a category opens the
+  Transactions list filtered to it ("Uncategorized" means no category, like the
+  web), with a chip to clear the filter.
+- The totals come from `GET /api/mobile/categories`, served by the web's one
+  canonical aggregation (`getCategoryTotalsComplete`), not recomputed in the app.
+  Like the web page it covers every Space the user belongs to.
+- **The all-time totals can be silently wrong for a long history.** The old query
+  read every settled outgoing transaction in one request, and the REST API
+  returns at most `max_rows` per request (1000 in the repo config; production's
+  value was not checked), so a longer history would drop everything past the cap
+  with no error. The Categories page and this route now use
+  `getCategoryTotalsComplete`, which pages (a stable `id` order, advancing by the
+  rows actually received and stopping only on an empty page so a lower server cap
+  cannot cut it short, 50 pages at most) and reports `truncated` if the cap is
+  reached, which the screen turns into a visible warning. A failed read is an
+  error the app can retry, never "no spending yet".
+- **Not changed, on purpose:** Home's "top spending category" and the
+  category-name suggestions on every transaction page still use the old
+  one-request `getCategoryTotals`, because paging on those hot paths would add a
+  full scan per load. They keep the row ceiling; other all-rows aggregations may
+  too. This work does not audit them.
+- Navigation: the tap-through uses `router.navigate` (Transactions is a tab) and
+  the filter chip clears with `router.setParams({ category: undefined })`, both
+  checked against the installed `expo-router` types.
+- The tap-through filters on category only, as the web does. The totals count
+  settled outgoing transactions, so the list can also include money in and
+  unsettled rows for that category; the direction chip narrows it.
+
 ## Implementation notes (Reports)
 
 - Read-only Reports screens (More -> Reports): a list of daily report runs and a

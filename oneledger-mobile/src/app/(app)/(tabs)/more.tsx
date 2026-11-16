@@ -109,6 +109,19 @@ export default function More() {
       </Card>
 
       <Card style={{ gap: space[3] }}>
+        <Text variant="bodyStrong">Categories</Text>
+        <Text variant="label" color="textSecondary">
+          See where your money has gone.
+        </Text>
+        <Button
+          label="Open categories"
+          variant="secondary"
+          fullWidth
+          onPress={() => router.push("/categories")}
+        />
+      </Card>
+
+      <Card style={{ gap: space[3] }}>
         <Text variant="bodyStrong">Security</Text>
         <Button
           label="App lock"

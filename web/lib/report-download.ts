@@ -3,7 +3,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 
 import { formatDateKeyLabel, formatZonedDateTime } from "./format";
-import { getReportRunById } from "./queries";
+import { getReportRunById, getReportRunByIdStrict } from "./queries";
 import { REPORT_PDF_TEMPLATE_VERSION, renderReportPdf } from "./report-pdf";
 import { supabaseServer } from "./supabase-server";
 
@@ -38,8 +38,14 @@ export type ReportDownloadResult =
       | "failed to create download link";
   };
 
-export async function createReportDownload(id: string): Promise<ReportDownloadResult> {
-  const report = await getReportRunById(id);
+export async function createReportDownload(
+  id: string,
+  options: { strict?: boolean } = {},
+): Promise<ReportDownloadResult> {
+  // `strict` (the mobile API) lets a failed lookup THROW, so the app sees an
+  // error it can retry instead of "not found"; the web route keeps its
+  // long-standing behaviour (a failed lookup reads as 404).
+  const report = options.strict ? await getReportRunByIdStrict(id) : await getReportRunById(id);
   if (!report) return { ok: false, status: 404, error: "not found" };
   if (!report.report_payload) {
     return { ok: false, status: 409, error: "report not yet generated" };

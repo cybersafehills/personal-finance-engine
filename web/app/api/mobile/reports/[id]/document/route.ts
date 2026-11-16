@@ -23,7 +23,8 @@ export async function GET(
   return mobileGet(request, "report-document", async () => {
     const none = (reason: Reason) => ({ download: null, reason });
     if (!isUuid(id)) return none("not_found");
-    const result = await createReportDownload(id);
+    // strict: a failed lookup is a retryable error, never "not found".
+    const result = await createReportDownload(id, { strict: true });
     if (result.ok) return { download: { url: result.url } };
     return none(
       result.status === 404 ? "not_found" : result.status === 409 ? "not_ready" : "failed",
