@@ -682,7 +682,25 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # Mobile push (20261221000000) adds push_devices (RLS enabled, own-row
 # SELECT only; register/unregister run through SECURITY DEFINER functions)
 # - 130 tables, 129 with RLS.
-if [ "$TABLE_COUNT" = "130" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# OneLedger 3.0 S3 (20261224000000) adds balance_observations (RLS enabled,
+# member SELECT only; writes via record_manual_balance_observation) - 131
+# tables, 130 with RLS. (account_balance_baselines_v is a view, not a table.)
+# OneLedger 3.0 S4 (20261225000000) adds counterparties,
+# counterparty_identifiers and counterparty_merge_events (RLS enabled, member
+# SELECT only; writes via RPCs) - 134 tables, 133 with RLS.
+# OneLedger 3.0 S5 (20261226000000) adds payment_requests and
+# payment_request_events (RLS enabled, member SELECT only; writes via RPCs) -
+# 136 tables, 135 with RLS.
+# OneLedger 3.0 E4 (20261228000000) adds counterparty_split_events (RLS enabled,
+# member SELECT only; written by split_/undo_counterparty_split) - 137 tables,
+# 136 with RLS.
+# OneLedger 3.0 E5 (20261229000000) adds transaction_sensitive_details (RLS
+# enabled, NO policy and NO grant for authenticated; service-role write only;
+# read only through reveal_transaction_sensitive_detail) - 138 tables, 137 with RLS.
+# OneLedger 3.0 E7 (20261230000000) adds utility_receipts (RLS enabled, column-
+# level SELECT for authenticated that excludes the ciphertext; service-role
+# write) - 139 tables, 138 with RLS.
+if [ "$TABLE_COUNT" = "139" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -824,10 +842,18 @@ AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from inform
 # authenticated (a user may read their own registered phones; writes go
 # through register_push_device / unregister_push_device, and the sender uses
 # the service role). 165 + 1 = 166.
-if [ "$AUTHENTICATED_GRANT_COUNT" = "166" ]; then
-  pass "authenticated holds exactly the 166 table grants expected, no more"
+# OneLedger 3.0 S3 (20261224000000): balance_observations SELECT (member-read
+# via RLS) + account_balance_baselines_v SELECT (security_invoker view, so the
+# caller's RLS applies). 166 + 2 = 168.
+# OneLedger 3.0 S4 (20261225000000): SELECT on the three counterparty tables
+# + counterparty_summaries_v (security_invoker). 168 + 4 = 172.
+# OneLedger 3.0 S5 (20261226000000): SELECT on payment_requests,
+# payment_request_events and payment_requests_v (security_invoker). 172 + 3 = 175.
+# OneLedger 3.0 E4 (20261228000000): SELECT on counterparty_split_events. 175 + 1 = 176.
+if [ "$AUTHENTICATED_GRANT_COUNT" = "176" ]; then
+  pass "authenticated holds exactly the 176 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 166 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 176 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -851,10 +877,13 @@ echo "=== function/sequence privilege regression check ==="
 # design must be callable by someone who has an invite link but hasn't
 # signed in yet.
 ANON_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p join pg_roles r on r.rolname = 'anon' where p.pronamespace='public'::regnamespace and has_function_privilege(r.oid, p.oid, 'EXECUTE');")"
-if [ "$ANON_FN_EXEC_COUNT" = "1" ]; then
-  pass "anon holds EXECUTE on exactly one function (invite_preview) after the full chain"
+# OneLedger 3.0 S5 (20261226000000) adds resolve_payment_request: the public
+# resolver for a shared payment-request link. It takes only a SHA-256 digest and
+# returns the minimum a payer needs. A second, deliberate anon function.
+if [ "$ANON_FN_EXEC_COUNT" = "2" ]; then
+  pass "anon holds EXECUTE on exactly two functions (invite_preview, resolve_payment_request) after the full chain"
 else
-  fail "anon holds EXECUTE on $ANON_FN_EXEC_COUNT function grant(s) after the full chain, expected exactly 1 (invite_preview)"
+  fail "anon holds EXECUTE on $ANON_FN_EXEC_COUNT function grant(s) after the full chain, expected exactly 2 (invite_preview, resolve_payment_request)"
 fi
 
 # authenticated gains EXECUTE on is_workspace_member() in Phase B (the RLS
@@ -1017,10 +1046,27 @@ AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_p
 # disable_push_devices are service-role only. 117 + 2 = 119.
 # create_manual_transaction (20261222000000) is the one write path for a
 # signed-in user creating a transaction, owner-checked inside. 119 + 1 = 120.
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "120" ]; then
-  pass "authenticated holds EXECUTE on exactly the 120 functions expected, no more"
+# OneLedger 3.0 S3 (20261224000000) adds record_manual_balance_observation -
+# authenticated-callable, member+-gated and audited. 120 + 1 = 121.
+# OneLedger 3.0 S4 (20261225000000): backfill_counterparties,
+# update_counterparty, merge_counterparties, undo_counterparty_merge - all
+# member+-gated; normalize_msisdn is internal (revoked). 121 + 4 = 125.
+# OneLedger 3.0 S5 (20261226000000): create_/cancel_/mark_..._paid_by_owner/
+# link_..._transaction (member+-gated) + resolve_payment_request (public,
+# also callable by authenticated). _payment_request_for_update is internal.
+# 125 + 5 = 130.
+# OneLedger 3.0 E4 (20261228000000): split_counterparty and
+# undo_counterparty_split (member+-gated); _counterparty_txn_key is internal.
+# 130 + 2 = 132.
+# OneLedger 3.0 E5 (20261229000000): reveal_transaction_sensitive_detail
+# (member+ and source-visibility gated, rate-limited, audited). 132 + 1 = 133.
+# OneLedger 3.0 E7 (20261230000000): confirm_/unlink_/ignore_utility_receipt
+# (member+-gated, audited). store_utility_receipt is service-role only and the
+# link helpers are internal. 133 + 3 = 136.
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "136" ]; then
+  pass "authenticated holds EXECUTE on exactly the 136 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 120 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 136 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -7892,6 +7938,1243 @@ if [ "$MT_ACL" = "f|t" ] || [ "$MT_ACL" = "false|true" ]; then
   pass "Manual transactions: create_manual_transaction is executable by signed-in users only (not anon)"
 else
   fail "Manual transactions: ACL wrong ('$MT_ACL', want anon=false authenticated=true)"
+fi
+
+# ===========================================================================
+# OneLedger 3.0 S3: balance provenance (20261224000000_balance_observations).
+# balance_observations is append-only and member-readable; the ONLY write path
+# is record_manual_balance_observation (member+, audited, no existence oracle).
+# account_balance_baselines_v is security_invoker, so RLS applies through it.
+# Reuses USER_A/WORKSPACE_A, USER_B/WORKSPACE_B, F2_ACCT_A/F2_ACCT_B and the
+# Phase R household fixture (R_MATRIX_HH with admin/member/viewer users).
+# ===========================================================================
+echo "=== OneLedger 3.0 S3: balance observations ==="
+
+S3_OBS_A="$(as_user "$USER_A" "select public.record_manual_balance_observation('$F2_ACCT_A', 125000, now() - interval '1 hour', 'counted at the shop');" | tail -1)"
+if [ -n "$S3_OBS_A" ] && [ "$(psql -d pfe_rls -t -A -c "select amount_minor || '|' || currency || '|' || source from public.balance_observations where id = '$S3_OBS_A';")" = "125000|RWF|manual" ]; then
+  pass "S3: a workspace member records a manual balance observation (currency taken from the account)"
+else
+  fail "S3: manual observation was not recorded correctly (id='$S3_OBS_A')"
+fi
+
+S3_AUDIT="$(psql -d pfe_rls -t -A -c "select count(*) from public.space_audit_events where workspace_id = '$WORKSPACE_A' and event_type = 'balance.manual_observation' and (new_value->>'observation_id') = '$S3_OBS_A';")"
+if [ "$S3_AUDIT" = "1" ]; then
+  pass "S3: recording a manual observation writes exactly one audit event"
+else
+  fail "S3: expected 1 audit event for the observation, found $S3_AUDIT"
+fi
+
+S3_B_SEES="$(as_user "$USER_B" "select count(*) from public.balance_observations;")"
+if [ "$S3_B_SEES" = "0" ]; then
+  pass "S3: another workspace's member cannot read the observation (RLS)"
+else
+  fail "S3: cross-tenant leak - USER_B sees $S3_B_SEES observation row(s)"
+fi
+
+if as_user "$USER_B" "select public.record_manual_balance_observation('$F2_ACCT_A', 1, now());" >/dev/null 2>$ARTIFACT_DIR/pfe_s3_xt.log; then
+  fail "S3: USER_B recorded an observation against another workspace's account"
+else
+  if grep -q "account_not_found" $ARTIFACT_DIR/pfe_s3_xt.log; then
+    pass "S3: cross-tenant observation is refused with the same error as a missing account (no existence oracle)"
+  else
+    fail "S3: cross-tenant refusal had an unexpected error: $(cat $ARTIFACT_DIR/pfe_s3_xt.log)"
+  fi
+fi
+rm -f $ARTIFACT_DIR/pfe_s3_xt.log
+
+if as_user "$USER_A" "select public.record_manual_balance_observation('$F2_ACCT_A', 1, now() + interval '1 day');" >/dev/null 2>$ARTIFACT_DIR/pfe_s3_fut.log; then
+  fail "S3: a future as_of was accepted"
+else
+  pass "S3: a future as_of is rejected"
+fi
+rm -f $ARTIFACT_DIR/pfe_s3_fut.log
+
+# authenticated has no direct write path (append-only, RPC-only).
+S3_PRIV="$(psql -d pfe_rls -t -A -c "select has_table_privilege('authenticated','public.balance_observations','INSERT') || '|' || has_table_privilege('authenticated','public.balance_observations','UPDATE') || '|' || has_table_privilege('authenticated','public.balance_observations','DELETE') || '|' || has_table_privilege('authenticated','public.balance_observations','SELECT');")"
+if [ "$S3_PRIV" = "false|false|false|true" ] || [ "$S3_PRIV" = "f|f|f|t" ]; then
+  pass "S3: authenticated can only SELECT balance_observations (no direct insert, update or delete)"
+else
+  fail "S3: balance_observations privileges wrong for authenticated: '$S3_PRIV' (want no INSERT/UPDATE/DELETE, SELECT only)"
+fi
+
+# Role gate: viewer denied, member allowed (household fixture from Phase R).
+S3_HH_ACCT="00000000-0000-0000-0000-0000000053a1"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "insert into public.accounts (id, workspace_id, name, provider, currency) values ('$S3_HH_ACCT', '$R_MATRIX_HH', 'S3 household', 'mtn_momo', 'RWF');" >/dev/null
+if as_user "$R_VIEWER_USER" "select public.record_manual_balance_observation('$S3_HH_ACCT', 1, now());" >/dev/null 2>&1; then
+  fail "S3: a viewer recorded a balance observation"
+else
+  pass "S3: a viewer cannot record a balance observation"
+fi
+if as_user "$R_MEMBER_USER" "select public.record_manual_balance_observation('$S3_HH_ACCT', 7000, now() - interval '2 hours');" >/dev/null 2>&1; then
+  pass "S3: a household member can record a balance observation"
+else
+  fail "S3: a household member was refused"
+fi
+
+# --- account_balance_baselines_v -------------------------------------------
+S3_ACCT_V="00000000-0000-0000-0000-0000000053b1"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "insert into public.accounts (id, workspace_id, name, provider, currency) values ('$S3_ACCT_V', '$WORKSPACE_A', 'S3 view acct', 'mtn_momo', 'RWF');" >/dev/null
+
+S3_V0="$(psql -d pfe_rls -t -A -c "select coalesce(baseline_source,'none') || '|' || txns_since_count from public.account_balance_baselines_v where account_id = '$S3_ACCT_V';")"
+if [ "$S3_V0" = "none|0" ]; then
+  pass "S3: an account with no evidence has no baseline (-> Unavailable)"
+else
+  fail "S3: empty account baseline wrong: '$S3_V0'"
+fi
+
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.momo_messages (id, raw_message, processing_status) values
+    ('00000000-0000-0000-0000-0000000053c1', 's3a', 'processed'),
+    ('00000000-0000-0000-0000-0000000053c2', 's3b', 'processed'),
+    ('00000000-0000-0000-0000-0000000053c3', 's3c', 'processed');
+  insert into public.transactions
+    (id, momo_message_id, account_id, workspace_id, transaction_type, direction, status,
+     amount_rwf, fee_rwf, occurred_at, parser_version, balance_after_rwf,
+     settlement_state, affects_balance, principal_effect_rwf, fee_effect_rwf, effect_reason)
+  values
+    ('00000000-0000-0000-0000-0000000053d1', '00000000-0000-0000-0000-0000000053c1', '$S3_ACCT_V', '$WORKSPACE_A', 'money_received', 'in', 'success',
+     50000, 0, now() - interval '3 hours', 'test', 80000, 'settled', true, 50000, 0, 'settled_incoming');
+" >/dev/null 2>$ARTIFACT_DIR/pfe_s3_tx.log || { fail "S3: could not seed provider transaction: $(cat $ARTIFACT_DIR/pfe_s3_tx.log)"; }
+rm -f $ARTIFACT_DIR/pfe_s3_tx.log
+
+S3_V1="$(psql -d pfe_rls -t -A -c "select baseline_source || '|' || baseline_amount_minor || '|' || txns_since_count from public.account_balance_baselines_v where account_id = '$S3_ACCT_V';")"
+if [ "$S3_V1" = "provider_reported|80000|0" ]; then
+  pass "S3: provider-reported balance_after becomes the baseline"
+else
+  fail "S3: provider baseline wrong: '$S3_V1'"
+fi
+
+# A later settled out-transaction (-1000, fee -100) and a pending one.
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.transactions
+    (id, momo_message_id, account_id, workspace_id, transaction_type, direction, status,
+     amount_rwf, fee_rwf, occurred_at, parser_version,
+     settlement_state, affects_balance, principal_effect_rwf, fee_effect_rwf, effect_reason)
+  values
+    ('00000000-0000-0000-0000-0000000053d2', '00000000-0000-0000-0000-0000000053c2', '$S3_ACCT_V', '$WORKSPACE_A', 'send_money', 'out', 'success',
+     1000, 100, now() - interval '2 hours', 'test', 'settled', true, -1000, -100, 'settled_outgoing_with_fee');
+" >/dev/null 2>$ARTIFACT_DIR/pfe_s3_tx2.log || { fail "S3: could not seed later transaction: $(cat $ARTIFACT_DIR/pfe_s3_tx2.log)"; }
+rm -f $ARTIFACT_DIR/pfe_s3_tx2.log
+S3_V2="$(psql -d pfe_rls -t -A -c "select txns_since_count || '|' || net_effect_since_minor || '|' || unresolved_since_count from public.account_balance_baselines_v where account_id = '$S3_ACCT_V';")"
+if [ "$S3_V2" = "1|-1100|0" ]; then
+  pass "S3: activity since the baseline is summed (principal + fee) and counted"
+else
+  fail "S3: since-baseline aggregates wrong: '$S3_V2'"
+fi
+
+# A manual observation newer than the provider baseline takes over.
+S3_V3_ID="$(as_user "$USER_A" "select public.record_manual_balance_observation('$S3_ACCT_V', 77000, now() - interval '30 minutes');" | tail -1)"
+S3_V3="$(psql -d pfe_rls -t -A -c "select baseline_source || '|' || baseline_amount_minor || '|' || txns_since_count from public.account_balance_baselines_v where account_id = '$S3_ACCT_V';")"
+if [ "$S3_V3" = "manual|77000|0" ]; then
+  pass "S3: a newer manual observation replaces the provider baseline"
+else
+  fail "S3: manual baseline selection wrong: '$S3_V3' (obs=$S3_V3_ID)"
+fi
+
+# Tenant isolation through the security_invoker view.
+S3_VB="$(as_user "$USER_B" "select count(*) from public.account_balance_baselines_v where account_id = '$S3_ACCT_V';")"
+S3_VA="$(as_user "$USER_A" "select count(*) from public.account_balance_baselines_v where account_id = '$S3_ACCT_V';")"
+if [ "$S3_VB" = "0" ] && [ "$S3_VA" = "1" ]; then
+  pass "S3: account_balance_baselines_v respects tenant isolation (member sees own account, other tenant sees none)"
+else
+  fail "S3: view isolation wrong (owner sees $S3_VA, other tenant sees $S3_VB)"
+fi
+
+# ===========================================================================
+# OneLedger 3.0 S4: counterparties (20261225000000_counterparties).
+# Reuses USER_A/WORKSPACE_A, USER_B/WORKSPACE_B, R_MATRIX_HH (+R_VIEWER_USER).
+# ===========================================================================
+echo "=== OneLedger 3.0 S4: counterparties ==="
+
+# SQL normalize_msisdn must agree with web/lib/counterparties/normalize.ts on
+# the shared vectors (web/lib/counterparties/msisdn-vectors.json).
+S4_VEC_BAD="$(psql -d pfe_rls -t -A -c "select count(*) from (values ('250793000439'::text, '250793000439'::text), ('+250 793 000 439'::text, '250793000439'::text), ('0793000439'::text, '250793000439'::text), ('793000439'::text, '250793000439'::text), ('00250793000439'::text, '250793000439'::text), ('(0793) 000-439'::text, '250793000439'::text), ('*********901'::text, null::text), ('093011'::text, null::text), ('250693000439'::text, null::text), ('25079300043'::text, null::text), (''::text, null::text), (null::text, null::text)) v(i, o) where public.normalize_msisdn(v.i) is distinct from v.o;")"
+if [ "$S4_VEC_BAD" = "0" ]; then
+  pass "S4: SQL normalize_msisdn agrees with the shared msisdn vectors (TS parity)"
+else
+  fail "S4: normalize_msisdn disagrees with $S4_VEC_BAD shared vector(s)"
+fi
+
+S4_ACCT="00000000-0000-0000-0000-0000000054a1"
+S4_ACCT_B="00000000-0000-0000-0000-0000000054a2"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.accounts (id, workspace_id, name, provider, currency) values
+    ('$S4_ACCT', '$WORKSPACE_A', 'S4 acct A', 'mtn_momo', 'RWF'),
+    ('$S4_ACCT_B', '$WORKSPACE_B', 'S4 acct B', 'mtn_momo', 'RWF');" >/dev/null
+
+s4_tx() { # idx workspace account type direction amount fee name reference minutes_ago
+  local n="$1" ws="$2" acct="$3" typ="$4" dir="$5" amt="$6" fee="$7" name="$8" ref="$9" ago="${10}"
+  local mid="00000000-0000-0000-0000-00000000550$n" tid="00000000-0000-0000-0000-00000000560$n"
+  local nm="null" rf="null" p f
+  [ -n "$name" ] && nm="'$name'"
+  [ -n "$ref" ] && rf="'$ref'"
+  if [ "$dir" = "in" ]; then p="$amt"; f="-$fee"; else p="-$amt"; f="-$fee"; fi
+  psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+    insert into public.momo_messages (id, raw_message, processing_status) values ('$mid', 's4-$n', 'processed');
+    insert into public.transactions
+      (id, momo_message_id, account_id, workspace_id, transaction_type, direction, status,
+       amount_rwf, fee_rwf, occurred_at, parser_version, counterparty_name, counterparty_reference,
+       settlement_state, affects_balance, principal_effect_rwf, fee_effect_rwf, effect_reason)
+    values ('$tid', '$mid', '$acct', '$ws', '$typ', '$dir', 'success', $amt, $fee,
+            now() - interval '$ago minutes', 'test', $nm, $rf, 'settled', true, $p, $f,
+            '$( [ "$dir" = "in" ] && echo settled_incoming || echo settled_outgoing_with_fee )');" >/dev/null
+}
+S4_T() { echo "00000000-0000-0000-0000-00000000560$1"; }
+
+s4_tx 1 "$WORKSPACE_A" "$S4_ACCT" money_received in 5000 0 "Samuel NSHIMIYIMANA" "250793000439" 600
+s4_tx 2 "$WORKSPACE_A" "$S4_ACCT" send_money out 2000 100 "Samuel N" "0793000439" 500
+s4_tx 3 "$WORKSPACE_A" "$S4_ACCT" merchant_payment out 1500 0 "KMLVIO CENTER SHOP" "093011" 400
+s4_tx 4 "$WORKSPACE_A" "$S4_ACCT" send_money out 700 0 "Ogabor JULIUS" "*********901" 300
+s4_tx 5 "$WORKSPACE_A" "$S4_ACCT" send_money out 800 0 "  ogabor   julius " "*********902" 200
+s4_tx 6 "$WORKSPACE_A" "$S4_ACCT" airtime out 300 0 "Airtime" "" 100
+s4_tx 7 "$WORKSPACE_B" "$S4_ACCT_B" send_money out 900 0 "Samuel NSHIMIYIMANA" "250793000439" 100
+
+S4_R1="$(as_user "$USER_A" "select public.backfill_counterparties('$WORKSPACE_A');" | tail -1)"
+S4_CP_COUNT="$(psql -d pfe_rls -t -A -c "select count(distinct counterparty_id) from public.transactions where id in ('00000000-0000-0000-0000-000000005601','00000000-0000-0000-0000-000000005602','00000000-0000-0000-0000-000000005603','00000000-0000-0000-0000-000000005604','00000000-0000-0000-0000-000000005605','00000000-0000-0000-0000-000000005606');")"
+S4_UNRES="$(psql -d pfe_rls -t -A -c "select count(*) from public.transactions where workspace_id = '$WORKSPACE_A' and id::text like '00000000-0000-0000-0000-00000000560%' and counterparty_id is null;")"
+if [ "$S4_CP_COUNT" = "4" ] && [ "$S4_UNRES" = "0" ]; then
+  pass "S4: backfill creates 4 counterparties (msisdn, merchant code, name label x2) and resolves every seeded transaction"
+else
+  fail "S4: backfill wrong (counterparties=$S4_CP_COUNT unresolved=$S4_UNRES result=$S4_R1)"
+fi
+
+S4_SAME="$(psql -d pfe_rls -t -A -c "select count(distinct counterparty_id) from public.transactions where id in ('$(S4_T 1)', '$(S4_T 2)');")"
+if [ "$S4_SAME" = "1" ]; then
+  pass "S4: the same phone number with different labels and formats resolves to ONE counterparty"
+else
+  fail "S4: msisdn identity split across $S4_SAME counterparties"
+fi
+
+S4_KINDS="$(psql -d pfe_rls -t -A -c "select string_agg(kind || '/' || confidence, ',' order by kind, confidence) from public.counterparties where id in (select counterparty_id from public.transactions where id in ('00000000-0000-0000-0000-000000005601','00000000-0000-0000-0000-000000005602','00000000-0000-0000-0000-000000005603','00000000-0000-0000-0000-000000005604','00000000-0000-0000-0000-000000005605','00000000-0000-0000-0000-000000005606'));")"
+if [ "$S4_KINDS" = "merchant/high,person/high,unknown/low,unknown/low" ]; then
+  pass "S4: strong identifiers are high confidence; name-only counterparties are unknown/low"
+else
+  fail "S4: kind/confidence wrong: '$S4_KINDS'"
+fi
+
+S4_NAME_SAME="$(psql -d pfe_rls -t -A -c "select count(distinct counterparty_id) from public.transactions where id in ('$(S4_T 4)', '$(S4_T 5)');")"
+if [ "$S4_NAME_SAME" = "1" ]; then
+  pass "S4: masked references never form identities; the exact (normalised) label groups them as a weak counterparty"
+else
+  fail "S4: name-label grouping wrong ($S4_NAME_SAME)"
+fi
+
+S4_XT="$(psql -d pfe_rls -t -A -c "select count(*) from public.counterparty_identifiers where identifier_type = 'msisdn' and normalized_value = '250793000439';")"
+S4_XT_B="$(psql -d pfe_rls -t -A -c "select count(*) from public.transactions t join public.counterparties c on c.id = t.counterparty_id where t.id = '$(S4_T 7)' and c.workspace_id is distinct from '$WORKSPACE_A';")"
+# Workspace B's tx is still unresolved (only A was backfilled); resolve B and compare.
+as_user "$USER_B" "select public.backfill_counterparties('$WORKSPACE_B');" >/dev/null
+S4_XT="$(psql -d pfe_rls -t -A -c "select count(*) from public.counterparty_identifiers where identifier_type = 'msisdn' and normalized_value = '250793000439';")"
+S4_B_OWN="$(psql -d pfe_rls -t -A -c "select count(distinct c.workspace_id) from public.transactions t join public.counterparties c on c.id = t.counterparty_id where t.id = '$(S4_T 7)' and c.workspace_id = '$WORKSPACE_B';")"
+if [ "$S4_XT" = "2" ] && [ "$S4_B_OWN" = "1" ]; then
+  pass "S4: the same phone number in two workspaces yields two independent counterparties (no cross-tenant matching)"
+else
+  fail "S4: cross-workspace identity leaked (identifiers=$S4_XT b_own=$S4_B_OWN)"
+fi
+
+S4_CP_ALL1="$(psql -d pfe_rls -t -A -c "select count(*) from public.counterparties where workspace_id = '$WORKSPACE_A';")"
+S4_R2="$(as_user "$USER_A" "select public.backfill_counterparties('$WORKSPACE_A');" | tail -1)"
+S4_CP_COUNT2="$(psql -d pfe_rls -t -A -c "select count(*) from public.counterparties where workspace_id = '$WORKSPACE_A';")"
+if [ "$S4_CP_COUNT2" = "$S4_CP_ALL1" ] && echo "$S4_R2" | grep -q '"created": 0' && echo "$S4_R2" | grep -q '"linked": 0'; then
+  pass "S4: re-running the backfill is a no-op (idempotent)"
+else
+  fail "S4: backfill is not idempotent (count=$S4_CP_COUNT2 result=$S4_R2)"
+fi
+
+# A transaction arriving later is resolved incrementally, joining the existing counterparty.
+s4_tx 8 "$WORKSPACE_A" "$S4_ACCT" send_money out 400 0 "Someone Else" "+250 793 000 439" 50
+as_user "$USER_A" "select public.backfill_counterparties('$WORKSPACE_A');" >/dev/null
+S4_INC="$(psql -d pfe_rls -t -A -c "select count(distinct counterparty_id) from public.transactions where id in ('$(S4_T 1)', '$(S4_T 8)');")"
+if [ "$S4_INC" = "1" ]; then
+  pass "S4: a later transaction with the same number joins the existing counterparty on the next backfill"
+else
+  fail "S4: incremental resolution failed ($S4_INC)"
+fi
+
+# Saved payee (Assisted Pay) seeds name/kind and, when trusted, confirmation.
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.trusted_recipients (workspace_id, display_name, kind, normalized_msisdn, trust_status)
+  values ('$WORKSPACE_A', 'Sam (brother)', 'phone', '250793000439', 'trusted_by_user');" >/dev/null 2>$ARTIFACT_DIR/pfe_s4_tr.log || fail "S4: could not seed trusted recipient: $(cat $ARTIFACT_DIR/pfe_s4_tr.log)"
+rm -f $ARTIFACT_DIR/pfe_s4_tr.log
+as_user "$USER_A" "select public.backfill_counterparties('$WORKSPACE_A');" >/dev/null
+S4_SEED="$(psql -d pfe_rls -t -A -c "select display_name || '|' || kind || '|' || confidence from public.counterparties c join public.transactions t on t.counterparty_id = c.id where t.id = '$(S4_T 1)';")"
+if [ "$S4_SEED" = "Sam (brother)|person|user_confirmed" ]; then
+  pass "S4: a trusted saved payee names and confirms the matching counterparty"
+else
+  fail "S4: saved-payee seeding wrong: '$S4_SEED'"
+fi
+
+# --- isolation, authz ------------------------------------------------------
+S4_B_SEES="$(as_user "$USER_B" "select count(*) from public.counterparties where workspace_id = '$WORKSPACE_A';")"
+if [ "$S4_B_SEES" = "0" ]; then
+  pass "S4: another workspace's member cannot read this workspace's counterparties (RLS)"
+else
+  fail "S4: cross-tenant leak - USER_B reads $S4_B_SEES counterparty row(s)"
+fi
+if as_user "$USER_B" "select public.backfill_counterparties('$WORKSPACE_A');" >/dev/null 2>&1; then
+  fail "S4: USER_B ran a backfill against another workspace"
+else
+  pass "S4: a non-member cannot run the backfill for another workspace"
+fi
+S4_PRIV="$(psql -d pfe_rls -t -A -c "select bool_or(has_table_privilege('authenticated', t, p)) from unnest(array['public.counterparties','public.counterparty_identifiers','public.counterparty_merge_events']) t, unnest(array['INSERT','UPDATE','DELETE']) p;")"
+if [ "$S4_PRIV" = "false" ] || [ "$S4_PRIV" = "f" ]; then
+  pass "S4: authenticated has no direct write privilege on any counterparty table"
+else
+  fail "S4: direct write privilege leaked ('$S4_PRIV')"
+fi
+S4_INT="$(psql -d pfe_rls -t -A -c "select has_function_privilege('authenticated','public.normalize_msisdn(text)','EXECUTE');")"
+if [ "$S4_INT" = "false" ] || [ "$S4_INT" = "f" ]; then
+  pass "S4: the internal normalize_msisdn helper is not callable by authenticated"
+else
+  fail "S4: normalize_msisdn is callable by authenticated"
+fi
+
+# --- summaries --------------------------------------------------------------
+S4_CP_SAM="$(psql -d pfe_rls -t -A -c "select counterparty_id from public.transactions where id = '$(S4_T 1)';")"
+S4_SUM="$(as_user "$USER_A" "select sent_minor || '|' || received_minor || '|' || txn_count from public.counterparty_summaries_v where counterparty_id = '$S4_CP_SAM';")"
+# Sam: in 5000; out 2000+100 fee; out 400 (t8). sent = 2100 + 400 = 2500
+if [ "$S4_SUM" = "2500|5000|3" ]; then
+  pass "S4: counterparty summary reports sent / received / count (fees in sent)"
+else
+  fail "S4: summary wrong: '$S4_SUM' (want 2500|5000|3)"
+fi
+
+# A confirmed self-transfer link removes both legs from the summary.
+s4_tx 9 "$WORKSPACE_A" "$S4_ACCT" money_received in 2000 0 "Samuel NSHIMIYIMANA" "250793000439" 40
+as_user "$USER_A" "select public.backfill_counterparties('$WORKSPACE_A');" >/dev/null
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "insert into public.transfer_links (workspace_id, out_transaction_id, in_transaction_id, status) values ('$WORKSPACE_A', '$(S4_T 2)', '$(S4_T 9)', 'linked');" >/dev/null 2>$ARTIFACT_DIR/pfe_s4_tl.log || fail "S4: could not seed transfer link: $(cat $ARTIFACT_DIR/pfe_s4_tl.log)"
+rm -f $ARTIFACT_DIR/pfe_s4_tl.log
+S4_SUM2="$(as_user "$USER_A" "select sent_minor || '|' || received_minor || '|' || txn_count from public.counterparty_summaries_v where counterparty_id = '$S4_CP_SAM';")"
+# remaining: t1 in 5000, t8 out 400 -> sent 400 received 5000 count 2
+if [ "$S4_SUM2" = "400|5000|2" ]; then
+  pass "S4: confirmed self-transfer legs are excluded from counterparty summaries (parity with Insights)"
+else
+  fail "S4: transfer exclusion wrong in summary: '$S4_SUM2' (want 400|5000|2)"
+fi
+
+# --- update ------------------------------------------------------------------
+S4_CP_OG="$(psql -d pfe_rls -t -A -c "select counterparty_id from public.transactions where id = '$(S4_T 4)';")"
+as_user "$USER_A" "select public.update_counterparty('$S4_CP_OG', ' Ogabor Julius Ineji ', 'person');" >/dev/null
+S4_UPD="$(psql -d pfe_rls -t -A -c "select display_name || '|' || kind || '|' || confidence from public.counterparties where id = '$S4_CP_OG';")"
+S4_RAW="$(psql -d pfe_rls -t -A -c "select counterparty_name from public.transactions where id = '$(S4_T 4)';")"
+if [ "$S4_UPD" = "Ogabor Julius Ineji|person|user_confirmed" ] && [ "$S4_RAW" = "Ogabor JULIUS" ]; then
+  pass "S4: a correction renames/kinds the counterparty and confirms it, while the raw transaction label is preserved"
+else
+  fail "S4: update wrong ('$S4_UPD' raw='$S4_RAW')"
+fi
+if as_user "$USER_A" "select public.update_counterparty('$S4_CP_OG', 'x', 'robot');" >/dev/null 2>&1; then
+  fail "S4: an invalid kind was accepted"
+else
+  pass "S4: an invalid kind is rejected"
+fi
+
+# --- merge / undo ---------------------------------------------------------------
+S4_CP_SHOP="$(psql -d pfe_rls -t -A -c "select counterparty_id from public.transactions where id = '$(S4_T 3)';")"
+S4_CP_AIR="$(psql -d pfe_rls -t -A -c "select counterparty_id from public.transactions where id = '$(S4_T 6)';")"
+S4_EV1="$(as_user "$USER_A" "select public.merge_counterparties('$S4_CP_SHOP', array['$S4_CP_AIR']::uuid[]);" | tail -1)"
+S4_MERGED="$(psql -d pfe_rls -t -A -c "select merged_into_id from public.counterparties where id = '$S4_CP_AIR';")"
+S4_SUM_M="$(as_user "$USER_A" "select count(*) || '|' || coalesce(sum(sent_minor),0) from public.counterparty_summaries_v where counterparty_id in ('$S4_CP_SHOP', '$S4_CP_AIR');")"
+# shop 1500 + airtime 300 under the survivor only
+if [ "$S4_MERGED" = "$S4_CP_SHOP" ] && [ "$S4_SUM_M" = "1|1800" ]; then
+  pass "S4: merge folds the merged counterparty's activity into the survivor; transaction links are untouched"
+else
+  fail "S4: merge wrong (merged_into='$S4_MERGED' summary='$S4_SUM_M')"
+fi
+S4_TX_LINK="$(psql -d pfe_rls -t -A -c "select counterparty_id from public.transactions where id = '$(S4_T 6)';")"
+if [ "$S4_TX_LINK" = "$S4_CP_AIR" ]; then
+  pass "S4: a merge never rewrites transactions.counterparty_id (soft, reversible link)"
+else
+  fail "S4: merge rewrote the transaction link"
+fi
+
+as_user "$USER_A" "select public.undo_counterparty_merge('$S4_EV1');" >/dev/null
+S4_UNDONE="$(psql -d pfe_rls -t -A -c "select coalesce(merged_into_id::text, 'null') from public.counterparties where id = '$S4_CP_AIR';")"
+S4_SUM_U="$(as_user "$USER_A" "select count(*) from public.counterparty_summaries_v where counterparty_id in ('$S4_CP_SHOP', '$S4_CP_AIR');")"
+if [ "$S4_UNDONE" = "null" ] && [ "$S4_SUM_U" = "2" ]; then
+  pass "S4: undoing a merge restores the original counterparties exactly"
+else
+  fail "S4: undo wrong (merged_into='$S4_UNDONE' rows=$S4_SUM_U)"
+fi
+if as_user "$USER_A" "select public.undo_counterparty_merge('$S4_EV1');" >/dev/null 2>&1; then
+  fail "S4: a merge was undone twice"
+else
+  pass "S4: a merge cannot be undone twice"
+fi
+
+# chain: Og -> Air, then Air -> Shop (flatten); undo order enforced.
+as_user "$USER_A" "select public.merge_counterparties('$S4_CP_AIR', array['$S4_CP_OG']::uuid[]);" >/dev/null
+S4_EV3="$(as_user "$USER_A" "select public.merge_counterparties('$S4_CP_SHOP', array['$S4_CP_AIR']::uuid[]);" | tail -1)"
+S4_EV2="$(psql -d pfe_rls -t -A -c "select id from public.counterparty_merge_events where survivor_id = '$S4_CP_AIR' and undone_at is null;")"
+S4_FLAT="$(psql -d pfe_rls -t -A -c "select merged_into_id from public.counterparties where id = '$S4_CP_OG';")"
+if [ "$S4_FLAT" = "$S4_CP_SHOP" ]; then
+  pass "S4: merging a survivor flattens its children onto the new survivor (one-hop resolution)"
+else
+  fail "S4: chain not flattened (og.merged_into='$S4_FLAT')"
+fi
+if as_user "$USER_A" "select public.undo_counterparty_merge('$S4_EV2');" >/dev/null 2>&1; then
+  fail "S4: an earlier merge was undone while a later merge depends on it"
+else
+  pass "S4: an earlier merge cannot be undone out of order (merge_state_changed)"
+fi
+as_user "$USER_A" "select public.undo_counterparty_merge('$S4_EV3');" >/dev/null
+as_user "$USER_A" "select public.undo_counterparty_merge('$S4_EV2');" >/dev/null
+S4_ALL="$(psql -d pfe_rls -t -A -c "select count(*) from public.counterparties where workspace_id = '$WORKSPACE_A' and merged_into_id is not null;")"
+if [ "$S4_ALL" = "0" ]; then
+  pass "S4: undoing merges in reverse order restores every counterparty"
+else
+  fail "S4: $S4_ALL counterparty(ies) still merged after full undo"
+fi
+
+# --- merge guards ---------------------------------------------------------------
+S4_CP_B="$(psql -d pfe_rls -t -A -c "select counterparty_id from public.transactions where id = '$(S4_T 7)';")"
+if as_user "$USER_A" "select public.merge_counterparties('$S4_CP_SHOP', array['$S4_CP_B']::uuid[]);" >/dev/null 2>&1; then
+  fail "S4: merged a counterparty from ANOTHER workspace"
+else
+  pass "S4: a counterparty from another workspace can never be merged in"
+fi
+if as_user "$USER_A" "select public.merge_counterparties('$S4_CP_SHOP', array['$S4_CP_SHOP']::uuid[]);" >/dev/null 2>&1; then
+  fail "S4: merged a counterparty into itself"
+else
+  pass "S4: a counterparty cannot be merged into itself"
+fi
+
+# --- roles: viewer denied ----------------------------------------------------------
+if as_user "$R_VIEWER_USER" "select public.backfill_counterparties('$R_MATRIX_HH');" >/dev/null 2>&1; then
+  fail "S4: a viewer ran the counterparty backfill"
+else
+  pass "S4: a viewer cannot run the counterparty backfill"
+fi
+
+S4_AUDIT="$(psql -d pfe_rls -t -A -c "select string_agg(event_type, ',' order by event_type collate \"C\") from (select distinct event_type from public.space_audit_events where workspace_id = '$WORKSPACE_A' and event_type like 'counterparty.%') x;")"
+if [ "$S4_AUDIT" = "counterparty.merge_undone,counterparty.merged,counterparty.updated" ]; then
+  pass "S4: update, merge and undo are each audited"
+else
+  fail "S4: audit events wrong: '$S4_AUDIT'"
+fi
+
+# ===========================================================================
+# OneLedger 3.0 S5: payment requests, Stage 1 (20261226000000_payment_requests).
+# Non-custodial. The DB sees only a SHA-256 digest of the token; "paid" only
+# via owner assertion or a human-linked matching settled incoming transaction.
+# ===========================================================================
+echo "=== OneLedger 3.0 S5: payment requests ==="
+
+s5h() { printf '%064d' "$1"; }   # a valid 64-hex digest (digits are hex)
+s5_anon() { psql -d pfe_rls -t -A -F'|' -c "set role anon; $1" | grep -v '^SET$' || true; }
+S5_FUT="now() + interval '7 days'"
+
+S5_H1="$(s5h 1)"
+S5_REQ1="$(as_user "$USER_A" "select public.create_payment_request('$WORKSPACE_A', 5000, 'RWF', 'momo_phone', '+250 793 000 439', ' Samuel N ', 'Rent Nov', $S5_FUT, '$S5_H1', 'idem-key-0001');" | tail -1)"
+S5_ROW="$(psql -d pfe_rls -t -A -c "select destination_value || '|' || recipient_display || '|' || status || '|' || token_hash from public.payment_requests where id = '$S5_REQ1';")"
+if [ "$S5_ROW" = "250793000439|Samuel N|open|$S5_H1" ]; then
+  pass "S5: a member creates a request; destination and name are normalised/trimmed server-side; only the digest is stored"
+else
+  fail "S5: create wrong (id='$S5_REQ1' row='$S5_ROW')"
+fi
+
+S5_REQ1B="$(as_user "$USER_A" "select public.create_payment_request('$WORKSPACE_A', 9999, 'RWF', 'momo_phone', '0793000439', 'Other', null, $S5_FUT, '$(s5h 2)', 'idem-key-0001');" | tail -1)"
+if [ "$S5_REQ1B" = "$S5_REQ1" ]; then
+  pass "S5: retrying with the same idempotency key returns the original request, creating nothing new"
+else
+  fail "S5: idempotency broken ($S5_REQ1B vs $S5_REQ1)"
+fi
+
+# --- public resolver ---------------------------------------------------------
+S5_PUB="$(s5_anon "select status, amount_minor, currency, recipient_display, reference, destination_type, destination_value from public.resolve_payment_request('$S5_H1');")"
+if [ "$S5_PUB" = "open|5000|RWF|Samuel N|Rent Nov|momo_phone|250793000439" ]; then
+  pass "S5: the anonymous resolver returns exactly what a payer needs for an open request"
+else
+  fail "S5: public resolve wrong: '$S5_PUB'"
+fi
+S5_COLS="$(psql -d pfe_rls -t -A -c "select pg_get_function_result('public.resolve_payment_request(text)'::regprocedure);")"
+if echo "$S5_COLS" | grep -qiE "workspace|created_by|user|owner|id uuid|transaction"; then
+  fail "S5: the public resolver exposes more than the minimum: $S5_COLS"
+else
+  pass "S5: the public resolver exposes no workspace, owner, id or transaction fields"
+fi
+S5_UNK="$(s5_anon "select count(*) from public.resolve_payment_request('$(s5h 999999)');")"
+S5_BAD="$(s5_anon "select count(*) from public.resolve_payment_request('not-a-digest');")"
+S5_RAWTOK="$(s5_anon "select count(*) from public.resolve_payment_request('$(printf 'z%.0s' $(seq 1 64))');")"
+if [ "$S5_UNK" = "0" ] && [ "$S5_BAD" = "0" ] && [ "$S5_RAWTOK" = "0" ]; then
+  pass "S5: unknown and malformed digests resolve to nothing"
+else
+  fail "S5: unknown/malformed resolve leaked (unk=$S5_UNK bad=$S5_BAD raw=$S5_RAWTOK)"
+fi
+S5_ANON_TBL="$(psql -d pfe_rls -t -A -c "select has_table_privilege('anon','public.payment_requests','SELECT') or has_table_privilege('anon','public.payment_requests_v','SELECT');")"
+if [ "$S5_ANON_TBL" = "false" ] || [ "$S5_ANON_TBL" = "f" ]; then
+  pass "S5: anon cannot read payment_requests directly (only the resolver)"
+else
+  fail "S5: anon can read payment request tables directly"
+fi
+
+# --- validation ---------------------------------------------------------------
+s5_bad() { # label sql
+  if as_user "$USER_A" "$2" >/dev/null 2>&1; then fail "S5: accepted invalid input: $1"; else pass "S5: rejected invalid input: $1"; fi
+}
+s5_bad "zero amount" "select public.create_payment_request('$WORKSPACE_A', 0, 'RWF', 'momo_phone', '0793000439', 'X', null, $S5_FUT, '$(s5h 10)');"
+s5_bad "unsupported currency" "select public.create_payment_request('$WORKSPACE_A', 100, 'GBP', 'momo_phone', '0793000439', 'X', null, $S5_FUT, '$(s5h 11)');"
+s5_bad "non-Rwandan phone" "select public.create_payment_request('$WORKSPACE_A', 100, 'RWF', 'momo_phone', '0693000439', 'X', null, $S5_FUT, '$(s5h 12)');"
+s5_bad "bad merchant code" "select public.create_payment_request('$WORKSPACE_A', 100, 'RWF', 'merchant_code', '12', 'X', null, $S5_FUT, '$(s5h 13)');"
+s5_bad "expiry too soon" "select public.create_payment_request('$WORKSPACE_A', 100, 'RWF', 'momo_phone', '0793000439', 'X', null, now() + interval '10 seconds', '$(s5h 14)');"
+s5_bad "expiry beyond 90 days" "select public.create_payment_request('$WORKSPACE_A', 100, 'RWF', 'momo_phone', '0793000439', 'X', null, now() + interval '91 days', '$(s5h 15)');"
+s5_bad "control character in name" "select public.create_payment_request('$WORKSPACE_A', 100, 'RWF', 'momo_phone', '0793000439', 'a'||chr(7)||'b', null, $S5_FUT, '$(s5h 16)');"
+s5_bad "digest that is not 64 hex" "select public.create_payment_request('$WORKSPACE_A', 100, 'RWF', 'momo_phone', '0793000439', 'X', null, $S5_FUT, 'abc');"
+s5_bad "duplicate token digest" "select public.create_payment_request('$WORKSPACE_A', 100, 'RWF', 'momo_phone', '0793000439', 'X', null, $S5_FUT, '$S5_H1');"
+
+# --- authz / isolation ----------------------------------------------------------
+if as_user "$USER_B" "select public.create_payment_request('$WORKSPACE_A', 100, 'RWF', 'momo_phone', '0793000439', 'X', null, $S5_FUT, '$(s5h 20)');" >/dev/null 2>&1; then
+  fail "S5: a non-member created a request in another workspace"
+else
+  pass "S5: a non-member cannot create a request in another workspace"
+fi
+if as_user "$R_VIEWER_USER" "select public.create_payment_request('$R_MATRIX_HH', 100, 'RWF', 'momo_phone', '0793000439', 'X', null, $S5_FUT, '$(s5h 21)');" >/dev/null 2>&1; then
+  fail "S5: a viewer created a payment request"
+else
+  pass "S5: a viewer cannot create a payment request"
+fi
+S5_B_SEES="$(as_user "$USER_B" "select count(*) from public.payment_requests;")"
+if [ "$S5_B_SEES" = "0" ]; then
+  pass "S5: another workspace's member cannot read the request (RLS)"
+else
+  fail "S5: cross-tenant leak - USER_B reads $S5_B_SEES request(s)"
+fi
+if as_user "$USER_B" "select public.cancel_payment_request('$S5_REQ1');" >/dev/null 2>&1; then
+  fail "S5: another workspace cancelled this request"
+else
+  pass "S5: another workspace cannot cancel the request"
+fi
+S5_PRIV="$(psql -d pfe_rls -t -A -c "select bool_or(has_table_privilege('authenticated', t, p)) from unnest(array['public.payment_requests','public.payment_request_events']) t, unnest(array['INSERT','UPDATE','DELETE']) p;")"
+S5_INT="$(psql -d pfe_rls -t -A -c "select has_function_privilege('authenticated','public._payment_request_for_update(uuid,boolean)','EXECUTE');")"
+if { [ "$S5_PRIV" = "false" ] || [ "$S5_PRIV" = "f" ]; } && { [ "$S5_INT" = "false" ] || [ "$S5_INT" = "f" ]; }; then
+  pass "S5: no direct writes on request tables; the internal guard function is not callable"
+else
+  fail "S5: privileges leaked (write='$S5_PRIV' internal='$S5_INT')"
+fi
+
+# --- cancel / expiry -------------------------------------------------------------
+S5_H3="$(s5h 3)"
+S5_REQ3="$(as_user "$USER_A" "select public.create_payment_request('$WORKSPACE_A', 3000, 'RWF', 'merchant_code', '093011', 'Shop', null, $S5_FUT, '$S5_H3');" | tail -1)"
+as_user "$USER_A" "select public.cancel_payment_request('$S5_REQ3');" >/dev/null
+S5_CAN="$(s5_anon "select status, amount_minor, coalesce(destination_value, 'withheld') from public.resolve_payment_request('$S5_H3');")"
+if [ "$S5_CAN" = "cancelled|3000|withheld" ]; then
+  pass "S5: a cancelled request resolves as cancelled and withholds the destination"
+else
+  fail "S5: cancelled resolve wrong: '$S5_CAN'"
+fi
+if as_user "$USER_A" "select public.cancel_payment_request('$S5_REQ3');" >/dev/null 2>&1; then
+  fail "S5: a cancelled request was cancelled again"
+else
+  pass "S5: a terminal request cannot change state again"
+fi
+
+S5_H4="$(s5h 4)"
+S5_REQ4="$(as_user "$USER_A" "select public.create_payment_request('$WORKSPACE_A', 4000, 'RWF', 'momo_phone', '0793000439', 'Late', null, $S5_FUT, '$S5_H4');" | tail -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "update public.payment_requests set created_at = now() - interval '2 days', expires_at = now() - interval '1 hour' where id = '$S5_REQ4';" >/dev/null
+S5_EXP="$(s5_anon "select status, coalesce(destination_value, 'withheld') from public.resolve_payment_request('$S5_H4');")"
+S5_EXPV="$(as_user "$USER_A" "select status from public.payment_requests_v where id = '$S5_REQ4';")"
+if [ "$S5_EXP" = "expired|withheld" ] && [ "$S5_EXPV" = "expired" ]; then
+  pass "S5: an expired request resolves as expired (no cron needed) and withholds the destination"
+else
+  fail "S5: expiry wrong (public='$S5_EXP' view='$S5_EXPV')"
+fi
+if as_user "$USER_A" "select public.mark_payment_request_paid_by_owner('$S5_REQ4');" >/dev/null 2>&1; then
+  fail "S5: an expired request was marked paid by owner"
+else
+  pass "S5: an expired request cannot be marked paid by the owner"
+fi
+
+# --- owner assertion ---------------------------------------------------------------
+S5_H5="$(s5h 5)"
+S5_REQ5="$(as_user "$USER_A" "select public.create_payment_request('$WORKSPACE_A', 6000, 'RWF', 'momo_phone', '0793000439', 'Owner says', null, $S5_FUT, '$S5_H5');" | tail -1)"
+as_user "$USER_A" "select public.mark_payment_request_paid_by_owner('$S5_REQ5', 'cash handed over');" >/dev/null
+S5_MP="$(s5_anon "select status, coalesce(destination_value, 'withheld') from public.resolve_payment_request('$S5_H5');")"
+S5_MPE="$(psql -d pfe_rls -t -A -c "select metadata->>'verified' from public.payment_request_events where payment_request_id = '$S5_REQ5' and event_type = 'marked_paid_by_owner';")"
+if [ "$S5_MP" = "marked_paid_by_owner|withheld" ] && [ "$S5_MPE" = "false" ]; then
+  pass "S5: owner-marked paid is a distinct, explicitly unverified status"
+else
+  fail "S5: owner-marked wrong (public='$S5_MP' verified='$S5_MPE')"
+fi
+
+# --- human-linked match ------------------------------------------------------------------
+s5_tx() { # n workspace account type direction amount currency
+  psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+    insert into public.momo_messages (id, raw_message, processing_status) values ('00000000-0000-0000-0000-0000000057$1', 's5-$1', 'processed');
+    insert into public.transactions
+      (id, momo_message_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at,
+       parser_version, counterparty_name, settlement_state, affects_balance, principal_effect_rwf, fee_effect_rwf, effect_reason)
+    values ('00000000-0000-0000-0000-0000000058$1', '00000000-0000-0000-0000-0000000057$1', '$3', '$2', '$4', '$5', 'success', $6, 0, now(),
+            'test', 'Payer', 'settled', true, $( [ "$5" = "in" ] && echo "$6" || echo "-$6" ), 0,
+            '$( [ "$5" = "in" ] && echo settled_incoming || echo settled_outgoing_with_fee )');" >/dev/null
+}
+S5_TX() { echo "00000000-0000-0000-0000-0000000058$1"; }
+s5_tx 01 "$WORKSPACE_A" "$S4_ACCT" money_received in 7000
+s5_tx 02 "$WORKSPACE_A" "$S4_ACCT" money_received in 7500
+s5_tx 03 "$WORKSPACE_A" "$S4_ACCT" send_money out 7000
+s5_tx 04 "$WORKSPACE_B" "$S4_ACCT_B" money_received in 7000
+
+S5_H6="$(s5h 6)"
+S5_REQ6="$(as_user "$USER_A" "select public.create_payment_request('$WORKSPACE_A', 7000, 'RWF', 'momo_phone', '0793000439', 'Match me', null, $S5_FUT, '$S5_H6');" | tail -1)"
+s5_link_bad() {
+  if as_user "$USER_A" "select public.link_payment_request_transaction('$S5_REQ6', '$2');" >/dev/null 2>&1; then
+    fail "S5: linked a non-matching transaction ($1)"
+  else
+    pass "S5: refuses to link a non-matching transaction ($1)"
+  fi
+}
+s5_link_bad "different amount" "$(S5_TX 02)"
+s5_link_bad "outgoing" "$(S5_TX 03)"
+s5_link_bad "another workspace's transaction" "$(S5_TX 04)"
+S5_NOMATCH="$(s5_anon "select status from public.resolve_payment_request('$S5_H6');")"
+if [ "$S5_NOMATCH" = "open" ]; then
+  pass "S5: failed link attempts leave the request open"
+else
+  fail "S5: failed link changed status to '$S5_NOMATCH'"
+fi
+as_user "$USER_A" "select public.link_payment_request_transaction('$S5_REQ6', '$(S5_TX 01)');" >/dev/null
+S5_M="$(psql -d pfe_rls -t -A -c "select status || '|' || (matched_transaction_id = '$(S5_TX 01)')::text from public.payment_requests where id = '$S5_REQ6';")"
+if [ "$S5_M" = "matched|true" ]; then
+  pass "S5: a human links a settled, equal-amount incoming transaction -> matched"
+else
+  fail "S5: match wrong: '$S5_M'"
+fi
+S5_H7="$(s5h 7)"
+S5_REQ7="$(as_user "$USER_A" "select public.create_payment_request('$WORKSPACE_A', 7000, 'RWF', 'momo_phone', '0793000439', 'Second', null, $S5_FUT, '$S5_H7');" | tail -1)"
+if as_user "$USER_A" "select public.link_payment_request_transaction('$S5_REQ7', '$(S5_TX 01)');" >/dev/null 2>&1; then
+  fail "S5: one transaction settled two requests"
+else
+  pass "S5: a transaction can settle at most one request"
+fi
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "update public.payment_requests set status = 'matched' where id = '$S5_REQ7';" >/dev/null 2>&1; then
+  fail "S5: status 'matched' accepted without a linked transaction"
+else
+  pass "S5: the database refuses status 'matched' without a linked transaction"
+fi
+
+# --- audit trail -----------------------------------------------------------------------
+S5_EV="$(psql -d pfe_rls -t -A -c "select string_agg(event_type, ',' order by event_type collate \"C\") from (select distinct event_type from public.payment_request_events where workspace_id = '$WORKSPACE_A') x;")"
+S5_AU="$(psql -d pfe_rls -t -A -c "select count(distinct event_type) from public.space_audit_events where workspace_id = '$WORKSPACE_A' and event_type like 'payment_request.%';")"
+if [ "$S5_EV" = "cancelled,created,marked_paid_by_owner,matched" ] && [ "$S5_AU" = "4" ]; then
+  pass "S5: create, cancel, owner-mark and match are each recorded in the event log and the space audit trail"
+else
+  fail "S5: audit trail wrong (events='$S5_EV' audit_kinds=$S5_AU)"
+fi
+
+# --- rate limit (fresh user so earlier fixtures do not count) ------------------------------
+S5_U="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('s5-limit@example.com') returning id;" | head -1)"
+S5_WS="$(psql -d pfe_rls -t -A -c "select w.id from public.workspaces w join public.workspace_memberships m on m.workspace_id = w.id where m.user_id = '$S5_U';" | head -1)"
+if as_user "$S5_U" "select count(public.create_payment_request('$S5_WS', 100, 'RWF', 'momo_phone', '0793000439', 'Bulk', null, $S5_FUT, lpad((1000 + i)::text, 64, '0'))) from generate_series(1, 30) i;" >/dev/null 2>&1; then
+  pass "S5: 30 requests in an hour are allowed"
+else
+  fail "S5: the first 30 requests were refused"
+fi
+if as_user "$S5_U" "select public.create_payment_request('$S5_WS', 100, 'RWF', 'momo_phone', '0793000439', 'Bulk', null, $S5_FUT, lpad('2000', 64, '0'));" >/dev/null 2>&1; then
+  fail "S5: the 31st request in an hour was allowed"
+else
+  pass "S5: the 31st request in an hour is rate limited"
+fi
+
+# ===========================================================================
+# OneLedger 3.0 E1: erasure covers the 3.0 tables. A user whose Personal Space
+# holds counterparties, a balance observation and a MATCHED payment request,
+# and who also created a payment request in someone else's household, must be
+# erasable: the matched request must not block deleting its transaction, and
+# nothing of the user's request (their own phone number as destination) may
+# survive in the shared Space.
+# ===========================================================================
+echo "=== OneLedger 3.0 E1: erasure covers new tables ==="
+E1_U="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('e1-user@example.com') returning id;" | head -1)"
+E1_O="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('e1-other@example.com') returning id;" | head -1)"
+E1_WS="$(psql -d pfe_rls -t -A -c "select w.id from public.workspaces w join public.workspace_memberships m on m.workspace_id=w.id where m.user_id='$E1_U' and w.kind='personal';" | head -1)"
+E1_ACCT="00000000-0000-0000-0000-0000000e1a01"
+E1_TX="00000000-0000-0000-0000-0000000e1b01"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.accounts (id, workspace_id, name, provider, currency) values ('$E1_ACCT', '$E1_WS', 'E1 acct', 'mtn_momo', 'RWF');
+  insert into public.momo_messages (id, raw_message, processing_status) values ('00000000-0000-0000-0000-0000000e1c01', 'e1', 'processed');
+  insert into public.transactions (id, momo_message_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at,
+     parser_version, counterparty_name, counterparty_reference, settlement_state, affects_balance, principal_effect_rwf, fee_effect_rwf, effect_reason)
+  values ('$E1_TX', '00000000-0000-0000-0000-0000000e1c01', '$E1_ACCT', '$E1_WS', 'money_received', 'in', 'success', 5000, 0, now(),
+     'test', 'E1 Payer', '250793000111', 'settled', true, 5000, 0, 'settled_incoming');" >/dev/null
+as_user "$E1_U" "select public.backfill_counterparties('$E1_WS');" >/dev/null
+as_user "$E1_U" "select public.record_manual_balance_observation('$E1_ACCT', 5000, now() - interval '1 minute');" >/dev/null
+E1_REQ="$(as_user "$E1_U" "select public.create_payment_request('$E1_WS', 5000, 'RWF', 'momo_phone', '0793000111', 'E1 Owner', null, now() + interval '3 days', '$(printf '%064d' 7001)');" | tail -1)"
+as_user "$E1_U" "select public.link_payment_request_transaction('$E1_REQ', '$E1_TX');" >/dev/null
+E1_PRE="$(psql -d pfe_rls -t -A -c "select (select count(*) from public.counterparties where workspace_id='$E1_WS') || '|' || (select count(*) from public.balance_observations where workspace_id='$E1_WS') || '|' || (select status from public.payment_requests where id='$E1_REQ');")"
+if [ "$E1_PRE" = "1|1|matched" ]; then
+  pass "E1: fixture ready (a counterparty, a balance observation and a matched payment request)"
+else
+  fail "E1: fixture wrong ('$E1_PRE')"
+fi
+
+E1_HH="$(as_user "$E1_O" "select public.create_household_workspace('E1 Household');" | grep -Eo '[0-9a-f-]{36}' | head -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.workspace_memberships (workspace_id, user_id, role, status, joined_at) values ('$E1_HH', '$E1_U', 'member', 'active', now());" >/dev/null
+E1_HREQ="$(as_user "$E1_U" "select public.create_payment_request('$E1_HH', 100, 'RWF', 'momo_phone', '0793000111', 'E1 in household', null, now() + interval '3 days', '$(printf '%064d' 7002)');" | tail -1)"
+E1_OREQ="$(as_user "$E1_O" "select public.create_payment_request('$E1_HH', 200, 'RWF', 'momo_phone', '0793000222', 'Other owner', null, now() + interval '3 days', '$(printf '%064d' 7003)');" | tail -1)"
+
+set +e
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; select public.execute_account_deletion('$E1_U');" > $ARTIFACT_DIR/pfe_e1.log 2>&1
+E1_RC=$?
+set -e
+if [ "$E1_RC" = "0" ]; then
+  pass "E1: erasing a user with a matched payment request, counterparties and balance observations succeeds"
+else
+  fail "E1: erasure failed (rc=$E1_RC): $(tail -3 $ARTIFACT_DIR/pfe_e1.log | tr '\n' ' ')"
+fi
+rm -f $ARTIFACT_DIR/pfe_e1.log
+
+E1_POST="$(psql -d pfe_rls -t -A -c "
+  select (select count(*) from public.counterparties where workspace_id='$E1_WS')
+    || '|' || (select count(*) from public.counterparty_identifiers where workspace_id='$E1_WS')
+    || '|' || (select count(*) from public.balance_observations where workspace_id='$E1_WS')
+    || '|' || (select count(*) from public.payment_requests where id in ('$E1_REQ','$E1_HREQ'))
+    || '|' || (select count(*) from public.payment_request_events where payment_request_id in ('$E1_REQ','$E1_HREQ'))
+    || '|' || (select count(*) from public.payment_requests where id='$E1_OREQ')
+    || '|' || (select count(*) from public.workspaces where id='$E1_HH');")"
+if [ "$E1_POST" = "0|0|0|0|0|1|1" ]; then
+  pass "E1: all of the user's counterparties, observations and payment requests (incl. the one in the shared Space) are gone; others' data stays"
+else
+  fail "E1: post-erasure state wrong ('$E1_POST', want 0|0|0|0|0|1|1)"
+fi
+
+# ===========================================================================
+# OneLedger 3.0 E4: split a counterparty (20261228000000_counterparty_split).
+# ===========================================================================
+echo "=== OneLedger 3.0 E4: counterparty split ==="
+E4_ACCT="00000000-0000-0000-0000-0000000059a1"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "insert into public.accounts (id, workspace_id, name, provider, currency) values ('$E4_ACCT', '$WORKSPACE_A', 'E4 acct', 'mtn_momo', 'RWF');" >/dev/null
+e4_tx() { # nn type dir amount name ref minutes_ago
+  psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+    insert into public.momo_messages (id, raw_message, processing_status) values ('00000000-0000-0000-0000-0000000060$1', 'e4-$1', 'processed');
+    insert into public.transactions
+      (id, momo_message_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at,
+       parser_version, counterparty_name, counterparty_reference, settlement_state, affects_balance, principal_effect_rwf, fee_effect_rwf, effect_reason)
+    values ('00000000-0000-0000-0000-0000000059$1', '00000000-0000-0000-0000-0000000060$1', '$E4_ACCT', '$WORKSPACE_A', '$2', '$3', 'success', $4, 0,
+            now() - interval '$7 minutes', 'test', '$5', $( [ -n "$6" ] && echo "'$6'" || echo null ), 'settled', true,
+            $( [ "$3" = "in" ] && echo "$4" || echo "-$4" ), 0, '$( [ "$3" = "in" ] && echo settled_incoming || echo settled_outgoing_with_fee )');" >/dev/null
+}
+E4_T() { echo "00000000-0000-0000-0000-0000000059$1"; }
+e4_cp() { psql -d pfe_rls -t -A -c "select counterparty_id from public.transactions where id = '$(E4_T "$1")';"; }
+
+# Two phone numbers + one weak-label pair, resolved by the ordinary backfill.
+e4_tx 01 send_money out 1000 "Chris A" "250793000501" 90
+e4_tx 02 send_money out 2000 "Chris A" "250793000501" 80
+e4_tx 03 send_money out 3000 "Chris Alt" "250793000502" 70
+e4_tx 04 send_money out 4000 "Alex Mugabo" "*********111" 60
+e4_tx 05 send_money out 5000 "Alex Mugabo" "*********222" 50
+e4_tx 06 send_money out 6000 "Alex Mugabo" "*********333" 40
+as_user "$USER_A" "select public.backfill_counterparties('$WORKSPACE_A');" >/dev/null
+
+# Legacy-style over-grouping: both numbers ended up on ONE counterparty.
+E4_CP1="$(e4_cp 01)"; E4_CP2="$(e4_cp 03)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  update public.counterparty_identifiers set counterparty_id = '$E4_CP1' where counterparty_id = '$E4_CP2';
+  update public.transactions set counterparty_id = '$E4_CP1' where counterparty_id = '$E4_CP2';
+  update public.counterparties set merged_into_id = '$E4_CP1' where id = '$E4_CP2';" >/dev/null
+E4_ID2="$(psql -d pfe_rls -t -A -c "select id from public.counterparty_identifiers where counterparty_id = '$E4_CP1' and normalized_value = '250793000502';")"
+E4_ID1="$(psql -d pfe_rls -t -A -c "select id from public.counterparty_identifiers where counterparty_id = '$E4_CP1' and normalized_value = '250793000501';")"
+if [ -n "$E4_ID1" ] && [ -n "$E4_ID2" ]; then
+  pass "E4: fixture ready (one counterparty carrying two phone numbers)"
+else
+  fail "E4: fixture wrong (id1='$E4_ID1' id2='$E4_ID2')"
+fi
+
+# --- split by identifier ---------------------------------------------------------
+E4_EV1="$(as_user "$USER_A" "select public.split_counterparty('$E4_CP1', array['$E4_ID2']::uuid[], '{}'::uuid[], null);" | tail -1)"
+E4_NEW1="$(psql -d pfe_rls -t -A -c "select new_id from public.counterparty_split_events where id = '$E4_EV1';")"
+E4_S1="$(psql -d pfe_rls -t -A -c "select (select counterparty_id::text from public.transactions where id = '$(E4_T 03)') = '$E4_NEW1' and (select counterparty_id::text from public.transactions where id = '$(E4_T 01)') = '$E4_CP1' and (select counterparty_id::text from public.counterparty_identifiers where id = '$E4_ID2') = '$E4_NEW1';")"
+E4_S1N="$(psql -d pfe_rls -t -A -c "select display_name || '|' || kind || '|' || confidence from public.counterparties where id = '$E4_NEW1';")"
+if { [ "$E4_S1" = "t" ] || [ "$E4_S1" = "true" ]; } && [ "$E4_S1N" = "Chris Alt|person|high" ]; then
+  pass "E4: splitting an identifier moves it and the transactions that carry it to a new counterparty (named from its latest label, person/high)"
+else
+  fail "E4: identifier split wrong (moved='$E4_S1' new='$E4_S1N')"
+fi
+E4_RAW="$(psql -d pfe_rls -t -A -c "select counterparty_name || '|' || counterparty_reference from public.transactions where id = '$(E4_T 03)';")"
+if [ "$E4_RAW" = "Chris Alt|250793000502" ]; then
+  pass "E4: a split never rewrites the raw transaction label or reference"
+else
+  fail "E4: raw label changed ('$E4_RAW')"
+fi
+
+# New transactions carrying the moved number now resolve to the NEW counterparty.
+e4_tx 07 send_money out 700 "Chris Alt" "0793000502" 5
+as_user "$USER_A" "select public.backfill_counterparties('$WORKSPACE_A');" >/dev/null
+if [ "$(e4_cp 07)" = "$E4_NEW1" ]; then
+  pass "E4: a later transaction with the moved number resolves to the split-off counterparty"
+else
+  fail "E4: later transaction resolved to '$(e4_cp 07)' (want $E4_NEW1)"
+fi
+
+# --- undo (including items that joined after the split) ----------------------------
+as_user "$USER_A" "select public.undo_counterparty_split('$E4_EV1');" >/dev/null
+E4_U="$(psql -d pfe_rls -t -A -c "select (select count(*) from public.transactions where id in ('$(E4_T 01)','$(E4_T 02)','$(E4_T 03)','$(E4_T 07)') and counterparty_id = '$E4_CP1') || '|' || (select count(*) from public.counterparty_identifiers where counterparty_id = '$E4_CP1') || '|' || (select merged_into_id from public.counterparties where id = '$E4_NEW1');")"
+if [ "$E4_U" = "4|2|$E4_CP1" ]; then
+  pass "E4: undo returns everything (even post-split arrivals) to the source and retires the split-off row"
+else
+  fail "E4: undo state wrong ('$E4_U')"
+fi
+if as_user "$USER_A" "select public.undo_counterparty_split('$E4_EV1');" >/dev/null 2>&1; then
+  fail "E4: a split was undone twice"
+else
+  pass "E4: a split cannot be undone twice"
+fi
+
+# --- split by transaction (two people sharing one name label) ------------------------
+E4_CPA="$(e4_cp 04)"
+E4_SAME="$(psql -d pfe_rls -t -A -c "select count(distinct counterparty_id) from public.transactions where id in ('$(E4_T 04)','$(E4_T 05)','$(E4_T 06)');")"
+E4_EV2="$(as_user "$USER_A" "select public.split_counterparty('$E4_CPA', '{}'::uuid[], array['$(E4_T 06)']::uuid[], 'Alex Mugabo (Kigali)');" | tail -1)"
+E4_NEW2="$(psql -d pfe_rls -t -A -c "select new_id from public.counterparty_split_events where id = '$E4_EV2';")"
+E4_S2="$(psql -d pfe_rls -t -A -c "select display_name || '|' || kind || '|' || confidence || '|' || (select count(*) from public.transactions where counterparty_id = c.id) || '|' || (select count(*) from public.counterparty_identifiers where counterparty_id = c.id) from public.counterparties c where id = '$E4_NEW2';")"
+if [ "$E4_SAME" = "1" ] && [ "$E4_S2" = "Alex Mugabo (Kigali)|unknown|user_confirmed|1|0" ] && [ "$(e4_cp 06)" = "$E4_NEW2" ] && [ "$(e4_cp 05)" = "$E4_CPA" ]; then
+  pass "E4: two people who share a name can be separated by transaction; the named result is user-confirmed with no identifiers"
+else
+  fail "E4: transaction split wrong (same=$E4_SAME new='$E4_S2')"
+fi
+
+# --- summaries reflect the split ---------------------------------------------------------
+E4_SUM="$(as_user "$USER_A" "select count(*) || '|' || coalesce(sum(sent_minor),0) from public.counterparty_summaries_v where counterparty_id in ('$E4_CPA', '$E4_NEW2');")"
+if [ "$E4_SUM" = "2|15000" ]; then
+  pass "E4: the summary view shows the two counterparties as separate rows (15,000 sent between them)"
+else
+  fail "E4: summaries wrong ('$E4_SUM')"
+fi
+
+# --- guards -----------------------------------------------------------------------------------
+e4_bad() { # label sql
+  if as_user "$USER_A" "$2" >/dev/null 2>&1; then fail "E4: accepted invalid split: $1"; else pass "E4: rejected invalid split: $1"; fi
+}
+e4_bad "empty request" "select public.split_counterparty('$E4_CP1', '{}'::uuid[], '{}'::uuid[], null);"
+e4_bad "moving every identifier and transaction (would empty the source)" "select public.split_counterparty('$E4_CP1', array['$E4_ID1','$E4_ID2']::uuid[], '{}'::uuid[], null);"
+e4_bad "a transaction that belongs to another counterparty" "select public.split_counterparty('$E4_CPA', '{}'::uuid[], array['$(E4_T 01)']::uuid[], null);"
+e4_bad "an identifier of another counterparty" "select public.split_counterparty('$E4_CPA', array['$E4_ID1']::uuid[], '{}'::uuid[], null);"
+e4_bad "a merged (retired) counterparty" "select public.split_counterparty('$E4_NEW1', '{}'::uuid[], array['$(E4_T 01)']::uuid[], null);"
+e4_bad "a name longer than 120 characters" "select public.split_counterparty('$E4_CPA', '{}'::uuid[], array['$(E4_T 05)']::uuid[], '$(printf 'x%.0s' $(seq 1 121))');"
+
+if as_user "$USER_B" "select public.split_counterparty('$E4_CPA', '{}'::uuid[], array['$(E4_T 05)']::uuid[], null);" >/dev/null 2>&1; then
+  fail "E4: another workspace split this counterparty"
+else
+  pass "E4: another workspace cannot split this counterparty"
+fi
+E4_RO="$(psql -d pfe_rls -t -A -c "select bool_or(has_table_privilege('authenticated','public.counterparty_split_events', p)) from unnest(array['INSERT','UPDATE','DELETE']) p;")"
+E4_INT="$(psql -d pfe_rls -t -A -c "select has_function_privilege('authenticated','public._counterparty_txn_key(text,text,text)','EXECUTE');")"
+if { [ "$E4_RO" = "false" ] || [ "$E4_RO" = "f" ]; } && { [ "$E4_INT" = "false" ] || [ "$E4_INT" = "f" ]; }; then
+  pass "E4: no direct writes on split events; the internal key function is not callable"
+else
+  fail "E4: privileges leaked (write='$E4_RO' internal='$E4_INT')"
+fi
+
+# --- undo refused while the split-off counterparty has been merged on ---------------------------
+E4_OTHER_CP="$(e4_cp 02)"
+as_user "$USER_A" "select public.merge_counterparties('$E4_CPA', array['$E4_NEW2']::uuid[]);" >/dev/null
+if as_user "$USER_A" "select public.undo_counterparty_split('$E4_EV2');" >/dev/null 2>&1; then
+  fail "E4: undid a split whose split-off counterparty was since merged away"
+else
+  pass "E4: a split cannot be undone while its split-off counterparty has been merged (undo the merge first)"
+fi
+
+E4_AUD="$(psql -d pfe_rls -t -A -c "select string_agg(event_type, ',' order by event_type collate \"C\") from (select distinct event_type from public.space_audit_events where workspace_id = '$WORKSPACE_A' and event_type like 'counterparty.split%') x;")"
+if [ "$E4_AUD" = "counterparty.split,counterparty.split_undone" ]; then
+  pass "E4: split and undo are each audited"
+else
+  fail "E4: audit wrong ('$E4_AUD')"
+fi
+
+# --- erasure still works with split events present ---------------------------------------------
+E4_E_U="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('e4-erase@example.com') returning id;" | head -1)"
+E4_E_WS="$(psql -d pfe_rls -t -A -c "select w.id from public.workspaces w join public.workspace_memberships m on m.workspace_id=w.id where m.user_id='$E4_E_U' and w.kind='personal';" | head -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.accounts (id, workspace_id, name, provider, currency) values ('00000000-0000-0000-0000-0000000059e1', '$E4_E_WS', 'E4 erase', 'mtn_momo', 'RWF');
+  insert into public.momo_messages (id, raw_message, processing_status) values ('00000000-0000-0000-0000-0000000060e1', 'e4e', 'processed'), ('00000000-0000-0000-0000-0000000060e2', 'e4f', 'processed');
+  insert into public.transactions (id, momo_message_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version, counterparty_name, counterparty_reference, settlement_state, affects_balance, principal_effect_rwf, fee_effect_rwf, effect_reason)
+  values ('00000000-0000-0000-0000-0000000059e1', '00000000-0000-0000-0000-0000000060e1', '00000000-0000-0000-0000-0000000059e1', '$E4_E_WS', 'send_money', 'out', 'success', 10, 0, now(), 'test', 'Zed', '250793000901', 'settled', true, -10, 0, 'settled_outgoing_with_fee'),
+         ('00000000-0000-0000-0000-0000000059e2', '00000000-0000-0000-0000-0000000060e2', '00000000-0000-0000-0000-0000000059e1', '$E4_E_WS', 'send_money', 'out', 'success', 20, 0, now(), 'test', 'Zed', '0793000901', 'settled', true, -20, 0, 'settled_outgoing_with_fee');" >/dev/null
+as_user "$E4_E_U" "select public.backfill_counterparties('$E4_E_WS');" >/dev/null
+E4_E_C="$(psql -d pfe_rls -t -A -c "select counterparty_id from public.transactions where id = '00000000-0000-0000-0000-0000000059e1';")"
+as_user "$E4_E_U" "select public.split_counterparty('$E4_E_C', '{}'::uuid[], array['00000000-0000-0000-0000-0000000059e2']::uuid[], null);" >/dev/null
+set +e
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; select public.execute_account_deletion('$E4_E_U');" > $ARTIFACT_DIR/pfe_e4e.log 2>&1
+E4_E_RC=$?
+set -e
+E4_E_LEFT="$(psql -d pfe_rls -t -A -c "select (select count(*) from public.counterparty_split_events where workspace_id='$E4_E_WS') + (select count(*) from public.counterparties where workspace_id='$E4_E_WS');")"
+if [ "$E4_E_RC" = "0" ] && [ "$E4_E_LEFT" = "0" ]; then
+  pass "E4: erasing a user whose counterparties were split removes the split events with the Personal Space"
+else
+  fail "E4: erasure with split events failed (rc=$E4_E_RC left=$E4_E_LEFT $(tail -2 $ARTIFACT_DIR/pfe_e4e.log | tr '\n' ' '))"
+fi
+rm -f $ARTIFACT_DIR/pfe_e4e.log
+
+# ===========================================================================
+# OneLedger 3.0 E5: sensitive details (20261229000000_transaction_sensitive_details).
+# The DB only ever holds ciphertext; reveal is authorised, rate-limited, audited.
+# ===========================================================================
+echo "=== OneLedger 3.0 E5: sensitive details ==="
+E5_ACCT="00000000-0000-0000-0000-0000000061a1"
+E5_HH_ACCT="00000000-0000-0000-0000-0000000061a2"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.accounts (id, workspace_id, name, provider, currency) values
+    ('$E5_ACCT', '$WORKSPACE_A', 'E5 acct', 'mtn_momo', 'RWF'),
+    ('$E5_HH_ACCT', '$R_MATRIX_HH', 'E5 hh acct', 'mtn_momo', 'RWF');
+  insert into public.momo_messages (id, raw_message, processing_status) values
+    ('00000000-0000-0000-0000-0000000062a1', 'e5a', 'processed'), ('00000000-0000-0000-0000-0000000062a2', 'e5b', 'processed');
+  -- A household transaction is only visible to members when its source is
+  -- shared into the Space (can_view_source_in_space), exactly as for RLS reads.
+  insert into public.financial_sources (id, owner_user_id, provider, source_type, display_name, currency)
+  values ('00000000-0000-0000-0000-0000000061b1', '$R_ADMIN_USER', 'mtn_momo', 'mobile_money', 'E5 shared src', 'RWF');
+  insert into public.source_space_links (financial_source_id, workspace_id, visibility_mode, status)
+  values ('00000000-0000-0000-0000-0000000061b1', '$R_MATRIX_HH', 'share_transactions', 'active');
+  insert into public.transactions (id, momo_message_id, account_id, workspace_id, financial_source_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at,
+     parser_version, counterparty_name, settlement_state, affects_balance, principal_effect_rwf, fee_effect_rwf, effect_reason)
+  values ('00000000-0000-0000-0000-0000000063a1', '00000000-0000-0000-0000-0000000062a1', '$E5_ACCT', '$WORKSPACE_A', null, 'merchant_payment', 'out', 'success', 5000, 0, now(), 'test', 'EUCL', 'settled', true, -5000, 0, 'settled_outgoing_with_fee'),
+         ('00000000-0000-0000-0000-0000000063a2', '00000000-0000-0000-0000-0000000062a2', '$E5_HH_ACCT', '$R_MATRIX_HH', '00000000-0000-0000-0000-0000000061b1', 'merchant_payment', 'out', 'success', 5000, 0, now(), 'test', 'EUCL', 'settled', true, -5000, 0, 'settled_outgoing_with_fee');
+  set role service_role;
+  insert into public.transaction_sensitive_details (transaction_id, workspace_id, kind, key_id, nonce, ciphertext) values
+    ('00000000-0000-0000-0000-0000000063a1', '$WORKSPACE_A', 'utility_token', 'k1', 'bm9uY2Vub25jZQ==', 'Y2lwaGVydGV4dC1ibG9iLW5vdC1hLXRva2Vu'),
+    ('00000000-0000-0000-0000-0000000063a2', '$R_MATRIX_HH', 'utility_token', 'k1', 'bm9uY2Vub25jZQ==', 'Y2lwaGVydGV4dC1ibG9iLW5vdC1hLXRva2Vu');" >/dev/null
+E5_T1="00000000-0000-0000-0000-0000000063a1"
+
+E5_PRIV="$(psql -d pfe_rls -t -A -c "select bool_or(has_table_privilege(r, 'public.transaction_sensitive_details', p)) from unnest(array['authenticated','anon']) r, unnest(array['SELECT','INSERT','UPDATE','DELETE']) p;")"
+if [ "$E5_PRIV" = "false" ] || [ "$E5_PRIV" = "f" ]; then
+  pass "E5: neither authenticated nor anon holds any privilege on the sensitive-details table"
+else
+  fail "E5: sensitive-details table is reachable by a client role ('$E5_PRIV')"
+fi
+
+E5_R="$(as_user "$USER_A" "select key_id || '|' || ciphertext from public.reveal_transaction_sensitive_detail('$E5_T1');" | tail -1)"
+if [ "$E5_R" = "k1|Y2lwaGVydGV4dC1ibG9iLW5vdC1hLXRva2Vu" ]; then
+  pass "E5: a workspace member reveals the SEALED value (key id + ciphertext) for a transaction they can see"
+else
+  fail "E5: reveal wrong ('$E5_R')"
+fi
+E5_AUD="$(psql -d pfe_rls -t -A -c "select count(*) || '|' || coalesce(max(new_value::text), '') from public.space_audit_events where event_type = 'transaction.sensitive_revealed' and resource_id = '$E5_T1';")"
+if [ "$E5_AUD" = '1|{"kind": "utility_token"}' ]; then
+  pass "E5: every reveal is audited, and the audit row carries neither the ciphertext nor any value"
+else
+  fail "E5: reveal audit wrong ('$E5_AUD')"
+fi
+
+e5_denied() { # label sql_user sql
+  if as_user "$2" "$3" >/dev/null 2>$ARTIFACT_DIR/pfe_e5.log; then
+    fail "E5: reveal allowed: $1"
+  elif grep -q "sensitive_detail_not_found" $ARTIFACT_DIR/pfe_e5.log; then
+    pass "E5: reveal refused with the generic not-found error: $1"
+  else
+    fail "E5: reveal refused with an unexpected error ($1): $(cat $ARTIFACT_DIR/pfe_e5.log)"
+  fi
+  rm -f $ARTIFACT_DIR/pfe_e5.log
+}
+e5_denied "another workspace's member" "$USER_B" "select * from public.reveal_transaction_sensitive_detail('$E5_T1');"
+e5_denied "a viewer in the same Space" "$R_VIEWER_USER" "select * from public.reveal_transaction_sensitive_detail('00000000-0000-0000-0000-0000000063a2');"
+e5_denied "a transaction with no sensitive value" "$USER_A" "select * from public.reveal_transaction_sensitive_detail('$(E4_T 01)');"
+e5_denied "a transaction that does not exist" "$USER_A" "select * from public.reveal_transaction_sensitive_detail('00000000-0000-0000-0000-00000000dead');"
+E5_M="$(as_user "$R_MEMBER_USER" "select count(*) from public.reveal_transaction_sensitive_detail('00000000-0000-0000-0000-0000000063a2');" | tail -1)"
+if [ "$E5_M" = "1" ]; then
+  pass "E5: a household member (not just the owner) can reveal for a Space transaction they can see"
+else
+  fail "E5: household member reveal wrong ('$E5_M')"
+fi
+
+# Rate limit: 20 successful reveals / user / hour (USER_A has done 1 already).
+if as_user "$USER_A" "select count(*) from (select public.reveal_transaction_sensitive_detail('$E5_T1') from generate_series(1, 19)) x;" >/dev/null 2>&1; then
+  pass "E5: reveals up to the hourly limit are allowed"
+else
+  fail "E5: reveals below the limit were refused"
+fi
+if as_user "$USER_A" "select * from public.reveal_transaction_sensitive_detail('$E5_T1');" >/dev/null 2>$ARTIFACT_DIR/pfe_e5rl.log; then
+  fail "E5: the 21st reveal in an hour was allowed"
+elif grep -q "rate_limited" $ARTIFACT_DIR/pfe_e5rl.log; then
+  pass "E5: the 21st reveal in an hour is rate limited"
+else
+  fail "E5: 21st reveal failed for another reason: $(cat $ARTIFACT_DIR/pfe_e5rl.log)"
+fi
+rm -f $ARTIFACT_DIR/pfe_e5rl.log
+
+# Malformed rows are rejected by the table itself.
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; insert into public.transaction_sensitive_details (transaction_id, workspace_id, kind, key_id, nonce, ciphertext) values ('00000000-0000-0000-0000-0000000063a1', '$WORKSPACE_A', 'password', 'k1', 'bm9uY2Vub25jZQ==', 'Y2lwaGVydGV4dC1ibG9iLW5vdC1hLXRva2Vu');" >/dev/null 2>&1; then
+  fail "E5: an unknown kind was accepted"
+else
+  pass "E5: only known kinds can be stored"
+fi
+
+# Erasure: a sensitive row leaves with its transaction / Space.
+E5_E_U="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('e5-erase@example.com') returning id;" | head -1)"
+E5_E_WS="$(psql -d pfe_rls -t -A -c "select w.id from public.workspaces w join public.workspace_memberships m on m.workspace_id=w.id where m.user_id='$E5_E_U' and w.kind='personal';" | head -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.accounts (id, workspace_id, name, provider, currency) values ('00000000-0000-0000-0000-0000000061e1', '$E5_E_WS', 'E5 erase', 'mtn_momo', 'RWF');
+  insert into public.momo_messages (id, raw_message, processing_status) values ('00000000-0000-0000-0000-0000000062e1', 'e5e', 'processed');
+  insert into public.transactions (id, momo_message_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version, counterparty_name, settlement_state, affects_balance, principal_effect_rwf, fee_effect_rwf, effect_reason)
+  values ('00000000-0000-0000-0000-0000000063e1', '00000000-0000-0000-0000-0000000062e1', '00000000-0000-0000-0000-0000000061e1', '$E5_E_WS', 'merchant_payment', 'out', 'success', 10, 0, now(), 'test', 'EUCL', 'settled', true, -10, 0, 'settled_outgoing_with_fee');
+  set role service_role;
+  insert into public.transaction_sensitive_details (transaction_id, workspace_id, kind, key_id, nonce, ciphertext) values ('00000000-0000-0000-0000-0000000063e1', '$E5_E_WS', 'utility_token', 'k1', 'bm9uY2Vub25jZQ==', 'Y2lwaGVydGV4dC1ibG9iLW5vdC1hLXRva2Vu');" >/dev/null
+set +e
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; select public.execute_account_deletion('$E5_E_U');" > $ARTIFACT_DIR/pfe_e5e.log 2>&1
+E5_E_RC=$?
+set -e
+E5_E_LEFT="$(psql -d pfe_rls -t -A -c "select count(*) from public.transaction_sensitive_details where workspace_id = '$E5_E_WS';")"
+if [ "$E5_E_RC" = "0" ] && [ "$E5_E_LEFT" = "0" ]; then
+  pass "E5: account erasure removes the user's sensitive details with their transactions"
+else
+  fail "E5: erasure with sensitive details failed (rc=$E5_E_RC left=$E5_E_LEFT $(tail -2 $ARTIFACT_DIR/pfe_e5e.log | tr '\n' ' '))"
+fi
+rm -f $ARTIFACT_DIR/pfe_e5e.log
+
+# ===========================================================================
+# OneLedger 3.0 E7: utility receipts (20261230000000_utility_receipts).
+# ===========================================================================
+echo "=== OneLedger 3.0 E7: utility receipts ==="
+E7_ACCT="00000000-0000-0000-0000-0000000071a1"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "insert into public.accounts (id, workspace_id, name, provider, currency) values ('$E7_ACCT', '$WORKSPACE_A', 'E7 acct', 'mtn_momo', 'RWF');" >/dev/null
+e7_tx() { # nn type amount minutes_ago [direction]
+  local dir="${5:-out}"
+  psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+    insert into public.momo_messages (id, raw_message, processing_status) values ('00000000-0000-0000-0000-0000000072$1', 'e7-$1', 'processed');
+    insert into public.transactions
+      (id, momo_message_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at,
+       parser_version, counterparty_name, settlement_state, affects_balance, principal_effect_rwf, fee_effect_rwf, effect_reason)
+    values ('00000000-0000-0000-0000-0000000073$1', '00000000-0000-0000-0000-0000000072$1', '$E7_ACCT', '$WORKSPACE_A', '$2', '$dir', 'success', $3, 0,
+            now() - interval '$4 minutes', 'test', 'EUCL', 'settled', true, $( [ "$dir" = "in" ] && echo "$3" || echo "-$3" ), 0,
+            '$( [ "$dir" = "in" ] && echo settled_incoming || echo settled_outgoing_with_fee )');" >/dev/null
+}
+E7_T() { echo "00000000-0000-0000-0000-0000000073$1"; }
+E7_H() { printf '%064d' "$1"; }
+e7_store() { # idx amount minutes_ago [with_token]
+  local id="00000000-0000-0000-0000-0000000074$1"
+  local tok="null, null, null"
+  [ "${4:-1}" = "1" ] && tok="'k1', 'bm9uY2Vub25jZQ==', 'Y2lwaGVydGV4dC1ibG9iLW5vdC1hLXRva2Vu'"
+  psql -d pfe_rls -t -A -F'|' -c "set role service_role; select status || '|' || created from public.store_utility_receipt('$id', '$WORKSPACE_A', 'cashpower_en', $2, 11900, '0001', '$(E7_H "$1")', now() - interval '$3 minutes', $tok);" | grep -v '^SET$'
+}
+E7_R() { echo "00000000-0000-0000-0000-0000000074$1"; }
+e7_status() { psql -d pfe_rls -t -A -c "select status || '|' || coalesce(transaction_id::text, '-') || '|' || coalesce(matched_by, '-') || '|' || candidate_count from public.utility_receipts where id = '$(E7_R "$1")';"; }
+
+# 1. receipt first, payment not seen yet -> unmatched; the payment arriving links it
+if [ "$(e7_store 01 7101 0)" = "unmatched|true" ]; then pass "E7: a receipt with no payment yet is stored as unmatched"; else fail "E7: store wrong"; fi
+e7_tx 01 merchant_payment 7101 3
+if [ "$(e7_status 01)" = "matched|$(E7_T 01)|auto|1" ]; then
+  pass "E7: when the MoMo payment arrives later it is linked to the waiting receipt automatically"
+else
+  fail "E7: late payment did not link ('$(e7_status 01)')"
+fi
+
+# 2. payment first, then receipt -> matched immediately
+e7_tx 02 merchant_payment 7102 20
+if [ "$(e7_store 02 7102 0)" = "matched|true" ] && [ "$(e7_status 02)" = "matched|$(E7_T 02)|auto|1" ]; then
+  pass "E7: a receipt arriving after its payment links at once"
+else
+  fail "E7: receipt-after-payment wrong ('$(e7_status 02)')"
+fi
+
+# 3. idempotent re-delivery
+if [ "$(e7_store 02 7102 0)" = "matched|false" ] && [ "$(psql -d pfe_rls -t -A -c "select count(*) from public.utility_receipts where vendor_ref_hash = '$(E7_H 02)';")" = "1" ]; then
+  pass "E7: a re-delivered receipt (same vendor reference) creates nothing new"
+else
+  fail "E7: duplicate handling wrong"
+fi
+
+# 4. what is NOT a candidate: person-to-person send, wrong amount, outside the window, already claimed
+e7_tx 03 send_money 7103 5
+e7_tx 04 merchant_payment 7104 5
+e7_tx 05 merchant_payment 7103 3000
+e7_store 03 7103 0 >/dev/null
+if [ "$(e7_status 03)" = "unmatched|-|-|0" ]; then
+  pass "E7: a send-money, a different amount and a payment days earlier are never matched"
+else
+  fail "E7: wrongly matched ('$(e7_status 03)')"
+fi
+e7_store 04 7101 0 >/dev/null
+if [ "$(e7_status 04)" = "unmatched|-|-|0" ]; then
+  pass "E7: a payment already claimed by another receipt is not offered again"
+else
+  fail "E7: claimed payment re-matched ('$(e7_status 04)')"
+fi
+
+# 5. two plausible payments -> ambiguous; the user chooses; the second receipt takes the other
+e7_tx 06 merchant_payment 7105 30
+e7_tx 07 merchant_payment 7105 10
+e7_store 05 7105 0 >/dev/null
+if [ "$(e7_status 05)" = "ambiguous|-|-|2" ]; then
+  pass "E7: two plausible payments make the receipt ambiguous (never a guess)"
+else
+  fail "E7: ambiguity wrong ('$(e7_status 05)')"
+fi
+if as_user "$USER_A" "select public.confirm_utility_receipt('$(E7_R 05)', '$(E7_T 06)');" >/dev/null 2>&1 && [ "$(e7_status 05)" = "matched|$(E7_T 06)|user|2" ]; then
+  pass "E7: the user confirms which payment it was"
+else
+  fail "E7: confirm wrong ('$(e7_status 05)')"
+fi
+
+# 6. guards on user actions
+e7_tx 08 merchant_payment 7106 5
+e7_store 06 7107 0 >/dev/null
+e7_denied() { # label user sql
+  if as_user "$2" "$3" >/dev/null 2>&1; then fail "E7: allowed: $1"; else pass "E7: refused: $1"; fi
+}
+e7_denied "confirming a payment of a different amount" "$USER_A" "select public.confirm_utility_receipt('$(E7_R 06)', '$(E7_T 08)');"
+e7_denied "confirming an already-claimed payment" "$USER_A" "select public.confirm_utility_receipt('$(E7_R 06)', '$(E7_T 06)');"
+e7_denied "another workspace confirming" "$USER_B" "select public.confirm_utility_receipt('$(E7_R 06)', '$(E7_T 08)');"
+e7_denied "ignoring or unlinking from another workspace" "$USER_B" "select public.ignore_utility_receipt('$(E7_R 06)');"
+
+# 7. unlink a wrong auto-match: it is not silently re-linked
+as_user "$USER_A" "select public.unlink_utility_receipt('$(E7_R 02)');" >/dev/null
+e7_tx 09 merchant_payment 7102 10
+if [ "$(e7_status 02)" = "unmatched|-|-|0" ]; then
+  pass "E7: un-linking a wrong match frees the payment and does not re-link behind the user's back"
+else
+  fail "E7: unlink wrong ('$(e7_status 02)')"
+fi
+as_user "$USER_A" "select public.confirm_utility_receipt('$(E7_R 02)', '$(E7_T 09)');" >/dev/null
+if [ "$(e7_status 02)" = "matched|$(E7_T 09)|user|0" ]; then
+  pass "E7: the user can re-link to the right payment"
+else
+  fail "E7: relink wrong ('$(e7_status 02)')"
+fi
+
+# 8. ignore
+as_user "$USER_A" "select public.ignore_utility_receipt('$(E7_R 06)');" >/dev/null
+if [ "$(psql -d pfe_rls -t -A -c "select status from public.utility_receipts where id = '$(E7_R 06)';")" = "ignored" ]; then
+  pass "E7: a receipt can be ignored"
+else
+  fail "E7: ignore wrong"
+fi
+
+# 9. privacy: the ciphertext is invisible to clients; nothing but the last 4 of the meter is stored
+E7_COLS="$(psql -d pfe_rls -t -A -c "select string_agg(column_name, ',') from information_schema.column_privileges where table_schema = 'public' and table_name = 'utility_receipts' and grantee = 'authenticated' and privilege_type = 'SELECT';")"
+if echo "$E7_COLS" | grep -q "token_" ; then
+  fail "E7: a token column is selectable by authenticated ($E7_COLS)"
+else
+  pass "E7: authenticated has no privilege on any token column of utility_receipts"
+fi
+if as_user "$USER_A" "select token_ciphertext from public.utility_receipts limit 1;" >/dev/null 2>&1; then
+  fail "E7: authenticated selected token_ciphertext"
+else
+  pass "E7: selecting token_ciphertext as a client fails"
+fi
+E7_OWN="$(as_user "$USER_A" "select count(*) from public.utility_receipts;" | tail -1)"
+E7_OTHER="$(as_user "$USER_B" "select count(*) from public.utility_receipts;" | tail -1)"
+if [ "$E7_OWN" -ge 5 ] && [ "$E7_OTHER" = "0" ]; then
+  pass "E7: a member sees their workspace's receipts; another workspace sees none (RLS)"
+else
+  fail "E7: RLS wrong (own=$E7_OWN other=$E7_OTHER)"
+fi
+E7_SVC="$(psql -d pfe_rls -t -A -c "select has_function_privilege('authenticated','public.store_utility_receipt(uuid,uuid,text,bigint,bigint,text,text,timestamptz,text,text,text)','EXECUTE') or has_function_privilege('authenticated','public._link_utility_receipt(uuid)','EXECUTE');")"
+if [ "$E7_SVC" = "false" ] || [ "$E7_SVC" = "f" ]; then
+  pass "E7: clients cannot call the ingest or the internal linking functions"
+else
+  fail "E7: ingest/link functions callable by authenticated"
+fi
+
+# 11. a failing link must never fail the payment's own insert
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; select public.store_utility_receipt('00000000-0000-0000-0000-0000000074f1', '$WORKSPACE_A', 'cashpower_en', 7777, 1000, null, '$(E7_H 99)', now(), null, null, null);" >/dev/null
+if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+    insert into public.momo_messages (id, raw_message, processing_status) values ('00000000-0000-0000-0000-0000000072f1', 'e7-f1', 'processed');
+    insert into public.transactions (id, momo_message_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version, counterparty_name, settlement_state, affects_balance, principal_effect_rwf, fee_effect_rwf, effect_reason)
+    values ('00000000-0000-0000-0000-0000000073f1', '00000000-0000-0000-0000-0000000072f1', '$E7_ACCT', '$WORKSPACE_A', 'merchant_payment', 'out', 'success', 7777, 0, now(), 'test', 'EUCL', 'settled', true, -7777, 0, 'settled_outgoing_with_fee');" >/dev/null 2>&1; then
+  pass "E7: inserting a payment that a receipt is waiting for succeeds (linking is best-effort)"
+else
+  fail "E7: the payment insert failed"
+fi
+
+# 12. audit + erasure
+E7_AUD="$(psql -d pfe_rls -t -A -c "select string_agg(event_type, ',' order by event_type collate \"C\") from (select distinct event_type from public.space_audit_events where workspace_id = '$WORKSPACE_A' and event_type like 'utility_receipt.%') x;")"
+if [ "$E7_AUD" = "utility_receipt.confirmed,utility_receipt.ignored,utility_receipt.unlinked" ]; then
+  pass "E7: confirm, unlink and ignore are each audited"
+else
+  fail "E7: audit wrong ('$E7_AUD')"
+fi
+E7_E_U="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('e7-erase@example.com') returning id;" | head -1)"
+E7_E_WS="$(psql -d pfe_rls -t -A -c "select w.id from public.workspaces w join public.workspace_memberships m on m.workspace_id=w.id where m.user_id='$E7_E_U' and w.kind='personal';" | head -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.accounts (id, workspace_id, name, provider, currency) values ('00000000-0000-0000-0000-0000000071e1', '$E7_E_WS', 'E7 erase', 'mtn_momo', 'RWF');
+  insert into public.momo_messages (id, raw_message, processing_status) values ('00000000-0000-0000-0000-0000000072e1', 'e7e', 'processed');
+  insert into public.transactions (id, momo_message_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version, counterparty_name, settlement_state, affects_balance, principal_effect_rwf, fee_effect_rwf, effect_reason)
+  values ('00000000-0000-0000-0000-0000000073e1', '00000000-0000-0000-0000-0000000072e1', '00000000-0000-0000-0000-0000000071e1', '$E7_E_WS', 'merchant_payment', 'out', 'success', 5000, 0, now(), 'test', 'EUCL', 'settled', true, -5000, 0, 'settled_outgoing_with_fee');
+  set role service_role;
+  select public.store_utility_receipt('00000000-0000-0000-0000-0000000074e1', '$E7_E_WS', 'tokeni_rw', 5000, 11900, '0002', '$(E7_H 98)', now(), 'k1', 'bm9uY2Vub25jZQ==', 'Y2lwaGVydGV4dC1ibG9iLW5vdC1hLXRva2Vu');" >/dev/null
+# 10. reveal through a matched receipt (fresh user: the reveal limit is per user)
+E7_REV="$(as_user "$E7_E_U" "select source || '|' || row_id || '|' || key_id from public.reveal_transaction_sensitive_detail('00000000-0000-0000-0000-0000000073e1');" | tail -1)"
+if [ "$E7_REV" = "receipt|00000000-0000-0000-0000-0000000074e1|k1" ]; then
+  pass "E7: the token of a matched receipt is revealed through the audited path and names its source row"
+else
+  fail "E7: receipt reveal wrong ('$E7_REV')"
+fi
+e7_denied "another workspace revealing a receipt token" "$USER_B" "select * from public.reveal_transaction_sensitive_detail('00000000-0000-0000-0000-0000000073e1');"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.momo_messages (id, raw_message, processing_status) values ('00000000-0000-0000-0000-0000000072e2', 'e7e2', 'processed');
+  insert into public.transactions (id, momo_message_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version, counterparty_name, settlement_state, affects_balance, principal_effect_rwf, fee_effect_rwf, effect_reason)
+  values ('00000000-0000-0000-0000-0000000073e2', '00000000-0000-0000-0000-0000000072e2', '00000000-0000-0000-0000-0000000071e1', '$E7_E_WS', 'merchant_payment', 'out', 'success', 6100, 0, now(), 'test', 'EUCL', 'settled', true, -6100, 0, 'settled_outgoing_with_fee');
+  set role service_role;
+  select public.store_utility_receipt('00000000-0000-0000-0000-0000000074e2', '$E7_E_WS', 'cashpower_en', 6100, 1000, null, '$(E7_H 97)', now(), null, null, null);" >/dev/null
+if as_user "$E7_E_U" "select * from public.reveal_transaction_sensitive_detail('00000000-0000-0000-0000-0000000073e2');" >/dev/null 2>$ARTIFACT_DIR/pfe_e7n.log; then
+  fail "E7: revealed a token that was never captured"
+elif grep -q "sensitive_detail_not_found" $ARTIFACT_DIR/pfe_e7n.log; then
+  pass "E7: a matched receipt with no captured token reveals nothing (generic not-found)"
+else
+  fail "E7: unexpected error for token-less receipt: $(cat $ARTIFACT_DIR/pfe_e7n.log)"
+fi
+rm -f $ARTIFACT_DIR/pfe_e7n.log
+
+set +e
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "set role service_role; select public.execute_account_deletion('$E7_E_U');" > $ARTIFACT_DIR/pfe_e7e.log 2>&1
+E7_E_RC=$?
+set -e
+E7_E_LEFT="$(psql -d pfe_rls -t -A -c "select count(*) from public.utility_receipts where workspace_id = '$E7_E_WS';")"
+if [ "$E7_E_RC" = "0" ] && [ "$E7_E_LEFT" = "0" ]; then
+  pass "E7: account erasure removes the user's receipts (even matched ones) with their transactions"
+else
+  fail "E7: erasure with receipts failed (rc=$E7_E_RC left=$E7_E_LEFT $(tail -2 $ARTIFACT_DIR/pfe_e7e.log | tr '\n' ' '))"
+fi
+rm -f $ARTIFACT_DIR/pfe_e7e.log
+
+# --- E7: scrub_utility_tokens (20261231000000) --------------------------------
+S7_ACCT="00000000-0000-0000-0000-0000000075a1"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.accounts (id, workspace_id, name, provider, currency) values ('$S7_ACCT', '$WORKSPACE_A', 'S7 acct', 'mtn_momo', 'RWF');
+  insert into public.momo_messages (id, raw_message, processing_status) values
+    ('00000000-0000-0000-0000-0000000076a1', 'Your payment of 100 RWF to EUCL with token 0000-1111-2222-3333-4444 was completed', 'processed'),
+    ('00000000-0000-0000-0000-0000000076a2', 'Your payment of 100 RWF to KMLVIO SHOP 093011 was completed', 'processed');
+  insert into public.transactions (id, momo_message_id, account_id, workspace_id, transaction_type, direction, status, amount_rwf, fee_rwf, occurred_at, parser_version, counterparty_name, counterparty_reference, metadata, settlement_state, affects_balance, principal_effect_rwf, fee_effect_rwf, effect_reason)
+  values
+   ('00000000-0000-0000-0000-0000000077a1','00000000-0000-0000-0000-0000000076a1','$S7_ACCT','$WORKSPACE_A','merchant_payment','out','success',100,0,now(),'test','EUCL with token 0000-1111-2222-3333-4444','00001111222233334444','{\"original_counterparty_name\":\"EUCL with token 0000-1111-2222-3333-4444\"}','settled',true,-100,0,'settled_outgoing_with_fee'),
+   ('00000000-0000-0000-0000-0000000077a2','00000000-0000-0000-0000-0000000076a2','$S7_ACCT','$WORKSPACE_A','merchant_payment','out','success',100,0,now(),'test','KMLVIO CENTER AND MILK ZONE SHOP','093011','{\"original_counterparty_name\":\"KMLVIO CENTER AND MILK ZONE SHOP\"}','settled',true,-100,0,'settled_outgoing_with_fee');" >/dev/null
+S7_DRY="$(psql -d pfe_rls -t -A -c "set role service_role; select public.scrub_utility_tokens(true)->>'transaction_labels';" | grep -v '^SET$')"
+S7_BEFORE="$(psql -d pfe_rls -t -A -c "select counterparty_name from public.transactions where id = '00000000-0000-0000-0000-0000000077a1';")"
+if [ "$S7_DRY" = "1" ] && [ "$S7_BEFORE" = "EUCL with token 0000-1111-2222-3333-4444" ]; then
+  pass "E7 scrub: a dry run counts the leaky label and changes nothing"
+else
+  fail "E7 scrub: dry run wrong (count='$S7_DRY' label='$S7_BEFORE')"
+fi
+psql -d pfe_rls -t -A -c "set role service_role; select public.scrub_utility_tokens(false);" >/dev/null
+S7_AFTER="$(psql -d pfe_rls -t -A -c "select coalesce(counterparty_name,'-') || '|' || coalesce(counterparty_reference,'-') || '|' || (metadata->>'original_counterparty_name') from public.transactions where id = '00000000-0000-0000-0000-0000000077a1';")"
+S7_RAW="$(psql -d pfe_rls -t -A -c "select raw_message from public.momo_messages where id = '00000000-0000-0000-0000-0000000076a1';")"
+S7_OK="$(psql -d pfe_rls -t -A -c "select counterparty_name || '|' || counterparty_reference from public.transactions where id = '00000000-0000-0000-0000-0000000077a2';")"
+if [ "$S7_AFTER" = "EUCL|-|EUCL" ] && ! echo "$S7_RAW" | grep -q "0000-1111" && [ "$S7_OK" = "KMLVIO CENTER AND MILK ZONE SHOP|093011" ]; then
+  pass "E7 scrub: tokens are removed from labels, references, metadata and raw evidence; ordinary rows are untouched"
+else
+  fail "E7 scrub: apply wrong (after='$S7_AFTER' raw='$S7_RAW' ordinary='$S7_OK')"
+fi
+S7_AGAIN="$(psql -d pfe_rls -t -A -c "set role service_role; select (public.scrub_utility_tokens(true)->>'transaction_labels') || '|' || (public.scrub_utility_tokens(true)->>'momo_messages');" | grep -v '^SET$')"
+if [ "$S7_AGAIN" = "0|0" ]; then
+  pass "E7 scrub: running it again finds nothing (idempotent)"
+else
+  fail "E7 scrub: not idempotent ('$S7_AGAIN')"
+fi
+S7_PRIV="$(psql -d pfe_rls -t -A -c "select has_function_privilege('authenticated','public.scrub_utility_tokens(boolean)','EXECUTE');")"
+if [ "$S7_PRIV" = "false" ] || [ "$S7_PRIV" = "f" ]; then
+  pass "E7 scrub: clients cannot run the scrub"
+else
+  fail "E7 scrub: callable by authenticated"
+fi
+
+# --- E7 end to end: real processor + real encryption + real DB + real reveal ---
+# Needs Deno (the CI migration job has it; a developer machine may not).
+if command -v deno >/dev/null 2>&1; then
+  E7E_OUT="$(E2E_DB=pfe_rls deno run -A supabase/migrations/tests/e2e_utility_receipts.ts 2>&1)" && E7E_RC=0 || E7E_RC=$?
+  while IFS= read -r line; do
+    case "$line" in
+      PASS:*) pass "E7 e2e: ${line#PASS: }" ;;
+      FAIL:*) fail "E7 e2e: ${line#FAIL: }" ;;
+    esac
+  done < <(echo "$E7E_OUT" | grep -E '^(PASS|FAIL):')
+  if [ "$E7E_RC" != "0" ] && ! echo "$E7E_OUT" | grep -q '^FAIL:'; then
+    fail "E7 e2e: the end-to-end script crashed: $(echo "$E7E_OUT" | tail -3 | tr '\n' ' ')"
+  fi
+else
+  echo "SKIP: E7 end-to-end (deno not installed)"
 fi
 
 # ===========================================================================

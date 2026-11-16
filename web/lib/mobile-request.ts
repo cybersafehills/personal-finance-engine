@@ -137,7 +137,8 @@ export class MobileApiError extends Error {
   constructor(
     readonly status: 400 | 403 | 404 | 409 | 413 | 422,
     readonly code: string,
-    message: string,
+    /** A safe, user-facing sentence (never raw database text); defaults to the code. */
+    message: string = code,
   ) {
     super(message);
   }
@@ -212,6 +213,11 @@ export async function mobileGet(
     const body = await runInSpace(request, auth.token, handler);
     return json(request, { ok: true, ...body }, 200);
   } catch (error) {
+    // A read handler may refuse with a specific status (flag off -> 404, bad
+    // input -> 400, ...), exactly as a mutation can.
+    if (error instanceof MobileApiError) {
+      return json(request, { ok: false, error: error.code, message: error.message }, error.status);
+    }
     // Message only: never the token, the request or the response body. Without
     // this a failing read model returns 500 and leaves no trace in the logs.
     console.error(

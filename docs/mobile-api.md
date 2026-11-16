@@ -124,6 +124,22 @@ required, request-scoped session, `no-store`).
 - Scoped to the active Space (`X-Workspace-Id`, else the personal Space), like the Inbox.
 - Amounts are integer minor units of the budget's currency.
 
+## OneLedger 3.0 endpoints (dark; each behind its own opt-in flag)
+
+All use the same guard as `/inbox` and `/budgets` (flag `MOBILE_API_ENABLED`, per-IP limit, bearer token validated with Supabase Auth, second factor required, `no-store`). Each additionally needs its feature flag (`<FLAG>_ENABLED=true`, optional `<FLAG>_WORKSPACE_ALLOWLIST`) or it answers `404 not_found` (indistinguishable from a missing route). A request may pass `workspace_id` to act on a workspace the caller is an active member of; otherwise it is the personal workspace. A workspace the caller isn't in is `404`, never `403`. Amounts are integer minor units sent as **decimal strings**. Errors: `{ ok:false, error:<code>, message? }` - `message` is only ever a fixed, user-facing sentence.
+
+| Endpoint | Flag | Purpose |
+|---|---|---|
+| `GET /api/mobile/insights/overview?from&to[&account_id=…][&category][&counterparty][&tz][&granularity=day\|week\|month][&compare=previous]` | `INSIGHTS_CENTER` | Money in/out/net, categories, accounts, top counterparties, transfers excluded, pending, per currency. `from`/`to` are full ISO instants (`to` exclusive), max 400 days; `422 range_too_large` above 20,000 transactions. Every aggregate carries a `drilldown` filter. |
+| `GET /api/mobile/insights/drilldown?kind&currency&from&to[&value][&limit<=100&offset]` | `INSIGHTS_CENTER` | The transactions behind one aggregate, classified exactly as the totals are. |
+| `GET /api/mobile/accounts` | `BALANCE_PROVENANCE` | Accounts with `balance.status` = `confirmed\|estimated\|stale\|unavailable`, `amount_minor` (null when unavailable), `as_of`, `basis`, `reasons`. |
+| `GET /api/mobile/counterparties?[q][&kind][&limit&offset]` | `COUNTERPARTIES` | People/merchants with sent/received/net/count/first/last per currency, plus `unresolved_transactions`. |
+| `GET /api/mobile/counterparties/{id}` | `COUNTERPARTIES` | One counterparty, what was merged into it, and its transactions (paged). `409 merged_into:<id>` if it was merged away. |
+| `POST /api/mobile/payment-requests` | `PAYMENT_REQUESTS` | Create a non-custodial payment request; returns `{ id, url, replayed }`. The link is returned **once** (`url` is null on an idempotent replay). Body: `amount_minor` (digit string), `currency`, `destination_type` (`momo_phone`\|`merchant_code`), `destination_value`, `recipient_display`, `reference?`, `expires_in_hours` (24/72/168/720/2160), `idempotency_key`. `422 payment_request_rejected` carries a safe `message`. |
+| `POST /api/mobile/transactions/{id}/reveal-token` | `UTILITY_TOKEN_CAPTURE_ENABLED` | Show a prepaid-electricity token (once, `no-store`). Every call is audited and limited to 20/hour/user; requires member+ and visibility of the transaction's source. `404 not_found` for anything the caller may not see (no oracle); `422 reveal_failed` with a safe `message` otherwise. Decryption uses the server-only `SENSITIVE_DATA_KEYRING`. |
+
+**Mutations the app calls directly with supabase-js under RLS** (member+ checked and audited inside the function; no extra API needed): `record_manual_balance_observation(p_account_id, p_amount_minor, p_as_of, p_note)`, `backfill_counterparties(p_workspace_id)`, `update_counterparty(p_id, p_display_name, p_kind)`, `merge_counterparties(p_survivor, p_merged)`, `undo_counterparty_merge(p_event_id)`, `split_counterparty(p_counterparty_id, p_identifier_ids, p_transaction_ids, p_new_name)` (returns the split event id), `undo_counterparty_split(p_event_id)`, `cancel_payment_request(p_id)`, `mark_payment_request_paid_by_owner(p_id, p_note)`, `link_payment_request_transaction(p_id, p_transaction_id)`. Reads of `payment_requests_v` / `payment_request_events` are plain RLS selects.
+
 ## `GET /api/mobile/statements`
 
 The user's generated **statements**, newest first (at most 30), for the app's

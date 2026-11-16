@@ -23,6 +23,20 @@ const SUPABASE_ORIGIN = (
 const API_HOST = "api.oneledger.me";
 
 const nextConfig: NextConfig = {
+  // Payment-request links carry a secret token in the path: never cache the
+  // page, never index it, and never send it as a Referer to another site.
+  async headers() {
+    return [
+      {
+        source: "/r/:token",
+        headers: [
+          { key: "Cache-Control", value: "no-store, max-age=0" },
+          { key: "X-Robots-Tag", value: "noindex, nofollow" },
+          { key: "Referrer-Policy", value: "no-referrer" },
+        ],
+      },
+    ];
+  },
   async rewrites() {
     if (!SUPABASE_ORIGIN) return [];
     return [

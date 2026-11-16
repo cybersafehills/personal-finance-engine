@@ -1,6 +1,7 @@
 export { Badge, type BadgeVariant } from "./Badge";
 export { Button, type ButtonProps, type ButtonVariant } from "./Button";
 export { Card } from "./Card";
+export { Chip } from "./Chip";
 export {
   CONNECTION_STATUSES,
   ConnectionStatusBadge,
@@ -11,6 +12,7 @@ export {
 export { EmptyState } from "./EmptyState";
 export { MoneyAmount } from "./MoneyAmount";
 export { ProgressBar, type ProgressTone } from "./ProgressBar";
+export { QrCode } from "./QrCode";
 export { ScreenHeader } from "./ScreenHeader";
 export { StatTile } from "./StatTile";
 export { Text, type TextProps } from "./Text";

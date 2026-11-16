@@ -60,6 +60,26 @@
     {
       "message": "Balance enquiry: 12,000 RWF available.",
       "provider": null
+    },
+    {
+      "message": "Cashpower Token:\n0000-1111-2222-3333-4444\nPurchased 11.90 KWh for 5,000 RWF,\nMeter# 10000000001\nTxID: 20000000000001",
+      "provider": "utility_receipt"
+    },
+    {
+      "message": "18/07/2026:\nTokeni:\n5555-6666-7777-8888-9999\nKonteri: 10000000001\n(TEST CUSTOMER NAME)\n1,000 RWF = 2.4 kWh\nTXNID: K1700000000000001",
+      "provider": "utility_receipt"
+    },
+    {
+      "message": "Your verification code: 0000 1111 2222 3333 4444. Do not share it. 5,000 RWF limit.",
+      "provider": null
+    },
+    {
+      "message": "Cashpower Token:\n0000-1111-2222-3333-4444\nPurchased for 5,000 RWF",
+      "provider": null
+    },
+    {
+      "message": "Tokeni: 0000-1111-2222-3333 1,000 RWF = 2.4 kWh",
+      "provider": null
     }
   ]
 }

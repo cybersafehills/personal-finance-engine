@@ -9,6 +9,7 @@ import { TransactionList } from "../../components/TransactionList";
 import { TransactionSearchBar } from "../../components/TransactionSearchBar";
 import { LifetimeFlowBadge } from "../../components/LifetimeFlowBadge";
 import { PageHeader } from "../../components/PageHeader";
+import { countOpenReceipts } from "../../lib/utility-receipts";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +37,7 @@ export default async function TransactionsPage({
   const amountMin = parseAmount(sp.min);
   const amountMax = parseAmount(sp.max);
 
-  const [transactions, reviewQueueCount, accounts, lifetimeFlow] = await Promise
+  const [transactions, reviewQueueCount, accounts, lifetimeFlow, openReceiptCount] = await Promise
     .all([
       getTransactions({
         limit: 100,
@@ -51,6 +52,7 @@ export default async function TransactionsPage({
       getReviewQueueCount(),
       getAccounts(),
       getLifetimeFlowTotals(),
+      countOpenReceipts(),
     ]);
 
   const accountOptions = accounts
@@ -83,6 +85,14 @@ export default async function TransactionsPage({
             >
               Review queue{reviewQueueCount > 0 ? ` (${reviewQueueCount})` : ""}
             </Link>
+            {openReceiptCount > 0 && (
+              <Link
+                href="/transactions/receipts"
+                className="text-sm font-medium text-accent hover:underline"
+              >
+                Electricity receipts ({openReceiptCount})
+              </Link>
+            )}
             <Link
               href="/transactions/transfers"
               className="text-sm font-medium text-accent hover:underline"

@@ -19,6 +19,8 @@ import {
   type PipelineRoute,
 } from "../_shared/ingestion-pipeline.ts";
 import { authorizeProcessorRequest, decideParseStatus } from "./lib.ts";
+import { type Keyring, parseKeyring } from "../_shared/sensitive-crypto.ts";
+import { processUtilityReceipt } from "./utility.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
@@ -26,6 +28,18 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
 const BATCH_LIMIT = 20;
 const SMS_RECONCILIATION_ENABLED =
   Deno.env.get("SMS_RECONCILIATION_ENABLED") === "true";
+
+// Encrypted keeping of prepaid-electricity tokens (ADR 0020): off unless
+// UTILITY_TOKEN_CAPTURE_ENABLED === "true" AND SENSITIVE_DATA_KEYRING is a valid
+// keyring. Otherwise the receipt is still recorded, the token is not kept.
+const UTILITY_TOKEN_CAPTURE_ENABLED =
+  Deno.env.get("UTILITY_TOKEN_CAPTURE_ENABLED") === "true";
+let SENSITIVE_RING: Keyring | null = null;
+try {
+  SENSITIVE_RING = await parseKeyring(Deno.env.get("SENSITIVE_DATA_KEYRING"));
+} catch {
+  console.error(JSON.stringify({ event: "sensitive_keyring_invalid" }));
+}
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
@@ -224,6 +238,66 @@ async function processRow(
     })
       .eq("id", row.id);
     return "failed";
+  }
+
+  // A prepaid-electricity receipt is not a transaction: it is recorded as a
+  // utility_receipts row that the database links to the MoMo payment.
+  if (row.provider_key === "utility_receipt") {
+    const outcome = await processUtilityReceipt({
+      rawMessage,
+      deviceReceivedAt,
+      eventReceivedAt: row.received_at,
+      workspaceId: conn.workspace_id as string,
+      attempts,
+      captureEnabled: UTILITY_TOKEN_CAPTURE_ENABLED,
+      ring: SENSITIVE_RING,
+      deps: {
+        storeReceipt: async (a) => {
+          const { data, error } = await supabase.rpc("store_utility_receipt", {
+            p_id: a.id,
+            p_workspace_id: a.workspaceId,
+            p_format: a.format,
+            p_amount_rwf: a.amountRwf,
+            p_kwh_milli: a.kwhMilli,
+            p_meter_last4: a.meterLast4,
+            p_vendor_ref_hash: a.vendorRefHash,
+            p_receipt_at: a.receiptAt,
+            p_token_key_id: a.tokenKeyId,
+            p_token_nonce: a.tokenNonce,
+            p_token_ciphertext: a.tokenCiphertext,
+          });
+          const first = Array.isArray(data) ? data[0] : null;
+          if (error || !first) return { ok: false };
+          return {
+            ok: true,
+            created: first.created === true,
+            status: String(first.status),
+          };
+        },
+        finalize: async (patch) => {
+          await supabase.from("raw_financial_events").update({
+            parse_status: patch.parseStatus,
+            // the evidence row keeps the message with the token removed
+            raw_payload: patch.rawMessage === null
+              ? rawPayload
+              : { ...rawPayload, raw_message: patch.rawMessage },
+          }).eq("id", row.id);
+        },
+      },
+    });
+    // Outcome only - never a value.
+    console.log(JSON.stringify({ event: "utility_receipt", outcome }));
+    if (outcome === "retried") {
+      await supabase.from("raw_financial_events").update({
+        parse_status: "pending",
+        raw_payload: { ...rawPayload, processor_attempts: attempts + 1 },
+      }).eq("id", row.id);
+    } else if (outcome === "failed" && attempts + 1 >= 5) {
+      await supabase.from("raw_financial_events").update({
+        parse_status: "rejected",
+      }).eq("id", row.id);
+    }
+    return outcome;
   }
 
   // Synthesize the momo_messages evidence row (reused as the raw-SMS store).

@@ -70,6 +70,58 @@ export default function More() {
       <NotificationsCard />
 
       <Card style={{ gap: space[3] }}>
+        <Text variant="bodyStrong">Insights</Text>
+        <Text variant="label" color="textSecondary">
+          Where your money went this month, and what is behind each number.
+        </Text>
+        <Button
+          label="Open insights"
+          variant="secondary"
+          fullWidth
+          onPress={() => router.push("/insights")}
+        />
+      </Card>
+
+      <Card style={{ gap: space[3] }}>
+        <Text variant="bodyStrong">People and merchants</Text>
+        <Text variant="label" color="textSecondary">
+          Who you pay and who pays you, grouped from your transactions.
+        </Text>
+        <Button
+          label="Open people and merchants"
+          variant="secondary"
+          fullWidth
+          onPress={() => router.push("/people")}
+        />
+      </Card>
+
+      <Card style={{ gap: space[3] }}>
+        <Text variant="bodyStrong">Payment requests</Text>
+        <Text variant="label" color="textSecondary">
+          Ask someone to pay you with a link. You confirm the payment yourself.
+        </Text>
+        <Button
+          label="Open payment requests"
+          variant="secondary"
+          fullWidth
+          onPress={() => router.push("/requests")}
+        />
+      </Card>
+
+      <Card style={{ gap: space[3] }}>
+        <Text variant="bodyStrong">Wallets</Text>
+        <Text variant="label" color="textSecondary">
+          Your balances, and how sure we are about each one.
+        </Text>
+        <Button
+          label="Open wallets"
+          variant="secondary"
+          fullWidth
+          onPress={() => router.push("/wallets")}
+        />
+      </Card>
+
+      <Card style={{ gap: space[3] }}>
         <Text variant="bodyStrong">Reports</Text>
         <Text variant="label" color="textSecondary">
           Your daily financial reports.

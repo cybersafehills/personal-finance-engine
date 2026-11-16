@@ -16,7 +16,8 @@ const TRANSACTION_CAP = 10_000;
 
 export type AccountDataExport = {
   exportedAt: string;
-  schemaVersion: 1;
+  /** 2 adds counterparties, balanceObservations and paymentRequests (OneLedger 3.0). */
+  schemaVersion: 2;
   profile: Record<string, unknown> | null;
   workspaces: unknown[];
   financialSources: unknown[];
@@ -26,7 +27,21 @@ export type AccountDataExport = {
   categorizationRules: unknown[];
   budgets: unknown[];
   goals: unknown[];
+  /** People/merchants resolved from transactions, with the identifiers used. */
+  counterparties: unknown[];
+  counterpartyIdentifiers: unknown[];
+  /** Balances the user stated manually (provider-reported ones live on transactions). */
+  balanceObservations: unknown[];
+  /** Payment requests the user created, plus their history. The secret link
+   *  token is never stored, so it cannot (and must not) appear here. */
+  paymentRequests: unknown[];
+  paymentRequestEvents: unknown[];
 };
+
+// Explicit columns, never "*": the payment_requests table holds a token digest
+// that has no value to the user and must not leave the database.
+const PAYMENT_REQUEST_COLUMNS =
+  "id, workspace_id, amount_minor, currency, destination_type, destination_value, recipient_display, reference, expires_at, status, matched_transaction_id, cancelled_at, paid_marked_at, paid_marked_note, created_at";
 
 export async function assembleAccountDataExport(): Promise<
   AccountDataExport | null
@@ -46,6 +61,10 @@ export async function assembleAccountDataExport(): Promise<
     rules,
     budgets,
     goals,
+    counterparties,
+    counterpartyIdentifiers,
+    balanceObservations,
+    paymentRequests,
   ] = await Promise.all([
     supabase.from("profiles").select("*").eq("id", user.id).maybeSingle(),
     supabase
@@ -65,13 +84,26 @@ export async function assembleAccountDataExport(): Promise<
     supabase.from("categorization_policies").select("*"),
     supabase.from("budgets").select("*"),
     supabase.from("financial_goals").select("*"),
+    supabase.from("counterparties").select("*"),
+    supabase.from("counterparty_identifiers").select("*"),
+    supabase.from("balance_observations").select("*"),
+    supabase
+      .from("payment_requests")
+      .select(PAYMENT_REQUEST_COLUMNS)
+      .eq("created_by", user.id),
   ]);
+
+  const requestIds = (paymentRequests.data ?? []).map((r) => r.id);
+  const requestEvents = requestIds.length === 0 ? { data: [] } : await supabase
+    .from("payment_request_events")
+    .select("id, payment_request_id, event_type, created_at, metadata")
+    .in("payment_request_id", requestIds);
 
   const txnRows = transactions.data ?? [];
 
   return {
     exportedAt: new Date().toISOString(),
-    schemaVersion: 1,
+    schemaVersion: 2,
     profile: (profile.data as Record<string, unknown> | null) ?? null,
     workspaces: memberships.data ?? [],
     financialSources: sources.data ?? [],
@@ -83,5 +115,10 @@ export async function assembleAccountDataExport(): Promise<
     categorizationRules: rules.data ?? [],
     budgets: budgets.data ?? [],
     goals: goals.data ?? [],
+    counterparties: counterparties.data ?? [],
+    counterpartyIdentifiers: counterpartyIdentifiers.data ?? [],
+    balanceObservations: balanceObservations.data ?? [],
+    paymentRequests: paymentRequests.data ?? [],
+    paymentRequestEvents: requestEvents.data ?? [],
   };
 }

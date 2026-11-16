@@ -49,7 +49,8 @@ insert into tt.allow values
   ('rls_off',        'auth_login_attempts',    'login lockout counters; service-role only, no client grants (asserted below)'),
   ('open_select',    'regulatory_authorities', 'public reference data, SELECT only'),
   ('open_select',    'service_operators',      'public reference data, SELECT only'),
-  ('anon_function',  'invite_preview',         'invite landing page, takes an unguessable token hash and returns a redacted preview');
+  ('anon_function',  'invite_preview',         'invite landing page, takes an unguessable token hash and returns a redacted preview'),
+  ('anon_function',  'resolve_payment_request','public payment-request link: takes only the SHA-256 digest of an unguessable 256-bit token and returns the minimum a payer needs (docs/oneledger-3/s5-payment-requests.md)');
 
 -- Per-table column values the generic row builder cannot infer from types and
 -- CHECK constraints (format regexes, exactly-one-of-N targets, cross-column
@@ -71,7 +72,13 @@ insert into tt.overrides values
   ('webhook_subscriptions',        'url',             $$'https://example.invalid/hook'$$),
   ('categorization_policies',      'merchant_pattern',$$'seed'$$),
   ('budgets',                      'period_start',    $$date '2026-01-01'$$),
-  ('budgets',                      'period_end',      $$date '2026-01-31'$$);
+  ('budgets',                      'period_end',      $$date '2026-01-31'$$),
+  -- OneLedger 3.0: format / cross-column rules the generic builder cannot infer
+  ('payment_requests',             'destination_type',  $$'momo_phone'$$),
+  ('payment_requests',             'destination_value', $$'250793000439'$$),
+  ('payment_requests',             'token_hash',        $$repeat('c', 64)$$),
+  ('payment_requests',             'expires_at',        $$now() + interval '1 day'$$),
+  ('counterparty_merge_events',    'merged_ids',        $$array[extensions.gen_random_uuid()]$$);
 
 -- Value for one NOT NULL, default-less column, from its type or from the single
 -- column CHECK that lists literals. NULL = cannot synthesise.
@@ -272,6 +279,10 @@ begin
         on g.table_schema = 'public' and g.table_name = c.table_name
        and g.grantee = 'authenticated' and g.privilege_type = 'SELECT'
      where c.table_schema = 'public' and c.column_name = 'workspace_id'
+       -- BASE tables only: a security_invoker view (e.g. payment_requests_v) is
+       -- governed by the RLS of the tables under it and cannot be planted into.
+       and exists (select 1 from information_schema.tables t
+                    where t.table_schema = 'public' and t.table_name = c.table_name and t.table_type = 'BASE TABLE')
      order by 1
   loop
     select * into q from tt.build_insert(r.t, wa, ua);

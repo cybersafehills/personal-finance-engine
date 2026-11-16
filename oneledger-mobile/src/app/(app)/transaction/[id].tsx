@@ -34,6 +34,7 @@ import { loadPayAgainOffer } from "@/features/pay/context";
 import { useActiveSpace } from "@/features/spaces/ActiveSpaceProvider";
 import { isInRequestedSpace, requestedWorkspaceId } from "@/features/spaces/spaces";
 import { getTransactionById } from "@/features/transactions/queries";
+import { ReceiptCard } from "@/features/receipts/ReceiptCard";
 import { useQuery } from "@/hooks/useQuery";
 import { config } from "@/lib/config";
 import { formatFullDateTime } from "@/lib/kigali-time";
@@ -179,6 +180,8 @@ export default function TransactionDetail() {
           <Row label="Reference" value={transaction.counterparty_reference} />
         ) : null}
       </Card>
+
+      <ReceiptCard transactionId={transaction.id} />
 
       <Card style={{ gap: space[2] }}>
         <Text variant="caption" color="textMuted" accessibilityRole="header">

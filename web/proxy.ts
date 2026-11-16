@@ -49,6 +49,11 @@ const PUBLIC_PATHS = [
   // FINANCIAL_STATEMENTS_ENABLED is unset and are per-IP rate-limited.
   "/verify",
   "/api/verify",
+  // Public payment-request page (/r/<token>) - a payer opening a shared
+  // "please pay me" link has no OneLedger account. Shows only the minimum
+  // needed to pay; 404 when PAYMENT_REQUESTS_ENABLED is unset; per-IP
+  // rate-limited. Non-custodial: it never takes or verifies a payment.
+  "/r",
 ];
 
 // Of those, only these should redirect an already-signed-in user away -

@@ -23,6 +23,21 @@ import {
   type ReportsResult,
 } from "@/features/reports/parse";
 import { parseInboxResponse, type InboxResult } from "@/features/inbox/parse";
+import {
+  parseDrilldownResponse,
+  parseInsightsResponse,
+  type DrilldownResult,
+  type InsightsResult,
+} from "@/features/insights/parse";
+import type { Drilldown } from "@/features/insights/types";
+import {
+  parsePeopleResponse,
+  parsePersonResponse,
+  type PeopleResult,
+  type PersonResult,
+} from "@/features/people/parse";
+import type { PersonKind } from "@/features/people/types";
+import { parseWalletsResponse, type WalletsResult } from "@/features/wallets/parse";
 import { parseSpacesEnabled } from "@/features/spaces/config";
 import type { InviteRole, MemberRole } from "@/features/spaces/members";
 import {
@@ -129,6 +144,72 @@ export async function fetchBudgets(): Promise<BudgetsResult> {
     return { ok: false, ...failureForOutcome(result, "Your budget") };
   }
   return parseBudgetsResponse(result.status, result.body);
+}
+
+/** Money in/out/net, categories and top people for a period (whole Kigali days, `to` exclusive). */
+export async function fetchInsights(params: {
+  from: string;
+  to: string;
+  accountIds?: string[];
+  compare?: boolean;
+}): Promise<InsightsResult> {
+  const q = new URLSearchParams({ from: params.from, to: params.to, tz: "Africa/Kigali" });
+  for (const id of params.accountIds ?? []) q.append("account_id", id);
+  if (params.compare) q.set("compare", "previous");
+  const result = await bearerGet(`/api/mobile/insights/overview?${q.toString()}`);
+  if (result.kind !== "response") {
+    return { ok: false, ...failureForOutcome(result, "Insights") };
+  }
+  return parseInsightsResponse(result.status, result.body);
+}
+
+/** The transactions behind one number on the Insights screen. */
+export async function fetchDrilldown(d: Drilldown, limit = 50, offset = 0): Promise<DrilldownResult> {
+  const q = new URLSearchParams({
+    kind: d.kind,
+    currency: d.currency,
+    from: d.from,
+    to: d.to,
+    limit: String(limit),
+    offset: String(offset),
+  });
+  if (d.value !== null) q.set("value", d.value);
+  for (const id of d.accountIds ?? []) q.append("account_id", id);
+  const result = await bearerGet(`/api/mobile/insights/drilldown?${q.toString()}`);
+  if (result.kind !== "response") {
+    return { ok: false, ...failureForOutcome(result, "These transactions") };
+  }
+  return parseDrilldownResponse(result.status, result.body);
+}
+
+/** Wallets with an honest balance label (Confirmed / Estimated / Out of date / Not available). */
+export async function fetchWallets(): Promise<WalletsResult> {
+  const result = await bearerGet("/api/mobile/accounts");
+  if (result.kind !== "response") {
+    return { ok: false, ...failureForOutcome(result, "Your wallets") };
+  }
+  return parseWalletsResponse(result.status, result.body);
+}
+
+/** People and merchants with sent/received/net per currency (all time). */
+export async function fetchPeople(params: { q?: string; kind?: PersonKind; limit?: number }): Promise<PeopleResult> {
+  const q = new URLSearchParams({ limit: String(params.limit ?? 100) });
+  if (params.q && params.q.trim()) q.set("q", params.q.trim().slice(0, 80));
+  if (params.kind) q.set("kind", params.kind);
+  const result = await bearerGet(`/api/mobile/counterparties?${q.toString()}`);
+  if (result.kind !== "response") {
+    return { ok: false, ...failureForOutcome(result, "People and merchants") };
+  }
+  return parsePeopleResponse(result.status, result.body);
+}
+
+/** One person or merchant, with their transactions. */
+export async function fetchPerson(id: string, limit = 50): Promise<PersonResult> {
+  const result = await bearerGet(`/api/mobile/counterparties/${encodeURIComponent(id)}?limit=${limit}`);
+  if (result.kind !== "response") {
+    return { ok: false, ...failureForOutcome(result, "This person") };
+  }
+  return parsePersonResponse(result.status, result.body);
 }
 
 /** The user's generated statements (read-only; generating stays on the web). */

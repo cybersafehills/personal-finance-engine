@@ -56,7 +56,30 @@ private fun looksLikeMtnMomo(message: String): Boolean {
         MTN_VERBS.any { it.containsMatchIn(message) }
 }
 
+// Prepaid-electricity ("Cash Power") receipts from the electricity vendor's own
+// SMS sender (not MTN). Port of looksLikeUtilityReceipt in providers.ts: a
+// labelled 20-digit token AND the word kWh AND an RWF amount. Must come BEFORE
+// MTN in the list: the English receipt contains "TxID:", which an MTN marker
+// would otherwise claim.
+private val UTILITY_TOKEN_LINE = Regex(
+    "\\b(?:cash\\s?power\\s+token|tokeni)\\s*:?\\s*\\d{4}(?:[-\\s]\\d{4}){4}(?!\\d)",
+    RegexOption.IGNORE_CASE,
+)
+
+private fun looksLikeUtilityReceipt(message: String): Boolean =
+    UTILITY_TOKEN_LINE.containsMatchIn(message) &&
+        Regex("\\bkwh\\b", RegexOption.IGNORE_CASE).containsMatchIn(message) &&
+        Regex("\\bRWF\\b", RegexOption.IGNORE_CASE).containsMatchIn(message)
+
 private val PROVIDER_MATCHERS: List<ProviderMatcher> = listOf(
+    ProviderMatcher(
+        provider = DetectedProvider(
+            providerKey = "utility_receipt",
+            connectorKey = "utility_receipt_sms_v1",
+            channel = "sms",
+        ),
+        detect = ::looksLikeUtilityReceipt,
+    ),
     ProviderMatcher(
         provider = DetectedProvider(
             providerKey = "mtn_momo",

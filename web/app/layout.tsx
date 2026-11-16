@@ -14,6 +14,7 @@ import {
   getUiPreferences,
   getUserWorkspaces,
 } from "../lib/queries";
+import { isPaymentRequestsEnabledForWorkspace } from "../lib/payment-requests/owner";
 import {
   isAssistedPayEnabled,
   isPayServicesEnabled,
@@ -134,6 +135,18 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   const payEnabled = Boolean(user) && isPayServicesEnabled(activeWorkspaceId);
   const assistedPayEnabled = payEnabled && isAssistedPayEnabled(activeWorkspaceId);
   const scanToPayEnabled = payEnabled && isScanToPayEnabled(activeWorkspaceId);
+  // Non-custodial payment requests (OneLedger 3.0): opt-in flag + optional
+  // allowlist, independent of the outbound Pay & Services flags. The page and
+  // its actions re-check this on the server.
+  const paymentRequestsEnabled = Boolean(user) &&
+    isPaymentRequestsEnabledForWorkspace(
+      {
+        PAYMENT_REQUESTS_ENABLED: process.env.PAYMENT_REQUESTS_ENABLED,
+        PAYMENT_REQUESTS_WORKSPACE_ALLOWLIST:
+          process.env.PAYMENT_REQUESTS_WORKSPACE_ALLOWLIST,
+      },
+      activeWorkspaceId,
+    );
   const integrationsEnabled =
     Boolean(user) && isIntegrationsEnabled(activeWorkspaceId);
 
@@ -182,6 +195,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           privacyMode={uiPreferences.privacyMode}
           payEnabled={payEnabled}
           assistedPayEnabled={assistedPayEnabled}
+          paymentRequestsEnabled={paymentRequestsEnabled}
           scanToPayEnabled={scanToPayEnabled}
           integrationsEnabled={integrationsEnabled}
           experienceMode={experienceMode}
