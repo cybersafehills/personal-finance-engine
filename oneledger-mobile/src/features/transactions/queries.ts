@@ -2,6 +2,7 @@ import { supabase } from "@/api/supabase";
 import { kigaliDateKey, kigaliDayBoundsUtc } from "@/lib/kigali-time";
 
 import { NO_FILTERS, periodStartUtc, type TransactionFilters } from "./filters";
+import { sumLifetimeFlow, type LifetimeFlow, type LifetimeRow } from "./lifetime";
 import { pickPlausibleBalance, safeSearchTerm, sumTodayTotals } from "./display";
 
 // Read queries, ported from web/lib/queries.ts. Like the web, every query
@@ -139,4 +140,36 @@ export async function getReviewQueueCount(): Promise<number> {
     .in("category_decision_status", REVIEW_STATUSES);
   if (error) throw new QueryError(error.message);
   return count ?? 0;
+}
+
+export type LifetimeTotals = LifetimeFlow & { accountCreatedIso: string | null };
+
+const LIFETIME_PAGE = 1000;
+// A runaway guard (50,000 transactions), not a limit anyone should reach.
+const LIFETIME_MAX_PAGES = 50;
+
+/**
+ * All-time totals sent and received (web `getLifetimeFlowTotals`): settled
+ * transactions, merged duplicates excluded. Read a page at a time because the
+ * API returns at most 1,000 rows per request; summing one request would
+ * silently stop at 1,000 transactions.
+ */
+export async function getLifetimeFlowTotals(): Promise<LifetimeTotals> {
+  const db = client();
+  const rows: LifetimeRow[] = [];
+  for (let page = 0; page < LIFETIME_MAX_PAGES; page++) {
+    const { data, error } = await db
+      .from("transactions")
+      .select("direction, principal_effect_rwf, fee_effect_rwf")
+      .eq("settlement_state", "settled")
+      .neq("dedupe_state", "merged")
+      // A stable order, or pages can overlap or skip rows.
+      .order("id", { ascending: true })
+      .range(page * LIFETIME_PAGE, (page + 1) * LIFETIME_PAGE - 1);
+    if (error) throw new QueryError(error.message);
+    rows.push(...((data ?? []) as LifetimeRow[]));
+    if (!data || data.length < LIFETIME_PAGE) break;
+  }
+  const { data: userData } = await db.auth.getUser();
+  return { ...sumLifetimeFlow(rows), accountCreatedIso: userData.user?.created_at ?? null };
 }
