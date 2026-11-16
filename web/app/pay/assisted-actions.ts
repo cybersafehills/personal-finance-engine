@@ -1,19 +1,14 @@
 "use server";
 
-import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { supabaseSession } from "../../lib/supabase-session-server";
-import { supabaseServer } from "../../lib/supabase-server";
 import { getActiveWorkspaceId } from "../../lib/queries";
 import {
   assertAssistedPayEnabled,
   assertPaymentIntentSurfaceEnabled,
   FeatureDisabledError,
   isPaymentTemplatesEnabled,
-  isSmsReconciliationEnabled,
   isTrustedRecipientsEnabled,
-  paymentIntentTtlHours,
-  smsReconciliationMode,
 } from "../../lib/pay/gate";
 import {
   guessProvider,
@@ -21,31 +16,17 @@ import {
   normalizeRwandaMsisdn,
 } from "../../lib/pay/phone";
 import { isSessionFresh } from "../../lib/pay/intents";
-import { getServiceCodeForPayment } from "../../lib/ussd/queries";
+import { recordPaymentHandoff } from "../../lib/pay/handoff";
 import {
-  type ParamSpec,
-  redactUssdForAnalytics,
-} from "../../lib/ussd/capability";
+  createPaymentIntent,
+  type DraftInput,
+  isPaymentType,
+  type PayIntentResult,
+} from "../../lib/pay/create-intent";
 import { requireMfaForSensitiveAction } from "../../lib/auth/assurance";
 
 export type PayResult = { ok: true } | { ok: false; error: string };
-export type PayIntentResult =
-  | { ok: true; id: string; existed?: boolean }
-  | { ok: false; error: string };
-
-const PAYMENT_TYPES = [
-  "pay_person",
-  "pay_merchant",
-  "pay_bill",
-  "buy_electricity",
-  "buy_airtime",
-  "government",
-] as const;
-type PaymentType = (typeof PAYMENT_TYPES)[number];
-
-function isPaymentType(v: string): v is PaymentType {
-  return (PAYMENT_TYPES as readonly string[]).includes(v);
-}
+export type { DraftInput, PayIntentResult };
 
 async function ctx() {
   const supabase = await supabaseSession();
@@ -70,29 +51,6 @@ function mapErr(err: unknown): { ok: false; error: string } {
 // Drafts & intents
 // ---------------------------------------------------------------------------
 
-export type DraftInput = {
-  paymentType: string;
-  provider?: string;
-  sourceAccountId?: string;
-  amountMinor: number;
-  recipientName?: string;
-  recipientMsisdn?: string;
-  merchantCode?: string;
-  meterNumber?: string;
-  billingReference?: string;
-  governmentReference?: string;
-  serviceCodeId?: string;
-  ussdTemplate?: string;
-  ussdParamSpecs?: ParamSpec[];
-  note?: string;
-  category?: string;
-  budgetId?: string;
-  trustedRecipientId?: string;
-  templateId?: string;
-  /** Client-held key so a retried submit is a no-op, not a duplicate. */
-  idempotencyKey?: string;
-};
-
 /**
  * Create a draft payment intent via the Phase N RPC. The RPC generates
  * the idempotency key (or reuses a client-supplied one) and dedupes on
@@ -107,127 +65,16 @@ export async function createDraftIntent(
     const { supabase, userId, workspaceId } = await ctx();
     if (!userId) return { ok: false, error: "Sign in to prepare a payment." };
     assertAssistedPayEnabled(workspaceId);
-    if (!isPaymentType(input.paymentType)) {
-      return { ok: false, error: "Unknown payment type." };
-    }
-    if (!Number.isInteger(input.amountMinor) || input.amountMinor <= 0) {
-      return { ok: false, error: "Enter an amount greater than zero." };
-    }
-
-    const norm = input.recipientMsisdn
-      ? normalizeRwandaMsisdn(input.recipientMsisdn)
-      : { normalized: null, display: "" };
-    if (input.recipientMsisdn && !norm.normalized) {
-      return {
-        ok: false,
-        error: "That doesn't look like a Rwandan mobile number.",
-      };
-    }
-
-    const providerGuess = input.provider ?? guessProvider(norm.normalized) ??
-      null;
-
-    // Give the intent a real USSD template to hand off with, resolved
-    // from the published directory (never a hard-coded string). Only the
-    // redacted template is persisted.
-    let serviceCodeId = input.serviceCodeId ?? null;
-    let ussdRedacted: string | null = input.ussdTemplate && input.ussdParamSpecs
-      ? redactUssdForAnalytics(input.ussdTemplate, input.ussdParamSpecs)
-      : (input.ussdTemplate ?? null);
-    // Map the payment type onto the published directory `intent` we can
-    // hand off with. Without this, a merchant / bill payment never gets a
-    // service_code_id and the review screen can only ever say "no
-    // verified USSD route" - the concatenated *182*8*1*code*amount# form
-    // is generated from the resolved code, never hard-coded here.
-    const directoryIntent: string | null =
-      input.paymentType === "pay_person" || input.paymentType === "buy_airtime"
-        ? "send_money"
-        : input.paymentType === "pay_merchant"
-          ? "merchant_payment"
-          : null;
-    if (
-      !serviceCodeId &&
-      directoryIntent &&
-      (providerGuess === "mtn" || providerGuess === "airtel")
-    ) {
-      const code = await getServiceCodeForPayment(providerGuess, directoryIntent);
-      if (code) {
-        serviceCodeId = code.id;
-        ussdRedacted = redactUssdForAnalytics(
-          code.ussd_template,
-          code.parameters.map((p) => ({
-            key: p.key,
-            kind: p.kind,
-            required: p.required,
-            formatRegex: p.format_regex,
-            minLength: p.min_length,
-            maxLength: p.max_length,
-          })),
-        );
-      }
-    }
-
-    const payload: Record<string, unknown> = {
-      workspace_id: workspaceId,
-      idempotency_key: input.idempotencyKey ?? randomUUID(),
-      payment_type: input.paymentType,
-      provider: providerGuess,
-      source_account_id: input.sourceAccountId ?? null,
-      amount_minor: input.amountMinor,
-      recipient_kind: recipientKindFor(input.paymentType),
-      recipient_name: input.recipientName ?? null,
-      recipient_msisdn_normalized: norm.normalized,
-      recipient_msisdn_masked: norm.normalized
-        ? maskMsisdn(norm.normalized)
-        : null,
-      merchant_code: input.merchantCode ?? null,
-      meter_number: input.meterNumber ?? null,
-      billing_reference: input.billingReference ?? null,
-      government_reference: input.governmentReference ?? null,
-      service_code_id: serviceCodeId,
-      ussd_string_redacted: ussdRedacted,
-      note: input.note ?? null,
-      category: input.category ?? null,
-      budget_id: input.budgetId ?? null,
-      trusted_recipient_id: input.trustedRecipientId ?? null,
-      template_id: input.templateId ?? null,
-      ttl_hours: paymentIntentTtlHours(),
-      session_fresh: await isSessionFresh(),
-    };
-
-    const { data, error } = await supabase.rpc("create_payment_intent", {
-      payload,
+    const result = await createPaymentIntent({
+      supabase,
+      workspaceId,
+      input,
+      sessionFresh: await isSessionFresh(),
     });
-    if (error) {
-      if (/not_authorized/i.test(error.message)) {
-        return { ok: false, error: "You're not a member of this workspace." };
-      }
-      if (/invalid_amount/i.test(error.message)) {
-        return { ok: false, error: "Enter a valid amount." };
-      }
-      return { ok: false, error: "Could not prepare the payment." };
-    }
-    const result = data as { id: string; existed: boolean };
-    revalidatePath("/pay/activity");
-    return { ok: true, id: result.id, existed: result.existed };
+    if (result.ok) revalidatePath("/pay/activity");
+    return result;
   } catch (err) {
     return mapErr(err);
-  }
-}
-
-function recipientKindFor(type: string): string | null {
-  switch (type) {
-    case "pay_person":
-    case "buy_airtime":
-      return "phone";
-    case "pay_merchant":
-      return "merchant";
-    case "pay_bill":
-      return "biller";
-    case "buy_electricity":
-      return "meter";
-    default:
-      return "other";
   }
 }
 
@@ -276,43 +123,9 @@ export async function recordHandoff(
   try {
     const { supabase, workspaceId } = await ctx();
     assertPaymentIntentSurfaceEnabled(workspaceId);
-
-    await supabase.rpc("record_payment_attempt", {
-      p_intent_id: id,
-      p_method: method,
-      p_outcome: outcome,
-    });
-    // draft -> initiated -> awaiting_verification. Ignore "invalid_transition"
-    // when the intent is already past draft (a second handoff gesture).
-    await supabase.rpc("transition_payment_intent", {
-      p_id: id,
-      p_to_state: "initiated",
-      p_reason: null,
-      p_evidence: { method },
-    });
-    await supabase.rpc("transition_payment_intent", {
-      p_id: id,
-      p_to_state: "awaiting_verification",
-      p_reason: null,
-      p_evidence: {},
-    });
-
-    // Phase 2b: the payment SMS may already have been ingested (the user
-    // dialed, paid, and came back before we got here). Best-effort,
-    // opt-in, non-fatal. Uses the service-role client because the
-    // matcher RPC is service_role-only (system actor) - the single,
-    // isolated place an assisted-pay action reaches for it.
-    if (isSmsReconciliationEnabled(workspaceId)) {
-      try {
-        await supabaseServer().rpc("reconcile_payment_intent", {
-          p_intent_id: id,
-          p_mode: smsReconciliationMode(),
-        });
-      } catch {
-        /* non-fatal */
-      }
-    }
-
+    // The shared core (lib/pay/handoff.ts) does the work. Like before, the web
+    // does not surface an attempt error: the panel just refreshes.
+    await recordPaymentHandoff({ supabase, workspaceId, id, method, outcome });
     revalidatePath(`/pay/${id}`);
     revalidatePath("/pay/activity");
     return { ok: true };

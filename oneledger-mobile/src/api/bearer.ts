@@ -3,8 +3,8 @@ import { config } from "@/lib/config";
 import { getRequestedWorkspace } from "@/features/spaces/request-space";
 import { echoMatches } from "@/features/spaces/spaces";
 
-// GET helper for the web app's bearer-authenticated, read-only /api/mobile
-// endpoints (inbox, budgets). Sends the user's own Supabase access token; the
+// GET/POST helpers for the web app's bearer-authenticated /api/mobile
+// endpoints (inbox, budgets, pay, ...). Sends the user's own Supabase access token; the
 // server validates it and runs everything under RLS (docs/mobile-api.md).
 
 export type BearerResponse =
@@ -16,7 +16,7 @@ export type BearerResponse =
   | { kind: "space_unsupported" }
   | { kind: "network" };
 
-export async function bearerGet(path: string): Promise<BearerResponse> {
+async function bearerRequest(path: string, init: RequestInit = {}): Promise<BearerResponse> {
   if (!supabase || !config.apiBaseUrl) return { kind: "unconfigured" };
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
@@ -27,7 +27,9 @@ export async function bearerGet(path: string): Promise<BearerResponse> {
   let response: Response;
   try {
     response = await fetch(`${config.apiBaseUrl}${path}`, {
+      ...init,
       headers: {
+        ...(init.headers as Record<string, string> | undefined),
         authorization: `Bearer ${token}`,
         ...(workspaceId ? { "x-workspace-id": workspaceId } : {}),
       },
@@ -45,6 +47,19 @@ export async function bearerGet(path: string): Promise<BearerResponse> {
     return { kind: "space_unsupported" };
   }
   return { kind: "response", status: response.status, body };
+}
+
+export function bearerGet(path: string): Promise<BearerResponse> {
+  return bearerRequest(path);
+}
+
+/** POST a JSON body with the user's own token (the server runs it under RLS, second factor required). */
+export function bearerPost(path: string, body: unknown): Promise<BearerResponse> {
+  return bearerRequest(path, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
 }
 
 export type BearerFailure = {
