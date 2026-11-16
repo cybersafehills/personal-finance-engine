@@ -1,4 +1,4 @@
-import { test, expect } from "./fixtures";
+import { test, expect, DESKTOP_LAYOUT } from "./fixtures";
 import AxeBuilder from "@axe-core/playwright";
 
 // Automated accessibility coverage (master prompt §13/§20.2) for the
@@ -26,7 +26,8 @@ for (const { path, name } of PAGES_TO_SCAN) {
   });
 }
 
-test("every primary nav destination and the Reports button have accessible names", async ({ page }) => {
+test("every primary nav destination and the Reports button have accessible names", async ({ page, isMobile }) => {
+  test.skip(isMobile, DESKTOP_LAYOUT);
   await page.goto("/");
 
   const nav = page.getByRole("navigation", { name: "Primary" }).first();

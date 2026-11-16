@@ -1,4 +1,4 @@
-import { test, expect } from "./fixtures";
+import { test, expect, DESKTOP_LAYOUT } from "./fixtures";
 
 // The per-user "Arrange navigation" preference was retired in the IA
 // re-cut (ADR 0011): the primary navigation is now a fixed financial
@@ -18,7 +18,9 @@ async function headerNavLabels(page: import("@playwright/test").Page) {
 
 test("the primary nav is a fixed journey: Home, Transactions, Inbox, Plan", async ({
   page,
+  isMobile,
 }) => {
+  test.skip(isMobile, DESKTOP_LAYOUT);
   await page.goto("/");
   expect(await headerNavLabels(page)).toEqual(FIXED_JOURNEY);
 });
@@ -47,7 +49,9 @@ test("Appearance settings no longer offers navigation reordering", async ({
 
 test("the fixed order is identical after a reload (no stored preference to drift)", async ({
   page,
+  isMobile,
 }) => {
+  test.skip(isMobile, DESKTOP_LAYOUT);
   await page.goto("/");
   const before = await headerNavLabels(page);
   await page.reload();

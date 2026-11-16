@@ -1,4 +1,4 @@
-import { test, expect } from "./fixtures";
+import { test, expect, DESKTOP_LAYOUT } from "./fixtures";
 
 // The unified shell after the information-architecture re-cut (assessment
 // section 19 / ADR 0011): the primary nav is the FIXED financial journey -
@@ -15,7 +15,9 @@ const headerNav = (page: import("@playwright/test").Page) =>
 
 test("the header primary nav is the fixed journey (Home, Transactions, Inbox, Plan) + More, Reports absent", async ({
   page,
+  isMobile,
 }) => {
+  test.skip(isMobile, DESKTOP_LAYOUT);
   await page.goto("/");
 
   const links = headerNav(page).getByRole("link");
@@ -44,7 +46,9 @@ test("the header primary nav is the fixed journey (Home, Transactions, Inbox, Pl
 
 test("the active destination is marked aria-current (Transactions = /transactions)", async ({
   page,
+  isMobile,
 }) => {
+  test.skip(isMobile, DESKTOP_LAYOUT);
   await page.goto("/transactions");
 
   await expect(
@@ -55,7 +59,8 @@ test("the active destination is marked aria-current (Transactions = /transaction
   ).not.toHaveAttribute("aria-current", "page");
 });
 
-test("the header More button opens the grouped More sheet", async ({ page }) => {
+test("the header More button opens the grouped More sheet", async ({ page, isMobile }) => {
+  test.skip(isMobile, DESKTOP_LAYOUT);
   await page.goto("/");
   await headerNav(page).getByRole("button", { name: "More" }).click();
 
