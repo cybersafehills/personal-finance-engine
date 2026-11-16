@@ -1,3 +1,4 @@
+import type { Page } from "@playwright/test";
 import ExcelJS from "exceljs";
 import { test, expect } from "./fixtures";
 import {
@@ -35,6 +36,17 @@ async function twoSheetWorkbook(): Promise<Buffer> {
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
+// Clicking Import starts a server action. Navigating away before it finishes
+// aborts the request mid-commit (the "destination stream closed early" errors in
+// CI), so the rows sometimes never reach the ledger. Wait for the page to
+// re-render as committed: the "Imported rows" heading only appears once the
+// batch status is really `imported`.
+async function waitForCommit(page: Page) {
+  await expect(
+    page.getByRole("heading", { name: "Imported rows" }),
+  ).toBeVisible({ timeout: 30_000 });
+}
+
 test.beforeAll(async () => {
   const admin = adminClient();
   await cleanupImportArtifacts(admin);
@@ -68,6 +80,7 @@ test("a CSV imports end to end and the rows land in the ledger", async ({ page }
   });
   await page.getByRole("button", { name: "Set account" }).click();
   await page.getByRole("button", { name: /Import \d+ ready rows?/ }).click();
+  await waitForCommit(page);
 
   await page.goto("/transactions");
   await expect(
@@ -113,6 +126,7 @@ test("an expense register imports as money-out, and a row without a category is 
   });
   await page.getByRole("button", { name: "Set account" }).click();
   await page.getByRole("button", { name: /Import 1 ready row\b/ }).click();
+  await waitForCommit(page);
 
   await page.goto("/transactions");
   await expect(

@@ -10,10 +10,10 @@ import { messages } from "../../lib/ussd/messages";
 import {
   buildTelHref,
   detectDialerCapability,
-  fillUssdTemplate,
   type DialerCapability,
   type ParamSpec,
 } from "../../lib/ussd/capability";
+import { buildUssdInstruction, ussdAmountMajor } from "../../lib/pay/instruction";
 import {
   describeMatchedOn,
   statusDescription,
@@ -139,60 +139,12 @@ export function PaymentIntentPanel({
     startDetect(() => setCapability(detectDialerCapability(navigator.userAgent)));
   }, []);
 
-  const amountMajor =
-    intent.currency === "RWF" ? intent.amount_minor : intent.amount_minor / 100;
+  const amountMajor = ussdAmountMajor(intent);
 
-  const filled = useMemo(() => {
-    if (!serviceCode) return null;
-    if (!serviceCode.accepts_parameters) {
-      return { ok: true as const, display: serviceCode.ussd_template, dial: serviceCode.ussd_template };
-    }
-    const specs: ParamSpec[] = serviceCode.parameters.map((p) => ({
-      key: p.key,
-      kind: p.kind,
-      required: p.required,
-      formatRegex: p.format_regex,
-      minLength: p.min_length,
-      maxLength: p.max_length,
-    }));
-    // Rwandan MoMo/Airtel USSD menus expect the recipient in local
-    // `07XXXXXXXX` form, which is also what the seeded service-code
-    // parameter regexes match.
-    const localMsisdn = intent.recipient_msisdn_normalized
-      ? "0" + intent.recipient_msisdn_normalized.slice(3)
-      : "";
-    // Supply a value for every parameter kind a code might ask for -
-    // keyed by the code's own parameter key, chosen by its kind - so a
-    // merchant / meter / bill template (`*182*8*1*{merchant}*{amount}#`)
-    // fills the same way a send-money one does. Previously only
-    // phone + amount were passed, so any merchant code failed with
-    // "Enter a merchant code" and the screen fell back to "no route".
-    const valueForKind: Partial<Record<ParamSpec["kind"], string>> = {
-      phone: localMsisdn,
-      amount: String(Math.round(amountMajor)),
-      merchant_code: intent.merchant_code ?? "",
-      meter_number: intent.meter_number ?? "",
-      billing_id: intent.billing_reference ?? "",
-      account_reference: intent.billing_reference ?? "",
-      national_id: intent.government_reference ?? "",
-      reference: intent.government_reference ?? "",
-      text: intent.government_reference ?? "",
-    };
-    const params: Record<string, string> = {};
-    for (const spec of specs) {
-      const v = valueForKind[spec.kind];
-      if (v) params[spec.key] = v;
-    }
-    return fillUssdTemplate(serviceCode.ussd_template, params, specs);
-  }, [
-    serviceCode,
-    intent.recipient_msisdn_normalized,
-    intent.merchant_code,
-    intent.meter_number,
-    intent.billing_reference,
-    intent.government_reference,
-    amountMajor,
-  ]);
+  const filled = useMemo(
+    () => buildUssdInstruction(intent, serviceCode),
+    [intent, serviceCode],
+  );
 
   const dialString = filled && filled.ok ? filled.dial : null;
 

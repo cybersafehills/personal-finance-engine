@@ -135,6 +135,39 @@ not a reason to keep the whole app native.
 - The Inbox tab falls back to the direct category-review queue when the
   endpoint is off or the app is not configured, so category checks never
   depend on the server route.
+## Implementation notes (Goals)
+
+- A read-only Goals screen (More → Goals). It reads `financial_goals` under RLS
+  and calls the database's `goal_progress()` per active goal (SECURITY DEFINER,
+  checks Space membership itself, granted to `authenticated`), so the percent,
+  the required monthly saving and the projected date are the database's, not
+  client maths, and no `/api/mobile` route is needed.
+- Like the web's goals list there is no workspace filter, so goals from a
+  household Space the user belongs to are listed with their own.
+- A failed progress call drops only that goal's pace lines. Creating goals and
+  adding contributions stay on the web.
+
+## Implementation notes (Pay intents)
+
+- Preparing a payment is the first mobile **mutation through a route**: the
+  assisted-pay flags live in server env (a direct RPC call would bypass them)
+  and the web action carries an MFA step-up. `mobilePost` shares the GET guard's
+  authentication, whose completed-second-factor rule is the same condition as
+  `requireMfaForSensitiveAction`, so a mobile mutation is never weaker than its
+  server action.
+- `lib/pay/create-intent.ts` (creation) and `lib/pay/instruction.ts` (the USSD
+  string) were extracted from the web action and review panel so web and app
+  run one implementation. `pay-assisted`, `pay-again` and `pay-merchant` e2e
+  are the safety net for that refactor.
+- The app never builds a USSD string itself: it shows and dials what the server
+  returns, and treats `instruction: null` as "no verified route".
+- Only person and merchant payments are offered. Airtime is excluded because the
+  web directory maps `buy_airtime` to the send-money code (it would transfer
+  money, not buy airtime; a web-side quirk, left unchanged), and bills have no
+  verified route. A merchant's network comes from the paying account's row.
+- Recording the handoff has its own route so an intent leaves `draft`; it reuses
+  the web action's logic via `lib/pay/handoff.ts`.
+
 ## Implementation notes (iPhone health)
 
 - iOS gives the app no view of the Shortcut, so the only honest health signal
@@ -150,6 +183,41 @@ not a reason to keep the whole app native.
 - The troubleshooting list only states things the capture spec
   (docs/oneledger-capture-shortcut.md) guarantees (exact Shortcut names,
   Run Immediately, trigger word RWF, one-time codes).
+
+## Implementation notes (Pay again, app)
+
+- "Pay {name} again" on a transaction's detail, only for `send_money` (a person)
+  and `merchant_payment` (a business). It is **absent** unless every check holds:
+  `GET /api/mobile/config` says assisted pay is on (any failure hides it), the
+  reference passes the server's own rules (a Rwandan mobile number or a 3-12
+  digit merchant code), the transaction lives in the user's personal Space (the
+  server creates intents there), and a usable RWF paying account exists. A
+  merchant needs an **MTN** account (the only merchant-pay code in the directory
+  is MTN's, and the network comes from the paying account); a bank, cash or
+  Airtel account would only lead to a draft with no route, so it is skipped.
+  Airtime and bills are excluded for the reasons in the Pay intents note.
+- **Deep links:** the app registers the `oneledger` scheme, so every route is a
+  link target. `/pay-again` therefore takes only a transaction id and rebuilds
+  the recipient, name and paying account from that transaction (re-checked each
+  time); a crafted link cannot choose a recipient. The form shows the whole
+  number, not a masked one: it is the one place to check it before paying.
+- The amount is never prefilled. The request id sent with "Prepare payment" is
+  bound to the recipient, account and amount: a retry or double tap returns the
+  same draft, an edited amount gets a new id (otherwise it would silently return
+  the old draft).
+- The review screen shows the code the server built and never claims success
+  (states the app doesn't recognise read "In progress"). It never dials by
+  itself. Android: an explicit "Open phone dialer" tap opens the `tel:` link.
+  iPhone: no dial button; share or copy the code and dial it in the Phone app,
+  because the app has not been run on an iPhone to verify `tel:` USSD handling.
+- Copy uses React Native's built-in share sheet (its "Copy" action), not
+  `expo-clipboard`, so no native module or new build was added. On iPhone a
+  hand-off is recorded only when the share completes; **Android always reports
+  "shared"** (React Native's own docs), so there a dismissed sheet is recorded
+  as well. That is no worse than the web, which records a copy click whether or
+  not the clipboard write worked, and a hand-off only ever means "awaiting
+  verification", never that anything was paid.
+- Not yet run on a physical device.
 
 ## Implementation notes (Budgets)
 
@@ -186,6 +254,40 @@ not a reason to keep the whole app native.
 - Category is chosen afterwards on the transaction's detail screen (the web
   form's optional category is applied through the existing category-correction
   function after creation).
+## Implementation notes (Transaction detail parity)
+
+- The detail screen follows the web page's block order: a centred hero (who, how
+  much, when), the Pay-again button, an attention banner, Duplicates, "Where this
+  came from", the detail rows, Category (with why, and history once there is
+  more than one change) and Tags. Splits and the household attribution panel are
+  not here yet; they stay on the web (the existing "Edit on the web" button).
+- Reads are plain queries under the signed-in user's RLS, ported from the web
+  queries (`getTransactionSpaceContext`, `getCategoryHistory`,
+  `getTransactionDuplicateContext`, tags, and the `space_member_directory`
+  function for household names): no new `/api/mobile` route. Each part loads and
+  fails on its own (`loadDetailExtras`), so a failed read removes only its own
+  block, never the whole screen.
+- **Tags are editable** (add, remove, one-tap suggestions from the Space). The
+  web does these as plain inserts and deletes with no MFA step, and the policies
+  enforce the `member` role, `created_by = auth.uid()` and a matching workspace,
+  so the app writes directly under RLS as well; the only server-side rule
+  (1-40 characters) is also a table check. The web's character rule uses a
+  Unicode property escape (`\p{L}`), which the app avoids (not verified on
+  Hermes), so ASCII symbols are rejected and accented letters pass; that is
+  slightly looser than the web for non-ASCII symbols.
+- **Duplicates are a trail, as on the web**: flagged, merged away (opens the
+  kept transaction) and what was merged in (each opens its own). Merging or
+  dismissing stays where both candidates are visible; the detail screen never
+  resolves one blind. A flagged *personal-Space* transaction offers "Review it"
+  (the Inbox); anything else offers the web's review queue, because the app's
+  Inbox only covers the personal Space and the item would not be there.
+- A tag removal asks the database for the rows it deleted: under RLS a delete the
+  caller may not make is not an error, it removes nothing (a household viewer
+  can see tags but not delete them), so zero rows is checked against the tag
+  still existing before the chip is dropped.
+- Household lines ("Paid by", "Added by", whose account) show real member names
+  when the directory loads and fall back to "You" / "A member" like the web.
+
 ## Implementation notes (Statements)
 
 - A read-only viewer: list the statements and download a PDF/CSV. The list is
@@ -198,6 +300,14 @@ not a reason to keep the whole app native.
   path and one audit event for both clients.
 - Generating statements, packs, schedules and provider documents stay on the
   web; the screen links there when there are none.
+## Implementation notes (Transaction filters)
+
+- The Transactions tab filters by direction, period and "needs review" on top
+  of the existing text search. All of it is a read under RLS (`direction`,
+  `occurred_at`, `category_decision_status`), so there is no `/api/mobile`
+  route. Periods are Kigali calendar days (last 7 days = today plus six);
+  the bounds live in `features/transactions/filters.ts` and are unit-tested.
+- Filters are screen state, not persisted: reopening the tab shows everything.
 
 ## Consequences
 
