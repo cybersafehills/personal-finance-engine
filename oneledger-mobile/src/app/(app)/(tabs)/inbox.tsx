@@ -1,7 +1,7 @@
 import { router } from "expo-router";
 import * as Linking from "expo-linking";
 import { useCallback, useState } from "react";
-import { FlatList, RefreshControl, View } from "react-native";
+import { RefreshControl, SectionList, View } from "react-native";
 
 import { fetchInbox } from "@/api/mobile-api";
 import {
@@ -18,11 +18,14 @@ import {
 import {
   actionKey,
   canPickCategory,
+  fallbackNotice,
   kindLabel,
   transactionIdFromHref,
   webUrl,
 } from "@/features/inbox/display";
+import { groupInbox, type InboxGroup } from "@/features/inbox/grouping";
 import type { InboxInlineAction, InboxItem } from "@/features/inbox/types";
+import { InboxNotifications } from "@/features/notifications/InboxNotifications";
 import {
   confirmCategory,
   dismissDuplicate,
@@ -52,7 +55,7 @@ function runAction(action: InboxInlineAction): Promise<void> {
 // Everything that needs a decision, in the order the web ranks it. The list
 // is computed by the web app (it owns the feature flags and cross-domain
 // read models); simple decisions are made here, the rest open the web.
-// If the server endpoint is off or unreachable the tab falls back to the
+// If the server endpoint is off, failing or unreachable the tab falls back to the
 // direct category-review queue, so a category check is never out of reach.
 export default function Inbox() {
   const load = useCallback(() => fetchInbox(), []);
@@ -84,8 +87,10 @@ export default function Inbox() {
     [refresh],
   );
 
-  if (data && !data.ok && data.reason === "unavailable") {
-    return <ReviewList notice="Category checks (the full inbox isn't available yet)" />;
+  const notice = fallbackNotice(data);
+  if (notice) {
+    // The retry reloads the full inbox; if it now succeeds this branch ends.
+    return <ReviewList notice={notice} onRetryFullInbox={refresh} />;
   }
 
   const items = data?.ok ? data.inbox.items.filter((i) => !decided.has(i.id)) : [];
@@ -93,10 +98,11 @@ export default function Inbox() {
   const high = items.filter((i) => i.priority === "high").length;
 
   return (
-    <ListScreen>
-      <FlatList
-        data={items}
-        keyExtractor={(item) => item.id}
+    <ListScreen edges={["left", "right"]}>
+      <SectionList
+        sections={groupInbox(items)}
+        keyExtractor={(entry) => (entry.type === "group" ? entry.id : entry.item.id)}
+        stickySectionHeadersEnabled={false}
         contentContainerStyle={listContentStyle}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.accent} />
@@ -104,6 +110,7 @@ export default function Inbox() {
         ListHeaderComponent={
           <View style={{ paddingTop: space[4], gap: space[3], marginBottom: space[3] }}>
             <ScreenHeader title="Inbox" subtitle="Everything that needs a decision" />
+            <InboxNotifications />
             {items.length > 0 ? (
               <View style={{ flexDirection: "row", gap: space[2] }}>
                 <StatTile label="Open" value={String(items.length)} />
@@ -114,14 +121,27 @@ export default function Inbox() {
           </View>
         }
         ItemSeparatorComponent={() => <View style={{ height: space[3] }} />}
-        renderItem={({ item }) => (
-          <InboxCard
-            item={item}
-            busy={busy === item.id}
-            error={errors[item.id] ?? null}
-            onAction={(action) => decide(item, action)}
-          />
+        renderSectionHeader={({ section }) => (
+          <Text
+            variant="bodyStrong"
+            accessibilityRole="header"
+            style={{ marginTop: space[4], marginBottom: space[2] }}
+          >
+            {section.title}
+          </Text>
         )}
+        renderItem={({ item: entry }) =>
+          entry.type === "group" ? (
+            <GroupCard group={entry} />
+          ) : (
+            <InboxCard
+              item={entry.item}
+              busy={busy === entry.item.id}
+              error={errors[entry.item.id] ?? null}
+              onAction={(action) => decide(entry.item, action)}
+            />
+          )
+        }
         ListEmptyComponent={
           loading ? (
             <Text variant="label" color="textMuted">
@@ -220,6 +240,38 @@ function InboxCard({
           />
         ) : null}
       </View>
+    </Card>
+  );
+}
+
+/**
+ * One card standing in for many same-kind items that all drill into the same
+ * place (web GroupSummaryItem). Decisions are made on that page, not here.
+ */
+function GroupCard({ group }: { group: InboxGroup }) {
+  const url = webUrl(config.apiBaseUrl, group.href);
+  return (
+    <Card style={{ gap: space[2] }}>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space[1] }}>
+        <Badge variant={group.priority === "critical" ? "attention" : "neutral"}>
+          {group.priority === "critical" ? "Resolve first" : kindLabel(group.kind)}
+        </Badge>
+        {group.priority === "critical" ? <Badge variant="neutral">{kindLabel(group.kind)}</Badge> : null}
+      </View>
+      <Text variant="bodyStrong">{`${kindLabel(group.kind)} (${group.count})`}</Text>
+      <Text variant="label" color="textSecondary">
+        {`${group.count} items need review - most recent: ${group.latestDescription}`}
+      </Text>
+      {group.oldestSince ? (
+        <Text variant="caption" color="textMuted">
+          {`Oldest waiting since ${formatDateTime(group.oldestSince)}`}
+        </Text>
+      ) : null}
+      {url ? (
+        <View style={{ flexDirection: "row" }}>
+          <Button label={`Review all ${group.count}`} onPress={() => Linking.openURL(url)} />
+        </View>
+      ) : null}
     </Card>
   );
 }

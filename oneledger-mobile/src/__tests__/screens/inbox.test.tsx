@@ -137,15 +137,56 @@ describe("Inbox screen", () => {
     expect(await screen.findByText(/REVIEW FALLBACK/)).toBeTruthy();
   });
 
-  it("shows a retry for a transient failure, not the fallback", async () => {
+  it("falls back to category checks when the server errors, instead of a dead end", async () => {
     mockFetchInbox.mockResolvedValue({
       ok: false,
       reason: "error",
       message: "Couldn't load your inbox. Check your connection and try again.",
     });
     await render(<Inbox />);
-    expect(await screen.findByText("Try again")).toBeTruthy();
+    expect(await screen.findByText(/REVIEW FALLBACK: Category checks only/)).toBeTruthy();
+  });
+
+  it("keeps a sign-in problem as a message with a retry, not the fallback", async () => {
+    mockFetchInbox.mockResolvedValue({
+      ok: false,
+      reason: "unauthorized",
+      message: "Please sign in again.",
+    });
+    await render(<Inbox />);
+    expect(await screen.findByText("Please sign in again.")).toBeTruthy();
+    expect(screen.getByText("Try again")).toBeTruthy();
     expect(screen.queryByText(/REVIEW FALLBACK/)).toBeNull();
+  });
+
+  it("groups by priority with the web's headings", async () => {
+    mockFetchInbox.mockResolvedValue(inbox([connectorItem, categoryItem]));
+    await render(<Inbox />);
+    expect(await screen.findByText("Resolve first (1)")).toBeTruthy();
+    expect(screen.getByText("Next up (1)")).toBeTruthy();
+  });
+
+  it("collapses a pile of same-kind items into one card that opens the web", async () => {
+    const pile: InboxItem[] = Array.from({ length: 5 }, (_, i) => ({
+      ...connectorItem,
+      id: `rec-${i}`,
+      kind: "reconciliation_conflict",
+      priority: "high",
+      title: `Payment ${i}`,
+      description: `Payment ${i + 1} · 100 RWF`,
+      href: "/pay/reconciliation",
+      actionableSince: `2026-09-0${i + 1}T10:00:00Z`,
+    }));
+    mockFetchInbox.mockResolvedValue(inbox(pile));
+    await render(<Inbox />);
+
+    expect(await screen.findByText("Next up (5)")).toBeTruthy();
+    expect(screen.getByText("Payment (5)")).toBeTruthy();
+    expect(screen.getByText(/5 items need review - most recent: Payment 5 · 100 RWF/)).toBeTruthy();
+    expect(screen.queryByText("Payment 0")).toBeNull();
+
+    await fireEvent.press(screen.getByText("Review all 5"));
+    expect(mockOpenUrl).toHaveBeenCalledWith("https://app.example.test/pay/reconciliation");
   });
 
   it("shows the caught-up state for an empty inbox", async () => {

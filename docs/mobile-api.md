@@ -17,6 +17,25 @@ Status: **sign-in only (PR 2).** Dark unless `MOBILE_API_ENABLED=true`.
   for the Expo web development preview). Unset in production.
 - Pure logic lives in `web/lib/mobile-api.ts` (`mobile_api_test.ts`).
 
+## Active Space (`X-Workspace-Id`)
+
+The web picks the active Space from an `active_workspace_id` cookie; the app has
+no cookie, so every `GET` below may carry `X-Workspace-Id: <workspace uuid>`.
+
+- It is a **request, not a grant.** `getActiveWorkspaceId()` (`lib/queries.ts`)
+  still requires an active membership in that workspace and otherwise falls back
+  to the user's personal Space, exactly as for the cookie. A malformed value is
+  ignored (same as no header).
+- With no header the endpoints below use the personal Space (unchanged).
+- When the header is sent, the response carries `workspace_id`: the Space actually
+  used. An app talking to a server that predates this header (or whose membership
+  was revoked) sees a different `workspace_id` or none, and must not present the
+  data as that Space's.
+- Only what the web scopes by the active Space follows it (Inbox read models,
+  config flags, ...). The transaction, balance and budget list queries are
+  **not** filtered by Space on the web (RLS is the boundary), and are not here.
+- CORS allows the header for allowlisted development origins.
+
 ## `POST /api/mobile/auth/sign-in`
 
 Body: `{ "email": string, "password": string }`.
@@ -58,6 +77,34 @@ app's Inbox tab. Read-only.
 - **In-app decisions:** only plain database functions the app already calls
   under the user's session (confirm / dismiss a category, merge / dismiss a
   duplicate). Every other item opens its web page.
+
+## Space & members (`POST /api/mobile/spaces/...`)
+
+Writes the web guards with a second-factor step-up in the server action (not in
+the database), so the app reaches them **only** through these routes: the bearer
+guard (flag, per-IP limit, token validated with Supabase Auth, second factor
+complete when the user has one) is that step-up. Reads (members, pending
+invites, names via `space_member_directory`) are plain `supabase-js` under RLS.
+
+Every write names its Space explicitly in the body (`workspaceId`) and **never**
+falls back to the personal Space: unlike a read, a write landing in the wrong
+Space would be silent. A Space the caller is not an active member of is `404`.
+A personal Space is `422 personal_space` (it has no other members).
+
+| Route | Body | Authority |
+|---|---|---|
+| `members/role` | `{ workspaceId, membershipId, role }` (`owner`/`admin`/`member`/`viewer`) | `set_member_role`: owners only; never leaves a Space without an owner |
+| `members/remove` | `{ workspaceId, membershipId }` | `remove_member`: owners only; never the last owner |
+| `invites` | `{ workspaceId, email, role }` (`admin`/`member`/`viewer`; never owner) | `workspace_invites` insert policy (a manager of that Space, `invited_by` = caller) |
+| `invites/revoke` | `{ workspaceId, inviteId }` | `workspace_invites` update policy; must be pending in that Space |
+
+- `200 { ok: true }`; `invites` also returns `{ link, emailSent }`. **The link is
+  shown once** (only its hash is stored); the app must not keep or log it.
+- Errors carry a fixed sentence in `message`, never database text:
+  `403 owner_only`, `409 last_owner`, `404 not_found`, `403 could_not_invite`,
+  `422 invalid_request`, `403 could_not_revoke`, `422 could_not_update`.
+- Invites share `lib/spaces/invites.ts` with the web action (one code path).
+- Not included: resending an invite (it rotates the token; later).
 
 ## `GET /api/mobile/budgets`
 
@@ -217,6 +264,73 @@ A navigation event, never a claim the payment succeeded.
   guard's usual codes. Same guard as the create route (own rate-limit bucket).
 - Shares `lib/pay/handoff.ts` with the web action (the optional SMS-reconciliation
   step uses the service role there; the web's behaviour is unchanged).
+
+## `GET /api/mobile/categories`
+
+Where the money has gone, all time, per category: the web's Categories page, for
+the app's Categories screen. Read-only; same guard as the others.
+
+- `200 { ok: true, categories: [{ category, totalRwf, transactionCount }],
+  truncated }`, largest total first. `"Uncategorized"` stands for a null
+  category. The figures come from `getCategoryTotalsComplete`
+  (`lib/category-totals.ts` holds the pure parts); the app never recomputes them.
+- Covers every Space the user belongs to (no Space filter), exactly like the web
+  page; settled outgoing transactions only, merged duplicates excluded.
+- **Why it pages:** the REST API returns at most `max_rows` per request (1000 in
+  `supabase/config.toml`; production's value was not checked), so reading all rows
+  in one request would silently drop everything past the cap and show wrong totals
+  with no error. It reads a page at a time, advancing by the rows it actually
+  received and stopping only on an empty page (so a lower server cap cannot cut it
+  short), in a stable `id` order, 50 pages at most. `truncated` is true only if that
+  cap was reached, so the app can say the totals are incomplete. The web Categories
+  page uses the same function.
+- **Errors are errors:** a failed read throws, so this answers `500` and the app
+  offers a retry, instead of a 200 that says "no spending yet".
+- Home's "top spending category" and the category-name suggestions still use the
+  old one-request `getCategoryTotals` on purpose (they run on every load and must
+  stay one cheap request), so they keep the old row ceiling.
+- Amounts are whole RWF.
+
+## `GET /api/mobile/reports`, `GET /api/mobile/reports/:id`, `GET /api/mobile/reports/:id/document`
+
+The user's **daily financial reports** (the web's Reports page), for the app's
+Reports screens. Read-only; same guard as the others.
+
+- **A report is an immutable snapshot** (`report_runs.report_payload`) that the
+  web, the PDF and the morning email all render; nothing here recomputes a
+  figure. A report belongs to its recipient (`report_runs_select_own`), across
+  every Space they get reports in, exactly like the web page.
+- **Why the server renders the words:** alerts are sentences shared with the
+  email (`lib/report-alert-messages.ts`), and dates are formatted in the report's
+  own IANA timezone with `toLocaleString`, which a phone's JS engine may not
+  support. `lib/mobile-reports.ts` renders both, with the web's own functions, so
+  the app only displays. An unknown status or an unrecognised timezone drops the
+  row rather than showing it wrongly.
+- **Errors are errors:** these routes use the throwing reads
+  (`getReportRunsStrict`, `getReportRunByIdStrict`, and `createReportDownload` with
+  `strict`), so a failed database read answers `500` and the app offers a retry,
+  never "No reports yet", "not found" or a missing PDF. The web's own callers keep
+  their long-standing behaviour (a failed read shows nothing), and the web PDF route
+  is unchanged.
+- **List:** `200 { ok: true, reports: [{ id, dateLabel, status, statusLabel,
+  generatedLabel }] }`, newest first, at most 30.
+- **Detail:** `200 { ok: true, report }` with `snapshot` (closing balance may be
+  `null`), `categories`, `budget` (`null` = no active RWF budget), `trends` (only
+  those with history, each with a `tone`: spending/fees up are unfavourable,
+  income up is favourable, a count is neutral), `alerts` (report alerts then
+  budget alerts, each with a `tone`), `forecast`, `insights` (AI commentary,
+  separate from the snapshot) and `hasDocument`. `200 { ok: true, report: null,
+  reason: "not_found" }` for an unknown, malformed or someone else's id (RLS makes
+  them indistinguishable). A report that failed or isn't generated yet has no
+  snapshot and carries the (capped) failure reason.
+- **Document:** `200 { ok: true, download: { url } }` or `{ download: null, reason:
+  not_found | not_ready | failed }`. A fresh **five-minute signed URL** for the
+  PDF, as JSON (not a redirect: the app fetches with a bearer token, then opens
+  the URL). Ownership is the caller's own RLS session; the service role is used
+  only afterwards to render, cache and sign (`lib/report-download.ts`, shared with
+  the web's redirecting route, whose status codes are unchanged). The app asks
+  again on every tap; the URL must never be stored or logged. Its own rate-limit
+  bucket, since rendering a PDF is expensive.
 
 ## Rollout
 

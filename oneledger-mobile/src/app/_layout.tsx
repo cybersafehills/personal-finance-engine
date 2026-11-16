@@ -7,6 +7,7 @@ import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 
 import { SessionProvider, useSession } from "@/features/auth/SessionProvider";
+import { ActiveSpaceProvider } from "@/features/spaces/ActiveSpaceProvider";
 import { LockProvider, useLock } from "@/features/lock/LockProvider";
 import { LockScreen } from "@/features/lock/LockScreen";
 import { PrivacyProvider } from "@/features/privacy/PrivacyProvider";
@@ -69,8 +70,10 @@ export default function RootLayout() {
     <SessionProvider>
       <LockProvider>
         <PrivacyProvider>
-          <StatusBar style="dark" />
-          <RootNavigator />
+          <ActiveSpaceProvider>
+            <StatusBar style="dark" />
+            <RootNavigator />
+          </ActiveSpaceProvider>
         </PrivacyProvider>
       </LockProvider>
     </SessionProvider>

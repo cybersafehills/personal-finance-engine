@@ -1,4 +1,4 @@
-import { test, expect } from "./fixtures";
+import { test, expect, grantClipboard } from "./fixtures";
 import AxeBuilder from "@axe-core/playwright";
 
 // Pay & Services - Phase 2a (Assisted Quick Pay). Non-custodial: the
@@ -17,9 +17,25 @@ async function prepareAPersonPayment(page: import("@playwright/test").Page) {
   await expect(page).toHaveURL(/\/pay\/[0-9a-f-]{36}$/);
 }
 
+// Clicks "I've confirmed this with my provider" and waits until the
+// server action has committed. Before the click the button's hint already
+// reads "Marks this as manually confirmed. OneLedger hasn't independently
+// verified it.", so a loose getByText("Manually confirmed") passed at
+// once and the test navigated away mid-action (flaky on CI). The exact
+// badge and the post-confirm description only render after the action
+// returns and router.refresh() re-reads the intent.
+async function confirmManually(page: import("@playwright/test").Page) {
+  await page.getByRole("button", { name: "I've confirmed this with my provider" }).click();
+  await expect(page.getByText("Manually confirmed", { exact: true })).toBeVisible();
+  await expect(page.getByText(/You told us this payment succeeded/)).toBeVisible();
+}
+
 test("the launcher's payment actions are live and route to a typed draft", async ({ page }) => {
   await page.goto("/");
-  await page.locator("header").getByRole("button", { name: "Pay", exact: true }).click();
+  // The global Pay action is a header pill from lg (1024px) up and the
+  // centre button of the bottom nav below it (AppShell / PayTrigger); only
+  // one is ever visible. Scoping to <header> timed out on mobile-safari.
+  await page.getByRole("button", { name: "Pay", exact: true }).filter({ visible: true }).click();
   await page.getByRole("button", { name: "Pay a person" }).click();
   await expect(page).toHaveURL(/\/pay\/new\/pay_person$/);
   await expect(page.getByRole("heading", { name: "Pay a person" })).toBeVisible();
@@ -40,8 +56,9 @@ test("the review screen is honest: non-custodial notice, provider fee, no succes
 test("desktop hand-off offers Copy + QR, not a dialer, and moves the intent to awaiting verification", async ({
   page,
   context,
+  browserName,
 }) => {
-  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await grantClipboard(context, browserName);
   await prepareAPersonPayment(page);
 
   await expect(page.getByRole("link", { name: "Open phone dialer" })).toHaveCount(0);
@@ -54,27 +71,31 @@ test("desktop hand-off offers Copy + QR, not a dialer, and moves the intent to a
 test("manual confirmation is labelled 'Manually confirmed', never a verified success", async ({
   page,
   context,
+  browserName,
 }) => {
-  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await grantClipboard(context, browserName);
   await prepareAPersonPayment(page);
   await page.getByRole("button", { name: "Copy code" }).click();
   await expect(page.getByText("Awaiting verification", { exact: true })).toBeVisible();
 
-  await page.getByRole("button", { name: "I've confirmed this with my provider" }).click();
-  await expect(page.getByText("Manually confirmed")).toBeVisible();
+  await confirmManually(page);
   await expect(page.getByText(/hasn't independently verified/)).toBeVisible();
 
   await page.goto("/pay/activity");
-  await expect(page.getByText("Manually confirmed").first()).toBeVisible();
+  await expect(page.getByText("Manually confirmed", { exact: true }).first()).toBeVisible();
 });
 
-test("Pay again creates a fresh editable draft with a new id", async ({ page, context }) => {
-  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+test("Pay again creates a fresh editable draft with a new id", async ({
+  page,
+  context,
+  browserName,
+}) => {
+  await grantClipboard(context, browserName);
   await prepareAPersonPayment(page);
   const firstUrl = page.url();
   await page.getByRole("button", { name: "Copy code" }).click();
-  await page.getByRole("button", { name: "I've confirmed this with my provider" }).click();
-  await expect(page.getByText("Manually confirmed")).toBeVisible();
+  await expect(page.getByText("Awaiting verification", { exact: true })).toBeVisible();
+  await confirmManually(page);
 
   await page.getByRole("button", { name: "Pay again" }).click();
   // A brand-new intent id - wait for the URL to actually change off the

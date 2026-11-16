@@ -6,6 +6,7 @@ import {
   cleanupSeededTransactions,
   ensureWorkspaceAndAccount,
   seedTransaction,
+  testUserId,
 } from "./seed";
 import { E2E_USER } from "./test-users";
 
@@ -500,6 +501,234 @@ test.describe("mobile API", () => {
     }
   });
 
+  test("categories: all-time totals under the bearer token", async () => {
+    const api = await playwrightRequest.newContext({ baseURL: BASE_URL });
+    try {
+      const signIn = await api.post("/api/mobile/auth/sign-in", {
+        data: { email: E2E_USER.email, password: E2E_USER.password },
+      });
+      expect(signIn.status()).toBe(200);
+      const res = await api.get("/api/mobile/categories", {
+        headers: { authorization: `Bearer ${(await signIn.json()).access_token}` },
+      });
+      expect(res.status()).toBe(200);
+      expect(res.headers()["cache-control"]).toContain("no-store");
+      const body = await res.json();
+      expect(body.ok).toBe(true);
+      expect(body.truncated).toBe(false);
+      expect(Array.isArray(body.categories)).toBe(true);
+      for (const c of body.categories) {
+        expect(typeof c.category).toBe("string");
+        expect(Number.isFinite(c.totalRwf)).toBe(true);
+        expect(c.transactionCount).toBeGreaterThanOrEqual(1);
+      }
+      // Largest first.
+      const totals = body.categories.map((c: { totalRwf: number }) => c.totalRwf);
+      expect(totals).toEqual([...totals].sort((a: number, b: number) => b - a));
+      // beforeAll seeds one settled, uncategorized RWF 4,200 outflow: it is counted.
+      const uncategorized = body.categories.find((c: { category: string }) => c.category === "Uncategorized");
+      expect(uncategorized, "the seeded outflow is in Uncategorized").toBeTruthy();
+      expect(uncategorized.totalRwf).toBeGreaterThanOrEqual(4200);
+    } finally {
+      await api.dispose();
+    }
+  });
+
+  test("reports: list, detail and PDF for a stored report", async () => {
+    const admin = adminClient();
+    const { workspaceId } = await ensureWorkspaceAndAccount(admin);
+    const userId = await testUserId(admin);
+
+    // Far in the past so it can't collide with a real report (one per user per day).
+    const periodStart = "2001-03-04T22:00:00Z"; // 5 March 2001, 00:00 in Kigali
+    const payload = {
+      schemaVersion: 1,
+      dateKey: "2001-03-05",
+      timezone: "Africa/Kigali",
+      financialSnapshot: {
+        openingBalanceRwf: 100000,
+        closingBalanceRwf: 120000,
+        moneyReceivedRwf: 50000,
+        moneySpentRwf: 30000,
+        feesRwf: 400,
+        netMovementRwf: 20000,
+        transactionCount: 7,
+        categorizedCount: 5,
+        uncategorizedCount: 2,
+        largestInflowRwf: 50000,
+        largestOutflowRwf: 15000,
+      },
+      categoryTotals: [{ category: "Food", amountRwf: 30000, transactionCount: 7, percentOfSpending: 100 }],
+      trends: [{ metric: "spend", label: "Spending", currentValue: 30000, comparisonValue: 25000, changePercent: 20 }],
+      alerts: [
+        { id: "a1", kind: "high_daily_spend", severity: "warning", spentRwf: 30000, thresholdRwf: 20000 },
+      ],
+      budget: { overallStatus: "no_active_budget" },
+      forecast: null,
+    };
+
+    await admin.from("report_runs").delete().eq("user_id", userId).eq("period_start", periodStart);
+    const { data: run, error } = await admin
+      .from("report_runs")
+      .insert({
+        workspace_id: workspaceId,
+        user_id: userId,
+        report_type: "daily",
+        period_start: periodStart,
+        period_end: "2001-03-05T22:00:00Z",
+        timezone: "Africa/Kigali",
+        status: "generated",
+        scheduled_for: periodStart,
+        generated_at: "2001-03-05T22:07:00Z",
+        report_payload: payload,
+      })
+      .select("id")
+      .single();
+    if (error || !run) throw new Error(`could not seed a report run: ${error?.message}`);
+    const reportId = run.id as string;
+
+    const api = await playwrightRequest.newContext({ baseURL: BASE_URL });
+    try {
+      const signIn = await api.post("/api/mobile/auth/sign-in", {
+        data: { email: E2E_USER.email, password: E2E_USER.password },
+      });
+      expect(signIn.status()).toBe(200);
+      const headers = { authorization: `Bearer ${(await signIn.json()).access_token}` };
+
+      // The list names the day in the report's own timezone.
+      const list = await (await api.get("/api/mobile/reports", { headers })).json();
+      expect(list.ok).toBe(true);
+      const item = list.reports.find((r: { id: string }) => r.id === reportId);
+      expect(item, "the seeded report is listed").toBeTruthy();
+      expect(item.dateLabel).toBe("March 5, 2001");
+      expect(item.statusLabel).toBe("Generated");
+
+      // The detail carries the stored figures and the web's own sentences.
+      const detailRes = await api.get(`/api/mobile/reports/${reportId}`, { headers });
+      expect(detailRes.status()).toBe(200);
+      expect(detailRes.headers()["cache-control"]).toContain("no-store");
+      const { report } = await detailRes.json();
+      expect(report.hasDocument).toBe(true);
+      expect(report.snapshot.closingBalanceRwf).toBe(120000);
+      expect(report.snapshot.netMovementRwf).toBe(20000);
+      expect(report.categories[0]).toMatchObject({ category: "Food", amountRwf: 30000 });
+      expect(report.trends[0]).toMatchObject({ label: "Spending", changePercent: 20, tone: "negative" });
+      expect(report.alerts[0].message).toBe("Total spending today (30,000 RWF) was higher than usual.");
+      expect(report.budget).toBeNull(); // no active budget in the payload
+      expect(report.forecast).toBeNull();
+
+      // The PDF: a real, fetchable document.
+      const doc = await (await api.get(`/api/mobile/reports/${reportId}/document`, { headers })).json();
+      expect(doc.ok).toBe(true);
+      expect(typeof doc.download.url).toBe("string");
+      const pdf = await playwrightRequest.newContext();
+      try {
+        const file = await pdf.get(doc.download.url);
+        expect(file.status()).toBe(200);
+        expect((await file.body()).subarray(0, 4).toString()).toBe("%PDF");
+      } finally {
+        await pdf.dispose();
+      }
+
+      // An unknown or malformed id has no report and no download.
+      for (const id of ["00000000-0000-4000-8000-000000000000", "not-a-uuid"]) {
+        const missing = await (await api.get(`/api/mobile/reports/${id}`, { headers })).json();
+        expect(missing.report).toBeNull();
+        expect(missing.reason).toBe("not_found");
+        const noDoc = await (await api.get(`/api/mobile/reports/${id}/document`, { headers })).json();
+        expect(noDoc.download).toBeNull();
+        expect(noDoc.reason).toBe("not_found");
+      }
+    } finally {
+      await api.dispose();
+      await admin.storage.from("report-artifacts").remove([`reports/${reportId}.pdf`]);
+      await admin.from("report_runs").delete().eq("id", reportId); // artifacts go with it
+    }
+  });
+
+  test("X-Workspace-Id: a member's Space is echoed, anything else falls back to Personal", async () => {
+    const api = await playwrightRequest.newContext({ baseURL: BASE_URL });
+    try {
+      const signIn = await api.post("/api/mobile/auth/sign-in", {
+        data: { email: E2E_USER.email, password: E2E_USER.password },
+      });
+      expect(signIn.status()).toBe(200);
+      const auth = { authorization: `Bearer ${(await signIn.json()).access_token}` };
+      const { workspaceId: personalId } = await ensureWorkspaceAndAccount(adminClient());
+
+      // No header: no echo, the personal Space as before.
+      const plain = await (await api.get("/api/mobile/config", { headers: auth })).json();
+      expect(plain.workspace_id).toBeUndefined();
+
+      // A Space the user belongs to is honoured and echoed.
+      const own = await api.get("/api/mobile/config", {
+        headers: { ...auth, "x-workspace-id": personalId },
+      });
+      expect(own.status()).toBe(200);
+      expect((await own.json()).workspace_id).toBe(personalId);
+
+      // A Space they are not in is only a request: it falls back to Personal
+      // and the echo says so, so the app never shows it as that Space's.
+      const stranger = "00000000-0000-4000-8000-0000000000aa";
+      const other = await api.get("/api/mobile/config", {
+        headers: { ...auth, "x-workspace-id": stranger },
+      });
+      expect(other.status()).toBe(200);
+      expect((await other.json()).workspace_id).toBe(personalId);
+
+      // A malformed value is ignored (no echo at all).
+      const junk = await api.get("/api/mobile/config", {
+        headers: { ...auth, "x-workspace-id": "personal" },
+      });
+      expect((await junk.json()).workspace_id).toBeUndefined();
+    } finally {
+      await api.dispose();
+    }
+  });
+
+  test("Space & members writes refuse a bad body, a Space they are not in, and a personal Space", async () => {
+    const api = await playwrightRequest.newContext({ baseURL: BASE_URL });
+    try {
+      const signIn = await api.post("/api/mobile/auth/sign-in", {
+        data: { email: E2E_USER.email, password: E2E_USER.password },
+      });
+      expect(signIn.status()).toBe(200);
+      const headers = { authorization: `Bearer ${(await signIn.json()).access_token}` };
+      const { workspaceId: personalId } = await ensureWorkspaceAndAccount(adminClient());
+      const stranger = "00000000-0000-4000-8000-0000000000aa";
+      const member = "00000000-0000-4000-8000-0000000000bb";
+
+      // Malformed: no explicit Space, a role that does not exist, an owner invite.
+      expect((await api.post("/api/mobile/spaces/members/role", { headers, data: { membershipId: member, role: "admin" } })).status()).toBe(422);
+      expect((await api.post("/api/mobile/spaces/members/role", { headers, data: { workspaceId: stranger, membershipId: member, role: "root" } })).status()).toBe(422);
+      expect((await api.post("/api/mobile/spaces/invites", { headers, data: { workspaceId: stranger, email: "a@b.co", role: "owner" } })).status()).toBe(422);
+
+      // A Space they are not in: 404, never a write somewhere else.
+      for (const [path, data] of [
+        ["/api/mobile/spaces/members/role", { workspaceId: stranger, membershipId: member, role: "admin" }],
+        ["/api/mobile/spaces/members/remove", { workspaceId: stranger, membershipId: member }],
+        ["/api/mobile/spaces/invites", { workspaceId: stranger, email: "a@b.co", role: "member" }],
+        ["/api/mobile/spaces/invites/revoke", { workspaceId: stranger, inviteId: member }],
+      ] as const) {
+        const res = await api.post(path, { headers, data });
+        expect(res.status(), path).toBe(404);
+        const body = await res.json();
+        expect(body.error).toBe("not_found");
+        expect(JSON.stringify(body)).not.toContain("workspace_memberships");
+      }
+
+      // Their own personal Space has no other members to manage or invite.
+      const res = await api.post("/api/mobile/spaces/invites", {
+        headers,
+        data: { workspaceId: personalId, email: "a@b.co", role: "member" },
+      });
+      expect(res.status()).toBe(422);
+      expect((await res.json()).error).toBe("personal_space");
+    } finally {
+      await api.dispose();
+    }
+  });
+
   test("the Inbox refuses a missing, malformed or invalid token", async () => {
     const api = await playwrightRequest.newContext({ baseURL: BASE_URL });
     try {
@@ -507,6 +736,14 @@ test.describe("mobile API", () => {
       expect((await api.get("/api/mobile/budgets")).status()).toBe(401);
       expect((await api.get("/api/mobile/statements")).status()).toBe(401);
       expect((await api.get("/api/mobile/config")).status()).toBe(401);
+      expect((await api.get("/api/mobile/categories")).status()).toBe(401);
+      for (const path of [
+        "/api/mobile/reports",
+        "/api/mobile/reports/00000000-0000-4000-8000-000000000000",
+        "/api/mobile/reports/00000000-0000-4000-8000-000000000000/document",
+      ]) {
+        expect((await api.get(path)).status(), path).toBe(401);
+      }
       expect(
         (await api.post("/api/mobile/pay/intents", { data: { paymentType: "pay_person" } })).status(),
       ).toBe(401);
@@ -521,6 +758,14 @@ test.describe("mobile API", () => {
       expect(
         (await api.get("/api/mobile/statements/00000000-0000-4000-8000-000000000000/document")).status(),
       ).toBe(401);
+      for (const path of [
+        "/api/mobile/spaces/members/role",
+        "/api/mobile/spaces/members/remove",
+        "/api/mobile/spaces/invites",
+        "/api/mobile/spaces/invites/revoke",
+      ]) {
+        expect((await api.post(path, { data: {} })).status(), path).toBe(401);
+      }
       expect(
         (await api.get("/api/mobile/inbox", { headers: { authorization: "Basic abc" } })).status(),
       ).toBe(401);

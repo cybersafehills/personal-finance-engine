@@ -24,7 +24,7 @@ export default function More() {
   const display = health ? healthDisplay(health.state) : null;
 
   return (
-    <Screen>
+    <Screen edges={["left", "right", "bottom"]}>
       <ScreenHeader title="More" />
 
       <Card style={{ gap: space[1] }}>
@@ -122,15 +122,15 @@ export default function More() {
       </Card>
 
       <Card style={{ gap: space[3] }}>
-        <Text variant="bodyStrong">Budget</Text>
+        <Text variant="bodyStrong">Reports</Text>
         <Text variant="label" color="textSecondary">
-          See how this period is going against your budget.
+          Your daily financial reports.
         </Text>
         <Button
-          label="Open budget"
+          label="Open reports"
           variant="secondary"
           fullWidth
-          onPress={() => router.push("/budgets")}
+          onPress={() => router.push("/reports")}
         />
       </Card>
 
@@ -157,6 +157,19 @@ export default function More() {
           variant="secondary"
           fullWidth
           onPress={() => router.push("/goals")}
+        />
+      </Card>
+
+      <Card style={{ gap: space[3] }}>
+        <Text variant="bodyStrong">Categories</Text>
+        <Text variant="label" color="textSecondary">
+          See where your money has gone.
+        </Text>
+        <Button
+          label="Open categories"
+          variant="secondary"
+          fullWidth
+          onPress={() => router.push("/categories")}
         />
       </Card>
 

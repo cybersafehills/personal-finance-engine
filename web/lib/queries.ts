@@ -1,6 +1,17 @@
 import "server-only";
 import { cookies } from "next/headers";
 import { supabaseSession } from "./supabase-session-server";
+import {
+  aggregateCategoryTotals,
+  collectPages,
+  type CategoryTotal as CategoryTotalRow,
+  type TotalsRow,
+} from "./category-totals";
+import { getUserForRequest } from "./mobile-api";
+import {
+  mobileAccessToken,
+  mobileRequestedWorkspaceId,
+} from "./mobile-session-context";
 import { kigaliDateKey, kigaliDayBoundsUtc } from "./kigali-time";
 import {
   aggregateOutflowsByAllocation,
@@ -728,13 +739,47 @@ export async function getTransactionDuplicateContext(
   return { dedupeState: row.dedupe_state, mergedInto, mergedDuplicates };
 }
 
-export type CategoryTotal = {
-  category: string; // "Uncategorized" for null
-  totalRwf: number;
-  transactionCount: number;
-};
+export type { CategoryTotal } from "./category-totals";
 
-export async function getCategoryTotals(): Promise<CategoryTotal[]> {
+/**
+ * Every settled outgoing transaction's category total, read a page at a time:
+ * the REST API returns at most `max_rows` (1000) per request, so a single
+ * request silently dropped everything past the first 1000 and the totals were
+ * wrong with no error. `truncated` is true only if the safety cap (50 pages,
+ * 50k rows) was reached, so callers can say the figures are incomplete.
+ * THROWS on a failed read (a caller that shows "no spending" for an error would
+ * be stating something false); used by the Categories page and the mobile API.
+ */
+export async function getCategoryTotalsComplete(): Promise<
+  { totals: CategoryTotalRow[]; truncated: boolean }
+> {
+  const supabase = await supabaseSession();
+  const { rows, truncated } = await collectPages<TotalsRow>(async (from, to) => {
+    const { data, error } = await supabase
+      .from("transactions")
+      .select("category, principal_effect_rwf, fee_effect_rwf")
+      .eq("direction", "out")
+      .eq("settlement_state", "settled")
+      // Phase U: exclude rows merged into a canonical duplicate.
+      .neq("dedupe_state", "merged")
+      // A stable order, or pages can overlap or skip rows.
+      .order("id", { ascending: true })
+      .range(from, to);
+    if (error) throw new Error(error.message);
+    return (data ?? []) as TotalsRow[];
+  });
+  return { totals: aggregateCategoryTotals(rows), truncated };
+}
+
+/**
+ * ONE bounded request (at most `max_rows`, 1000, rows), kept as it always was for
+ * the hot paths that call it on every load: Home's "top spending category" and
+ * the category-name suggestions on every transaction page. Those must stay one
+ * cheap request, so they still share the 1000-row ceiling that
+ * getCategoryTotalsComplete exists to avoid. Use that one wherever the totals
+ * themselves are shown (the Categories page, the mobile API).
+ */
+export async function getCategoryTotals(): Promise<CategoryTotalRow[]> {
   const supabase = await supabaseSession();
   const { data, error } = await supabase
     .from("transactions")
@@ -748,28 +793,7 @@ export async function getCategoryTotals(): Promise<CategoryTotal[]> {
     console.error("getCategoryTotals failed:", error.message);
     return [];
   }
-
-  const totals = new Map<string, { total: number; count: number }>();
-
-  for (const row of data ?? []) {
-    const key = row.category ?? "Uncategorized";
-    const effect = Math.abs(
-      Number(row.principal_effect_rwf) + Number(row.fee_effect_rwf),
-    );
-    const existing = totals.get(key) ?? { total: 0, count: 0 };
-    totals.set(key, {
-      total: existing.total + effect,
-      count: existing.count + 1,
-    });
-  }
-
-  return Array.from(totals.entries())
-    .map(([category, { total, count }]) => ({
-      category,
-      totalRwf: total,
-      transactionCount: count,
-    }))
-    .sort((a, b) => b.totalRwf - a.totalRwf);
+  return aggregateCategoryTotals((data ?? []) as TotalsRow[]);
 }
 
 // ===========================================================================
@@ -880,7 +904,10 @@ export async function getCategorySuggestions(): Promise<string[]> {
 export async function getActiveWorkspaceId(): Promise<string | null> {
   const cookieStore = await cookies();
   const supabase = await supabaseSession();
-  const requestedId = cookieStore.get("active_workspace_id")?.value;
+  // The web sends a cookie; the mobile app (no cookie) sends X-Workspace-Id.
+  // Either way it is only a request: membership is checked below.
+  const requestedId = cookieStore.get("active_workspace_id")?.value ??
+    mobileRequestedWorkspaceId() ?? undefined;
 
   if (requestedId) {
     const { data } = await supabase
@@ -1090,7 +1117,7 @@ export async function getCanonicalConnectorInstallations(): Promise<
     { data: userData, error: userError },
     { data: installationData, error: installationError },
   ] = await Promise.all([
-    supabase.auth.getUser(),
+    getUserForRequest(supabase.auth, mobileAccessToken()),
     supabase
       .from("connector_installations")
       .select(
@@ -3268,7 +3295,7 @@ const REPORT_RUN_SUMMARY_COLUMNS =
  * mixing another workspace's reports in there would misleadingly suggest
  * they belong to the one being configured).
  */
-export async function getReportRuns(
+export async function getReportRunsStrict(
   limit = 30,
   workspaceId?: string,
 ): Promise<ReportRunSummary[]> {
@@ -3284,13 +3311,21 @@ export async function getReportRuns(
   }
 
   const { data, error } = await query;
+  if (error) throw new Error(error.message);
+  return (data ?? []) as unknown as ReportRunSummary[];
+}
 
-  if (error) {
-    console.error("getReportRuns failed:", error.message);
+/** The web's view: a failed read is logged and shows no reports, as it always has. */
+export async function getReportRuns(
+  limit = 30,
+  workspaceId?: string,
+): Promise<ReportRunSummary[]> {
+  try {
+    return await getReportRunsStrict(limit, workspaceId);
+  } catch (error) {
+    console.error("getReportRuns failed:", (error as Error).message);
     return [];
   }
-
-  return data ?? [];
 }
 
 export type ReportRunDetail = ReportRunSummary & {
@@ -3299,7 +3334,12 @@ export type ReportRunDetail = ReportRunSummary & {
   error_message: string | null;
 };
 
-export async function getReportRunById(
+/**
+ * THROWS on a failed read; null only when there genuinely is no such report (or
+ * it isn't the caller's, which RLS makes indistinguishable). The mobile API uses
+ * this so a database hiccup is an error the app can retry, not "not found".
+ */
+export async function getReportRunByIdStrict(
   id: string,
 ): Promise<ReportRunDetail | null> {
   const supabase = await supabaseSession();
@@ -3311,12 +3351,20 @@ export async function getReportRunById(
     .eq("id", id)
     .maybeSingle();
 
-  if (error) {
-    console.error("getReportRunById failed:", error.message);
+  if (error) throw new Error(error.message);
+  return data as unknown as ReportRunDetail | null;
+}
+
+/** The web's view: a failed read is logged and reads as "not found", as it always has. */
+export async function getReportRunById(
+  id: string,
+): Promise<ReportRunDetail | null> {
+  try {
+    return await getReportRunByIdStrict(id);
+  } catch (error) {
+    console.error("getReportRunById failed:", (error as Error).message);
     return null;
   }
-
-  return data as unknown as ReportRunDetail | null;
 }
 
 export type ReportPreferencesRow = {

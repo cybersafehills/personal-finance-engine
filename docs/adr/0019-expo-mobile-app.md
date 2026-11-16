@@ -230,6 +230,56 @@ not a reason to keep the whole app native.
 - The Home budget card loads independently of the rest of Home and respects
   privacy mode, so a slow or unavailable budget service never delays Home.
 
+## Implementation notes (Categories)
+
+- A read-only Categories screen (More -> Categories): all-time spending per
+  category with a share bar and transaction count; tapping a category opens the
+  Transactions list filtered to it ("Uncategorized" means no category, like the
+  web), with a chip to clear the filter.
+- The totals come from `GET /api/mobile/categories`, served by the web's one
+  canonical aggregation (`getCategoryTotalsComplete`), not recomputed in the app.
+  Like the web page it covers every Space the user belongs to.
+- **The all-time totals can be silently wrong for a long history.** The old query
+  read every settled outgoing transaction in one request, and the REST API
+  returns at most `max_rows` per request (1000 in the repo config; production's
+  value was not checked), so a longer history would drop everything past the cap
+  with no error. The Categories page and this route now use
+  `getCategoryTotalsComplete`, which pages (a stable `id` order, advancing by the
+  rows actually received and stopping only on an empty page so a lower server cap
+  cannot cut it short, 50 pages at most) and reports `truncated` if the cap is
+  reached, which the screen turns into a visible warning. A failed read is an
+  error the app can retry, never "no spending yet".
+- **Not changed, on purpose:** Home's "top spending category" and the
+  category-name suggestions on every transaction page still use the old
+  one-request `getCategoryTotals`, because paging on those hot paths would add a
+  full scan per load. They keep the row ceiling; other all-rows aggregations may
+  too. This work does not audit them.
+- Navigation: the tap-through uses `router.navigate` (Transactions is a tab) and
+  the filter chip clears with `router.setParams({ category: undefined })`, both
+  checked against the installed `expo-router` types.
+- The tap-through filters on category only, as the web does. The totals count
+  settled outgoing transactions, so the list can also include money in and
+  unsettled rows for that category; the direction chip narrows it.
+
+## Implementation notes (Reports)
+
+- Read-only Reports screens (More -> Reports): a list of daily report runs and a
+  detail with the closing balance, the day's activity, the spending breakdown,
+  budget health, trends, watch-outs, the outlook, the AI commentary and a PDF
+  download. A report is an immutable stored snapshot, so the app only displays it.
+- The server renders every sentence and date (`lib/mobile-reports.ts`, using the
+  web's shared `report-alert-messages.ts` and its timezone-aware formatters):
+  the sentences are shared with the morning email so the two never word an alert
+  differently, and the dates use `toLocaleString` with an IANA timezone, which a
+  phone's JS engine may not support. The app maps a tone to a colour and also
+  spells the tone out for screen readers, so colour is never the only signal.
+- The PDF follows the statements pattern: the render, cache and signed URL moved
+  into `lib/report-download.ts`, shared by the web's redirecting route and the
+  mobile JSON route, so there is one ownership check and one render path. The app
+  asks for a fresh five-minute link on every tap and only accepts `https`.
+- Reports are not Statements: Statements (already in the app) are generated,
+  period-scoped documents; Reports are the daily snapshots.
+
 ## Implementation notes (Add transaction)
 
 - **Signed-in users cannot INSERT into `transactions`.** Phase B made
@@ -254,6 +304,54 @@ not a reason to keep the whole app native.
 - Category is chosen afterwards on the transaction's detail screen (the web
   form's optional category is applied through the existing category-correction
   function after creation).
+## Implementation notes (Transaction detail parity)
+
+- The detail screen follows the web page's block order: a centred hero (who, how
+  much, when), the Pay-again button, an attention banner, Duplicates, "Where this
+  came from", the detail rows, Category (with why, and history once there is
+  more than one change) and Tags. Budget-allocation splits are not here yet; they stay on the web (the existing "Edit on the web" button).
+- Reads are plain queries under the signed-in user's RLS, ported from the web
+  queries (`getTransactionSpaceContext`, `getCategoryHistory`,
+  `getTransactionDuplicateContext`, tags, and the `space_member_directory`
+  function for household names): no new `/api/mobile` route. Each part loads and
+  fails on its own (`loadDetailExtras`), so a failed read removes only its own
+  block, never the whole screen.
+- **Tags are editable** (add, remove, one-tap suggestions from the Space). The
+  web does these as plain inserts and deletes with no MFA step, and the policies
+  enforce the `member` role, `created_by = auth.uid()` and a matching workspace,
+  so the app writes directly under RLS as well; the only server-side rule
+  (1-40 characters) is also a table check. The web's character rule uses a
+  Unicode property escape (`\p{L}`), which the app avoids (not verified on
+  Hermes), so ASCII symbols are rejected and accented letters pass; that is
+  slightly looser than the web for non-ASCII symbols.
+- **Duplicates are a trail, as on the web**: flagged, merged away (opens the
+  kept transaction) and what was merged in (each opens its own). Merging or
+  dismissing stays where both candidates are visible; the detail screen never
+  resolves one blind. A flagged *personal-Space* transaction offers "Review it"
+  (the Inbox); anything else offers the web's review queue, because the app's
+  Inbox only covers the personal Space and the item would not be there.
+- A tag removal asks the database for the rows it deleted: under RLS a delete the
+  caller may not make is not an error, it removes nothing (a household viewer
+  can see tags but not delete them), so zero rows is checked against the tag
+  still existing before the chip is dropped.
+- **Household attribution ("Whose spending")** is editable for a household
+  transaction: shared, one member, a percentage split, or not sure yet. The web
+  action is a thin wrapper over the `set_transaction_attribution` database
+  function (no MFA step; it only adds an analytics event and revalidation), and
+  that function enforces household-only, source visibility, the
+  `transaction.categorize` capability, active members and the 10000-basis-point
+  total, so the app calls it directly under RLS like tags and category changes. It
+  changes how an expense is *counted* in household reports; no money moves. A
+  split is edited as one percentage box per member (so a member cannot appear
+  twice) and totalled in whole basis points (summing percentages as floats makes
+  three equal thirds miss 100). The database's own refusals are plain sentences
+  raised with `raise exception` (`P0001`) and shown as they are; any other error
+  gets a generic message. If a split's rows cannot be read there is no panel
+  rather than a false "Not decided yet". The web's analytics event
+  (`transaction_attributed`) is not sent from the app.
+- Household lines ("Paid by", "Added by", whose account) show real member names
+  when the directory loads and fall back to "You" / "A member" like the web.
+
 ## Implementation notes (Statements)
 
 - A read-only viewer: list the statements and download a PDF/CSV. The list is

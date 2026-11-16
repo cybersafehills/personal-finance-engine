@@ -2,14 +2,21 @@ import { act, fireEvent, render, screen } from "@testing-library/react-native";
 
 import Transactions from "@/app/(app)/(tabs)/transactions";
 import type { TransactionRow } from "@/features/transactions/queries";
-import { resetRouterMock, router } from "@/test/router-mock";
+import { resetRouterMock, router, setParams } from "@/test/router-mock";
 
 const mockGetTransactions = jest.fn();
+const mockLifetime = jest.fn();
+const mockReviewCount = jest.fn();
 
 jest.mock("expo-router", () => jest.requireActual("@/test/router-mock"));
 jest.mock("@/features/transactions/queries", () => {
   const actual = jest.requireActual("@/features/transactions/queries");
-  return { ...actual, getTransactions: (args: unknown) => mockGetTransactions(args) };
+  return {
+    ...actual,
+    getTransactions: (args: unknown) => mockGetTransactions(args),
+    getLifetimeFlowTotals: () => mockLifetime(),
+    getReviewQueueCount: () => mockReviewCount(),
+  };
 });
 
 const row = (id: string, name: string): TransactionRow => ({
@@ -34,6 +41,13 @@ beforeEach(() => {
   jest.useFakeTimers();
   resetRouterMock();
   mockGetTransactions.mockReset();
+  mockLifetime.mockResolvedValue({
+    sentRwf: 3830678,
+    receivedRwf: 28950556,
+    count: 40,
+    accountCreatedIso: "2026-09-04T08:00:00Z",
+  });
+  mockReviewCount.mockResolvedValue(0);
 });
 afterEach(() => jest.useRealTimers());
 
@@ -45,8 +59,48 @@ describe("Transactions screen", () => {
     expect(await screen.findByText("Kigali Fresh")).toBeTruthy();
     expect(screen.getByText("Simba Market")).toBeTruthy();
 
-    await fireEvent.press(screen.getByText("Add"));
+    await fireEvent.press(screen.getByText("Add transaction"));
     expect(router.push).toHaveBeenCalledWith("/add-transaction");
+  });
+
+  it("shows the lifetime chips and explains them on tap", async () => {
+    mockGetTransactions.mockResolvedValue([row("1", "Kigali Fresh")]);
+    await render(<Transactions />);
+
+    expect(await screen.findByText("3,830,678 RWF")).toBeTruthy();
+    expect(screen.getByText("28,950,556 RWF")).toBeTruthy();
+
+    await fireEvent.press(screen.getByLabelText(/Total sent through OneLedger/));
+    expect(
+      screen.getByText(
+        "Total money sent through OneLedger since your account was created on 04/09/2026.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("hides the chips when there is no history yet", async () => {
+    mockLifetime.mockResolvedValue({ sentRwf: 0, receivedRwf: 0, count: 0, accountCreatedIso: null });
+    mockGetTransactions.mockResolvedValue([]);
+    await render(<Transactions />);
+    await screen.findByText("No transactions yet");
+    expect(screen.queryByLabelText(/through OneLedger/)).toBeNull();
+  });
+
+  it("links to the review queue with its count", async () => {
+    mockReviewCount.mockResolvedValue(3);
+    mockGetTransactions.mockResolvedValue([row("1", "Kigali Fresh")]);
+    await render(<Transactions />);
+
+    await fireEvent.press(await screen.findByText("Review queue (3)"));
+    expect(router.push).toHaveBeenCalledWith("/inbox");
+  });
+
+  it("still lists transactions when the totals cannot load", async () => {
+    mockLifetime.mockRejectedValue(new Error("network"));
+    mockGetTransactions.mockResolvedValue([row("1", "Kigali Fresh")]);
+    await render(<Transactions />);
+    expect(await screen.findByText("Kigali Fresh")).toBeTruthy();
+    expect(screen.queryByLabelText(/through OneLedger/)).toBeNull();
   });
 
   it("searches after a short pause, not on every keystroke", async () => {
@@ -84,5 +138,40 @@ describe("Transactions screen", () => {
     mockGetTransactions.mockRejectedValue(new Error("network"));
     await render(<Transactions />);
     expect(await screen.findByText("Try again")).toBeTruthy();
+  });
+
+  describe("opened from Categories", () => {
+    it("shows only that category and says so", async () => {
+      setParams({ category: "Food" });
+      mockGetTransactions.mockResolvedValue([row("1", "Kigali Fresh")]);
+      await render(<Transactions />);
+
+      expect(await screen.findByText("Category: Food")).toBeTruthy();
+      expect(mockGetTransactions).toHaveBeenCalledWith(expect.objectContaining({ category: "Food" }));
+    });
+
+    it("clears the category", async () => {
+      setParams({ category: "Food" });
+      mockGetTransactions.mockResolvedValue([row("1", "Kigali Fresh")]);
+      await render(<Transactions />);
+
+      await fireEvent.press(await screen.findByText("Clear"));
+      expect(router.setParams).toHaveBeenCalledWith({ category: undefined });
+      expect(router.replace).not.toHaveBeenCalled();
+    });
+
+    it("has no category chip when opened normally", async () => {
+      mockGetTransactions.mockResolvedValue([row("1", "Kigali Fresh")]);
+      await render(<Transactions />);
+      await screen.findByText("Kigali Fresh");
+      expect(screen.queryByText(/^Category:/)).toBeNull();
+    });
+
+    it("explains an empty category rather than showing the empty ledger message", async () => {
+      setParams({ category: "Food" });
+      mockGetTransactions.mockResolvedValue([]);
+      await render(<Transactions />);
+      expect(await screen.findByText("Nothing matches that search")).toBeTruthy();
+    });
   });
 });
