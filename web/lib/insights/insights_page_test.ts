@@ -165,10 +165,14 @@ Deno.test("drill-down: links pin dates and parse back; malformed -> null", () =>
   const back = parseInsightsQuery(sp, "2027-01-01");
   assertEquals([back.fromKey, back.toKey], ["2026-11-01", "2026-11-16"]);
 
-  assertEquals(parseDrilldown({ kind: "everything", currency: "RWF" }), null);
+  // The figure's currency must not come back as a page filter.
+  assertEquals(back.currency, undefined);
+
+  assertEquals(parseDrilldown({ kind: "everything", cur: "RWF" }), null);
   assertEquals(parseDrilldown({ kind: "money_in" }), null);
-  assertEquals(parseDrilldown({ kind: "category", currency: "RWF" }), null);
-  assertEquals(parseDrilldown({ kind: "money_in", currency: "RWF", value: "x" }), {
+  assertEquals(parseDrilldown({ kind: "money_in", currency: "RWF" }), null);
+  assertEquals(parseDrilldown({ kind: "category", cur: "RWF" }), null);
+  assertEquals(parseDrilldown({ kind: "money_in", cur: "RWF", value: "x" }), {
     kind: "money_in",
     currency: "RWF",
   });

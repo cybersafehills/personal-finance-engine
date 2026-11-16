@@ -88,6 +88,8 @@ test("a category drills down to exactly its transactions", async ({ page }) => {
 
   await page.getByRole("link", { name: /Insights$/ }).first().click();
   await expect(page).toHaveURL(/\/insights\?.*from=2024-03-01/);
+  // Going back must not add a currency filter the user never chose.
+  expect(page.url()).not.toContain("currency=");
 });
 
 test("an empty period says so instead of showing zeros", async ({ page }) => {
@@ -96,9 +98,9 @@ test("an empty period says so instead of showing zeros", async ({ page }) => {
 });
 
 test("a malformed drill-down link is a not-found, not an error", async ({ page }) => {
-  await page.goto(`/insights/transactions?${PERIOD}&kind=everything&currency=RWF`);
-  await expect(page.getByText("2 transactions behind this figure.")).toHaveCount(0);
-  await expect(page.getByRole("region", { name: "RWF insights" })).toHaveCount(0);
+  await page.goto(`/insights/transactions?${PERIOD}&kind=everything&cur=RWF`);
+  await expect(page.getByText("We couldn't find that.")).toBeVisible();
+  await expect(page.getByText(/behind this figure/)).toHaveCount(0);
 });
 
 test("Insights has no serious/critical automated accessibility violations", async ({ page }) => {

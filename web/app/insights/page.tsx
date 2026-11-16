@@ -673,7 +673,12 @@ export default async function InsightsPage({
               </li>
             )}
             {data.excluded.reversed > 0 && (
-              <li>{data.excluded.reversed} that were reversed.</li>
+              <li>
+                {data.excluded.reversed}{" "}
+                reversal notice{data.excluded.reversed === 1 ? "" : "s"}{" "}
+                whose effect can’t be worked out yet — the original payment
+                may still be counted.
+              </li>
             )}
             {data.excluded.uncomputed > 0 && (
               <li>

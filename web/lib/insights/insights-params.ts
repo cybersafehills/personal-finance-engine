@@ -250,7 +250,10 @@ export function drilldownHref(q: InsightsQuery, f: DrilldownFilter): string {
   p.delete("category");
   if (f.scope.category !== undefined) p.set("category", f.scope.category);
   p.set("kind", f.kind);
-  p.set("currency", f.currency);
+  // "cur" (the figure's currency) is separate from "currency" (the page's
+  // optional filter), so "Back to Insights" never adds a filter the user
+  // did not choose.
+  p.set("cur", f.currency);
   if (f.value !== undefined) p.set("value", f.value);
   return `/insights/transactions?${p.toString()}`;
 }
@@ -265,7 +268,7 @@ export type DrilldownRequest = {
 export function parseDrilldown(sp: RawParams): DrilldownRequest | null {
   const kind = one(sp.kind) as DrilldownFilter["kind"] | undefined;
   if (!kind || !DRILLDOWN_KINDS.includes(kind)) return null;
-  const currency = one(sp.currency)?.toUpperCase();
+  const currency = one(sp.cur)?.toUpperCase();
   if (!currency || !CURRENCY.test(currency)) return null;
   const value = one(sp.value)?.slice(0, 200);
   if (KINDS_WITH_VALUE.has(kind) && value === undefined) return null;

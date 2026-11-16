@@ -112,7 +112,10 @@ async function fetchRows(
   toIso: string,
 ): Promise<InsightRow[] | "too_many_rows"> {
   const rows: InsightRow[] = [];
-  for (let offset = 0;; offset += PAGE) {
+  // Advance by what was actually returned and stop only on an EMPTY page:
+  // the server's own row cap (PostgREST max-rows) may be lower than PAGE,
+  // and "a short page means the last page" would then truncate silently.
+  for (let offset = 0;; offset = rows.length) {
     const { data, error } = await supabase
       .from("transactions")
       .select(INSIGHT_COLUMNS)
@@ -125,9 +128,9 @@ async function fetchRows(
       .order("id", { ascending: true })
       .range(offset, offset + PAGE - 1);
     if (error) throw new Error(`insights transactions: ${error.message}`);
-    rows.push(...((data ?? []) as InsightRow[]));
-    if ((data ?? []).length < PAGE) return rows;
-    if (rows.length >= MAX_INSIGHT_ROWS) return "too_many_rows";
+    if (!data || data.length === 0) return rows;
+    rows.push(...(data as InsightRow[]));
+    if (rows.length > MAX_INSIGHT_ROWS) return "too_many_rows";
   }
 }
 
@@ -136,7 +139,7 @@ async function fetchLinkedIds(
   workspaceId: string,
 ): Promise<Set<string> | "too_many_rows"> {
   const links: { out_transaction_id: string; in_transaction_id: string }[] = [];
-  for (let offset = 0;; offset += PAGE) {
+  for (let offset = 0;; offset = links.length) {
     const { data, error } = await supabase
       .from("transfer_links")
       .select("out_transaction_id, in_transaction_id")
@@ -145,9 +148,9 @@ async function fetchLinkedIds(
       .order("id", { ascending: true })
       .range(offset, offset + PAGE - 1);
     if (error) throw new Error(`insights transfer links: ${error.message}`);
-    links.push(...(data ?? []));
-    if ((data ?? []).length < PAGE) return linkedTransferIdSet(links);
-    if (links.length >= MAX_LINK_ROWS) return "too_many_rows";
+    if (!data || data.length === 0) return linkedTransferIdSet(links);
+    links.push(...data);
+    if (links.length > MAX_LINK_ROWS) return "too_many_rows";
   }
 }
 
