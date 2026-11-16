@@ -1,6 +1,14 @@
 import { bearerGet, failureForOutcome } from "@/api/bearer";
 import { parseBudgetsResponse, type BudgetsResult } from "@/features/budgets/parse";
 import { parseInboxResponse, type InboxResult } from "@/features/inbox/parse";
+import {
+  parseDrilldownResponse,
+  parseInsightsResponse,
+  type DrilldownResult,
+  type InsightsResult,
+} from "@/features/insights/parse";
+import type { Drilldown } from "@/features/insights/types";
+import { parseWalletsResponse, type WalletsResult } from "@/features/wallets/parse";
 import { config } from "@/lib/config";
 
 // Client for the web app's /api/mobile/* endpoints (ADR 0019): operations
@@ -99,4 +107,49 @@ export async function fetchBudgets(): Promise<BudgetsResult> {
     return { ok: false, ...failureForOutcome(result, "Your budget") };
   }
   return parseBudgetsResponse(result.status, result.body);
+}
+
+/** Money in/out/net, categories and top people for a period (whole Kigali days, `to` exclusive). */
+export async function fetchInsights(params: {
+  from: string;
+  to: string;
+  accountIds?: string[];
+  compare?: boolean;
+}): Promise<InsightsResult> {
+  const q = new URLSearchParams({ from: params.from, to: params.to, tz: "Africa/Kigali" });
+  for (const id of params.accountIds ?? []) q.append("account_id", id);
+  if (params.compare) q.set("compare", "previous");
+  const result = await bearerGet(`/api/mobile/insights/overview?${q.toString()}`);
+  if (result.kind !== "response") {
+    return { ok: false, ...failureForOutcome(result, "Insights") };
+  }
+  return parseInsightsResponse(result.status, result.body);
+}
+
+/** The transactions behind one number on the Insights screen. */
+export async function fetchDrilldown(d: Drilldown, limit = 50, offset = 0): Promise<DrilldownResult> {
+  const q = new URLSearchParams({
+    kind: d.kind,
+    currency: d.currency,
+    from: d.from,
+    to: d.to,
+    limit: String(limit),
+    offset: String(offset),
+  });
+  if (d.value !== null) q.set("value", d.value);
+  for (const id of d.accountIds ?? []) q.append("account_id", id);
+  const result = await bearerGet(`/api/mobile/insights/drilldown?${q.toString()}`);
+  if (result.kind !== "response") {
+    return { ok: false, ...failureForOutcome(result, "These transactions") };
+  }
+  return parseDrilldownResponse(result.status, result.body);
+}
+
+/** Wallets with an honest balance label (Confirmed / Estimated / Out of date / Not available). */
+export async function fetchWallets(): Promise<WalletsResult> {
+  const result = await bearerGet("/api/mobile/accounts");
+  if (result.kind !== "response") {
+    return { ok: false, ...failureForOutcome(result, "Your wallets") };
+  }
+  return parseWalletsResponse(result.status, result.body);
 }

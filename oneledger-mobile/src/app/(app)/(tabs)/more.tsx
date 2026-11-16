@@ -70,6 +70,32 @@ export default function More() {
       <NotificationsCard />
 
       <Card style={{ gap: space[3] }}>
+        <Text variant="bodyStrong">Insights</Text>
+        <Text variant="label" color="textSecondary">
+          Where your money went this month, and what is behind each number.
+        </Text>
+        <Button
+          label="Open insights"
+          variant="secondary"
+          fullWidth
+          onPress={() => router.push("/insights")}
+        />
+      </Card>
+
+      <Card style={{ gap: space[3] }}>
+        <Text variant="bodyStrong">Wallets</Text>
+        <Text variant="label" color="textSecondary">
+          Your balances, and how sure we are about each one.
+        </Text>
+        <Button
+          label="Open wallets"
+          variant="secondary"
+          fullWidth
+          onPress={() => router.push("/wallets")}
+        />
+      </Card>
+
+      <Card style={{ gap: space[3] }}>
         <Text variant="bodyStrong">Budget</Text>
         <Text variant="label" color="textSecondary">
           See how this period is going against your budget.
