@@ -408,6 +408,48 @@ test.describe("mobile API", () => {
       expect(readBody.intent.id).toBe(created.intent.id);
       expect(readBody.intent.state).toBe("draft");
 
+      // A merchant payment has no phone number, so its USSD route comes from the
+      // paying account's own network, read server-side. (Without that the
+      // instruction would be null: "no verified route".)
+      const { accountId } = await ensureWorkspaceAndAccount(adminClient());
+      const merchantRes = await api.post("/api/mobile/pay/intents", {
+        headers,
+        data: {
+          paymentType: "pay_merchant",
+          amountMinor: 2500,
+          merchantCode: "123456",
+          recipientName: "E2E Shop",
+          sourceAccountId: accountId,
+          idempotencyKey: crypto.randomUUID(),
+        },
+      });
+      expect(merchantRes.status()).toBe(200);
+      const merchant = (await merchantRes.json()).intent;
+      createdIntentIds.push(merchant.id);
+      expect(merchant.provider).toBe("mtn");
+      expect(merchant.instruction?.ok, "a verified MTN merchant route").toBe(true);
+      expect(merchant.instruction.display).toContain("123456");
+      expect(merchant.instruction.telHref).not.toContain("#");
+
+      // Handing off (copied / dialled) moves the intent to awaiting verification.
+      const handoff = await api.post(`/api/mobile/pay/intents/${created.intent.id}/handoff`, {
+        headers,
+        data: { method: "copy", outcome: "copied" },
+      });
+      expect(handoff.status()).toBe(200);
+      expect((await handoff.json()).intent.state).toBe("awaiting_verification");
+      // An unknown id is "not found", and an outcome that doesn't fit the method is refused.
+      const ghost = await api.post("/api/mobile/pay/intents/00000000-0000-4000-8000-000000000000/handoff", {
+        headers,
+        data: { method: "copy", outcome: "copied" },
+      });
+      expect(ghost.status()).toBe(404);
+      const mismatch = await api.post(`/api/mobile/pay/intents/${created.intent.id}/handoff`, {
+        headers,
+        data: { method: "dialer", outcome: "copied" },
+      });
+      expect(mismatch.status()).toBe(422);
+
       // An unknown or malformed id has no intent.
       for (const id of ["00000000-0000-4000-8000-000000000000", "not-a-uuid"]) {
         const miss = await api.get(`/api/mobile/pay/intents/${id}`, { headers });
@@ -470,6 +512,11 @@ test.describe("mobile API", () => {
       ).toBe(401);
       expect(
         (await api.get("/api/mobile/pay/intents/00000000-0000-4000-8000-000000000000")).status(),
+      ).toBe(401);
+      expect(
+        (await api.post("/api/mobile/pay/intents/00000000-0000-4000-8000-000000000000/handoff", {
+          data: { method: "copy", outcome: "copied" },
+        })).status(),
       ).toBe(401);
       expect(
         (await api.get("/api/mobile/statements/00000000-0000-4000-8000-000000000000/document")).status(),

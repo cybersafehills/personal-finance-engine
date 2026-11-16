@@ -6,13 +6,13 @@
 import type { FillResult } from "./ussd/capability.ts";
 import { buildTelHref } from "./ussd/capability.ts";
 
-/** The intent types the app can create today: the four "Pay X again" targets. */
-export const MOBILE_PAYMENT_TYPES = [
-  "pay_person",
-  "buy_airtime",
-  "pay_merchant",
-  "pay_bill",
-] as const;
+/**
+ * The intent types the app can create today: the ones with a genuine verified
+ * USSD route. Airtime is left out on purpose (the directory resolves
+ * `buy_airtime` to the send-money code, which would transfer money rather than
+ * buy airtime) and bill payments have no route yet.
+ */
+export const MOBILE_PAYMENT_TYPES = ["pay_person", "pay_merchant"] as const;
 export type MobilePaymentType = (typeof MOBILE_PAYMENT_TYPES)[number];
 
 export type CreateIntentRequest = {
@@ -22,7 +22,6 @@ export type CreateIntentRequest = {
   recipientName?: string;
   recipientMsisdn?: string;
   merchantCode?: string;
-  billingReference?: string;
   sourceAccountId?: string;
 };
 
@@ -84,30 +83,27 @@ export function parseCreateIntent(body: unknown): ParsedCreate {
   const recipientName = optionalText(b.recipientName, 80);
   const recipientMsisdn = optionalText(b.recipientMsisdn, 20);
   const merchantCode = optionalText(b.merchantCode, 12);
-  const billingReference = optionalText(b.billingReference, 40);
   if (
-    recipientName === null || recipientMsisdn === null ||
-    merchantCode === null || billingReference === null
+    recipientName === null || recipientMsisdn === null || merchantCode === null
   ) {
     return { ok: false, message: "One of the recipient details isn't valid." };
   }
 
-  const needsPhone = paymentType === "pay_person" ||
-    paymentType === "buy_airtime";
-  if (needsPhone && !recipientMsisdn) {
+  if (paymentType === "pay_person" && !recipientMsisdn) {
     return { ok: false, message: "A phone number is needed for this payment." };
   }
-  if (paymentType === "pay_merchant" && !merchantCode) {
-    return {
-      ok: false,
-      message: "A merchant code is needed for this payment.",
-    };
-  }
-  if (paymentType === "pay_bill" && !billingReference) {
-    return {
-      ok: false,
-      message: "A bill reference is needed for this payment.",
-    };
+  if (paymentType === "pay_merchant") {
+    if (!merchantCode) {
+      return {
+        ok: false,
+        message: "A merchant code is needed for this payment.",
+      };
+    }
+    // A merchant has no phone number to say which network to dial on, so the
+    // paying account's own network decides (resolved server-side from the row).
+    if (typeof b.sourceAccountId !== "string") {
+      return { ok: false, message: "Choose the account you're paying from." };
+    }
   }
 
   return {
@@ -119,7 +115,6 @@ export function parseCreateIntent(body: unknown): ParsedCreate {
       recipientName,
       recipientMsisdn,
       merchantCode,
-      billingReference,
       sourceAccountId: typeof b.sourceAccountId === "string"
         ? b.sourceAccountId
         : undefined,
@@ -188,4 +183,40 @@ export function toMobileIntent(
       }
       : { ok: false, error: filled.error },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Recording a handoff (POST /api/mobile/pay/intents/:id/handoff)
+// ---------------------------------------------------------------------------
+
+/** What the app can honestly report: it opened the dialer, or the user copied/shared the code. */
+const HANDOFF_OUTCOMES = {
+  dialer: ["dialer_opened", "dialer_unsupported"],
+  copy: ["copied", "fallback_shown"],
+} as const;
+
+export type HandoffRequest =
+  | { method: "dialer"; outcome: (typeof HANDOFF_OUTCOMES.dialer)[number] }
+  | { method: "copy"; outcome: (typeof HANDOFF_OUTCOMES.copy)[number] };
+
+export type ParsedHandoff =
+  | { ok: true; value: HandoffRequest }
+  | { ok: false; message: string };
+
+export function parseHandoff(body: unknown): ParsedHandoff {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, message: "Send the handoff details as JSON." };
+  }
+  const { method, outcome } = body as Record<string, unknown>;
+  if (method !== "dialer" && method !== "copy") {
+    return { ok: false, message: "That handoff method isn't supported." };
+  }
+  const allowed: readonly string[] = HANDOFF_OUTCOMES[method];
+  if (typeof outcome !== "string" || !allowed.includes(outcome)) {
+    return {
+      ok: false,
+      message: "That handoff outcome isn't valid for the method.",
+    };
+  }
+  return { ok: true, value: { method, outcome } as HandoffRequest };
 }

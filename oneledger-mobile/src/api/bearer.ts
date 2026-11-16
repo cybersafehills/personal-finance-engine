@@ -12,7 +12,7 @@ export type BearerResponse =
   | { kind: "unconfigured" }
   | { kind: "network" };
 
-export async function bearerGet(path: string): Promise<BearerResponse> {
+async function bearerRequest(path: string, init: RequestInit = {}): Promise<BearerResponse> {
   if (!supabase || !config.apiBaseUrl) return { kind: "unconfigured" };
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
@@ -21,7 +21,8 @@ export async function bearerGet(path: string): Promise<BearerResponse> {
   let response: Response;
   try {
     response = await fetch(`${config.apiBaseUrl}${path}`, {
-      headers: { authorization: `Bearer ${token}` },
+      ...init,
+      headers: { ...(init.headers as Record<string, string> | undefined), authorization: `Bearer ${token}` },
     });
   } catch {
     return { kind: "network" };
@@ -35,30 +36,17 @@ export async function bearerGet(path: string): Promise<BearerResponse> {
   return { kind: "response", status: response.status, body };
 }
 
-/** POST helper (JSON in, JSON out) for the bearer-authenticated /api/mobile mutations. */
-export async function bearerPost(path: string, payload: unknown): Promise<BearerResponse> {
-  if (!supabase || !config.apiBaseUrl) return { kind: "unconfigured" };
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
-  if (!token) return { kind: "no_session" };
+export function bearerGet(path: string): Promise<BearerResponse> {
+  return bearerRequest(path);
+}
 
-  let response: Response;
-  try {
-    response = await fetch(`${config.apiBaseUrl}${path}`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-  } catch {
-    return { kind: "network" };
-  }
-  let body: unknown = null;
-  try {
-    body = await response.json();
-  } catch {
-    // Non-JSON error page; the status alone decides.
-  }
-  return { kind: "response", status: response.status, body };
+/** POST a JSON body with the user's own token (the server runs it under RLS, second factor required). */
+export function bearerPost(path: string, body: unknown): Promise<BearerResponse> {
+  return bearerRequest(path, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
 }
 
 export type BearerFailure = {

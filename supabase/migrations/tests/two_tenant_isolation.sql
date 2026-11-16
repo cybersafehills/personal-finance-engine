@@ -49,7 +49,6 @@ insert into tt.allow values
   ('rls_off',        'auth_login_attempts',    'login lockout counters; service-role only, no client grants (asserted below)'),
   ('open_select',    'regulatory_authorities', 'public reference data, SELECT only'),
   ('open_select',    'service_operators',      'public reference data, SELECT only'),
-  ('forge_gap',      'directory_suggestions',  'KNOWN GAP: insert policy checks only suggester_user_id = auth.uid(), so a user can stamp a suggestion with another tenant''s workspace_id (provenance only; the row is readable just by its author and directory admins). Fix with a forward migration adding is_workspace_member(workspace_id) to WITH CHECK, then delete this row.'),
   ('anon_function',  'invite_preview',         'invite landing page, takes an unguessable token hash and returns a redacted preview'),
   ('anon_function',  'resolve_payment_request','public payment-request link: takes only the SHA-256 digest of an unguessable 256-bit token and returns the minimum a payer needs (docs/oneledger-3/s5-payment-requests.md)');
 
@@ -352,6 +351,18 @@ begin
       end if;
     end loop;
   end loop;
+
+  -- directory_suggestions: the policy must still let a member suggest from their own workspace.
+  begin
+    perform tt.act_as(ua);
+    insert into public.directory_suggestions (suggester_user_id, workspace_id, suggestion_type, body)
+      values (ua, wa, 'other', 'positive control: a member suggesting from their own workspace');
+    reset role;
+    perform tt.rec(true, 'directory_suggestions: a member can still suggest from their own workspace (positive control)');
+  exception when others then
+    reset role;
+    perform tt.rec(false, format('directory_suggestions: a member could not suggest from their own workspace (%s)', sqlerrm));
+  end;
 
   perform tt.rec(true, format('swept %s workspace-scoped tables; %s forged inserts denied by RLS', cardinality(seeded_tables), forge_denied));
   -- A catalog that suddenly yields almost no tables means the sweep broke, not that all is well.

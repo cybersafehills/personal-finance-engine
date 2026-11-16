@@ -1,5 +1,9 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { parseCreateIntent, toMobileIntent } from "./mobile-pay.ts";
+import {
+  parseCreateIntent,
+  parseHandoff,
+  toMobileIntent,
+} from "./mobile-pay.ts";
 
 const KEY = "11111111-1111-4111-8111-111111111111";
 const ok = (over: Record<string, unknown> = {}) =>
@@ -29,39 +33,43 @@ Deno.test("a request id is required and must be a UUID", () => {
   assertEquals(ok({ idempotencyKey: "not-a-uuid" }).ok, false);
 });
 
-Deno.test("only the app's pay-again types are accepted", () => {
-  assertEquals(ok({ paymentType: "buy_electricity" }).ok, false);
-  assertEquals(ok({ paymentType: "government" }).ok, false);
-  assertEquals(ok({ paymentType: 7 }).ok, false);
+Deno.test("only person and merchant payments are accepted", () => {
+  // Airtime resolves to the send-money code (it would transfer money) and bills
+  // have no verified route, so neither is offered, nor is anything else.
+  for (
+    const paymentType of [
+      "buy_airtime",
+      "pay_bill",
+      "buy_electricity",
+      "government",
+      7,
+    ]
+  ) {
+    assertEquals(ok({ paymentType }).ok, false, String(paymentType));
+  }
 });
 
-Deno.test("the recipient detail must match the payment type", () => {
+const ACCOUNT = "22222222-2222-4222-8222-222222222222";
+const merchant = (over: Record<string, unknown> = {}) =>
+  parseCreateIntent({
+    paymentType: "pay_merchant",
+    amountMinor: 100,
+    idempotencyKey: KEY,
+    merchantCode: "123456",
+    sourceAccountId: ACCOUNT,
+    ...over,
+  });
+
+Deno.test("a person payment needs a phone number", () => {
   assertEquals(ok({ recipientMsisdn: undefined }).ok, false);
-  assertEquals(
-    parseCreateIntent({
-      paymentType: "pay_merchant",
-      amountMinor: 100,
-      idempotencyKey: KEY,
-    }).ok,
-    false,
-  );
-  assertEquals(
-    parseCreateIntent({
-      paymentType: "pay_merchant",
-      amountMinor: 100,
-      idempotencyKey: KEY,
-      merchantCode: "123456",
-    }).ok,
-    true,
-  );
-  assertEquals(
-    parseCreateIntent({
-      paymentType: "pay_bill",
-      amountMinor: 100,
-      idempotencyKey: KEY,
-    }).ok,
-    false,
-  );
+});
+
+Deno.test("a merchant payment needs a merchant code and the paying account", () => {
+  assertEquals(merchant().ok, true);
+  assertEquals(merchant({ merchantCode: undefined }).ok, false);
+  // No account means no way to know which network's USSD to use.
+  assertEquals(merchant({ sourceAccountId: undefined }).ok, false);
+  assertEquals(merchant({ sourceAccountId: "nope" }).ok, false);
 });
 
 Deno.test("oversized or non-text recipient fields are rejected", () => {
@@ -79,7 +87,6 @@ Deno.test("unknown fields (note, category, budget...) are ignored, not passed on
   });
   assertEquals(r.ok && Object.keys(r.value).sort(), [
     "amountMinor",
-    "billingReference",
     "idempotencyKey",
     "merchantCode",
     "paymentType",
@@ -140,4 +147,38 @@ Deno.test("the full phone number never appears in the payload except inside the 
   const json = JSON.stringify(toMobileIntent(intent, null));
   assertEquals(json.includes("250788123456"), false);
   assertEquals(json.includes("0788123456"), false);
+});
+
+Deno.test("a handoff is the dialer or a copy, with an outcome that fits the method", () => {
+  assertEquals(parseHandoff({ method: "copy", outcome: "copied" }).ok, true);
+  assertEquals(
+    parseHandoff({ method: "copy", outcome: "fallback_shown" }).ok,
+    true,
+  );
+  assertEquals(
+    parseHandoff({ method: "dialer", outcome: "dialer_opened" }).ok,
+    true,
+  );
+  assertEquals(
+    parseHandoff({ method: "dialer", outcome: "dialer_unsupported" }).ok,
+    true,
+  );
+});
+
+Deno.test("a handoff never accepts a mismatched method/outcome, qr, or anything else", () => {
+  for (
+    const body of [
+      { method: "dialer", outcome: "copied" },
+      { method: "copy", outcome: "dialer_opened" },
+      { method: "qr", outcome: "qr_shown" },
+      { method: "none", outcome: "copied" },
+      { method: "copy" },
+      { outcome: "copied" },
+      { method: "copy", outcome: 5 },
+      null,
+      "copy",
+    ]
+  ) {
+    assertEquals(parseHandoff(body).ok, false, JSON.stringify(body));
+  }
 });

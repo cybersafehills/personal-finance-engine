@@ -1,4 +1,4 @@
-import { bearerGet, failureForOutcome } from "@/api/bearer";
+import { bearerGet, bearerPost, failureForOutcome } from "@/api/bearer";
 import { parseBudgetsResponse, type BudgetsResult } from "@/features/budgets/parse";
 import {
   parseDownloadResponse,
@@ -7,6 +7,12 @@ import {
   type StatementsResult,
 } from "@/features/statements/parse";
 import type { DownloadFormat } from "@/features/statements/types";
+import {
+  parseConfigResponse,
+  parseIntentResponse,
+  type PayConfigResult,
+  type PayIntentResult,
+} from "@/features/pay/parse";
 import { parseInboxResponse, type InboxResult } from "@/features/inbox/parse";
 import {
   parseDrilldownResponse,
@@ -214,4 +220,54 @@ export async function fetchStatementDownload(
     return { ok: false, reason: f.reason, message: f.message };
   }
   return parseDownloadResponse(result.status, result.body);
+}
+
+/** Which payment features are on for this user. Any failure means "hide the button". */
+export async function fetchPayConfig(): Promise<PayConfigResult> {
+  const result = await bearerGet("/api/mobile/config");
+  if (result.kind !== "response") {
+    return { ok: false, ...failureForOutcome(result, "Payments") };
+  }
+  return parseConfigResponse(result.status, result.body);
+}
+
+const intentFailure = (result: Exclude<Awaited<ReturnType<typeof bearerGet>>, { kind: "response" }>): PayIntentResult => {
+  const f = failureForOutcome(result, "That payment");
+  return { ok: false, reason: f.reason, message: f.message };
+};
+
+export type CreatePayIntentBody = {
+  paymentType: "pay_person" | "pay_merchant";
+  amountMinor: number;
+  idempotencyKey: string;
+  recipientName?: string;
+  recipientMsisdn?: string;
+  merchantCode?: string;
+  sourceAccountId?: string;
+};
+
+/** Prepare a draft payment. Never charges anything; the same idempotencyKey returns the same intent. */
+export async function createPayIntent(body: CreatePayIntentBody): Promise<PayIntentResult> {
+  const result = await bearerPost("/api/mobile/pay/intents", body);
+  if (result.kind !== "response") return intentFailure(result);
+  return parseIntentResponse(result.status, result.body);
+}
+
+/** A payment intent with its prepared USSD instruction. */
+export async function fetchPayIntent(id: string): Promise<PayIntentResult> {
+  const result = await bearerGet(`/api/mobile/pay/intents/${encodeURIComponent(id)}`);
+  if (result.kind !== "response") return intentFailure(result);
+  return parseIntentResponse(result.status, result.body);
+}
+
+/** Record that the user opened the dialer or shared/copied the code. Returns the refreshed intent. */
+export async function recordPayHandoff(
+  id: string,
+  body:
+    | { method: "dialer"; outcome: "dialer_opened" | "dialer_unsupported" }
+    | { method: "copy"; outcome: "copied" | "fallback_shown" },
+): Promise<PayIntentResult> {
+  const result = await bearerPost(`/api/mobile/pay/intents/${encodeURIComponent(id)}/handoff`, body);
+  if (result.kind !== "response") return intentFailure(result);
+  return parseIntentResponse(result.status, result.body);
 }

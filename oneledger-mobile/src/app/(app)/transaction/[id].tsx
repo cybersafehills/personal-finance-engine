@@ -19,6 +19,7 @@ import {
   signedAmountRwf,
   transactionTypeLabel,
 } from "@/features/transactions/display";
+import { loadPayAgainOffer } from "@/features/pay/context";
 import { getTransactionById } from "@/features/transactions/queries";
 import { ReceiptCard } from "@/features/receipts/ReceiptCard";
 import { useQuery } from "@/hooks/useQuery";
@@ -31,6 +32,14 @@ export default function TransactionDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const load = useCallback(() => getTransactionById(id), [id]);
   const { data: transaction, loading, error, refresh } = useQuery(load);
+
+  // "Pay X again": only when it can honestly work (see features/pay/context.ts).
+  // Any doubt - config off, shared Space, odd reference - and the button is absent.
+  const loadOffer = useCallback(
+    () => (transaction ? loadPayAgainOffer(transaction) : Promise.resolve(null)),
+    [transaction],
+  );
+  const { data: payOffer } = useQuery(loadOffer);
 
   const back = (
     <Button label="Back" variant="ghost" onPress={() => router.back()} />
@@ -108,6 +117,18 @@ export default function TransactionDetail() {
           }
         />
       )}
+
+      {payOffer ? (
+        <Button
+          label={`Pay ${payOffer.target.name ?? "this recipient"} again`}
+          fullWidth
+          // Only the id travels: the form rebuilds the recipient from the
+          // transaction itself, so a crafted deep link can't choose one.
+          onPress={() =>
+            router.push({ pathname: "/pay-again", params: { txn: transaction.id } })
+          }
+        />
+      ) : null}
 
       {config.apiBaseUrl ? (
         <Button
