@@ -95,7 +95,7 @@ export default function Transactions() {
   }
 
   return (
-    <ListScreen>
+    <ListScreen edges={["left", "right"]}>
       <SectionList
         sections={groupByDay(rows, loadedAt)}
         keyExtractor={(row) => row.id}

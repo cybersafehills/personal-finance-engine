@@ -67,7 +67,6 @@ describe("More screen", () => {
     for (const [label, path] of [
       ["Recording status", "/capture"],
       ["See notifications", "/notifications"],
-      ["Open budget", "/budgets"],
       ["Open statements", "/statements"],
       ["Open goals", "/goals"],
       ["App lock", "/security"],

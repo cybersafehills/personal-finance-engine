@@ -98,7 +98,7 @@ export default function Inbox() {
   const high = items.filter((i) => i.priority === "high").length;
 
   return (
-    <ListScreen>
+    <ListScreen edges={["left", "right"]}>
       <SectionList
         sections={groupInbox(items)}
         keyExtractor={(entry) => (entry.type === "group" ? entry.id : entry.item.id)}

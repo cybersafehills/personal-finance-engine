@@ -10,7 +10,9 @@ import {
   mobileAuthRateLimited,
   tokenAal,
   tokenIsFresh,
+  workspaceIdFromHeader,
 } from "./mobile-api";
+import { getActiveWorkspaceId } from "./queries";
 import { runWithMobileSession } from "./mobile-session-context";
 
 // The shared guard for bearer-authenticated, read-only mobile endpoints
@@ -108,6 +110,23 @@ async function authenticate(
   return { ok: true, token, userId: data.user.id };
 }
 
+// Runs a handler under the caller's token and the Space the app is viewing
+// (`X-Workspace-Id`). The header is only a request: getActiveWorkspaceId()
+// checks membership and falls back to the personal Space. When it is sent the
+// response echoes the Space actually used, so an app talking to a server that
+// ignores the header (or a revoked membership) can tell.
+function runInSpace(
+  request: NextRequest,
+  token: string,
+  fn: () => Promise<Record<string, unknown>>,
+): Promise<Record<string, unknown>> {
+  const requested = workspaceIdFromHeader(request.headers.get("x-workspace-id"));
+  return runWithMobileSession(token, async () => {
+    const out = await fn();
+    return requested ? { ...out, workspace_id: await getActiveWorkspaceId() } : out;
+  }, requested);
+}
+
 /** Whether the caller's access token is recent enough to count as a fresh sign-in. */
 export function mobileSessionFresh(token: string, maxMinutes: number): boolean {
   return tokenIsFresh(token, maxMinutes);
@@ -161,7 +180,8 @@ export async function mobilePost(
   }
 
   try {
-    const out = await runWithMobileSession(
+    const out = await runInSpace(
+      request,
       auth.token,
       () => handler(body, { userId: auth.userId, token: auth.token }),
     );
@@ -189,7 +209,7 @@ export async function mobileGet(
   if (!auth.ok) return auth.response;
 
   try {
-    const body = await runWithMobileSession(auth.token, handler);
+    const body = await runInSpace(request, auth.token, handler);
     return json(request, { ok: true, ...body }, 200);
   } catch (error) {
     // Message only: never the token, the request or the response body. Without
