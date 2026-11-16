@@ -8,8 +8,9 @@ import { accountNetwork, payAgainTarget, type PayAgainTarget } from "./target";
 // Decides whether a transaction gets a "Pay X again" button, and with which
 // paying account. Every doubt hides the button (a button that cannot work is
 // worse than none): config off or unreachable, a transaction that isn't in the
-// Space the server will create the draft in, a reference the server would
-// refuse, or no usable RWF account.
+// Space the server will create the draft in, a household role that can't create
+// drafts, a reference the server would refuse, or no usable RWF account of the
+// user's own.
 
 export type PayAgainOffer = {
   target: PayAgainTarget;
@@ -45,6 +46,24 @@ async function transactionPaymentContext(
   return { accountId: row.account_id, workspaceId: row.workspace_id, workspaceKind: kind };
 }
 
+/** Roles the database lets create a payment draft (`is_workspace_member(ws, 'member')`); a viewer can't. */
+const DRAFT_ROLES: readonly string[] = ["owner", "admin", "member"];
+
+async function myMembership(workspaceId: string): Promise<{ userId: string; role: string | null } | null> {
+  if (!supabase) return null;
+  const { data: session } = await supabase.auth.getSession();
+  const userId = session.session?.user.id;
+  if (!userId) return null;
+  const { data } = await supabase
+    .from("workspace_memberships")
+    .select("role")
+    .eq("workspace_id", workspaceId)
+    .eq("user_id", userId)
+    .eq("status", "active")
+    .maybeSingle();
+  return { userId, role: (data as { role: string } | null)?.role ?? null };
+}
+
 export async function loadPayAgainOffer(txn: TxnLike): Promise<PayAgainOffer | null> {
   const target = payAgainTarget(txn);
   if (!target) return null;
@@ -58,6 +77,12 @@ export async function loadPayAgainOffer(txn: TxnLike): Promise<PayAgainOffer | n
       return null;
     }
 
+    // A viewer in a household can see this but can't create a draft: the database
+    // would refuse it after they typed an amount. (Unreadable role: hide.)
+    const me = await myMembership(context.workspaceId);
+    if (!me || me.role === null || !DRAFT_ROLES.includes(me.role)) return null;
+    const personal = context.workspaceKind === "personal";
+
     // Pay from the account this transaction was made from when it can do the
     // job, else the first account in the same Space that can (the web form
     // preselects the first as well). A merchant payment can only be dialled on
@@ -66,9 +91,15 @@ export async function loadPayAgainOffer(txn: TxnLike): Promise<PayAgainOffer | n
     // it rather than let someone prepare a draft that has no route. A person's
     // network comes from the recipient's number, so there the account is just
     // "pay from" and any mobile-money account will do.
+    // In a household the transaction's own account may be ANOTHER member's (the
+    // web labels it "Amy's account"): never offer to pay from it, and for a
+    // merchant it would also decide the network. Only the user's own accounts
+    // count there; an account whose owner can't be told is skipped. (In a personal
+    // Space every account is the user's.)
     const usable = (await listPayerAccounts()).filter(
       (a) =>
         a.workspaceId === context.workspaceId &&
+        (personal || a.ownerUserId === me.userId) &&
         a.currency === "RWF" &&
         (target.type === "pay_merchant" ? accountNetwork(a.provider) === "mtn" : accountNetwork(a.provider) !== null),
     );

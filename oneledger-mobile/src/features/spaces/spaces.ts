@@ -77,7 +77,7 @@ export function storageKey(userId: string): string {
  * transaction in that Space.
  */
 export function isInRequestedSpace(
-  transaction: { workspaceId: string; workspaceKind: SpaceKind | string },
+  transaction: { workspaceId: string; workspaceKind: SpaceKind | string | null },
   requestedId: string | null,
 ): boolean {
   return requestedId === null

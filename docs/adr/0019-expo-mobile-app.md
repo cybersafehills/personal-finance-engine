@@ -194,7 +194,7 @@ not a reason to keep the whole app native.
   merchant needs an **MTN** account (the only merchant-pay code in the directory
   is MTN's, and the network comes from the paying account); a bank, cash or
   Airtel account would only lead to a draft with no route, so it is skipped.
-  Airtime and bills are excluded for the reasons in the Pay intents note.
+  In a household only the user's **own** accounts count as the payer: the transaction's own account may be another member's (the web labels it "Amy's account"), and for a merchant the account also decides the network; an account whose owner can't be told is skipped, and in a personal Space every account is the user's. A household **viewer** is hidden from it, because `create_payment_intent` requires the `member` role and would refuse after an amount was typed. Airtime and bills are excluded for the reasons in the Pay intents note.
 - **Deep links:** the app registers the `oneledger` scheme, so every route is a
   link target. `/pay-again` therefore takes only a transaction id and rebuilds
   the recipient, name and paying account from that transaction (re-checked each

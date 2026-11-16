@@ -53,7 +53,7 @@ export async function getTransactionContext(id: string): Promise<TransactionCont
   return {
     workspaceId: row.workspace_id,
     workspaceName: workspace?.name ?? null,
-    workspaceKind: workspace?.kind ?? "personal",
+    workspaceKind: workspace?.kind ?? null,
     sourceName: source?.display_name ?? null,
     sourceProvider: source?.provider ?? null,
     sourceMaskedIdentifier: source?.masked_identifier ?? null,

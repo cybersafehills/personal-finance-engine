@@ -454,6 +454,14 @@ describe("Transaction detail screen", () => {
       expect(await screen.findByText("Review on the web")).toBeTruthy();
     });
 
+    it("an unreadable Space is never taken for the personal one: it goes to the web", async () => {
+      mockActive.mockReturnValue(null);
+      withContext({ workspaceId: "p1", workspaceKind: null });
+      await render(<TransactionDetail />);
+      expect(await screen.findByText("Review on the web")).toBeTruthy();
+      expect(screen.queryByText("Review it")).toBeNull();
+    });
+
     it("with no Space loaded, a personal transaction still opens the Inbox (the server default)", async () => {
       mockActive.mockReturnValue(null);
       withContext({ workspaceId: "p1", workspaceKind: "personal" });
