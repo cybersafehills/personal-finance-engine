@@ -417,19 +417,16 @@ test.describe("mobile API", () => {
         expect(missBody.reason).toBe("not_found");
       }
 
-      // Bad requests are refused before anything is written.
-      const bad = [
-        { ...payload, idempotencyKey: crypto.randomUUID(), amountMinor: 0 },
-        { ...payload, idempotencyKey: crypto.randomUUID(), paymentType: "government" },
-        { ...payload, idempotencyKey: "not-a-uuid" },
-        { ...payload, idempotencyKey: crypto.randomUUID(), recipientMsisdn: undefined },
-        { ...payload, idempotencyKey: crypto.randomUUID(), recipientMsisdn: "12345" },
-      ];
-      for (const data of bad) {
-        const res = await api.post("/api/mobile/pay/intents", { headers, data });
-        expect(res.status(), JSON.stringify(data)).toBe(422);
-        expect((await res.json()).ok).toBe(false);
-      }
+      // A bad request is refused before anything is written. (Each field rule is
+      // covered in lib/mobile_pay_test.ts; this proves the route enforces it. Few
+      // POSTs on purpose: the endpoint allows 20 a minute per IP, and a CI retry
+      // repeats this whole test.)
+      const bad = await api.post("/api/mobile/pay/intents", {
+        headers,
+        data: { ...payload, idempotencyKey: crypto.randomUUID(), amountMinor: 0 },
+      });
+      expect(bad.status()).toBe(422);
+      expect((await bad.json()).ok).toBe(false);
 
       // A paying account that is not this workspace's is refused.
       const foreign = await api.post("/api/mobile/pay/intents", {
@@ -451,7 +448,10 @@ test.describe("mobile API", () => {
       });
       expect(garbage.status()).toBe(400);
       // Valid JSON that is not an object is refused as a bad request, not a 500.
-      const notObject = await api.post("/api/mobile/pay/intents", { headers, data: "just a string" });
+      const notObject = await api.post("/api/mobile/pay/intents", {
+        headers: { ...headers, "content-type": "application/json" },
+        data: Buffer.from('"just a string"'),
+      });
       expect(notObject.status()).toBe(422);
     } finally {
       await api.dispose();
