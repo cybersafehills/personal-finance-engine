@@ -23,6 +23,7 @@ export type InsightRow = {
   principal_effect_rwf: number | string | null;
   fee_effect_rwf: number | string | null;
   category: string | null;
+  counterparty_id?: string | null;
   counterparty_name: string | null;
   financial_source_id: string | null;
   settlement_state: string | null;
@@ -92,6 +93,7 @@ export function toInsightFact(row: InsightRow): MappedRow {
       feeEffectRwf: fee,
       category: row.category,
       transactionType: row.transaction_type,
+      counterpartyId: row.counterparty_id ?? null,
       counterpartyName: row.counterparty_name,
       // The "wallet" dimension is the financial source - the same key the
       // Transactions filter uses (transactions.account_id is not reliably set).

@@ -16,6 +16,11 @@ import { getActiveWorkspaceId } from "../queries";
 import { supabaseSession } from "../supabase-session-server";
 import { isValidReportTimezone } from "../timezones";
 import { linkedTransferIdSet } from "../transfer-exclusion";
+import {
+  buildEffectiveMap,
+  type CounterpartyRef,
+  resolveCounterparty,
+} from "../counterparties/effective";
 import type { InsightFact } from "./insights-math";
 import {
   emptyExcluded,
@@ -29,10 +34,11 @@ const PAGE = 1000;
 /** Rows in [comparison start, period end). Beyond this we refuse, not truncate. */
 export const MAX_INSIGHT_ROWS = 50_000;
 const MAX_LINK_ROWS = 50_000;
+const MAX_COUNTERPARTY_ROWS = 50_000;
 export const DEFAULT_TIMEZONE = "Africa/Kigali";
 
 const INSIGHT_COLUMNS =
-  "id, direction, transaction_type, currency, amount_rwf, fee_rwf, principal_effect_rwf, fee_effect_rwf, category, counterparty_name, financial_source_id, settlement_state, occurred_at";
+  "id, direction, transaction_type, currency, amount_rwf, fee_rwf, principal_effect_rwf, fee_effect_rwf, category, counterparty_id, counterparty_name, financial_source_id, settlement_state, occurred_at";
 
 type Session = Awaited<ReturnType<typeof supabaseSession>>;
 
@@ -154,6 +160,25 @@ async function fetchLinkedIds(
   }
 }
 
+async function fetchCounterparties(
+  supabase: Session,
+  workspaceId: string,
+): Promise<CounterpartyRef[] | "too_many_rows"> {
+  const out: CounterpartyRef[] = [];
+  for (let offset = 0;; offset = out.length) {
+    const { data, error } = await supabase
+      .from("counterparties")
+      .select("id, display_name, merged_into_id")
+      .eq("workspace_id", workspaceId)
+      .order("id", { ascending: true })
+      .range(offset, offset + PAGE - 1);
+    if (error) throw new Error(`insights counterparties: ${error.message}`);
+    if (!data || data.length === 0) return out;
+    out.push(...(data as CounterpartyRef[]));
+    if (out.length > MAX_COUNTERPARTY_ROWS) return "too_many_rows";
+  }
+}
+
 async function fetchBound(
   supabase: Session,
   workspaceId: string,
@@ -207,21 +232,34 @@ export async function loadInsightsDataset(
 ): Promise<InsightsLoad> {
   try {
     const supabase = await supabaseSession();
-    const [rows, linked, sources, earliest, latest] = await Promise.all([
+    const [rows, linked, counterparties, sources, earliest, latest] = await Promise.all([
       fetchRows(supabase, ctx.workspaceId, fromIso, toIso),
       fetchLinkedIds(supabase, ctx.workspaceId),
+      fetchCounterparties(supabase, ctx.workspaceId),
       fetchSources(supabase, ctx.workspaceId),
       fetchBound(supabase, ctx.workspaceId, true),
       fetchBound(supabase, ctx.workspaceId, false),
     ]);
-    if (rows === "too_many_rows" || linked === "too_many_rows") {
+    if (
+      rows === "too_many_rows" || linked === "too_many_rows" ||
+      counterparties === "too_many_rows"
+    ) {
       return { ok: false, reason: "too_many_rows" };
     }
+    // Resolve merged counterparties to their survivors so a merge changes the
+    // grouping and the displayed name, exactly as in the counterparty list and
+    // the mobile Insights routes.
+    const effective = buildEffectiveMap(counterparties);
     const facts: InsightFact[] = [];
     const excluded = emptyExcluded();
     for (const row of rows) {
       const m = toInsightFact(row);
-      if ("fact" in m) facts.push(m.fact);
+      if ("fact" in m) {
+        facts.push({
+          ...m.fact,
+          ...resolveCounterparty(row.counterparty_id ?? null, m.fact.counterpartyName, effective),
+        });
+      }
       else if (
         new Date(row.occurred_at).toISOString() >= countExcludedFromIso
       ) {

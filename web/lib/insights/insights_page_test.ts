@@ -3,7 +3,8 @@
 // that goes through the SAME functions the page calls.
 
 import { assertEquals } from "jsr:@std/assert@1";
-import { applyDrilldown, computeOverview } from "./insights-math.ts";
+import { applyDrilldown, computeOverview, counterpartyKey } from "./insights-math.ts";
+import { buildEffectiveMap, resolveCounterparty } from "../counterparties/effective.ts";
 import {
   compareOverviews,
   formatBps,
@@ -388,4 +389,33 @@ Deno.test("formatting: bigint money and truncated percentages", () => {
   assertEquals(formatBps(9999), "99.9%");
   assertEquals(formatBps(-250), "−2.5%");
   assertEquals(formatBps(0), "0.0%");
+});
+
+Deno.test("mapper: carries counterparty_id so the loader can resolve merges", () => {
+  const m = toInsightFact(row({ id: "x", principal_effect_rwf: -500, counterparty_id: "cp-1", counterparty_name: "Jean" }));
+  if (!("fact" in m)) throw new Error("expected a fact");
+  assertEquals(m.fact.counterpartyId, "cp-1");
+  const none = toInsightFact(row({ id: "y", principal_effect_rwf: -500, counterparty_name: "Jean" }));
+  if (!("fact" in none)) throw new Error("expected a fact");
+  assertEquals(none.fact.counterpartyId, null);
+});
+
+Deno.test("loader resolution: a merged counterparty groups under its survivor", () => {
+  const effective = buildEffectiveMap([
+    { id: "survivor", display_name: "Jean Claude", merged_into_id: null },
+    { id: "dupe", display_name: "J. Claude", merged_into_id: "survivor" },
+  ]);
+  const resolve = (id: string, name: string) => {
+    const m = toInsightFact(row({ id: `t-${id}`, principal_effect_rwf: -1000, counterparty_id: id, counterparty_name: name }));
+    if (!("fact" in m)) throw new Error("expected a fact");
+    return { ...m.fact, ...resolveCounterparty(id, m.fact.counterpartyName, effective) };
+  };
+  const a = resolve("survivor", "Jean Claude");
+  const b = resolve("dupe", "J. Claude");
+  assertEquals(counterpartyKey(a), counterpartyKey(b));
+  assertEquals(b.counterpartyName, "Jean Claude");
+  // An unmerged, unknown id keeps its own identity and raw name.
+  const c = resolve("other", "Marie");
+  assertEquals(counterpartyKey(c) === counterpartyKey(a), false);
+  assertEquals(c.counterpartyName, "Marie");
 });
