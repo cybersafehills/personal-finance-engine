@@ -58,3 +58,14 @@ Deno.test("MORE_GROUPS: Advanced + Pay items are surface-gated and flag-gated", 
     assertEquals(item.requires, "integrations");
   }
 });
+
+Deno.test("MORE_GROUPS: Payment requests is in Pay & Services, pay-surface and gated only by its own flag", () => {
+  const pay = MORE_GROUPS.find((g) => g.title === "Pay & Services");
+  assert(pay);
+  const item = pay.items.find((i) => i.href === "/pay/requests");
+  assert(item);
+  assertEquals(item.label, "Payment requests");
+  assertEquals(item.surface, "pay");
+  assertEquals(item.requires, "paymentRequests");
+  assertEquals(item.icon, "requests");
+});

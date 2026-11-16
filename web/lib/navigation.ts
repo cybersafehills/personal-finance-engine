@@ -63,7 +63,8 @@ export type MoreIconKey =
   | "developer"
   | "ussd"
   | "recipients"
-  | "templates";
+  | "templates"
+  | "requests";
 
 export type MoreItem = {
   href: string;
@@ -71,7 +72,7 @@ export type MoreItem = {
   icon: MoreIconKey;
   surface: SurfaceKey | null;
   /** Extra gate beyond the experience mode, checked by MoreSheet. */
-  requires?: "integrations" | "pay" | "assistedPay";
+  requires?: "integrations" | "pay" | "assistedPay" | "paymentRequests";
 };
 
 export type MoreGroup = { title: string; items: readonly MoreItem[] };
@@ -141,6 +142,16 @@ export const MORE_GROUPS: readonly MoreGroup[] = [
         icon: "templates",
         surface: "pay",
         requires: "assistedPay",
+      },
+      // Non-custodial "ask someone to pay you" links (OneLedger 3.0). Gated by
+      // PAYMENT_REQUESTS_ENABLED (+ allowlist) only - independent of the
+      // outbound Pay & Services flags.
+      {
+        href: "/pay/requests",
+        label: "Payment requests",
+        icon: "requests",
+        surface: "pay",
+        requires: "paymentRequests",
       },
     ],
   },

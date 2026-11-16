@@ -16,6 +16,7 @@ import {
   GridIcon,
   LinkIcon,
   PhoneIcon,
+  QrScanIcon,
   ReceiptIcon,
   ShieldIcon,
   TagIcon,
@@ -40,6 +41,7 @@ const MORE_ICONS: Record<
   ussd: PhoneIcon,
   recipients: ShieldIcon,
   templates: BookmarkIcon,
+  requests: QrScanIcon,
 };
 
 // The "More" panel - the structured home for everything that is not on the
@@ -66,6 +68,7 @@ export function MoreSheet({
   onClose,
   payEnabled,
   assistedPayEnabled,
+  paymentRequestsEnabled,
   integrationsEnabled,
   experienceMode,
   businessSurfacesEnabled,
@@ -74,6 +77,7 @@ export function MoreSheet({
   onClose: () => void;
   payEnabled: boolean;
   assistedPayEnabled: boolean;
+  paymentRequestsEnabled: boolean;
   integrationsEnabled: boolean;
   experienceMode: ExperienceMode;
   businessSurfacesEnabled: boolean;
@@ -84,6 +88,7 @@ export function MoreSheet({
       onClose={onClose}
       payEnabled={payEnabled}
       assistedPayEnabled={assistedPayEnabled}
+      paymentRequestsEnabled={paymentRequestsEnabled}
       integrationsEnabled={integrationsEnabled}
       experienceMode={experienceMode}
       businessSurfacesEnabled={businessSurfacesEnabled}
@@ -95,6 +100,7 @@ function MorePanel({
   onClose,
   payEnabled,
   assistedPayEnabled,
+  paymentRequestsEnabled,
   integrationsEnabled,
   experienceMode,
   businessSurfacesEnabled,
@@ -102,6 +108,7 @@ function MorePanel({
   onClose: () => void;
   payEnabled: boolean;
   assistedPayEnabled: boolean;
+  paymentRequestsEnabled: boolean;
   integrationsEnabled: boolean;
   experienceMode: ExperienceMode;
   businessSurfacesEnabled: boolean;
@@ -176,6 +183,7 @@ function MorePanel({
     if (item.requires === "integrations" && !integrationsEnabled) return false;
     if (item.requires === "pay" && !payEnabled) return false;
     if (item.requires === "assistedPay" && !assistedPayEnabled) return false;
+    if (item.requires === "paymentRequests" && !paymentRequestsEnabled) return false;
     return true;
   }
 
