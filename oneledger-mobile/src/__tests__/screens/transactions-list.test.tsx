@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react-native";
 
 import Transactions from "@/app/(app)/(tabs)/transactions";
 import type { TransactionRow } from "@/features/transactions/queries";
-import { resetRouterMock, router } from "@/test/router-mock";
+import { resetRouterMock, router, setParams } from "@/test/router-mock";
 
 const mockGetTransactions = jest.fn();
 const mockLifetime = jest.fn();
@@ -138,5 +138,40 @@ describe("Transactions screen", () => {
     mockGetTransactions.mockRejectedValue(new Error("network"));
     await render(<Transactions />);
     expect(await screen.findByText("Try again")).toBeTruthy();
+  });
+
+  describe("opened from Categories", () => {
+    it("shows only that category and says so", async () => {
+      setParams({ category: "Food" });
+      mockGetTransactions.mockResolvedValue([row("1", "Kigali Fresh")]);
+      await render(<Transactions />);
+
+      expect(await screen.findByText("Category: Food")).toBeTruthy();
+      expect(mockGetTransactions).toHaveBeenCalledWith(expect.objectContaining({ category: "Food" }));
+    });
+
+    it("clears the category", async () => {
+      setParams({ category: "Food" });
+      mockGetTransactions.mockResolvedValue([row("1", "Kigali Fresh")]);
+      await render(<Transactions />);
+
+      await fireEvent.press(await screen.findByText("Clear"));
+      expect(router.setParams).toHaveBeenCalledWith({ category: undefined });
+      expect(router.replace).not.toHaveBeenCalled();
+    });
+
+    it("has no category chip when opened normally", async () => {
+      mockGetTransactions.mockResolvedValue([row("1", "Kigali Fresh")]);
+      await render(<Transactions />);
+      await screen.findByText("Kigali Fresh");
+      expect(screen.queryByText(/^Category:/)).toBeNull();
+    });
+
+    it("explains an empty category rather than showing the empty ledger message", async () => {
+      setParams({ category: "Food" });
+      mockGetTransactions.mockResolvedValue([]);
+      await render(<Transactions />);
+      expect(await screen.findByText("Nothing matches that search")).toBeTruthy();
+    });
   });
 });

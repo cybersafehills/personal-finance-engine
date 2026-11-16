@@ -500,6 +500,39 @@ test.describe("mobile API", () => {
     }
   });
 
+  test("categories: all-time totals under the bearer token", async () => {
+    const api = await playwrightRequest.newContext({ baseURL: BASE_URL });
+    try {
+      const signIn = await api.post("/api/mobile/auth/sign-in", {
+        data: { email: E2E_USER.email, password: E2E_USER.password },
+      });
+      expect(signIn.status()).toBe(200);
+      const res = await api.get("/api/mobile/categories", {
+        headers: { authorization: `Bearer ${(await signIn.json()).access_token}` },
+      });
+      expect(res.status()).toBe(200);
+      expect(res.headers()["cache-control"]).toContain("no-store");
+      const body = await res.json();
+      expect(body.ok).toBe(true);
+      expect(body.truncated).toBe(false);
+      expect(Array.isArray(body.categories)).toBe(true);
+      for (const c of body.categories) {
+        expect(typeof c.category).toBe("string");
+        expect(Number.isFinite(c.totalRwf)).toBe(true);
+        expect(c.transactionCount).toBeGreaterThanOrEqual(1);
+      }
+      // Largest first.
+      const totals = body.categories.map((c: { totalRwf: number }) => c.totalRwf);
+      expect(totals).toEqual([...totals].sort((a: number, b: number) => b - a));
+      // beforeAll seeds one settled, uncategorized RWF 4,200 outflow: it is counted.
+      const uncategorized = body.categories.find((c: { category: string }) => c.category === "Uncategorized");
+      expect(uncategorized, "the seeded outflow is in Uncategorized").toBeTruthy();
+      expect(uncategorized.totalRwf).toBeGreaterThanOrEqual(4200);
+    } finally {
+      await api.dispose();
+    }
+  });
+
   test("the Inbox refuses a missing, malformed or invalid token", async () => {
     const api = await playwrightRequest.newContext({ baseURL: BASE_URL });
     try {
@@ -507,6 +540,7 @@ test.describe("mobile API", () => {
       expect((await api.get("/api/mobile/budgets")).status()).toBe(401);
       expect((await api.get("/api/mobile/statements")).status()).toBe(401);
       expect((await api.get("/api/mobile/config")).status()).toBe(401);
+      expect((await api.get("/api/mobile/categories")).status()).toBe(401);
       expect(
         (await api.post("/api/mobile/pay/intents", { data: { paymentType: "pay_person" } })).status(),
       ).toBe(401);
