@@ -31,6 +31,9 @@ Deno.test("balance input: never rounds, never guesses", () => {
   // Stays inside what a JSON number / bigint column can hold exactly.
   assertEquals(parseBalanceInput("999999999999999", "RWF").ok, true);
   assertEquals(parseBalanceInput("1000000000000000", "RWF").ok, false);
+  // The bound is on minor units, so cents cannot push a value past 2^53.
+  assertEquals(parseBalanceInput("9999999999999.99", "USD").ok, true);
+  assertEquals(parseBalanceInput("99999999999999.99", "USD").ok, false);
 });
 
 Deno.test("totals: per currency, uncertainty carried, unavailable excluded", () => {

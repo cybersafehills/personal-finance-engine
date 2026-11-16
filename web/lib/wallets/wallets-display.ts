@@ -56,8 +56,12 @@ export type ParsedBalance =
   | { ok: true; amountMinor: bigint }
   | { ok: false; error: string };
 
-/** Far above any real balance; keeps the value inside Postgres bigint. */
-const MAX_DIGITS = 15;
+/**
+ * Limit on MINOR-unit digits. 15 digits is below 2^53, so the value is
+ * exact both as a Postgres bigint and when PostgREST returns it as a JSON
+ * number - for every currency, not only zero-decimal ones.
+ */
+const MAX_MINOR_DIGITS = 15;
 
 /**
  * A typed balance -> minor units of the wallet's currency. Zero is a valid
@@ -91,13 +95,11 @@ export function parseBalanceInput(
   if (frac.length > decimals && /[1-9]/.test(frac.slice(decimals))) {
     return invalid;
   }
-  if (m[1].replace(/^0+/, "").length > MAX_DIGITS) {
+  const digits = m[1] + frac.padEnd(decimals, "0").slice(0, decimals);
+  if (digits.replace(/^0+/, "").length > MAX_MINOR_DIGITS) {
     return { ok: false, error: "That amount is too large." };
   }
-  return {
-    ok: true,
-    amountMinor: BigInt(m[1] + frac.padEnd(decimals, "0").slice(0, decimals)),
-  };
+  return { ok: true, amountMinor: BigInt(digits) };
 }
 
 export type WalletForTotal = {

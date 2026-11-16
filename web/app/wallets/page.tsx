@@ -136,7 +136,7 @@ function WalletCard({
             href={`/transactions?account=${w.financialSourceId}`}
             className={link}
           >
-            Transactions<span className="sr-only">for {w.name}</span>
+            Transactions<span className="sr-only">{" "}for {w.name}</span>
           </Link>
         )}
         {w.financialSourceId && insightsEnabled && (
@@ -144,11 +144,11 @@ function WalletCard({
             href={`/insights?account=${w.financialSourceId}`}
             className={link}
           >
-            Insights<span className="sr-only">for {w.name}</span>
+            Insights<span className="sr-only">{" "}for {w.name}</span>
           </Link>
         )}
         <Link href={`/settings/accounts/${w.id}`} className={link}>
-          Wallet details<span className="sr-only">for {w.name}</span>
+          Wallet details<span className="sr-only">{" "}for {w.name}</span>
         </Link>
       </div>
     </section>

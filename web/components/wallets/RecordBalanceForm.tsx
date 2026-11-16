@@ -41,7 +41,7 @@ export function RecordBalanceForm({
           className="min-h-11 rounded-control border border-border-subtle bg-background px-4 py-2.5 text-sm font-medium text-text-primary"
         >
           I checked my balance
-          <span className="sr-only">for {walletName}</span>
+          <span className="sr-only">{" "}for {walletName}</span>
         </button>
         {saved && (
           <p role="status" className="text-sm text-text-secondary">
