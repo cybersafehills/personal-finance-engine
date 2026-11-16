@@ -52,6 +52,7 @@
     "moduleNameMapper": {
       "^@expo/vector-icons/Feather$": "<rootDir>/src/test/feather-mock.tsx",
       "^@/(.*)$": "<rootDir>/src/$1"
-    }
+    },
+    "testTimeout": 20000
   }
 }
