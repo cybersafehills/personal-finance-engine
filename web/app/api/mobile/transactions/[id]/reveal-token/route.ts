@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { MobileApiError, mobileOptions, mobilePost } from "../../../../../../lib/mobile-request";
+import { MobileApiError, mobilePostOptions, mobilePost } from "../../../../../../lib/mobile-request";
 import { revealUtilityToken, utilityTokenFeatureOn } from "../../../../../../lib/sensitive/utility-token";
 import { formatUtilityToken } from "../../../../../../lib/sensitive/token-format";
 
@@ -11,7 +11,7 @@ import { formatUtilityToken } from "../../../../../../lib/sensitive/token-format
 // is returned once, `no-store`, and never logged. Dark unless
 // UTILITY_TOKEN_CAPTURE_ENABLED=true and SENSITIVE_DATA_KEYRING is set.
 
-export const OPTIONS = mobileOptions;
+export const OPTIONS = mobilePostOptions;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

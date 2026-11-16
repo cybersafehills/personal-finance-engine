@@ -93,6 +93,7 @@ async function ensureActiveBudget(): Promise<{ created: boolean }> {
 test.describe("mobile API", () => {
   let transactionId: string;
   let createdBudget = false;
+  const createdIntentIds: string[] = [];
 
   test.beforeAll(async () => {
     const admin = adminClient();
@@ -111,6 +112,13 @@ test.describe("mobile API", () => {
   });
 
   test.afterAll(async () => {
+    // Payment intents made through the pay endpoint (events first: they
+    // reference the intent). Best effort - a leftover draft is harmless.
+    if (createdIntentIds.length > 0) {
+      const admin = adminClient();
+      await admin.from("payment_events").delete().in("payment_intent_id", createdIntentIds);
+      await admin.from("payment_intents").delete().in("id", createdIntentIds);
+    }
     await cleanupSeededTransactions(TAG);
     if (createdBudget) {
       await adminClient().from("budgets").delete().eq("name", BUDGET_NAME);
@@ -266,11 +274,206 @@ test.describe("mobile API", () => {
     }
   });
 
+  test("statements: list under the bearer token, and no download for an unknown id", async () => {
+    const api = await playwrightRequest.newContext({ baseURL: BASE_URL });
+    try {
+      const signIn = await api.post("/api/mobile/auth/sign-in", {
+        data: { email: E2E_USER.email, password: E2E_USER.password },
+      });
+      expect(signIn.status()).toBe(200);
+      const headers = { authorization: `Bearer ${(await signIn.json()).access_token}` };
+
+      // FINANCIAL_STATEMENTS_ENABLED is on for this suite (playwright.config.ts).
+      const list = await api.get("/api/mobile/statements", { headers });
+      expect(list.status()).toBe(200);
+      expect(list.headers()["cache-control"]).toContain("no-store");
+      const body = await list.json();
+      expect(body.ok).toBe(true);
+      expect(body.enabled).toBe(true);
+      expect(Array.isArray(body.statements)).toBe(true);
+      for (const st of body.statements) {
+        expect(typeof st.periodLabel).toBe("string");
+        expect(Array.isArray(st.totals)).toBe(true);
+      }
+
+      // An id that is not a statement the caller can see (RLS hides other
+      // users' rows exactly like a missing one) gets no URL, and a malformed
+      // id never reaches the database.
+      for (const id of ["00000000-0000-4000-8000-000000000000", "not-a-uuid"]) {
+        const res = await api.get(`/api/mobile/statements/${id}/document?format=pdf`, { headers });
+        expect(res.status()).toBe(200);
+        const doc = await res.json();
+        expect(doc.download).toBeNull();
+        expect(doc.reason).toBe("not_found");
+      }
+    } finally {
+      await api.dispose();
+    }
+  });
+
+  test("config: booleans only, resolved under the bearer token", async () => {
+    const api = await playwrightRequest.newContext({ baseURL: BASE_URL });
+    try {
+      const signIn = await api.post("/api/mobile/auth/sign-in", {
+        data: { email: E2E_USER.email, password: E2E_USER.password },
+      });
+      expect(signIn.status()).toBe(200);
+      const res = await api.get("/api/mobile/config", {
+        headers: { authorization: `Bearer ${(await signIn.json()).access_token}` },
+      });
+      expect(res.status()).toBe(200);
+      expect(res.headers()["cache-control"]).toContain("no-store");
+      const body = await res.json();
+      expect(body.ok).toBe(true);
+      const keys = Object.keys(body.config).sort();
+      expect(keys).toEqual([
+        "assistedPay",
+        "bills",
+        "businessSurfaces",
+        "insights",
+        "integrations",
+        "pay",
+        "scanToPay",
+        "spaces",
+        "statements",
+        "ussdDirectory",
+      ]);
+      for (const k of keys) expect(typeof body.config[k]).toBe("boolean");
+      // FINANCIAL_STATEMENTS_ENABLED is on for this suite (playwright.config.ts).
+      expect(body.config.statements).toBe(true);
+      // The sub-flags never outrun their parent.
+      if (body.config.assistedPay || body.config.ussdDirectory || body.config.scanToPay) {
+        expect(body.config.pay).toBe(true);
+      }
+    } finally {
+      await api.dispose();
+    }
+  });
+
+  test("pay: prepare a draft intent, retry safely, and read it back", async () => {
+    const api = await playwrightRequest.newContext({ baseURL: BASE_URL });
+    try {
+      const signIn = await api.post("/api/mobile/auth/sign-in", {
+        data: { email: E2E_USER.email, password: E2E_USER.password },
+      });
+      expect(signIn.status()).toBe(200);
+      const headers = { authorization: `Bearer ${(await signIn.json()).access_token}` };
+
+      // Assisted pay is on by default in this suite (pay-assisted.spec.ts relies on it).
+      const key = crypto.randomUUID();
+      const payload = {
+        paymentType: "pay_person",
+        amountMinor: 1500,
+        recipientName: "E2E Mobile Recipient",
+        recipientMsisdn: "0788123456",
+        idempotencyKey: key,
+      };
+
+      const first = await api.post("/api/mobile/pay/intents", { headers, data: payload });
+      expect(first.status()).toBe(200);
+      expect(first.headers()["cache-control"]).toContain("no-store");
+      const created = await first.json();
+      expect(created.ok).toBe(true);
+      expect(created.existed).toBe(false);
+      createdIntentIds.push(created.intent.id);
+      expect(created.intent.state).toBe("draft");
+      expect(created.intent.amountMinor).toBe(1500);
+      expect(created.intent.recipientMasked).toContain("3456");
+      // The full number only ever appears inside the dialable instruction.
+      const { instruction, ...rest } = created.intent;
+      expect(JSON.stringify(rest)).not.toContain("0788123456");
+      expect(JSON.stringify(rest)).not.toContain("250788123456");
+      if (instruction) {
+        // A route is either ready to dial (with `#` encoded) or says why not.
+        if (instruction.ok) {
+          expect(instruction.display).toContain("0788123456");
+          expect(instruction.telHref.startsWith("tel:")).toBe(true);
+          expect(instruction.telHref).not.toContain("#");
+        } else {
+          expect(typeof instruction.error).toBe("string");
+        }
+      }
+
+      // The same request id again (a double tap, a retry) is the same intent.
+      const again = await api.post("/api/mobile/pay/intents", { headers, data: payload });
+      expect(again.status()).toBe(200);
+      const repeat = await again.json();
+      expect(repeat.existed).toBe(true);
+      expect(repeat.intent.id).toBe(created.intent.id);
+
+      // Read it back by id.
+      const read = await api.get(`/api/mobile/pay/intents/${created.intent.id}`, { headers });
+      expect(read.status()).toBe(200);
+      const readBody = await read.json();
+      expect(readBody.intent.id).toBe(created.intent.id);
+      expect(readBody.intent.state).toBe("draft");
+
+      // An unknown or malformed id has no intent.
+      for (const id of ["00000000-0000-4000-8000-000000000000", "not-a-uuid"]) {
+        const miss = await api.get(`/api/mobile/pay/intents/${id}`, { headers });
+        expect(miss.status()).toBe(200);
+        const missBody = await miss.json();
+        expect(missBody.intent).toBeNull();
+        expect(missBody.reason).toBe("not_found");
+      }
+
+      // A bad request is refused before anything is written. (Each field rule is
+      // covered in lib/mobile_pay_test.ts; this proves the route enforces it. Few
+      // POSTs on purpose: the endpoint allows 20 a minute per IP, and a CI retry
+      // repeats this whole test.)
+      const bad = await api.post("/api/mobile/pay/intents", {
+        headers,
+        data: { ...payload, idempotencyKey: crypto.randomUUID(), amountMinor: 0 },
+      });
+      expect(bad.status()).toBe(422);
+      expect((await bad.json()).ok).toBe(false);
+
+      // A paying account that is not this workspace's is refused.
+      const foreign = await api.post("/api/mobile/pay/intents", {
+        headers,
+        data: {
+          ...payload,
+          idempotencyKey: crypto.randomUUID(),
+          sourceAccountId: "00000000-0000-4000-8000-000000000000",
+        },
+      });
+      expect(foreign.status()).toBe(422);
+      expect((await foreign.json()).error).toBe("invalid_account");
+
+      // Bytes that are not JSON are a 400, not a crash. (A raw Buffer: Playwright
+      // would JSON-encode a string body, which is then valid JSON.)
+      const garbage = await api.post("/api/mobile/pay/intents", {
+        headers: { ...headers, "content-type": "application/json" },
+        data: Buffer.from("{not json"),
+      });
+      expect(garbage.status()).toBe(400);
+      // Valid JSON that is not an object is refused as a bad request, not a 500.
+      const notObject = await api.post("/api/mobile/pay/intents", {
+        headers: { ...headers, "content-type": "application/json" },
+        data: Buffer.from('"just a string"'),
+      });
+      expect(notObject.status()).toBe(422);
+    } finally {
+      await api.dispose();
+    }
+  });
+
   test("the Inbox refuses a missing, malformed or invalid token", async () => {
     const api = await playwrightRequest.newContext({ baseURL: BASE_URL });
     try {
       expect((await api.get("/api/mobile/inbox")).status()).toBe(401);
       expect((await api.get("/api/mobile/budgets")).status()).toBe(401);
+      expect((await api.get("/api/mobile/statements")).status()).toBe(401);
+      expect((await api.get("/api/mobile/config")).status()).toBe(401);
+      expect(
+        (await api.post("/api/mobile/pay/intents", { data: { paymentType: "pay_person" } })).status(),
+      ).toBe(401);
+      expect(
+        (await api.get("/api/mobile/pay/intents/00000000-0000-4000-8000-000000000000")).status(),
+      ).toBe(401);
+      expect(
+        (await api.get("/api/mobile/statements/00000000-0000-4000-8000-000000000000/document")).status(),
+      ).toBe(401);
       expect(
         (await api.get("/api/mobile/inbox", { headers: { authorization: "Basic abc" } })).status(),
       ).toBe(401);

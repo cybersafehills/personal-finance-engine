@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { MobileApiError, mobileOptions, mobilePost } from "../../../../lib/mobile-request";
+import { MobileApiError, mobilePostOptions, mobilePost } from "../../../../lib/mobile-request";
 import { requireFlag, resolveMobileWorkspace } from "../../../../lib/mobile-workspace";
 import { supabaseSession } from "../../../../lib/supabase-session-server";
 import { createPaymentRequestCore } from "../../../../lib/payment-requests/create";
@@ -13,16 +13,11 @@ import { parseMobileCreateBody } from "../../../../lib/payment-requests/owner";
 // which the app calls directly under RLS (docs/mobile-api.md). Dark unless
 // PAYMENT_REQUESTS_ENABLED (+ optional allowlist) covers the workspace.
 
-export const OPTIONS = mobileOptions;
+export const OPTIONS = mobilePostOptions;
 
 export function POST(request: NextRequest) {
-  return mobilePost(request, "payment-requests", async () => {
-    let raw: unknown;
-    try {
-      raw = await request.json();
-    } catch {
-      throw new MobileApiError(400, "invalid_request");
-    }
+  // Main's guard parses and size-limits the JSON body for us.
+  return mobilePost(request, "payment-requests", async (raw) => {
     const body = parseMobileCreateBody(raw);
     if (!body) throw new MobileApiError(400, "invalid_request");
 

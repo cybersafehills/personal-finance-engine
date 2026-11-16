@@ -17,7 +17,7 @@ export async function resolveMobileWorkspace(
 ): Promise<{ userId: string; workspaceId: string }> {
   const supabase = await supabaseSession();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new MobileApiError(401, "unauthorized");
+  if (!user) throw new MobileApiError(404, "not_found"); // unreachable: the guard already validated the token
 
   if (requested) {
     const { data } = await supabase

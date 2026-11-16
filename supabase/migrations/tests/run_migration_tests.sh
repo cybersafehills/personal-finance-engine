@@ -198,7 +198,7 @@ else
   # but keeps behavior sane if this script is ever pointed at a
   # longer-lived external instance.
   cleanup() {
-    for db in pfe_h pfe_g pfe_ade pfe_i1 pfe_i2 pfe_j pfe_k pfe_rls; do
+    for db in pfe_h pfe_g pfe_ade pfe_i1 pfe_i2 pfe_j pfe_k pfe_rls pfe_tt; do
       psql -d postgres -c "drop database if exists \"$db\";" >/dev/null 2>&1 || true
     done
     rm -rf "$ARTIFACT_DIR"
@@ -9176,6 +9176,32 @@ if command -v deno >/dev/null 2>&1; then
 else
   echo "SKIP: E7 end-to-end (deno not installed)"
 fi
+
+# ===========================================================================
+# Two-tenant isolation sweep (two_tenant_isolation.sql). Catalog-driven, so a
+# table added later is covered without a new hand-written case. Runs in its own
+# disposable database: it plants rows in every workspace-scoped table and
+# defines a `tt` schema, neither of which any other test should ever see.
+# ===========================================================================
+echo "=== Two-tenant isolation sweep ==="
+bootstrap_db "pfe_tt"
+apply_chain "pfe_tt"
+TT_OUT="$(psql -d pfe_tt -v ON_ERROR_STOP=1 -f "$SCRIPT_DIR/two_tenant_isolation.sql" 2>"$ARTIFACT_DIR/pfe_tt_stderr.log")" || {
+  cat "$ARTIFACT_DIR/pfe_tt_stderr.log" >&2
+  fail "Two-tenant sweep: the SQL file itself errored, so nothing was verified"
+  TT_OUT=""
+}
+TT_SEEN=0
+while IFS='|' read -r tt_status tt_msg; do
+  case "$tt_status" in
+    PASS) pass "Two-tenant: $tt_msg"; TT_SEEN=$((TT_SEEN + 1)) ;;
+    FAIL) fail "Two-tenant: $tt_msg"; TT_SEEN=$((TT_SEEN + 1)) ;;
+  esac
+done <<< "$TT_OUT"
+if [ "$TT_SEEN" -lt 100 ]; then
+  fail "Two-tenant sweep produced only $TT_SEEN assertions (expected 100+) - the sweep did not run to completion"
+fi
+rm -f "$ARTIFACT_DIR/pfe_tt_stderr.log"
 
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="

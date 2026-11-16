@@ -135,6 +135,33 @@ not a reason to keep the whole app native.
 - The Inbox tab falls back to the direct category-review queue when the
   endpoint is off or the app is not configured, so category checks never
   depend on the server route.
+## Implementation notes (Goals)
+
+- A read-only Goals screen (More → Goals). It reads `financial_goals` under RLS
+  and calls the database's `goal_progress()` per active goal (SECURITY DEFINER,
+  checks Space membership itself, granted to `authenticated`), so the percent,
+  the required monthly saving and the projected date are the database's, not
+  client maths, and no `/api/mobile` route is needed.
+- Like the web's goals list there is no workspace filter, so goals from a
+  household Space the user belongs to are listed with their own.
+- A failed progress call drops only that goal's pace lines. Creating goals and
+  adding contributions stay on the web.
+
+## Implementation notes (Pay intents)
+
+- Preparing a payment is the first mobile **mutation through a route**: the
+  assisted-pay flags live in server env (a direct RPC call would bypass them)
+  and the web action carries an MFA step-up. `mobilePost` shares the GET guard's
+  authentication, whose completed-second-factor rule is the same condition as
+  `requireMfaForSensitiveAction`, so a mobile mutation is never weaker than its
+  server action.
+- `lib/pay/create-intent.ts` (creation) and `lib/pay/instruction.ts` (the USSD
+  string) were extracted from the web action and review panel so web and app
+  run one implementation. `pay-assisted`, `pay-again` and `pay-merchant` e2e
+  are the safety net for that refactor.
+- The app never builds a USSD string itself: it shows and dials what the server
+  returns, and treats `instruction: null` as "no verified route".
+
 ## Implementation notes (iPhone health)
 
 - iOS gives the app no view of the Shortcut, so the only honest health signal
@@ -186,6 +213,26 @@ not a reason to keep the whole app native.
 - Category is chosen afterwards on the transaction's detail screen (the web
   form's optional category is applied through the existing category-correction
   function after creation).
+## Implementation notes (Statements)
+
+- A read-only viewer: list the statements and download a PDF/CSV. The list is
+  `GET /api/mobile/statements` (stored totals, personal workspace, behind
+  `FINANCIAL_STATEMENTS_ENABLED`); a download is a fresh five-minute signed URL
+  from `GET /api/mobile/statements/:id/document`, opened with the system
+  (`expo-linking`), so no new native module and no build is needed.
+- The document logic was extracted from the web route into
+  `lib/statement-download.ts` so there is one ownership check, one render
+  path and one audit event for both clients.
+- Generating statements, packs, schedules and provider documents stay on the
+  web; the screen links there when there are none.
+## Implementation notes (Transaction filters)
+
+- The Transactions tab filters by direction, period and "needs review" on top
+  of the existing text search. All of it is a read under RLS (`direction`,
+  `occurred_at`, `category_decision_status`), so there is no `/api/mobile`
+  route. Periods are Kigali calendar days (last 7 days = today plus six);
+  the bounds live in `features/transactions/filters.ts` and are unit-tested.
+- Filters are screen state, not persisted: reopening the tab shows everything.
 
 ## Consequences
 

@@ -8,6 +8,8 @@ import {
   mobileAuthRateLimited,
   parseSignInBody,
   tokenAal,
+  tokenIsFresh,
+  tokenIssuedAt,
 } from "./mobile-api.ts";
 
 Deno.test("mobile API is dark unless the flag is exactly 'true'", () => {
@@ -106,4 +108,25 @@ Deno.test("rate limiter honours a custom ceiling", () => {
   const t = 5_000_000;
   for (let i = 0; i < 3; i++) assertEquals(mobileAuthRateLimited(ip, t, 3), false);
   assertEquals(mobileAuthRateLimited(ip, t, 3), true);
+});
+
+const jwt = (claims: Record<string, unknown>) => {
+  const enc = (o: unknown) => btoa(JSON.stringify(o)).replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");
+  return `${enc({ alg: "none" })}.${enc(claims)}.sig`;
+};
+
+Deno.test("tokenIssuedAt reads the iat claim and nothing else", () => {
+  assertEquals(tokenIssuedAt(jwt({ iat: 1_700_000_000 })), 1_700_000_000);
+  assertEquals(tokenIssuedAt(jwt({ iat: "1700000000" })), null);
+  assertEquals(tokenIssuedAt(jwt({})), null);
+  assertEquals(tokenIssuedAt("garbage"), null);
+});
+
+Deno.test("tokenIsFresh is true only within the window, and false when iat is unknown", () => {
+  const now = 1_700_000_000_000;
+  const issued = (minutesAgo: number) => jwt({ iat: now / 1000 - minutesAgo * 60 });
+  assertEquals(tokenIsFresh(issued(5), 15, now), true);
+  assertEquals(tokenIsFresh(issued(15), 15, now), true);
+  assertEquals(tokenIsFresh(issued(16), 15, now), false);
+  assertEquals(tokenIsFresh(jwt({}), 15, now), false);
 });
