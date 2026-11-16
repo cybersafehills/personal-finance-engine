@@ -38,6 +38,16 @@ export default async function SourcesPage() {
       />
 
       <div className="flex flex-col gap-3">
+        <p className="text-sm text-text-muted">
+          Messages not arriving?{" "}
+          <Link
+            href="/integrations/connections"
+            className="font-medium text-accent hover:underline"
+          >
+            Check your phone connections
+          </Link>
+          .
+        </p>
         {spacesEnabled && sources.length > 0 && (
           <p className="text-sm text-text-muted">
             Sharing is per account and off by default. &ldquo;Transactions
