@@ -8344,7 +8344,7 @@ else
   pass "S4: a viewer cannot run the counterparty backfill"
 fi
 
-S4_AUDIT="$(psql -d pfe_rls -t -A -c "select string_agg(event_type, ',' order by event_type collate "C") from (select distinct event_type from public.space_audit_events where workspace_id = '$WORKSPACE_A' and event_type like 'counterparty.%') x;")"
+S4_AUDIT="$(psql -d pfe_rls -t -A -c "select string_agg(event_type, ',' order by event_type collate \"C\") from (select distinct event_type from public.space_audit_events where workspace_id = '$WORKSPACE_A' and event_type like 'counterparty.%') x;")"
 if [ "$S4_AUDIT" = "counterparty.merge_undone,counterparty.merged,counterparty.updated" ]; then
   pass "S4: update, merge and undo are each audited"
 else
@@ -8550,7 +8550,7 @@ else
 fi
 
 # --- audit trail -----------------------------------------------------------------------
-S5_EV="$(psql -d pfe_rls -t -A -c "select string_agg(event_type, ',' order by event_type collate "C") from (select distinct event_type from public.payment_request_events where workspace_id = '$WORKSPACE_A') x;")"
+S5_EV="$(psql -d pfe_rls -t -A -c "select string_agg(event_type, ',' order by event_type collate \"C\") from (select distinct event_type from public.payment_request_events where workspace_id = '$WORKSPACE_A') x;")"
 S5_AU="$(psql -d pfe_rls -t -A -c "select count(distinct event_type) from public.space_audit_events where workspace_id = '$WORKSPACE_A' and event_type like 'payment_request.%';")"
 if [ "$S5_EV" = "cancelled,created,marked_paid_by_owner,matched" ] && [ "$S5_AU" = "4" ]; then
   pass "S5: create, cancel, owner-mark and match are each recorded in the event log and the space audit trail"
@@ -8769,7 +8769,7 @@ else
   pass "E4: a split cannot be undone while its split-off counterparty has been merged (undo the merge first)"
 fi
 
-E4_AUD="$(psql -d pfe_rls -t -A -c "select string_agg(event_type, ',' order by event_type collate "C") from (select distinct event_type from public.space_audit_events where workspace_id = '$WORKSPACE_A' and event_type like 'counterparty.split%') x;")"
+E4_AUD="$(psql -d pfe_rls -t -A -c "select string_agg(event_type, ',' order by event_type collate \"C\") from (select distinct event_type from public.space_audit_events where workspace_id = '$WORKSPACE_A' and event_type like 'counterparty.split%') x;")"
 if [ "$E4_AUD" = "counterparty.split,counterparty.split_undone" ]; then
   pass "E4: split and undo are each audited"
 else
@@ -9070,7 +9070,7 @@ else
 fi
 
 # 12. audit + erasure
-E7_AUD="$(psql -d pfe_rls -t -A -c "select string_agg(event_type, ',' order by event_type collate "C") from (select distinct event_type from public.space_audit_events where workspace_id = '$WORKSPACE_A' and event_type like 'utility_receipt.%') x;")"
+E7_AUD="$(psql -d pfe_rls -t -A -c "select string_agg(event_type, ',' order by event_type collate \"C\") from (select distinct event_type from public.space_audit_events where workspace_id = '$WORKSPACE_A' and event_type like 'utility_receipt.%') x;")"
 if [ "$E7_AUD" = "utility_receipt.confirmed,utility_receipt.ignored,utility_receipt.unlinked" ]; then
   pass "E7: confirm, unlink and ignore are each audited"
 else
