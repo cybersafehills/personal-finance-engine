@@ -1,0 +1,69 @@
+// Spaces (personal, household, organization). Pure rules, kept apart from
+// React and native APIs so they are unit-testable.
+//
+// What switching does, as on the web: it changes the *active Space*. Only what
+// the web scopes by the active Space follows it (the server read models behind
+// /api/mobile/*, categories, policies). The transaction, balance and budget
+// list queries are deliberately NOT filtered by Space (RLS is the boundary),
+// so Home and Transactions look the same in every Space.
+
+export type SpaceKind = "personal" | "household" | "organization";
+
+export type Space = {
+  id: string;
+  name: string;
+  kind: SpaceKind;
+  role: string;
+};
+
+const KINDS: readonly SpaceKind[] = ["personal", "household", "organization"];
+
+export function isSpaceKind(value: unknown): value is SpaceKind {
+  return typeof value === "string" && (KINDS as readonly string[]).includes(value);
+}
+
+export function kindLabel(kind: SpaceKind): string {
+  return kind === "personal" ? "Personal" : kind === "household" ? "Household" : "Organization";
+}
+
+/**
+ * The Space to show: the stored choice if the user is still a member, else
+ * their personal Space, else the first one. Mirrors the web's
+ * `getActiveWorkspaceId` fallback for a revoked membership.
+ */
+export function resolveActiveSpace(spaces: readonly Space[], storedId: string | null): Space | null {
+  if (spaces.length === 0) return null;
+  return (
+    spaces.find((s) => s.id === storedId) ??
+    spaces.find((s) => s.kind === "personal") ??
+    spaces[0]
+  );
+}
+
+/**
+ * The id to send as `X-Workspace-Id`, or null for the personal Space (the
+ * server default, so an older server keeps working for the common case).
+ */
+export function requestedWorkspaceId(active: Space | null): string | null {
+  return active && active.kind !== "personal" ? active.id : null;
+}
+
+/**
+ * Whether a server response is for the Space that was asked for. Only checked
+ * when a header was sent; a server that ignores the header (or a revoked
+ * membership) echoes another id or none, and the data must not be presented as
+ * that Space's.
+ */
+export function echoMatches(requested: string | null, body: unknown): boolean {
+  if (requested === null) return true;
+  const echoed =
+    typeof body === "object" && body !== null
+      ? (body as Record<string, unknown>).workspace_id
+      : undefined;
+  return typeof echoed === "string" && echoed.toLowerCase() === requested.toLowerCase();
+}
+
+/** Storage key for the remembered choice, per user so accounts never share it. */
+export function storageKey(userId: string): string {
+  return `oneledger.activeSpace.${userId}`;
+}

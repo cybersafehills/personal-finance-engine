@@ -6,6 +6,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Button, Text } from "@/components/ds";
 import { useSession } from "@/features/auth/SessionProvider";
+import { useActiveSpace } from "@/features/spaces/ActiveSpaceProvider";
+import { kindLabel } from "@/features/spaces/spaces";
 import { getUnreadNotificationCount } from "@/features/notifications/queries";
 import {
   badgeText,
@@ -33,6 +35,7 @@ export function AppHeader() {
   const { data: count } = useQuery(loadBadge);
   const [menuOpen, setMenuOpen] = useState(false);
   const badge = badgeText(count ?? 0);
+  const { spaces, active } = useActiveSpace();
 
   return (
     <View style={[styles.bar, { paddingTop: insets.top }]}>
@@ -52,6 +55,19 @@ export function AppHeader() {
         </Pressable>
 
         <View style={styles.actions}>
+          {/* As on the web: the current Space as a chip, only with more than one. */}
+          {spaces.length > 1 && active ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Space: ${active.name}. Change Space`}
+              onPress={() => setMenuOpen(true)}
+              style={styles.chip}
+            >
+              <Text variant="caption" color="accent" numberOfLines={1} style={styles.chipText}>
+                {active.name}
+              </Text>
+            </Pressable>
+          ) : null}
           <IconButton
             icon="inbox"
             label={inboxAccessibilityLabel(count ?? 0)}
@@ -103,6 +119,7 @@ function IconButton({
 
 function ProfileMenu({ visible, onClose }: { visible: boolean; onClose(): void }) {
   const { session, signOut } = useSession();
+  const { spaces, active, setActive } = useActiveSpace();
   const go = useCallback(
     (path: "/notifications" | "/security") => {
       onClose();
@@ -122,6 +139,36 @@ function ProfileMenu({ visible, onClose }: { visible: boolean; onClose(): void }
           <Text variant="bodyStrong" numberOfLines={1}>
             {session?.user.email ?? "Unknown"}
           </Text>
+          {spaces.length > 1 ? (
+            <View style={styles.spaces} accessibilityRole="radiogroup">
+              <Text variant="caption" color="textMuted">
+                Space
+              </Text>
+              {spaces.map((space) => {
+                const selected = space.id === active?.id;
+                return (
+                  <Pressable
+                    key={space.id}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected }}
+                    accessibilityLabel={`${space.name}, ${kindLabel(space.kind)}`}
+                    onPress={() => {
+                      setActive(space.id);
+                      onClose();
+                    }}
+                    style={[styles.spaceRow, selected && styles.spaceRowSelected]}
+                  >
+                    <Text variant="bodyStrong" numberOfLines={1} style={styles.spaceName}>
+                      {space.name}
+                    </Text>
+                    <Text variant="caption" color="textMuted">
+                      {kindLabel(space.kind)}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : null}
           <View style={styles.menuActions}>
             <Button label="Notifications" variant="secondary" fullWidth onPress={() => go("/notifications")} />
             <Button label="App lock" variant="secondary" fullWidth onPress={() => go("/security")} />
@@ -191,4 +238,26 @@ const styles = StyleSheet.create({
     gap: space[1],
   },
   menuActions: { marginTop: space[3], gap: space[2] },
+  chip: {
+    maxWidth: 120,
+    minHeight: 32,
+    justifyContent: "center",
+    paddingHorizontal: space[2],
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+  },
+  chipText: { fontSize: 12 },
+  spaces: { marginTop: space[3], gap: space[1] },
+  spaceRow: {
+    minHeight: MIN_TOUCH_TARGET,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: space[3],
+    paddingHorizontal: space[3],
+    borderRadius: radii.control,
+  },
+  spaceRowSelected: { backgroundColor: colors.background },
+  spaceName: { flex: 1 },
 });
