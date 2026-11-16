@@ -646,6 +646,74 @@ test.describe("mobile API", () => {
     }
   });
 
+  test("bills: list and detail for a stored document, with a status filter and honest errors", async () => {
+    const admin = adminClient();
+    const { workspaceId } = await ensureWorkspaceAndAccount(admin);
+    const key = `e2e/mobile-api/${Date.now()}.pdf`;
+    const { data: doc, error } = await admin
+      .from("bill_documents")
+      .insert({
+        workspace_id: workspaceId,
+        original_filename: "mobile-api-bill.pdf",
+        sanitized_filename: "mobile-api-bill.pdf",
+        storage_key: key,
+        mime_type: "application/pdf",
+        byte_size: 2048,
+        page_count: 2,
+        checksum_sha256: "a".repeat(64),
+      })
+      .select("id")
+      .single();
+    if (error || !doc) throw new Error(`could not seed a bill document: ${error?.message}`);
+    const billId = doc.id as string;
+
+    const api = await playwrightRequest.newContext({ baseURL: BASE_URL });
+    try {
+      const signIn = await api.post("/api/mobile/auth/sign-in", {
+        data: { email: E2E_USER.email, password: E2E_USER.password },
+      });
+      expect(signIn.status()).toBe(200);
+      const headers = { authorization: `Bearer ${(await signIn.json()).access_token}` };
+
+      const list = await (await api.get("/api/mobile/bills", { headers })).json();
+      expect(list.ok).toBe(true);
+      const item = list.bills.find((b: { id: string }) => b.id === billId);
+      expect(item.filename).toBe("mobile-api-bill.pdf");
+      expect(item.statusLabel).toBe("Received");
+      expect(item.pageCount).toBe(2);
+      expect(typeof list.hasMore).toBe("boolean");
+
+      // The status filter narrows the list; an invalid one is a 400, never silently "all".
+      const none = await (await api.get("/api/mobile/bills?status=archived", { headers })).json();
+      expect(none.bills.find((b: { id: string }) => b.id === billId)).toBeUndefined();
+      const bad = await api.get("/api/mobile/bills?status=nonsense", { headers });
+      expect(bad.status()).toBe(400);
+      expect((await bad.json()).error).toBe("invalid_status");
+
+      const detailRes = await api.get(`/api/mobile/bills/${billId}`, { headers });
+      expect(detailRes.status()).toBe(200);
+      const { bill } = await detailRes.json();
+      expect(bill.typeLabel).toBe("PDF");
+      expect(bill.sizeLabel).toBe("2.0 KB");
+      // The raw checksum and storage key are never part of the answer.
+      const raw = JSON.stringify(bill);
+      expect(raw).not.toContain("a".repeat(64));
+      expect(raw).not.toContain(key);
+      // The history is either a list or null (no permission), never raw rows.
+      expect(bill.history === null || Array.isArray(bill.history)).toBe(true);
+
+      // An unknown or malformed id is a plain 404.
+      for (const id of ["00000000-0000-4000-8000-000000000000", "not-a-uuid"]) {
+        const missing = await api.get(`/api/mobile/bills/${id}`, { headers });
+        expect(missing.status(), id).toBe(404);
+        expect((await missing.json()).error).toBe("not_found");
+      }
+    } finally {
+      await api.dispose();
+      await admin.from("bill_documents").delete().eq("id", billId);
+    }
+  });
+
   test("X-Workspace-Id: a member's Space is echoed, anything else falls back to Personal", async () => {
     const api = await playwrightRequest.newContext({ baseURL: BASE_URL });
     try {
@@ -737,6 +805,9 @@ test.describe("mobile API", () => {
       expect((await api.get("/api/mobile/statements")).status()).toBe(401);
       expect((await api.get("/api/mobile/config")).status()).toBe(401);
       expect((await api.get("/api/mobile/categories")).status()).toBe(401);
+      for (const path of ["/api/mobile/bills", "/api/mobile/bills/00000000-0000-4000-8000-000000000000"]) {
+        expect((await api.get(path)).status(), path).toBe(401);
+      }
       for (const path of [
         "/api/mobile/reports",
         "/api/mobile/reports/00000000-0000-4000-8000-000000000000",
