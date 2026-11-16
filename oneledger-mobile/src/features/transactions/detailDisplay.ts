@@ -17,6 +17,9 @@ export type TransactionContext = {
   ingestionConnectionLabel: string | null;
   allocationStatus: AllocationStatus;
   categorySource: string | null;
+  /** Whose spending a household transaction is: null = never decided. */
+  attributionType: "shared" | "member" | "split" | "unassigned" | null;
+  attributedUserId: string | null;
 };
 
 export type CategoryHistoryEntry = {
@@ -58,7 +61,7 @@ export function directionLabel(direction: string): string {
 export function attentionMessage(status: AllocationStatus | null | undefined): string | null {
   if (!status || status === "allocated") return null;
   return status === "needs_attribution"
-    ? "This household transaction needs an attribution. Say whose spending it was on the web."
+    ? "This household transaction needs an attribution. Say whose spending it was below."
     : "This transaction's Space couldn't be determined automatically.";
 }
 
