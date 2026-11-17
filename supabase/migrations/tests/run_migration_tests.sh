@@ -6113,8 +6113,8 @@ MC_CREDS="$(psql -d pfe_rls -t -A -c "select (select count(*) from public.device
 MC_RESOLVES="$(psql -d pfe_rls -t -A -c "set role service_role; select device_credential_id is not null from public.resolve_canonical_ingestion_credential('$MC_HASH_3');" | grep -E '^(t|f|true|false)$' | head -1)"
 MC_TOTAL="$(psql -d pfe_rls -t -A -c "select count(*) from public.ingestion_connections where account_id = '$MC_ACCOUNT';")"
 if [ "$MC_CONN_3" = "$MC_CONN_1" ] \
-  && [ "$MC_LEGACY_STATE" = "active|$MC_HASH_3|Replacement phone|t" ] \
-  && [ "$MC_INSTALL_STATE" = "healthy|t" ] \
+  && { [ "$MC_LEGACY_STATE" = "active|$MC_HASH_3|Replacement phone|t" ] || [ "$MC_LEGACY_STATE" = "active|$MC_HASH_3|Replacement phone|true" ]; } \
+  && { [ "$MC_INSTALL_STATE" = "healthy|t" ] || [ "$MC_INSTALL_STATE" = "healthy|true" ]; } \
   && { [ "$MC_CREDS" = "1|$MC_CONN_1|revoked:t|$MC_OLD_CRED" ] || [ "$MC_CREDS" = "1|$MC_CONN_1|revoked:true|$MC_OLD_CRED" ]; } \
   && { [ "$MC_RESOLVES" = "t" ] || [ "$MC_RESOLVES" = "true" ]; } \
   && [ "$MC_TOTAL" = "1" ]; then

@@ -28,6 +28,15 @@ async function createFreshAccount(page: Page): Promise<string> {
   return name;
 }
 
+// The <select> sits inside its <label>, so the label's accessible name also
+// carries the selected option's text - find it by the label's own caption.
+function accountSelect(page: Page) {
+  return page
+    .locator("form label")
+    .filter({ has: page.getByText("Account", { exact: true }) })
+    .locator("select");
+}
+
 test("a new connection surfaces the full ingest contract, not just the key", async ({
   page,
 }) => {
@@ -38,7 +47,7 @@ test("a new connection surfaces the full ingest contract, not just the key", asy
   await page.goto("/integrations/connections");
   await page.getByRole("button", { name: "Connect a device" }).click();
   await page.getByLabel("Label").fill(label);
-  await page.getByLabel("Account", { exact: true }).selectOption({ label: accountName });
+  await accountSelect(page).selectOption({ label: accountName });
   await page.getByRole("button", { name: "Create connection" }).click();
 
   // The one-time reveal: the key itself, plus enough to finish wiring the
@@ -77,7 +86,7 @@ test("a new connection surfaces the full ingest contract, not just the key", asy
   // without cutting off the connection made above.
   await page.getByRole("button", { name: "Connect a device" }).click();
   await page.getByLabel("Label").fill(`${label} again`);
-  await page.getByLabel("Account", { exact: true }).selectOption({ label: accountName });
+  await accountSelect(page).selectOption({ label: accountName });
   await page.getByRole("button", { name: "Create connection" }).click();
   await expect(page.getByText(/This account already has a connection/)).toBeVisible();
   await expect(page.getByText(/Copy this now/)).toHaveCount(0);
