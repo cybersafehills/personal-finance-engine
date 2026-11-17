@@ -9,6 +9,8 @@ import {
   getReviewQueueTransactions,
   getSpaceDuplicateReview,
 } from "./queries";
+import { kigaliDateKey } from "./kigali-time";
+import { monthPeriodFor } from "./budget-period";
 import { isPaymentIntentSurfaceEnabled } from "./pay/gate";
 import { getReconciliationQueue } from "./pay/intents";
 import { isIntegrationsEnabled, isWorkbooksEnabled } from "./integrations/gate";
@@ -310,6 +312,22 @@ export async function getFinancialInbox(): Promise<FinancialInbox> {
       href: "/integrations/sync/conflicts",
       actionableSince: oldest.createdAt,
       affectedCount: openConflicts.length,
+    });
+  }
+
+  // An active budget whose month is over: say so and point at the one-tap
+  // fix, instead of "needs attention" about a month that can't be changed.
+  if (budgetSummary?.ended) {
+    const month = monthPeriodFor(kigaliDateKey(new Date().toISOString()));
+    items.push({
+      id: `budget-ended:${budgetSummary.budgetId}`,
+      kind: "budget_alert",
+      priority: "normal",
+      title: `${budgetSummary.budgetName} has ended`,
+      description: `It covered up to ${budgetSummary.periodEnd}. Start ${month.monthName}'s budget to keep tracking this month.`,
+      href: "/budgets",
+      actionableSince: `${budgetSummary.periodEnd}T00:00:00Z`,
+      affectedCount: 1,
     });
   }
 

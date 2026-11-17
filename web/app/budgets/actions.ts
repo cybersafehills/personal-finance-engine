@@ -15,6 +15,8 @@ import {
   validatePercentages,
 } from "../../lib/budget-math";
 import { isSupportedCurrency, SupportedCurrency, toMinorUnits } from "../../lib/money";
+import { budgetPeriodState, monthPeriodFor, nameForMonth } from "../../lib/budget-period";
+import { kigaliDateKey } from "../../lib/kigali-time";
 
 export type BudgetActionResult =
   | { ok: true; budgetId: string }
@@ -436,6 +438,8 @@ export async function duplicateBudget(
   sourceBudgetId: string,
   periodStart: string,
   periodEnd: string,
+  /** Optional: name the copy (default: the source's name, as before). */
+  name?: string,
 ): Promise<BudgetActionResult> {
   const supabase = await supabaseSession();
   const workspaceId = await getActiveWorkspaceId();
@@ -478,7 +482,7 @@ export async function duplicateBudget(
   return insertBudgetWithAllocations({
     workspaceId,
     templateId: source.data.template_id,
-    name: source.data.name,
+    name: name ?? source.data.name,
     currency: source.data.currency,
     periodStart,
     periodEnd,
@@ -504,4 +508,94 @@ export async function fetchVariableIncomeMonths(
 ): Promise<VariableIncomeMonth[]> {
   if (!isSupportedCurrency(currency)) return [];
   return getVariableIncomeMonths(currency);
+}
+
+/**
+ * "Start <this month>'s budget" for a budget whose period has ended.
+ *
+ * Copies the ended budget (same currency, income and percentages) into the
+ * calendar month that contains today, archives the ended one, and activates
+ * the copy. That is the three manual steps the app asked for before (copy,
+ * archive, activate), and "Create next month" copied to the month after the
+ * ended budget's start, which was itself already over. There is at most one
+ * active budget per workspace and currency, so the old one must be archived
+ * before the new one can be activated.
+ *
+ * Safe to press twice: if a non-archived budget for this month already exists
+ * it is reused, not duplicated. Only an ENDED budget can be rolled over (so
+ * this can never archive a budget that is still in use). If activating fails
+ * after the archive, the new month's budget is left as a draft and the error
+ * says so; nothing is lost, and the ended budget's figures stay reproducible.
+ */
+export async function startCurrentMonthBudget(
+  sourceBudgetId: string,
+): Promise<BudgetActionResult> {
+  const supabase = await supabaseSession();
+  const workspaceId = await getActiveWorkspaceId();
+  if (!workspaceId) return { ok: false, error: "Could not resolve your workspace." };
+
+  const { data: source, error: sourceError } = await supabase
+    .from("budgets")
+    .select("id, name, status, currency, period_start, period_end")
+    .eq("id", sourceBudgetId)
+    .eq("workspace_id", workspaceId)
+    .maybeSingle();
+  if (sourceError || !source) return { ok: false, error: "Budget not found." };
+
+  const todayKey = kigaliDateKey(new Date().toISOString());
+  if (budgetPeriodState(source.period_start, source.period_end, todayKey) !== "ended") {
+    return { ok: false, error: "This budget's period hasn't ended yet." };
+  }
+  if (source.status !== "active" && source.status !== "draft") {
+    return { ok: false, error: "Only an active or draft budget can be rolled over." };
+  }
+
+  const month = monthPeriodFor(todayKey);
+
+  // Reuse this month's budget if one already exists (a second press, or one the
+  // user made by hand), so the button never creates a duplicate.
+  const { data: existing, error: existingError } = await supabase
+    .from("budgets")
+    .select("id, status")
+    .eq("workspace_id", workspaceId)
+    .eq("currency", source.currency)
+    .eq("period_start", month.periodStart)
+    .in("status", ["draft", "active"]);
+  if (existingError) return { ok: false, error: "Could not check for an existing budget." };
+
+  let targetId = existing?.[0]?.id as string | undefined;
+  const targetStatus = existing?.[0]?.status as string | undefined;
+
+  if (!targetId) {
+    const copy = await duplicateBudget(
+      source.id,
+      month.periodStart,
+      month.periodEnd,
+      nameForMonth(source.name, month),
+    );
+    if (!copy.ok) return copy;
+    targetId = copy.budgetId;
+  }
+
+  if (targetStatus !== "active") {
+    // One active budget per workspace and currency: free the slot first.
+    if (source.status === "active") {
+      const archived = await archiveBudget(source.id);
+      if (!archived.ok) {
+        return { ok: false, error: "Created this month's budget as a draft, but couldn't archive the old one." };
+      }
+    }
+    const activated = await activateBudget(targetId);
+    if (!activated.ok) {
+      return {
+        ok: false,
+        error: `This month's budget was created as a draft but couldn't be activated: ${activated.error}`,
+      };
+    }
+  }
+
+  revalidatePath("/");
+  revalidatePath("/budgets");
+  revalidatePath("/inbox");
+  return { ok: true, budgetId: targetId };
 }
