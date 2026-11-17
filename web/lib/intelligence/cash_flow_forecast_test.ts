@@ -98,8 +98,39 @@ Deno.test("basis explains every input and the disclaimer is present", () => {
     scheduled: [RENT, SALARY],
     estimatedDailyDiscretionaryMinor: 4_000,
   });
-  assertEquals(f.basis.length, 3);
+  // balance, scheduled items, everyday spend, and money in (stated even when
+  // there is none, so "Why am I seeing this?" never hides an assumption).
+  assertEquals(f.basis.length, 4);
   assert(f.basis[0].toLowerCase().includes("current balance"));
   assert(f.basis[1].includes("2 scheduled items"));
   assert(f.disclaimer.toLowerCase().includes("not a guaranteed outcome"));
+});
+
+Deno.test("income side: typical money in offsets everyday spending, and the low is on the NET path", () => {
+  const f = computeCashFlowForecast({
+    currentBalanceMinor: 50_000, currency: "RWF", horizonDays: 30, scheduled: [],
+    estimatedDailyDiscretionaryMinor: 10_000, estimatedDailyInflowMinor: 10_000,
+  });
+  assertEquals(f.estimatedInMinor, 300_000);
+  assertEquals(f.projectedEnd.estimatedBalanceMinor, 50_000); // out and in cancel
+  assertEquals(f.mayGoNegative, false);
+});
+
+Deno.test("spending-only (no income estimate) still projects the conservative path", () => {
+  const f = computeCashFlowForecast({
+    currentBalanceMinor: 50_000, currency: "RWF", horizonDays: 30, scheduled: [],
+    estimatedDailyDiscretionaryMinor: 10_000,
+  });
+  assertEquals(f.estimatedInMinor, 0);
+  assertEquals(f.projectedEnd.estimatedBalanceMinor, 50_000 - 300_000);
+  assertEquals(f.mayGoNegative, true);
+  assertEquals(f.basis.some((b) => b.includes("assumes none")), true);
+});
+
+Deno.test("a negative inflow input is clamped to 0, never turned into spending", () => {
+  const f = computeCashFlowForecast({
+    currentBalanceMinor: 100, currency: "RWF", horizonDays: 10, scheduled: [],
+    estimatedDailyDiscretionaryMinor: 0, estimatedDailyInflowMinor: -999,
+  });
+  assertEquals(f.projectedEnd.estimatedBalanceMinor, 100);
 });

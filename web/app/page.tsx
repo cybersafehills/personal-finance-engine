@@ -3,7 +3,6 @@ import { redirect } from "next/navigation";
 import {
   getActiveWorkspaceId,
   getCategoryTotals,
-  getCurrentBalance,
   getDashboardBudgetSummary,
   getHouseholdSpendingBreakdown,
   getOnboardingState,
@@ -20,6 +19,7 @@ import {
   isIntelligenceEnabled,
 } from "../lib/intelligence/insights";
 import { BalanceCard } from "../components/BalanceCard";
+import { getHomeBalance } from "../lib/wallets/home-balance-data";
 import { IntelligenceCard } from "../components/IntelligenceCard";
 import { OnboardingCard } from "../components/OnboardingCard";
 import { OnboardingJourneyCard } from "../components/OnboardingJourneyCard";
@@ -58,7 +58,7 @@ export default async function HomePage() {
     categoryTotals,
     insights,
   ] = await Promise.all([
-    getCurrentBalance(),
+    getHomeBalance(),
     getTodayTotals(),
     getRecentTransactions(RECENT_TRANSACTIONS_LIMIT),
     getDashboardBudgetSummary(),
@@ -150,7 +150,13 @@ export default async function HomePage() {
       )}
 
       <div className={`lg:col-start-1 ${mainColumnSpan}`}>
-        <BalanceCard balanceRwf={balance?.amountRwf ?? null} asOfIso={balance?.asOfIso ?? null} />
+        <BalanceCard
+          balanceRwf={balance?.amountRwf ?? null}
+          asOfIso={balance?.asOfIso ?? null}
+          label={balance?.label}
+          walletCount={balance?.walletCount}
+          excludedCount={balance?.excludedCount}
+        />
       </div>
 
       <section

@@ -93,11 +93,26 @@ const CURRENCY_LOCALE: Record<SupportedCurrency, string> = {
   USD: "en-US",
 };
 
-/** Locale-aware display string, e.g. "RWF 500,000", "€1,250.00", "$1,250.00". */
+/**
+ * Display string, e.g. "500,000 RWF", "€1,250.00", "$1,250.00".
+ *
+ * RWF is written by hand, not through Intl. The "en-RW" currency format
+ * depends on the runtime's ICU data: Node (the live server) renders the
+ * currency as "RF 500,000", Deno (the unit tests) as "RWF 500,000". The
+ * short form "RF" looks like a different currency, and the difference hid
+ * the bug from the tests. "500,000 RWF" is also how Home, Insights and the
+ * rest of the web app already write it.
+ */
 export function formatMoney(
   amountMinor: bigint,
   currency: SupportedCurrency,
 ): string {
+  if (currency === "RWF") {
+    const negative = amountMinor < 0n;
+    const digits = (negative ? -amountMinor : amountMinor).toString();
+    const grouped = digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    return `${negative ? "\u2212" : ""}${grouped} RWF`;
+  }
   const major = toMajorUnits(amountMinor, currency);
   const formatter = new Intl.NumberFormat(CURRENCY_LOCALE[currency], {
     style: "currency",

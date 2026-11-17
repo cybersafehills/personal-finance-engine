@@ -129,7 +129,7 @@ export async function getCurrentBalance(): Promise<CurrentBalance | null> {
  * (RLS-scoped, same source getBudgetActuals uses). A failed lookup yields an
  * empty set (totals then match the pre-fix behaviour) and is logged.
  */
-async function getLinkedTransferIds(
+export async function getLinkedTransferIds(
   supabase: Awaited<ReturnType<typeof supabaseSession>>,
 ): Promise<Set<string>> {
   const { data, error } = await supabase
