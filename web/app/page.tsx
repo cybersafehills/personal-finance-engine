@@ -29,6 +29,9 @@ import {
 } from "../components/FirstRunCards";
 import { SummaryMetric } from "../components/SummaryMetric";
 import { BudgetStatusCard } from "../components/BudgetStatusCard";
+import { BudgetEndedCard } from "../components/BudgetEndedCard";
+import { monthPeriodFor } from "../lib/budget-period";
+import { kigaliDateKey } from "../lib/kigali-time";
 import { DashboardTransactionItem } from "../components/DashboardTransactionItem";
 import { HouseholdSpendingCard } from "../components/HouseholdSpendingCard";
 import { EmptyState } from "../components/EmptyState";
@@ -166,15 +169,26 @@ export default async function HomePage() {
           quiet day is correct, not broken (master prompt §8.2/§8.3). */}
       {budgetSummary && (
         <div className="lg:col-start-3 lg:row-start-1">
-          <BudgetStatusCard
-            budgetId={budgetSummary.budgetId}
-            totalTargetMinor={budgetSummary.totalTargetMinor}
-            totalActualMinor={budgetSummary.totalActualMinor}
-            remainingMinor={budgetSummary.remainingMinor}
-            percentUsed={budgetSummary.percentUsed}
-            worstStatus={budgetSummary.worstStatus}
-            daysRemainingInPeriod={budgetSummary.daysRemainingInPeriod}
-          />
+          {budgetSummary.ended
+            ? (
+              <BudgetEndedCard
+                budgetId={budgetSummary.budgetId}
+                budgetName={budgetSummary.budgetName}
+                periodEnd={budgetSummary.periodEnd}
+                monthName={monthPeriodFor(kigaliDateKey(new Date().toISOString())).monthName}
+              />
+            )
+            : (
+              <BudgetStatusCard
+                budgetId={budgetSummary.budgetId}
+                totalTargetMinor={budgetSummary.totalTargetMinor}
+                totalActualMinor={budgetSummary.totalActualMinor}
+                remainingMinor={budgetSummary.remainingMinor}
+                percentUsed={budgetSummary.percentUsed}
+                worstStatus={budgetSummary.worstStatus}
+                daysRemainingInPeriod={budgetSummary.daysRemainingInPeriod}
+              />
+            )}
         </div>
       )}
 

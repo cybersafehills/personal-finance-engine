@@ -4,11 +4,19 @@ import { PageHeader } from "../../components/PageHeader";
 import { EmptyState } from "../../components/EmptyState";
 import { BudgetStatusBadge, formatCalendarDate } from "../../components/BudgetStatusBadge";
 import { formatMoney, isSupportedCurrency } from "../../lib/money";
+import { BudgetEndedCard } from "../../components/BudgetEndedCard";
+import { budgetPeriodState, monthPeriodFor } from "../../lib/budget-period";
+import { kigaliDateKey } from "../../lib/kigali-time";
 
 export const dynamic = "force-dynamic";
 
 export default async function BudgetsPage() {
   const budgets = await getBudgets();
+  const todayKey = kigaliDateKey(new Date().toISOString());
+  // An "active" budget whose month is over: offer the one-tap roll-over here too.
+  const endedActive = budgets.find(
+    (b) => b.status === "active" && budgetPeriodState(b.period_start, b.period_end, todayKey) === "ended",
+  );
 
   return (
     <div>
@@ -38,6 +46,17 @@ export default async function BudgetsPage() {
           </div>
         }
       />
+
+      {endedActive && (
+        <div className="mb-3">
+          <BudgetEndedCard
+            budgetId={endedActive.id}
+            budgetName={endedActive.name}
+            periodEnd={endedActive.period_end}
+            monthName={monthPeriodFor(todayKey).monthName}
+          />
+        </div>
+      )}
 
       {budgets.length === 0 ? (
         <EmptyState

@@ -13,6 +13,7 @@ import {
   mobileRequestedWorkspaceId,
 } from "./mobile-session-context";
 import { kigaliDateKey, kigaliDayBoundsUtc } from "./kigali-time";
+import { budgetPeriodState } from "./budget-period";
 import { excludeLinkedTransfers, linkedTransferIdSet } from "./transfer-exclusion";
 import {
   aggregateOutflowsByAllocation,
@@ -1801,6 +1802,9 @@ export type DashboardBudgetSummary = {
   worstStatus: AllocationStatus;
   daysRemainingInPeriod: number | null;
   periodEnd: string;
+  /** True once today is past periodEnd: the figures describe a finished month,
+   *  so Home and the Inbox must not call it "on track" or "needs attention". */
+  ended: boolean;
   actionableAlertCount: number;
 };
 
@@ -1850,11 +1854,18 @@ export async function getDashboardBudgetSummary(): Promise<
       : worst),
     "insufficient_data",
   );
-  const actionableAlertCount = actuals.alerts.filter(
+  const todayKey = kigaliDateKey(new Date().toISOString());
+  const ended = budgetPeriodState(
+      withAllocations.period_start,
+      withAllocations.period_end,
+      todayKey,
+    ) === "ended";
+  // Nothing to act on in a month that is over: the "start this month's budget"
+  // prompt replaces these (see financial-inbox.ts and BudgetEndedCard).
+  const actionableAlertCount = ended ? 0 : actuals.alerts.filter(
     (alert) => alert.severity === "warning" || alert.severity === "critical",
   ).length;
 
-  const todayKey = kigaliDateKey(new Date().toISOString());
   const daysRemainingInPeriod = todayKey <= withAllocations.period_end
     ? Math.max(0, daysBetweenDateKeys(todayKey, withAllocations.period_end))
     : null;
@@ -1871,6 +1882,7 @@ export async function getDashboardBudgetSummary(): Promise<
     worstStatus,
     daysRemainingInPeriod,
     periodEnd: withAllocations.period_end,
+    ended,
     actionableAlertCount,
   };
 }
