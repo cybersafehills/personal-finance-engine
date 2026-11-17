@@ -69,3 +69,14 @@ Deno.test("MORE_GROUPS: Payment requests is in Pay & Services, pay-surface and g
   assertEquals(item.requires, "paymentRequests");
   assertEquals(item.icon, "requests");
 });
+
+Deno.test("MORE_GROUPS: People and merchants is in Manage money, ungated by mode and gated only by its own flag", () => {
+  const group = MORE_GROUPS.find((g) => g.title === "Manage money");
+  assert(group);
+  const item = group.items.find((i) => i.href === "/people");
+  assert(item);
+  assertEquals(item.label, "People and merchants");
+  assertEquals(item.surface, null);
+  assertEquals(item.requires, "counterparties");
+  assertEquals(item.icon, "people");
+});

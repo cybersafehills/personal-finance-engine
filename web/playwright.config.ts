@@ -85,6 +85,10 @@ export default defineConfig({
       // "true"; insights.spec.ts needs it. Adds no navigation entry, only a
       // link on /reports, so it is inert for every other spec.
       INSIGHTS_CENTER_ENABLED: "true",
+      // People & merchants (/people, OneLedger 3.0): dark unless exactly "true";
+      // people.spec.ts needs it. It adds one entry to the More menu, which no
+      // other spec counts or snapshots.
+      COUNTERPARTIES_ENABLED: "true",
       // Integrations: the base area + Import Studio + Export Center for
       // integrations-nav.spec.ts / integrations-import.spec.ts. These
       // default on ("on unless exactly false"); set explicitly so the

@@ -42,6 +42,7 @@ const MORE_ICONS: Record<
   recipients: ShieldIcon,
   templates: BookmarkIcon,
   requests: QrScanIcon,
+  people: UsersIcon,
 };
 
 // The "More" panel - the structured home for everything that is not on the
@@ -69,6 +70,7 @@ export function MoreSheet({
   payEnabled,
   assistedPayEnabled,
   paymentRequestsEnabled,
+  counterpartiesEnabled,
   integrationsEnabled,
   experienceMode,
   businessSurfacesEnabled,
@@ -78,6 +80,7 @@ export function MoreSheet({
   payEnabled: boolean;
   assistedPayEnabled: boolean;
   paymentRequestsEnabled: boolean;
+  counterpartiesEnabled: boolean;
   integrationsEnabled: boolean;
   experienceMode: ExperienceMode;
   businessSurfacesEnabled: boolean;
@@ -89,6 +92,7 @@ export function MoreSheet({
       payEnabled={payEnabled}
       assistedPayEnabled={assistedPayEnabled}
       paymentRequestsEnabled={paymentRequestsEnabled}
+      counterpartiesEnabled={counterpartiesEnabled}
       integrationsEnabled={integrationsEnabled}
       experienceMode={experienceMode}
       businessSurfacesEnabled={businessSurfacesEnabled}
@@ -101,6 +105,7 @@ function MorePanel({
   payEnabled,
   assistedPayEnabled,
   paymentRequestsEnabled,
+  counterpartiesEnabled,
   integrationsEnabled,
   experienceMode,
   businessSurfacesEnabled,
@@ -109,6 +114,7 @@ function MorePanel({
   payEnabled: boolean;
   assistedPayEnabled: boolean;
   paymentRequestsEnabled: boolean;
+  counterpartiesEnabled: boolean;
   integrationsEnabled: boolean;
   experienceMode: ExperienceMode;
   businessSurfacesEnabled: boolean;
@@ -184,6 +190,7 @@ function MorePanel({
     if (item.requires === "pay" && !payEnabled) return false;
     if (item.requires === "assistedPay" && !assistedPayEnabled) return false;
     if (item.requires === "paymentRequests" && !paymentRequestsEnabled) return false;
+    if (item.requires === "counterparties" && !counterpartiesEnabled) return false;
     return true;
   }
 
