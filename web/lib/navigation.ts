@@ -64,7 +64,8 @@ export type MoreIconKey =
   | "ussd"
   | "recipients"
   | "templates"
-  | "requests";
+  | "requests"
+  | "people";
 
 export type MoreItem = {
   href: string;
@@ -72,7 +73,7 @@ export type MoreItem = {
   icon: MoreIconKey;
   surface: SurfaceKey | null;
   /** Extra gate beyond the experience mode, checked by MoreSheet. */
-  requires?: "integrations" | "pay" | "assistedPay" | "paymentRequests";
+  requires?: "integrations" | "pay" | "assistedPay" | "paymentRequests" | "counterparties";
 };
 
 export type MoreGroup = { title: string; items: readonly MoreItem[] };
@@ -91,6 +92,9 @@ export const MORE_GROUPS: readonly MoreGroup[] = [
       { href: "/reports", label: "Reports", icon: "reports", surface: "reports" },
       { href: "/settings/sources", label: "Connected sources", icon: "sources", surface: "sources" },
       { href: "/bills", label: "Bills", icon: "bills", surface: "bills" },
+      // People & merchants (OneLedger 3.0): gated by COUNTERPARTIES_ENABLED
+      // (+ allowlist) only, so it is absent - not merely disabled - when off.
+      { href: "/people", label: "People and merchants", icon: "people", surface: null, requires: "counterparties" },
     ],
   },
   {
@@ -164,6 +168,7 @@ export const MORE_MENU_PREFIXES = [
   "/categories",
   "/reports",
   "/bills",
+  "/people",
   "/settings",
   "/pay",
 ] as const;

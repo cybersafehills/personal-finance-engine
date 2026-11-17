@@ -86,6 +86,7 @@ export function AppShell({
   payEnabled,
   assistedPayEnabled,
   paymentRequestsEnabled,
+  counterpartiesEnabled,
   scanToPayEnabled,
   integrationsEnabled,
   experienceMode,
@@ -103,6 +104,8 @@ export function AppShell({
   assistedPayEnabled: boolean;
   /** PAYMENT_REQUESTS_ENABLED (+ allowlist) for the active workspace. */
   paymentRequestsEnabled: boolean;
+  /** COUNTERPARTIES_ENABLED (+ allowlist) for the active workspace. */
+  counterpartiesEnabled: boolean;
   scanToPayEnabled: boolean;
   integrationsEnabled: boolean;
   /** The active Space's experience mode - decides surface visibility only. */
@@ -284,6 +287,7 @@ export function AppShell({
             payEnabled={payEnabled}
             assistedPayEnabled={assistedPayEnabled}
             paymentRequestsEnabled={paymentRequestsEnabled}
+            counterpartiesEnabled={counterpartiesEnabled}
             integrationsEnabled={integrationsEnabled}
             experienceMode={experienceMode}
             businessSurfacesEnabled={businessSurfacesEnabled}

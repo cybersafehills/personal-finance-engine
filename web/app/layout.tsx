@@ -15,6 +15,7 @@ import {
   getUserWorkspaces,
 } from "../lib/queries";
 import { isPaymentRequestsEnabledForWorkspace } from "../lib/payment-requests/owner";
+import { isCounterpartiesEnabledFor } from "../lib/counterparties/directory";
 import {
   isAssistedPayEnabled,
   isPayServicesEnabled,
@@ -147,6 +148,10 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
       },
       activeWorkspaceId,
     );
+  // People & merchants (OneLedger 3.0): same opt-in flag + allowlist as the
+  // mobile API; the pages and actions re-check it on the server.
+  const counterpartiesEnabled = Boolean(user) &&
+    isCounterpartiesEnabledFor(process.env, activeWorkspaceId);
   const integrationsEnabled =
     Boolean(user) && isIntegrationsEnabled(activeWorkspaceId);
 
@@ -196,6 +201,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           payEnabled={payEnabled}
           assistedPayEnabled={assistedPayEnabled}
           paymentRequestsEnabled={paymentRequestsEnabled}
+          counterpartiesEnabled={counterpartiesEnabled}
           scanToPayEnabled={scanToPayEnabled}
           integrationsEnabled={integrationsEnabled}
           experienceMode={experienceMode}
