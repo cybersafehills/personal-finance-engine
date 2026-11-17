@@ -22,7 +22,7 @@ export const LAUNCHER_ACTIONS: readonly LauncherAction[] = [
 
 export const LAUNCHER_LINKS = {
   ussd: { label: "Open USSD directory", path: "/pay/ussd" },
-  activity: { label: "Payment activity", path: "/pay/activity" },
+  activity: { label: "View payment activity", path: "/pay/activity" },
   templates: { label: "Use a payment template", path: "/pay/templates" },
 } as const;
 
