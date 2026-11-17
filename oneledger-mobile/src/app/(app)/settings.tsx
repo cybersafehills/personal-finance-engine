@@ -1,15 +1,20 @@
 import * as Linking from "expo-linking";
 import { router } from "expo-router";
+import { useCallback } from "react";
 import { Pressable, View } from "react-native";
 
+import { fetchMoreFlags } from "@/api/mobile-api";
 import { Button, Card, Screen, ScreenHeader, Text } from "@/components/ds";
-import { SETTINGS_GROUPS, type SettingsRow } from "@/features/settings/groups";
+import { visibleSettingsGroups, type SettingsRow } from "@/features/settings/groups";
+import { useQuery } from "@/hooks/useQuery";
 import { config } from "@/lib/config";
 import { colors, space } from "@/theme/tokens";
 
 // Settings, grouped like the web's. Rows with a native screen open it; the
 // rest open the web page (the browser may ask you to sign in once).
 export default function Settings() {
+  const load = useCallback(() => fetchMoreFlags(), []);
+  const { data: flags } = useQuery(load);
   function open(row: SettingsRow) {
     if (row.route) router.push(row.route);
     else if (row.webPath) Linking.openURL(`${config.apiBaseUrl}${row.webPath}`);
@@ -19,7 +24,7 @@ export default function Settings() {
     <Screen>
       <Button label="Back" variant="ghost" onPress={() => router.back()} />
       <ScreenHeader title="Settings" />
-      {SETTINGS_GROUPS.map((group) => (
+      {visibleSettingsGroups(flags ?? null).map((group) => (
         <View key={group.title} style={{ gap: space[2] }}>
           <Text variant="bodyStrong" accessibilityRole="header">
             {group.title}

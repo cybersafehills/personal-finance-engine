@@ -1,7 +1,10 @@
+import type { MoreFlag, MoreFlags } from "@/features/more/groups";
+
 // Settings, grouped with the web's headings (web/lib/settings-navigation.ts).
 // The pages that have no native screen open on the web; screens the app
-// already has open natively. Integrations, Developer platform and shared-Space
-// account sharing are left out: they are flagged or have their own entries.
+// already has open natively. Rows for features that are dark by default
+// (Integrations, Developer platform, account sharing) show only when the server
+// says they are on for this Space.
 
 export type SettingsRow = {
   label: string;
@@ -10,6 +13,8 @@ export type SettingsRow = {
   route?: "/security" | "/notifications" | "/space-members";
   /** A page on the web, opened in the browser (the user may need to sign in). */
   webPath?: string;
+  /** Shown only when the server says this feature is on (an unknown answer hides it). */
+  onlyWhenOn?: MoreFlag;
 };
 
 export type SettingsGroup = { title: string; description: string; rows: SettingsRow[] };
@@ -51,6 +56,12 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
         description: "Create or manage a shared Space, invite people and set roles.",
         route: "/space-members",
       },
+      {
+        label: "Account sharing",
+        description: "Choose what each shared Space sees of an account: nothing, transactions or the balance.",
+        webPath: "/settings/sources",
+        onlyWhenOn: "spaces",
+      },
     ],
   },
   {
@@ -66,6 +77,24 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
         label: "Notifications",
         description: "Your alerts, in this app.",
         route: "/notifications",
+      },
+    ],
+  },
+  {
+    title: "Data & Integrations",
+    description: "Move your data in and out, and connect external services.",
+    rows: [
+      {
+        label: "Integrations",
+        description: "Imports, exports, connected workbooks, reconciliation and external services.",
+        webPath: "/integrations",
+        onlyWhenOn: "integrations",
+      },
+      {
+        label: "Developer platform",
+        description: "API keys, webhooks and the marketplace.",
+        webPath: "/integrations/developer",
+        onlyWhenOn: "developer",
       },
     ],
   },
@@ -102,3 +131,11 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
     ],
   },
 ];
+
+/** Groups with the rows the server hasn't switched on removed; empty groups are dropped. */
+export function visibleSettingsGroups(flags: MoreFlags | null): SettingsGroup[] {
+  return SETTINGS_GROUPS.map((group) => ({
+    ...group,
+    rows: group.rows.filter((row) => !row.onlyWhenOn || flags?.[row.onlyWhenOn] === true),
+  })).filter((group) => group.rows.length > 0);
+}

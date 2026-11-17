@@ -4,7 +4,7 @@
 // answer (offline, older server) hides nothing, so nothing that worked
 // before disappears.
 
-export type MoreFlag = "statements" | "insights" | "spaces" | "bills";
+export type MoreFlag = "statements" | "insights" | "spaces" | "bills" | "integrations" | "developer";
 
 export type MoreFlags = Partial<Record<MoreFlag, boolean>>;
 
@@ -86,7 +86,7 @@ export function parseMoreFlags(status: number, body: unknown): MoreFlags | null 
   if (b.ok !== true || typeof b.config !== "object" || b.config === null) return null;
   const c = b.config as Record<string, unknown>;
   const flags: MoreFlags = {};
-  for (const key of ["statements", "insights", "spaces", "bills"] as const) {
+  for (const key of ["statements", "insights", "spaces", "bills", "integrations", "developer"] as const) {
     if (typeof c[key] === "boolean") flags[key] = c[key];
   }
   return flags;
