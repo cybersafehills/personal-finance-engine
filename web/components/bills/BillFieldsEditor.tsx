@@ -8,6 +8,7 @@ import type {
   BillExtractionRow,
   BillLineItemRow,
 } from "../../lib/bills/queries";
+import { BILL_FIELD_LABELS } from "../../lib/bills/display";
 
 // The Fields tab of the review workspace (Phase 7). Reviewers edit a
 // field inline; the raw + model-normalised values are preserved and a
@@ -15,34 +16,7 @@ import type {
 // review_revision and re-runs the checks - the page shows a "checks are
 // out of date" prompt when a stale validation is detected.
 
-const LABEL: Record<string, string> = {
-  supplier_name: "Supplier",
-  supplier_tax_id: "Tax ID",
-  supplier_address: "Address",
-  supplier_email: "Email",
-  supplier_phone: "Phone",
-  supplier_bank_details: "Bank details",
-  invoice_number: "Invoice no.",
-  receipt_number: "Receipt no.",
-  credit_note_number: "Credit note no.",
-  purchase_order_reference: "PO reference",
-  payment_reference: "Payment reference",
-  issue_date: "Issue date",
-  receipt_date: "Receipt date",
-  due_date: "Due date",
-  payment_date: "Payment date",
-  service_period_start: "Service from",
-  service_period_end: "Service to",
-  currency: "Currency",
-  subtotal: "Subtotal",
-  tax_amount: "Tax",
-  tax_rate: "Tax rate",
-  discount_amount: "Discount",
-  additional_charges: "Charges",
-  total: "Total",
-  amount_paid: "Amount paid",
-  outstanding_balance: "Balance due",
-};
+const LABEL = BILL_FIELD_LABELS;
 
 const RWF_LIKE = ["RWF", "UGX", "TZS", "JPY", "BIF", "XAF", "XOF"];
 

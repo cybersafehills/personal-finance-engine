@@ -1,3 +1,5 @@
+import { shouldUseSecureCookie } from "./cookie-security";
+
 export const PENDING_VERIFICATION_EMAIL_COOKIE =
   "ol_pending_verification_email";
 export const PENDING_VERIFICATION_NEXT_COOKIE = "ol_pending_verification_next";
@@ -6,11 +8,15 @@ export const VERIFICATION_RESEND_AT_COOKIE = "ol_verification_resend_at";
 export const PENDING_VERIFICATION_TTL_SECONDS = 60 * 60;
 export const VERIFICATION_RESEND_COOLDOWN_SECONDS = 60;
 
-export function pendingVerificationCookieOptions() {
+/**
+ * `host` is the request's Host header: loopback http (the e2e suite) gets a
+ * non-Secure cookie so WebKit keeps it - see lib/cookie-security.ts.
+ */
+export function pendingVerificationCookieOptions(host?: string | null) {
   return {
     httpOnly: true,
     sameSite: "lax" as const,
-    secure: process.env.NODE_ENV === "production",
+    secure: process.env.NODE_ENV === "production" && shouldUseSecureCookie(host),
     path: "/",
     maxAge: PENDING_VERIFICATION_TTL_SECONDS,
   };

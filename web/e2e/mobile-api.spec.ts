@@ -646,6 +646,128 @@ test.describe("mobile API", () => {
     }
   });
 
+  test("bills: list and detail for a stored document, with a status filter and honest errors", async () => {
+    const admin = adminClient();
+    const { workspaceId } = await ensureWorkspaceAndAccount(admin);
+    const key = `e2e/mobile-api/${Date.now()}.pdf`;
+    // (workspace_id, checksum_sha256) is unique, so every run needs its own.
+    const checksum = (n: number) => `${Date.now().toString(16)}${n}`.padStart(64, "b");
+    const { data: doc, error } = await admin
+      .from("bill_documents")
+      .insert({
+        workspace_id: workspaceId,
+        original_filename: "mobile-api-bill.pdf",
+        sanitized_filename: "mobile-api-bill.pdf",
+        storage_key: key,
+        mime_type: "application/pdf",
+        byte_size: 2048,
+        page_count: 2,
+        checksum_sha256: checksum(1),
+      })
+      .select("id")
+      .single();
+    if (error || !doc) throw new Error(`could not seed a bill document: ${error?.message}`);
+    const billId = doc.id as string;
+    let householdId: string | null = null;
+
+    const api = await playwrightRequest.newContext({ baseURL: BASE_URL });
+    try {
+      const signIn = await api.post("/api/mobile/auth/sign-in", {
+        data: { email: E2E_USER.email, password: E2E_USER.password },
+      });
+      expect(signIn.status()).toBe(200);
+      const headers = { authorization: `Bearer ${(await signIn.json()).access_token}` };
+
+      const list = await (await api.get("/api/mobile/bills", { headers })).json();
+      expect(list.ok).toBe(true);
+      const item = list.bills.find((b: { id: string }) => b.id === billId);
+      expect(item.filename).toBe("mobile-api-bill.pdf");
+      expect(item.statusLabel).toBe("Received");
+      expect(item.pageCount).toBe(2);
+      expect(typeof list.hasMore).toBe("boolean");
+
+      // The status filter narrows the list; an invalid one is a 400, never silently "all".
+      const none = await (await api.get("/api/mobile/bills?status=archived", { headers })).json();
+      expect(none.bills.find((b: { id: string }) => b.id === billId)).toBeUndefined();
+      const bad = await api.get("/api/mobile/bills?status=nonsense", { headers });
+      expect(bad.status()).toBe(400);
+      expect((await bad.json()).error).toBe("invalid_status");
+
+      const detailRes = await api.get(`/api/mobile/bills/${billId}`, { headers });
+      expect(detailRes.status()).toBe(200);
+      const { bill } = await detailRes.json();
+      expect(bill.typeLabel).toBe("PDF");
+      expect(bill.sizeLabel).toBe("2.0 KB");
+      // The raw checksum and storage key are never part of the answer.
+      const raw = JSON.stringify(bill);
+      expect(raw).not.toContain(checksum(1));
+      expect(raw).not.toContain(key);
+      // The history is either a list or null (no permission), never raw rows.
+      expect(bill.history === null || Array.isArray(bill.history)).toBe(true);
+
+      // An unknown or malformed id is a plain 404.
+      for (const id of ["00000000-0000-4000-8000-000000000000", "not-a-uuid"]) {
+        const missing = await api.get(`/api/mobile/bills/${id}`, { headers });
+        expect(missing.status(), id).toBe(404);
+        expect((await missing.json()).error).toBe("not_found");
+      }
+
+      // Space scoping: RLS is plain membership, so a document in ANOTHER Space the
+      // user belongs to must not show under Personal, nor open by id there.
+      const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      if (url && anon) {
+        const user = createClient(url, anon, {
+          auth: { persistSession: false, autoRefreshToken: false },
+          global: { headers: { Authorization: headers.authorization } },
+        });
+        const { data: hid, error: hErr } = await user.rpc("create_household_workspace", {
+          p_name: "E2E Bills Household",
+        });
+        if (hErr || !hid) throw new Error(`could not create a household: ${hErr?.message}`);
+        householdId = hid as string;
+        const { data: hdoc, error: hdocErr } = await admin
+          .from("bill_documents")
+          .insert({
+            workspace_id: householdId,
+            original_filename: "household-bill.pdf",
+            sanitized_filename: "household-bill.pdf",
+            storage_key: `e2e/mobile-api/h-${Date.now()}.pdf`,
+            mime_type: "application/pdf",
+            byte_size: 1024,
+            checksum_sha256: checksum(2),
+          })
+          .select("id")
+          .single();
+        if (hdocErr || !hdoc) throw new Error(`could not seed a household bill: ${hdocErr?.message}`);
+        const householdBillId = hdoc.id as string;
+        const inHousehold = { ...headers, "x-workspace-id": householdId };
+
+        // Personal: sees its own document, not the household's, and the household's id is a 404.
+        const personal = await (await api.get("/api/mobile/bills", { headers })).json();
+        const personalIds = personal.bills.map((b: { id: string }) => b.id);
+        expect(personalIds).toContain(billId);
+        expect(personalIds).not.toContain(householdBillId);
+        expect((await api.get(`/api/mobile/bills/${householdBillId}`, { headers })).status()).toBe(404);
+
+        // The household: the reverse, and the echo says which Space answered.
+        const hlist = await (await api.get("/api/mobile/bills", { headers: inHousehold })).json();
+        expect(hlist.workspace_id).toBe(householdId);
+        const hIds = hlist.bills.map((b: { id: string }) => b.id);
+        expect(hIds).toContain(householdBillId);
+        expect(hIds).not.toContain(billId);
+        expect((await api.get(`/api/mobile/bills/${householdBillId}`, { headers: inHousehold })).status()).toBe(200);
+        expect((await api.get(`/api/mobile/bills/${billId}`, { headers: inHousehold })).status()).toBe(404);
+      }
+    } finally {
+      await api.dispose();
+      const removed = await admin.from("bill_documents").delete().eq("id", billId);
+      // Deleting the household cascades its documents.
+      if (householdId) await admin.from("workspaces").delete().eq("id", householdId);
+      expect(removed.error).toBeNull();
+    }
+  });
+
   test("X-Workspace-Id: a member's Space is echoed, anything else falls back to Personal", async () => {
     const api = await playwrightRequest.newContext({ baseURL: BASE_URL });
     try {
@@ -737,6 +859,9 @@ test.describe("mobile API", () => {
       expect((await api.get("/api/mobile/statements")).status()).toBe(401);
       expect((await api.get("/api/mobile/config")).status()).toBe(401);
       expect((await api.get("/api/mobile/categories")).status()).toBe(401);
+      for (const path of ["/api/mobile/bills", "/api/mobile/bills/00000000-0000-4000-8000-000000000000"]) {
+        expect((await api.get(path)).status(), path).toBe(401);
+      }
       for (const path of [
         "/api/mobile/reports",
         "/api/mobile/reports/00000000-0000-4000-8000-000000000000",

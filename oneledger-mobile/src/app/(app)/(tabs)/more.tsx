@@ -2,6 +2,7 @@ import { router } from "expo-router";
 import { useCallback, useState } from "react";
 import { Platform } from "react-native";
 
+import { fetchBillsEnabled } from "@/api/mobile-api";
 import { Badge, Button, Card, Screen, ScreenHeader, Text } from "@/components/ds";
 import { useSession } from "@/features/auth/SessionProvider";
 import { captureSupported, getCaptureHealth } from "@/features/capture/capture";
@@ -21,6 +22,9 @@ export default function More() {
   const { session, signOut } = useSession();
   const load = useCallback(() => getCaptureHealth(), []);
   const { data: health } = useQuery(load);
+  // Bills is switched on per Space on the server; offer it only where it will work.
+  const loadBills = useCallback(() => fetchBillsEnabled(), []);
+  const { data: billsOn } = useQuery(loadBills);
   const display = health ? healthDisplay(health.state) : null;
 
   return (
@@ -133,6 +137,21 @@ export default function More() {
           onPress={() => router.push("/reports")}
         />
       </Card>
+
+      {billsOn ? (
+        <Card style={{ gap: space[3] }}>
+          <Text variant="bodyStrong">Bills</Text>
+          <Text variant="label" color="textSecondary">
+            Invoices and receipts in this Space.
+          </Text>
+          <Button
+            label="Open bills"
+            variant="secondary"
+            fullWidth
+            onPress={() => router.push("/bills")}
+          />
+        </Card>
+      ) : null}
 
       <Card style={{ gap: space[3] }}>
         <Text variant="bodyStrong">Statements</Text>

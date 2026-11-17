@@ -10,37 +10,44 @@ import type { Page } from "@playwright/test";
 //
 // Shares the one seeded e2e user (see auth.setup.ts) - the seeded user
 // has a workspace but no financial account, so this creates one first
-// (a connection must bind to an active account).
+// (a connection must bind to an active account; see createFreshAccount).
 
 const ENDPOINT_PATH = "/functions/v1/ingest-momo";
 
-async function ensureAnAccountExists(page: Page): Promise<void> {
+// An account has at most one live connection, and every browser project
+// shares the one seeded user and database - so each run connects its own
+// fresh account instead of whichever account happens to be first (which an
+// earlier project may already have connected).
+async function createFreshAccount(page: Page): Promise<string> {
+  const name = `E2E conn ${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
   await page.goto("/settings/accounts");
-  const hasAccount = await page
-    .getByRole("button", { name: "Rename" })
-    .first()
-    .isVisible()
-    .catch(() => false);
-  if (hasAccount) return;
-
   await page.getByRole("button", { name: "Add account" }).click();
-  await page.getByLabel("Account name").fill("E2E MoMo account");
+  await page.getByLabel("Account name").fill(name);
   await page.getByRole("button", { name: "Create account" }).click();
-  await expect(
-    page.getByRole("button", { name: "Rename" }).first(),
-  ).toBeVisible();
+  await expect(page.getByText(name).first()).toBeVisible();
+  return name;
+}
+
+// The <select> sits inside its <label>, so the label's accessible name also
+// carries the selected option's text - find it by the label's own caption.
+function accountSelect(page: Page) {
+  return page
+    .locator("form label")
+    .filter({ has: page.getByText("Account", { exact: true }) })
+    .locator("select");
 }
 
 test("a new connection surfaces the full ingest contract, not just the key", async ({
   page,
 }) => {
-  await ensureAnAccountExists(page);
+  const accountName = await createFreshAccount(page);
 
   const label = `E2E ingest ${Date.now()}`;
 
   await page.goto("/integrations/connections");
   await page.getByRole("button", { name: "Connect a device" }).click();
   await page.getByLabel("Label").fill(label);
+  await accountSelect(page).selectOption({ label: accountName });
   await page.getByRole("button", { name: "Create connection" }).click();
 
   // The one-time reveal: the key itself, plus enough to finish wiring the
@@ -73,6 +80,16 @@ test("a new connection surfaces the full ingest contract, not just the key", asy
   // readiness probe (it has never ingested anything).
   await expect(row.getByText(/Waiting for the first forwarded message/))
     .toBeVisible();
+
+  // A second connection to the same, still-active account is refused with
+  // a clear message (20270101000000) - not the old generic failure, and
+  // without cutting off the connection made above.
+  await page.getByRole("button", { name: "Connect a device" }).click();
+  await page.getByLabel("Label").fill(`${label} again`);
+  await accountSelect(page).selectOption({ label: accountName });
+  await page.getByRole("button", { name: "Create connection" }).click();
+  await expect(page.getByText(/This account already has a connection/)).toBeVisible();
+  await expect(page.getByText(/Copy this now/)).toHaveCount(0);
 
   // PR2: the panel links to the full step-by-step guide.
   await row.getByRole("link", { name: /step-by-step Shortcut guide/i }).click();

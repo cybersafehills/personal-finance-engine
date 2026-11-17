@@ -6,6 +6,7 @@ import { resetRouterMock, router } from "@/test/router-mock";
 const mockSignOut = jest.fn();
 const mockHealth = jest.fn();
 const mockUnread = jest.fn();
+const mockBillsOn = jest.fn();
 const mockIsPushEnabled = jest.fn();
 const mockEnablePush = jest.fn();
 const mockDisablePush = jest.fn();
@@ -18,6 +19,7 @@ jest.mock("@/features/auth/SessionProvider", () => ({
     signOut: () => mockSignOut(),
   }),
 }));
+jest.mock("@/api/mobile-api", () => ({ fetchBillsEnabled: () => mockBillsOn() }));
 jest.mock("@/features/capture/capture", () => ({
   get captureSupported() {
     return flags.captureSupported;
@@ -44,14 +46,30 @@ jest.mock("@/features/push/push", () => ({
 
 beforeEach(() => {
   resetRouterMock();
-  [mockSignOut, mockHealth, mockUnread, mockIsPushEnabled, mockEnablePush, mockDisablePush].forEach((m) => m.mockReset());
+  [mockSignOut, mockHealth, mockUnread, mockBillsOn, mockIsPushEnabled, mockEnablePush, mockDisablePush].forEach((m) => m.mockReset());
   flags.pushSupported = true;
   flags.captureSupported = true;
   mockHealth.mockResolvedValue({ state: "active" });
   mockUnread.mockResolvedValue(0);
+  mockBillsOn.mockResolvedValue(false);
   mockIsPushEnabled.mockResolvedValue(false);
   mockEnablePush.mockResolvedValue({ ok: true });
   mockDisablePush.mockResolvedValue(undefined);
+});
+
+describe("More screen: Bills", () => {
+  it("offers Bills only where the server says it is on for this Space", async () => {
+    mockBillsOn.mockResolvedValue(true);
+    await render(<More />);
+    await fireEvent.press(await screen.findByText("Open bills"));
+    expect(router.push).toHaveBeenCalledWith("/bills");
+  });
+
+  it("hides Bills when it is off", async () => {
+    await render(<More />);
+    await waitFor(() => expect(mockBillsOn).toHaveBeenCalled());
+    expect(screen.queryByText("Open bills")).toBeNull();
+  });
 });
 
 describe("More screen", () => {
