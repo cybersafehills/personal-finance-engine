@@ -386,3 +386,16 @@ not a reason to keep the whole app native.
 - **Keep Kotlin app + build a second mobile app.** Two apps for one user.
 - **Pure-JS notification capture.** Cannot run when the app is killed.
 - **Expo Go.** Cannot load the custom native module.
+
+### Bills (read-only first slice)
+
+The Bills screens list and open the invoices and receipts of the active Space
+(`GET /api/mobile/bills[/:id]`, docs/mobile-api.md). They ship dark with the web
+feature (`BILLS_ENABLED`): the More-tab entry appears only when `GET
+/api/mobile/config` says `bills` for the active Space. Two decisions worth
+keeping: RLS on `bill_documents` is plain membership, so the routes filter on
+the active Space explicitly (a document from another Space answers 404); and the
+wording is shared with the web (`lib/bills/display.ts`) so the two never describe
+a document differently. Not in this slice: upload or capture, review and
+approval, supplier and duplicate handling, comments, and viewing or downloading
+the original file (a signed URL behind `bill.download_original`).
