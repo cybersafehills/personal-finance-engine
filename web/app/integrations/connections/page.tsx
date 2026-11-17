@@ -15,6 +15,7 @@ import { canonicalConnectionsUiEnabled } from "../../../lib/connector-ui-mode";
 import { devicePairingV2Enabled } from "../../../lib/pairing";
 import { AdvancedConnectionSetup } from "../../../components/AdvancedConnectionSetup";
 import { isPlatformAdmin } from "../../../lib/pay/admin";
+import { connectionHealthNow } from "../../../lib/connection-health";
 
 export const dynamic = "force-dynamic";
 
@@ -82,7 +83,7 @@ export default async function ConnectionsPage() {
     <div>
       <PageHeader
         title="Connections"
-        subtitle="The devices and Shortcuts that send transactions in"
+        subtitle="Phones that send your transaction messages to OneLedger"
         backHref="/integrations"
         backLabel="Integrations"
       />
@@ -139,6 +140,8 @@ export default async function ConnectionsPage() {
                 connection={connection}
                 ingestEndpointUrl={ingestEndpointUrl}
                 canManageAdapterCanary={canManageAdapterCanary}
+                health={connectionHealthNow(connection)}
+                canReconnect={pairingWizardEnabled}
               />
             ))
           )
