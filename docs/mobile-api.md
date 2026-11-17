@@ -373,3 +373,25 @@ Uploading, reviewing, approving and the original file stay on the web.
 
 Sign-up, password reset and MFA enrolment stay on the web for now; the app
 links out to them.
+
+## `POST /api/mobile/pay/scan/classify`
+
+Scan to pay, step 1. Body `{ "raw": "<decoded QR text>" }` (1 to 8192 characters).
+Dark unless `scanToPay` is on in `GET /api/mobile/config` (403 `feature_disabled`).
+Returns `{ ok: true, result }` where `result` is the web's `ScanResult`: either
+`{ ok: true, model }` (class `verified_ussd`, `provider_link` or
+`oneledger_payment`, with masked identifiers and warnings) or `{ ok: false,
+class, reason }` with a coarse reason. Read-only: nothing is stored or dialed.
+The text is re-parsed server-side (a scan is data, never authorization); the
+reply never echoes the scanned text.
+
+## `POST /api/mobile/pay/scan/prepare`
+
+Scan to pay, step 2. Body `{ "raw": "...", "amountMinor"?: 1500 }`; the amount is
+only for a code that carries none (whole RWF, re-validated). Returns `{ ok:
+true, outcome }` with `outcome.status`: `prepared` (`intentId`, `telHref`,
+`existed`: a draft with source `qr_scan`), `info_only` (`telHref`, a menu or
+balance code, nothing recorded), `amount_required`, `currency_unsupported`,
+`unsupported`, `feature_disabled` or `error`. Idempotent on the code and amount.
+Never charges anything and never dials. Recording that the user opened the
+dialer uses `POST /api/mobile/pay/intents/:id/handoff`.

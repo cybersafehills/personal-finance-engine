@@ -42,6 +42,14 @@
         }
       ],
       [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow OneLedger to use the camera to read a payment QR code. Nothing is photographed or saved.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ],
+      [
         "expo-local-authentication",
         {
           "faceIDPermission": "Allow OneLedger to use Face ID to unlock the app."

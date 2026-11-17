@@ -116,9 +116,24 @@ export function MobilePrivacyPolicy() {
           </li>
           <li>
             The app does <strong>not</strong> request SMS, call logs, contacts,
-            location, photos, files, the camera or the microphone.
+            location, photos, files or the microphone. It asks for the camera
+            only if you use Scan to pay (see below).
           </li>
         </ul>
+      </Section>
+
+      <Section title="Scan to pay (camera)">
+        <p className={body}>
+          If you open Scan to pay, the app asks for permission to use the
+          camera so it can read a payment QR code. The camera only reads the
+          code: nothing is photographed, recorded or stored. The text of the
+          code you scan is sent over HTTPS to your OneLedger account so it can
+          be checked against OneLedger&rsquo;s verified directory; if you go on to
+          prepare a payment, a draft payment record is saved to your account.
+          OneLedger never dials, authorizes or sends a payment for you. You can
+          refuse or withdraw camera access in your phone&rsquo;s settings; the rest
+          of the app keeps working.
+        </p>
       </Section>
 
       <Section title="iPhone: Shortcuts">

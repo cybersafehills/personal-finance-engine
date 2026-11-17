@@ -79,7 +79,7 @@ keystore** (`eas build` offers this on the first production build).
    | Personal info: email address | Yes | No | Account management | Sign-in |
    | Financial info: other financial info | Yes | No | App functionality | Mobile-money message text (Android capture) and the user's own transactions/balances, shown back to them |
    | Device or other IDs | Yes | Yes (push provider) | App functionality | Expo push token, only after the user turns alerts on. Disclose sharing with the push providers |
-   | App activity, location, contacts, SMS, photos, files, audio, health | No | | | Camera and SMS are not requested |
+   | App activity, location, contacts, SMS, photos, files, audio, health | No | | | SMS is not requested. The camera is used only by Scan to pay to read a QR code: no photo or video is taken, saved or sent (only the decoded text is sent to check it), so it is not collected as "photos or videos" |
 
    Encrypted in transit: yes. Users can request deletion: yes (account on the
    web). Ads and analytics SDKs: none. Biometrics: handled by the OS, never
