@@ -35,7 +35,7 @@ test("the balance eye control toggles visibility and persists across reload", as
 
   await balanceToggle.click();
   await expect(page.getByLabel("Show current balance")).toBeVisible();
-  await expect(page.getByText("••••••")).toBeVisible();
+  await expect(page.getByText("••••••").first()).toBeVisible();
 
   // The click's persistence is a Server Action call the dashboard
   // deliberately never shows a "Saved" indicator for (meant to feel
@@ -50,7 +50,7 @@ test("the balance eye control toggles visibility and persists across reload", as
   // (see PrivacyProvider's bootstrap-from-props comment), so the masked
   // placeholder must be present immediately, not after a client effect.
   await expect(page.getByLabel("Show current balance")).toBeVisible();
-  await expect(page.getByText("••••••")).toBeVisible();
+  await expect(page.getByText("••••••").first()).toBeVisible();
 });
 
 test("full privacy mode masks the balance, today's totals, and disables the standalone eye toggle", async ({ page }) => {
