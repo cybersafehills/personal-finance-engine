@@ -66,7 +66,16 @@ export function BalanceCarousel({ cards }: { cards: HomeWalletCard[] }) {
                   type="button"
                   onClick={toggleBalanceVisible}
                   disabled={balanceHiddenByPrivacyMode || isSavingBalanceVisibility}
-                  aria-label={isBalanceMasked ? "Show balances" : "Hide balances"}
+                  aria-label={balanceHiddenByPrivacyMode
+                    ? "Balance hidden by full privacy mode"
+                    : isBalanceMasked
+                    ? "Show current balance"
+                    : "Hide current balance"}
+                  title={balanceHiddenByPrivacyMode
+                    ? "Balance is hidden by full privacy mode (Settings → Privacy and security)"
+                    : isBalanceMasked
+                    ? "Show current balance"
+                    : "Hide current balance"}
                   className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-accent-foreground/80 hover:bg-accent-foreground/10 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {isBalanceMasked ? <EyeOffIcon className="h-5 w-5" /> : <EyeIcon className="h-5 w-5" />}
