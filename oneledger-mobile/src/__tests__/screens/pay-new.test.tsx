@@ -8,6 +8,13 @@ const mockAccounts = jest.fn();
 
 jest.mock("expo-router", () => jest.requireActual("@/test/router-mock"));
 jest.mock("@/api/mobile-api", () => ({ createPayIntent: (b: unknown) => mockCreate(b) }));
+const mockSaved = jest.fn();
+const mockRecent = jest.fn();
+jest.mock("@/features/pay/recipients", () => ({
+  ...jest.requireActual("@/features/pay/recipients"),
+  getTrustedRecipients: () => mockSaved(),
+  getRecentRecipients: () => mockRecent(),
+}));
 jest.mock("@/features/pay/payment-accounts", () => ({ loadPayableAccounts: () => mockAccounts() }));
 
 const account = { id: "acc1", name: "MTN MoMo" };
@@ -16,6 +23,10 @@ beforeEach(() => {
   resetRouterMock();
   mockCreate.mockReset();
   mockAccounts.mockReset();
+  mockSaved.mockReset();
+  mockRecent.mockReset();
+  mockSaved.mockResolvedValue([]);
+  mockRecent.mockResolvedValue([]);
   mockAccounts.mockResolvedValue([account]);
   mockCreate.mockResolvedValue({ ok: true, intent: { id: "i1" }, existed: false });
   setParams({ type: "pay_person" });
@@ -72,6 +83,34 @@ describe("Pay a person (from the Pay button)", () => {
     await render(<PayNew />);
     expect(await screen.findByText("You need a mobile-money account in OneLedger to prepare a payment.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Prepare payment" }).props.accessibilityState.disabled).toBe(true);
+  });
+});
+
+describe("saved and recent recipients", () => {
+  it("fills the number and name from a saved person, then prepares with that number", async () => {
+    mockSaved.mockResolvedValue([{ id: "r1", name: "Amy", kind: "phone", msisdn: "250781234567", merchantCode: null, trusted: true, relationship: null }]);
+    await render(<PayNew />);
+    await fireEvent.press(await screen.findByRole("button", { name: "Amy (trusted)" }));
+    expect(screen.getByLabelText("Mobile number").props.value).toBe("078 123 4567");
+    await fireEvent.changeText(screen.getByLabelText("Amount (RWF)"), "1000");
+    await fireEvent.press(await screen.findByRole("button", { name: "Prepare payment" }));
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ recipientMsisdn: "250781234567", recipientName: "Amy" })));
+  });
+
+  it("fills only the name from a recent payee", async () => {
+    mockRecent.mockResolvedValue([{ name: "Bob", maskedMsisdn: "•••• 1111", kind: "phone" }]);
+    await render(<PayNew />);
+    await fireEvent.press(await screen.findByRole("button", { name: "Bob" }));
+    expect(screen.getByLabelText("Name (optional)").props.value).toBe("Bob");
+    expect(screen.getByLabelText("Mobile number").props.value).toBe("");
+  });
+
+  it("still works by typing when saved recipients can't be read", async () => {
+    mockSaved.mockRejectedValue(new Error("x"));
+    mockRecent.mockRejectedValue(new Error("x"));
+    await render(<PayNew />);
+    expect(await screen.findByLabelText("Mobile number")).toBeTruthy();
+    expect(screen.queryByText("Saved recipients")).toBeNull();
   });
 });
 

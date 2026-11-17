@@ -71,4 +71,15 @@ describe("Pay sheet", () => {
     await render(<PaySheet open onClose={onClose} config={{ pay: true }} />);
     expect(screen.queryByText("Favourite")).toBeNull();
   });
+
+  it("offers Saved recipients only where the server has them on", async () => {
+    await render(<PaySheet open onClose={onClose} config={{ pay: true }} />);
+    expect(screen.queryByRole("button", { name: "Saved recipients" })).toBeNull();
+  });
+
+  it("opens Saved recipients", async () => {
+    await render(<PaySheet open onClose={onClose} config={{ pay: true, trustedRecipients: true }} />);
+    await fireEvent.press(screen.getByRole("button", { name: "Saved recipients" }));
+    expect(router.push).toHaveBeenCalledWith("/recipients");
+  });
 });

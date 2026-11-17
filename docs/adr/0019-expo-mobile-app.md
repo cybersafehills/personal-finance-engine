@@ -413,3 +413,18 @@ the original file (a signed URL behind `bill.download_original`).
   the app has no verified route for them (see "Pay intents").
 - Not yet native: Scan to pay (needs a camera module and a new build, plus a
   `scanToPay` flag in the config response) and a native USSD directory.
+
+### Pay button: USSD directory and saved recipients
+
+- The USSD directory is native (`/ussd`, `/ussd/[slug]`) and reads `service_codes`,
+  `service_favourites` and `service_code_reports` under RLS exactly as the web
+  does; the fill/validation rules are a port of `web/lib/ussd/capability.ts`
+  (same messages, tested against the same cases). Not ported: the payment
+  networks list and recent-usage analytics.
+- Saved recipients (`/recipients`) read and write `trusted_recipients` under RLS.
+  Because the web gates writing behind a server flag, the app offers the screen
+  only where `GET /api/mobile/config` says `trustedRecipients` is on. In the Pay
+  form a saved recipient fills the number and name (sent as an ordinary
+  recipient: the mobile intents route does not take a `trustedRecipientId`, so the
+  intent is not linked to the saved row); a recent payee fills the name only, as
+  on the web.
