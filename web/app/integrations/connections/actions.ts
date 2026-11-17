@@ -156,6 +156,19 @@ export async function createConnection(
   );
 
   if (error) {
+    // An account has at most one live connection (one installation per
+    // financial source). A revoked one is restored by the RPC itself; an
+    // active or paused one is refused rather than silently rotated, so the
+    // phone already using it keeps working.
+    if (error.message.includes("account_already_connected")) {
+      return {
+        ok: false,
+        error:
+          "This account already has a connection. Reconnect your phone to that connection instead of creating a new one.",
+      };
+    }
+    // The database message carries no key material (only the hash was sent).
+    console.error("createConnection failed:", error.code, error.message);
     return { ok: false, error: "Could not create the connection." };
   }
 

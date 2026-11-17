@@ -9,6 +9,7 @@ import {
   compareOverviews,
   formatBps,
   formatMoney,
+  hasKnownScale,
   historyCoverage,
   type InsightRow,
   toInsightFact,
@@ -379,7 +380,14 @@ Deno.test("history coverage: none / partial / full", () => {
 Deno.test("formatting: bigint money and truncated percentages", () => {
   assertEquals(formatMoney(1234567n, "RWF"), "1,234,567 RWF");
   assertEquals(formatMoney(-500n, "RWF"), "−500 RWF");
-  assertEquals(formatMoney(500n, "USD", { signed: true }), "+500 USD");
+  // USD/EUR are stored in cents: 2500 is $25.00, never "2,500 USD".
+  assertEquals(formatMoney(2500n, "USD"), "25.00 USD");
+  assertEquals(formatMoney(500n, "USD", { signed: true }), "+5.00 USD");
+  assertEquals(formatMoney(-123456705n, "EUR"), "−1,234,567.05 EUR");
+  assertEquals(formatMoney(7n, "USD"), "0.07 USD");
+  // Unknown scale: shown exactly as recorded, no decimal point invented.
+  assertEquals(formatMoney(2500n, "KES"), "2,500 KES");
+  assertEquals([hasKnownScale("RWF"), hasKnownScale("KES")], [true, false]);
   assertEquals(formatMoney(0n, "RWF", { signed: true }), "0 RWF");
   assertEquals(
     formatMoney(123456789012345678901n, "RWF"),

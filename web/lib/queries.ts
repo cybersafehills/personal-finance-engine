@@ -13,6 +13,7 @@ import {
   mobileRequestedWorkspaceId,
 } from "./mobile-session-context";
 import { kigaliDateKey, kigaliDayBoundsUtc } from "./kigali-time";
+import { excludeLinkedTransfers, linkedTransferIdSet } from "./transfer-exclusion";
 import {
   aggregateOutflowsByAllocation,
   ALLOCATION_TYPES,
@@ -123,6 +124,25 @@ export async function getCurrentBalance(): Promise<CurrentBalance | null> {
   return { amountRwf: plausible.balance_after_rwf, asOfIso: plausible.occurred_at };
 }
 
+/**
+ * Ids of both legs of every confirmed self-transfer visible to the session
+ * (RLS-scoped, same source getBudgetActuals uses). A failed lookup yields an
+ * empty set (totals then match the pre-fix behaviour) and is logged.
+ */
+async function getLinkedTransferIds(
+  supabase: Awaited<ReturnType<typeof supabaseSession>>,
+): Promise<Set<string>> {
+  const { data, error } = await supabase
+    .from("transfer_links")
+    .select("out_transaction_id, in_transaction_id")
+    .eq("status", "linked");
+  if (error) {
+    console.error("getLinkedTransferIds failed:", error.message);
+    return new Set();
+  }
+  return linkedTransferIdSet(data ?? []);
+}
+
 export type TodayTotals = {
   spentRwf: number;
   receivedRwf: number;
@@ -135,7 +155,7 @@ export async function getTodayTotals(): Promise<TodayTotals> {
 
   const { data, error } = await supabase
     .from("transactions")
-    .select("direction, principal_effect_rwf, fee_effect_rwf")
+    .select("id, direction, principal_effect_rwf, fee_effect_rwf")
     .eq("settlement_state", "settled")
     // Phase U: exclude rows merged into a canonical duplicate (kept for
     // evidence, never counted).
@@ -151,7 +171,9 @@ export async function getTodayTotals(): Promise<TodayTotals> {
   let spentRwf = 0;
   let receivedRwf = 0;
 
-  for (const row of data ?? []) {
+  // Confirmed self-transfers are neither spending nor income.
+  const linked = await getLinkedTransferIds(supabase);
+  for (const row of excludeLinkedTransfers(data ?? [], linked)) {
     const effect = Number(row.principal_effect_rwf) +
       Number(row.fee_effect_rwf);
     if (row.direction === "out") {
@@ -783,10 +805,10 @@ export async function getCategoryTotalsComplete(): Promise<
   { totals: CategoryTotalRow[]; truncated: boolean }
 > {
   const supabase = await supabaseSession();
-  const { rows, truncated } = await collectPages<TotalsRow>(async (from, to) => {
+  const { rows, truncated } = await collectPages<TotalsRow & { id: string }>(async (from, to) => {
     const { data, error } = await supabase
       .from("transactions")
-      .select("category, principal_effect_rwf, fee_effect_rwf")
+      .select("id, category, principal_effect_rwf, fee_effect_rwf")
       .eq("direction", "out")
       .eq("settlement_state", "settled")
       // Phase U: exclude rows merged into a canonical duplicate.
@@ -795,9 +817,13 @@ export async function getCategoryTotalsComplete(): Promise<
       .order("id", { ascending: true })
       .range(from, to);
     if (error) throw new Error(error.message);
-    return (data ?? []) as TotalsRow[];
+    return (data ?? []) as (TotalsRow & { id: string })[];
   });
-  return { totals: aggregateCategoryTotals(rows), truncated };
+  // Confirmed self-transfers are not spending (same rule as getCategoryTotals,
+  // Home and the reports). A failed link lookup is logged and falls back to the
+  // pre-fix totals rather than failing the page.
+  const linked = await getLinkedTransferIds(supabase);
+  return { totals: aggregateCategoryTotals(excludeLinkedTransfers(rows, linked)), truncated };
 }
 
 /**
@@ -812,7 +838,7 @@ export async function getCategoryTotals(): Promise<CategoryTotalRow[]> {
   const supabase = await supabaseSession();
   const { data, error } = await supabase
     .from("transactions")
-    .select("category, principal_effect_rwf, fee_effect_rwf")
+    .select("id, category, principal_effect_rwf, fee_effect_rwf")
     .eq("direction", "out")
     .eq("settlement_state", "settled")
     // Phase U: exclude rows merged into a canonical duplicate.
@@ -822,7 +848,11 @@ export async function getCategoryTotals(): Promise<CategoryTotalRow[]> {
     console.error("getCategoryTotals failed:", error.message);
     return [];
   }
-  return aggregateCategoryTotals((data ?? []) as TotalsRow[]);
+  // Confirmed self-transfers are not spending.
+  const linked = await getLinkedTransferIds(supabase);
+  return aggregateCategoryTotals(
+    excludeLinkedTransfers((data ?? []) as (TotalsRow & { id: string })[], linked),
+  );
 }
 
 // ===========================================================================

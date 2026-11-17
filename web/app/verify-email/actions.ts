@@ -1,6 +1,6 @@
 "use server";
 
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import {
   decodePendingValue,
@@ -125,7 +125,7 @@ export async function resendVerificationEmail(): Promise<
   cookieStore.set(
     VERIFICATION_RESEND_AT_COOKIE,
     String(nextResendAt),
-    pendingVerificationCookieOptions(),
+    pendingVerificationCookieOptions((await headers()).get("host")),
   );
   return { ok: true, resendAvailableAt: nextResendAt };
 }

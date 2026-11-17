@@ -1,6 +1,6 @@
 "use server";
 
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { supabaseSession } from "../../lib/supabase-session-server";
 import { siteUrl } from "../../lib/site-url";
 import { internalRedirectPath } from "../../lib/internal-redirect";
@@ -56,7 +56,9 @@ export async function signUp(
 
   if (!data.session) {
     const cookieStore = await cookies();
-    const options = pendingVerificationCookieOptions();
+    const options = pendingVerificationCookieOptions(
+      (await headers()).get("host"),
+    );
     cookieStore.set(
       PENDING_VERIFICATION_EMAIL_COOKIE,
       encodePendingValue(validation.email),
