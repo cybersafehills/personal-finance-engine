@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { isOneLedger3FlagEnabled } from "../../lib/oneledger3-flags";
 import { getActiveWorkspaceId } from "../../lib/queries";
 import { supabaseSession } from "../../lib/supabase-session-server";
+import { setPrimaryAccount } from "../settings/accounts/actions";
 import { parseBalanceInput } from "../../lib/wallets/wallets-display";
 
 // "I checked my balance": the user states what their provider shows. The
@@ -69,6 +70,31 @@ export async function recordBalanceAction(input: {
     };
   }
 
+  revalidatePath("/wallets");
+  return { ok: true };
+}
+
+// "Show this wallet first on Home": the workspace's primary account is the
+// default. Checks the wallet is a live one in the ACTIVE workspace first, so a
+// bad id can never clear the current default and then fail to set a new one.
+export async function setDefaultWalletAction(accountId: string): Promise<RecordBalanceResult> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!workspaceId || !UUID.test(accountId)) {
+    return { ok: false, error: "That wallet couldn't be found." };
+  }
+  const supabase = await supabaseSession();
+  const { data, error } = await supabase
+    .from("accounts")
+    .select("id")
+    .eq("id", accountId)
+    .eq("workspace_id", workspaceId)
+    .is("archived_at", null)
+    .maybeSingle();
+  if (error || !data) return { ok: false, error: "That wallet couldn't be found." };
+
+  const res = await setPrimaryAccount(accountId);
+  if (!res.ok) return { ok: false, error: "Couldn't change your default wallet. Only the owner can." };
+  revalidatePath("/");
   revalidatePath("/wallets");
   return { ok: true };
 }

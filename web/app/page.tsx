@@ -19,7 +19,8 @@ import {
   isIntelligenceEnabled,
 } from "../lib/intelligence/insights";
 import { BalanceCard } from "../components/BalanceCard";
-import { getHomeBalance } from "../lib/wallets/home-balance-data";
+import { BalanceCarousel } from "../components/BalanceCarousel";
+import { getHomeBalance, getHomeWalletCards } from "../lib/wallets/home-balance-data";
 import { IntelligenceCard } from "../components/IntelligenceCard";
 import { OnboardingCard } from "../components/OnboardingCard";
 import { OnboardingJourneyCard } from "../components/OnboardingJourneyCard";
@@ -60,6 +61,7 @@ export default async function HomePage() {
     journey,
     categoryTotals,
     insights,
+    walletCards,
   ] = await Promise.all([
     getHomeBalance(),
     getTodayTotals(),
@@ -70,6 +72,7 @@ export default async function HomePage() {
     journeyEnabled ? getOnboardingJourney() : Promise.resolve(null),
     journeyEnabled ? getCategoryTotals() : Promise.resolve([]),
     intelligenceEnabled ? getIntelligenceInsights() : Promise.resolve(null),
+    getHomeWalletCards(),
   ]);
 
   // Release 3 first-run surfaces (ADR 0012), dark unless
@@ -153,13 +156,17 @@ export default async function HomePage() {
       )}
 
       <div className={`lg:col-start-1 ${mainColumnSpan}`}>
-        <BalanceCard
-          balanceRwf={balance?.amountRwf ?? null}
-          asOfIso={balance?.asOfIso ?? null}
-          label={balance?.label}
-          walletCount={balance?.walletCount}
-          excludedCount={balance?.excludedCount}
-        />
+        {walletCards
+          ? <BalanceCarousel cards={walletCards} />
+          : (
+            <BalanceCard
+              balanceRwf={balance?.amountRwf ?? null}
+              asOfIso={balance?.asOfIso ?? null}
+              label={balance?.label}
+              walletCount={balance?.walletCount}
+              excludedCount={balance?.excludedCount}
+            />
+          )}
       </div>
 
       <section

@@ -6,19 +6,37 @@ import {
 } from "./wallets-display.ts";
 
 Deno.test("balance input: whole RWF, grouping, zero", () => {
-  assertEquals(parseBalanceInput("78,900", "RWF"), { ok: true, amountMinor: 78900n });
-  assertEquals(parseBalanceInput(" 78 900 ", "RWF"), { ok: true, amountMinor: 78900n });
+  assertEquals(parseBalanceInput("78,900", "RWF"), {
+    ok: true,
+    amountMinor: 78900n,
+  });
+  assertEquals(parseBalanceInput(" 78 900 ", "RWF"), {
+    ok: true,
+    amountMinor: 78900n,
+  });
   assertEquals(parseBalanceInput("0", "RWF"), { ok: true, amountMinor: 0n });
-  assertEquals(parseBalanceInput("78900.00", "RWF"), { ok: true, amountMinor: 78900n });
+  assertEquals(parseBalanceInput("78900.00", "RWF"), {
+    ok: true,
+    amountMinor: 78900n,
+  });
 });
 
 Deno.test("balance input: never rounds, never guesses", () => {
   // RWF has no cents: a fraction is refused, not rounded.
   assertEquals(parseBalanceInput("78900.5", "RWF").ok, false);
   // 2-decimal currency: exact cents only.
-  assertEquals(parseBalanceInput("78,900.5", "USD"), { ok: true, amountMinor: 7890050n });
-  assertEquals(parseBalanceInput("12", "EUR"), { ok: true, amountMinor: 1200n });
-  assertEquals(parseBalanceInput("12.340", "EUR"), { ok: true, amountMinor: 1234n });
+  assertEquals(parseBalanceInput("78,900.5", "USD"), {
+    ok: true,
+    amountMinor: 7890050n,
+  });
+  assertEquals(parseBalanceInput("12", "EUR"), {
+    ok: true,
+    amountMinor: 1200n,
+  });
+  assertEquals(parseBalanceInput("12.340", "EUR"), {
+    ok: true,
+    amountMinor: 1234n,
+  });
   assertEquals(parseBalanceInput("12.345", "EUR").ok, false);
   for (const bad of ["", "abc", "-5", "1e3", "12.", ".5", "1.2.3", "٣٤"]) {
     assertEquals(parseBalanceInput(bad, "RWF").ok, false, bad);
@@ -46,9 +64,30 @@ Deno.test("totals: per currency, uncertainty carried, unavailable excluded", () 
     { currency: "EUR", status: "unavailable", amountMinor: null },
   ]);
   assertEquals(t, [
-    { currency: "EUR", totalMinor: 0n, counted: 0, unavailable: 1, allConfirmed: false, uncertain: 0 },
-    { currency: "RWF", totalMinor: 71000n, counted: 3, unavailable: 1, allConfirmed: false, uncertain: 2 },
-    { currency: "USD", totalMinor: 2500n, counted: 1, unavailable: 0, allConfirmed: true, uncertain: 0 },
+    {
+      currency: "EUR",
+      totalMinor: 0n,
+      counted: 0,
+      unavailable: 1,
+      allConfirmed: false,
+      uncertain: 0,
+    },
+    {
+      currency: "RWF",
+      totalMinor: 71000n,
+      counted: 3,
+      unavailable: 1,
+      allConfirmed: false,
+      uncertain: 2,
+    },
+    {
+      currency: "USD",
+      totalMinor: 2500n,
+      counted: 1,
+      unavailable: 0,
+      allConfirmed: true,
+      uncertain: 0,
+    },
   ]);
 });
 
