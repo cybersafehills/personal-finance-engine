@@ -46,6 +46,7 @@ import {
 import type { PersonKind } from "@/features/people/types";
 import { parseWalletsResponse, type WalletsResult } from "@/features/wallets/parse";
 import { parseMoreFlags, type MoreFlags } from "@/features/more/groups";
+import { parseClassifyResponse, parsePrepareResponse, type ClassifyResponse, type PrepareResponse } from "@/features/scan/parse";
 import { parseSpacesEnabled } from "@/features/spaces/config";
 import type { InviteRole, MemberRole } from "@/features/spaces/members";
 import {
@@ -404,4 +405,18 @@ export async function inviteMember(
 export async function revokeInvite(workspaceId: string, inviteId: string): Promise<WriteResult> {
   const r = await bearerPost("/api/mobile/spaces/invites/revoke", { workspaceId, inviteId });
   return r.kind === "response" ? parseSimpleWrite(r.status, r.body) : spaceFailure(r);
+}
+
+/** Read a scanned QR string and say what it is. Read-only: nothing is stored or dialed. */
+export async function classifyScan(raw: string): Promise<ClassifyResponse> {
+  const result = await bearerPost("/api/mobile/pay/scan/classify", { raw });
+  if (result.kind !== "response") return { ok: false, disabled: false, ...failureForOutcome(result, "That code") };
+  return parseClassifyResponse(result.status, result.body);
+}
+
+/** Turn a scanned code into a hand-off (a draft payment and the route to open). Never charges anything. */
+export async function prepareScan(raw: string, amountMinor?: number): Promise<PrepareResponse> {
+  const result = await bearerPost("/api/mobile/pay/scan/prepare", amountMinor === undefined ? { raw } : { raw, amountMinor });
+  if (result.kind !== "response") return { ok: false, ...failureForOutcome(result, "That payment") };
+  return parsePrepareResponse(result.status, result.body);
 }

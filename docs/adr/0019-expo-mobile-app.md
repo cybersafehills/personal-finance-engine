@@ -428,3 +428,21 @@ the original file (a signed URL behind `bill.download_original`).
   recipient: the mobile intents route does not take a `trustedRecipientId`, so the
   intent is not linked to the saved row); a recent payee fills the name only, as
   on the web.
+
+### Pay button: Scan to pay
+
+- `/scan` uses `expo-camera` (a native module: needs a new build). The config
+  plugin requests the camera only; the microphone and Android `RECORD_AUDIO` are
+  switched off. The privacy policy and the Play Data safety answer were updated
+  to say the camera is used only to read a QR code and nothing is kept.
+- The scan is data, never authorization (ADR 0006). The app sends the decoded
+  text to `POST /api/mobile/pay/scan/classify`; the server re-parses it with the
+  same pipeline as the web (`lib/pay/scan`) and returns a redacted, display-ready
+  model or a coarse rejection. One tap on `/prepare` creates the draft
+  (`lib/pay/scan/prepare.ts`, shared with the web action, so one code path).
+- Nothing is dialed on detection. Android has an explicit "Open phone dialer";
+  iPhone shares/copies the code (same reason as the Pay review screen). The app
+  never claims the payment settled.
+- Provider links and EMV merchant QRs are explained but not continued (the web
+  does the same: no verified route). Only the first code the camera reports in a
+  scan is handled.

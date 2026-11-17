@@ -76,6 +76,27 @@ export function PaySheet({
         </View>
 
         <ScrollView contentContainerStyle={{ gap: space[3] }}>
+          {config.scanToPay ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Scan to pay"
+              onPress={() => {
+                onClose();
+                router.push("/scan");
+              }}
+              style={[styles.cell, styles.scan]}
+            >
+              <View style={styles.scanIcon}>
+                <Feather name="maximize" size={18} color={colors.accentForeground} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text variant="bodyStrong">Scan to pay</Text>
+                <Text variant="caption" color="textMuted">
+                  Scan a merchant payment QR code.
+                </Text>
+              </View>
+            </Pressable>
+          ) : null}
           <View style={styles.grid}>
             {LAUNCHER_ACTIONS.map((action) => {
               const available = actionAvailableHere(action, config);
@@ -222,6 +243,8 @@ const styles = StyleSheet.create({
     borderRadius: radii.control,
     backgroundColor: colors.accent,
   },
+  scan: { flexDirection: "row", alignItems: "center", gap: space[3], flexBasis: "100%", borderColor: colors.moneyPositive },
+  scanIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.moneyPositive, alignItems: "center", justifyContent: "center" },
   row: { flexDirection: "row", gap: space[2] },
   rowCell: { flexBasis: "45%", alignItems: "center" },
   close: {

@@ -82,4 +82,12 @@ describe("Pay sheet", () => {
     await fireEvent.press(screen.getByRole("button", { name: "Saved recipients" }));
     expect(router.push).toHaveBeenCalledWith("/recipients");
   });
+
+  it("offers Scan to pay only where the server has it on, and opens the scanner", async () => {
+    await render(<PaySheet open onClose={onClose} config={{ pay: true }} />);
+    expect(screen.queryByRole("button", { name: "Scan to pay" })).toBeNull();
+    await render(<PaySheet open onClose={onClose} config={{ pay: true, scanToPay: true }} />);
+    await fireEvent.press(screen.getByRole("button", { name: "Scan to pay" }));
+    expect(router.push).toHaveBeenCalledWith("/scan");
+  });
 });
