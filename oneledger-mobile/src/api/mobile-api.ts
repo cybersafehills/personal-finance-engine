@@ -38,6 +38,7 @@ import {
 } from "@/features/people/parse";
 import type { PersonKind } from "@/features/people/types";
 import { parseWalletsResponse, type WalletsResult } from "@/features/wallets/parse";
+import { parseMoreFlags, type MoreFlags } from "@/features/more/groups";
 import { parseSpacesEnabled } from "@/features/spaces/config";
 import type { InviteRole, MemberRole } from "@/features/spaces/members";
 import {
@@ -293,6 +294,12 @@ export async function recordPayHandoff(
 export async function fetchSpacesEnabled(): Promise<boolean> {
   const result = await bearerGet("/api/mobile/config");
   return result.kind === "response" && parseSpacesEnabled(result.status, result.body);
+}
+
+/** Which optional features are on, for the More screen; null if the server can't say. */
+export async function fetchMoreFlags(): Promise<MoreFlags | null> {
+  const result = await bearerGet("/api/mobile/config");
+  return result.kind === "response" ? parseMoreFlags(result.status, result.body) : null;
 }
 
 /** All-time spending per category, from the web's canonical totals (the app never recomputes them). */

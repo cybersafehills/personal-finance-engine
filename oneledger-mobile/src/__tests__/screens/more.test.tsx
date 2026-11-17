@@ -9,9 +9,11 @@ const mockUnread = jest.fn();
 const mockIsPushEnabled = jest.fn();
 const mockEnablePush = jest.fn();
 const mockDisablePush = jest.fn();
+const mockFlags = jest.fn();
 const flags = { pushSupported: true, captureSupported: true };
 
 jest.mock("expo-router", () => jest.requireActual("@/test/router-mock"));
+jest.mock("@/api/mobile-api", () => ({ fetchMoreFlags: () => mockFlags() }));
 jest.mock("@/features/auth/SessionProvider", () => ({
   useSession: () => ({
     session: { user: { email: "me@example.com" } },
@@ -44,9 +46,10 @@ jest.mock("@/features/push/push", () => ({
 
 beforeEach(() => {
   resetRouterMock();
-  [mockSignOut, mockHealth, mockUnread, mockIsPushEnabled, mockEnablePush, mockDisablePush].forEach((m) => m.mockReset());
+  [mockFlags, mockSignOut, mockHealth, mockUnread, mockIsPushEnabled, mockEnablePush, mockDisablePush].forEach((m) => m.mockReset());
   flags.pushSupported = true;
   flags.captureSupported = true;
+  mockFlags.mockResolvedValue(null);
   mockHealth.mockResolvedValue({ state: "active" });
   mockUnread.mockResolvedValue(0);
   mockIsPushEnabled.mockResolvedValue(false);
@@ -67,13 +70,28 @@ describe("More screen", () => {
     for (const [label, path] of [
       ["Recording status", "/capture"],
       ["See notifications", "/notifications"],
-      ["Open statements", "/statements"],
-      ["Open goals", "/goals"],
+      ["Statements", "/statements"],
+      ["Goals", "/goals"],
+      ["Payment requests", "/requests"],
       ["App lock", "/security"],
     ] as const) {
       await fireEvent.press(screen.getByText(label));
       expect(router.push).toHaveBeenLastCalledWith(path);
     }
+  });
+
+  it("groups the destinations under the web's headings", async () => {
+    await render(<More />);
+    expect(await screen.findByText("Manage money")).toBeTruthy();
+    expect(screen.getByText("Pay & Services")).toBeTruthy();
+    expect(screen.getByText("Account")).toBeTruthy();
+  });
+
+  it("hides a feature the server says is off", async () => {
+    mockFlags.mockResolvedValue({ statements: false, insights: true });
+    await render(<More />);
+    await screen.findByText("Insights");
+    await waitFor(() => expect(screen.queryByText("Statements")).toBeNull());
   });
 
   it("offers to set up recording only when it needs it", async () => {
