@@ -18,13 +18,16 @@ export function InsightAmount({
   text,
   tone = "neutral",
   className = "",
+  kind = "amount",
 }: {
   text: string;
   tone?: keyof typeof TONE;
   className?: string;
+  /** "balance" also honours the hide-balance toggle, like the Home balance card. */
+  kind?: "amount" | "balance";
 }) {
-  const { isDashboardMasked } = usePrivacy();
-  if (isDashboardMasked) {
+  const { isDashboardMasked, isBalanceMasked } = usePrivacy();
+  if (kind === "balance" ? isBalanceMasked : isDashboardMasked) {
     return (
       <span
         className={`tabular-nums text-text-muted ${className}`}

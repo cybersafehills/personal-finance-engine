@@ -85,6 +85,10 @@ export default defineConfig({
       // "true"; insights.spec.ts needs it. Adds no navigation entry, only a
       // link on /reports, so it is inert for every other spec.
       INSIGHTS_CENTER_ENABLED: "true",
+      // Wallets (/wallets, balance labels + "I checked my balance") for
+      // wallets.spec.ts. Also opens GET /api/mobile/accounts; adds no
+      // navigation entry, only a link on /settings/accounts.
+      BALANCE_PROVENANCE_ENABLED: "true",
       // Integrations: the base area + Import Studio + Export Center for
       // integrations-nav.spec.ts / integrations-import.spec.ts. These
       // default on ("on unless exactly false"); set explicitly so the
