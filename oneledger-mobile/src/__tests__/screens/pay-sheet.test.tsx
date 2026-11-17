@@ -42,7 +42,7 @@ describe("Pay sheet", () => {
     await render(<PaySheet open onClose={onClose} config={{ pay: true }} />);
     await fireEvent.press(screen.getByRole("button", { name: "Open USSD directory" }));
     expect(Linking.openURL).toHaveBeenLastCalledWith("https://www.example.test/pay/ussd");
-    await fireEvent.press(screen.getByRole("button", { name: "Payment activity" }));
+    await fireEvent.press(screen.getByRole("button", { name: "View payment activity" }));
     expect(Linking.openURL).toHaveBeenLastCalledWith("https://www.example.test/pay/activity");
   });
 
