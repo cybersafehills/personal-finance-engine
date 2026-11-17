@@ -700,7 +700,9 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # OneLedger 3.0 E7 (20261230000000) adds utility_receipts (RLS enabled, column-
 # level SELECT for authenticated that excludes the ciphertext; service-role
 # write) - 139 tables, 138 with RLS.
-if [ "$TABLE_COUNT" = "139" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Offline sync (20270102000000) adds client_operations (RLS enabled, no grant for
+# users; written only by the SECURITY DEFINER sync function) - 140 tables, 139 with RLS.
+if [ "$TABLE_COUNT" = "140" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -1063,10 +1065,13 @@ AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_p
 # OneLedger 3.0 E7 (20261230000000): confirm_/unlink_/ignore_utility_receipt
 # (member+-gated, audited). store_utility_receipt is service-role only and the
 # link helpers are internal. 133 + 3 = 136.
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "136" ]; then
-  pass "authenticated holds EXECUTE on exactly the 136 functions expected, no more"
+# Offline sync (20270102000000): sync_create_manual_transaction (authorized and
+# idempotent) + sync_transactions_changes (SECURITY INVOKER, RLS). 136 + 2 = 138.
+# sync_set_category (20270103000000). 138 + 1 = 139.
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "139" ]; then
+  pass "authenticated holds EXECUTE on exactly the 139 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 136 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 139 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -7988,6 +7993,115 @@ if [ "$MT_ACL" = "f|t" ] || [ "$MT_ACL" = "false|true" ]; then
   pass "Manual transactions: create_manual_transaction is executable by signed-in users only (not anon)"
 else
   fail "Manual transactions: ACL wrong ('$MT_ACL', want anon=false authenticated=true)"
+fi
+
+# ---------------------------------------------------------------------------
+# Offline sync foundation (20270102000000): idempotent create keyed by op_id,
+# device-chosen transaction id, replay safety, cross-user isolation, and the
+# incremental feed under RLS.
+# ---------------------------------------------------------------------------
+SY_OP="$(psql -d pfe_rls -t -A -c "select gen_random_uuid();" | tail -1)"
+SY_TX="$(psql -d pfe_rls -t -A -c "select gen_random_uuid();" | tail -1)"
+SY_ARGS="'$SY_OP','$SY_TX','$S_ACCT_A','merchant_payment','out',4200,100,now() - interval '1 hour','Offline Shop','made offline'"
+SY_R1="$(as_user "$USER_A" "select public.sync_create_manual_transaction($SY_ARGS)->>'status';")"
+SY_R2="$(as_user "$USER_A" "select public.sync_create_manual_transaction($SY_ARGS)->>'status';")"
+SY_R3="$(as_user "$USER_A" "select public.sync_create_manual_transaction($SY_ARGS)->>'status';")"
+SY_N="$(psql -d pfe_rls -t -A -c "select count(*) from public.transactions where id = '$SY_TX';" | tail -1)"
+SY_OPS="$(psql -d pfe_rls -t -A -c "select count(*) from public.client_operations where op_id = '$SY_OP';" | tail -1)"
+if [ "$SY_R1" = "applied" ] && [ "$SY_R2" = "replayed" ] && [ "$SY_R3" = "replayed" ] && [ "$SY_N" = "1" ] && [ "$SY_OPS" = "1" ]; then
+  pass "Offline sync: a create keeps the device-chosen id and redelivery replays without a second row"
+else
+  fail "Offline sync: idempotency wrong (r1=$SY_R1 r2=$SY_R2 r3=$SY_R3 rows=$SY_N ops=$SY_OPS)"
+fi
+
+SY_ROW="$(as_user "$USER_A" "select direction||'|'||principal_effect_rwf||'|'||fee_effect_rwf||'|'||source||'|'||settlement_state from public.transactions where id = '$SY_TX';")"
+if [ "$SY_ROW" = "out|-4200|-100|manual|settled" ]; then
+  pass "Offline sync: the created row obeys the same accounting rules as create_manual_transaction"
+else
+  fail "Offline sync: created row wrong ('$SY_ROW')"
+fi
+
+if as_user "$USER_B" "select public.sync_create_manual_transaction($SY_ARGS);" >/dev/null 2>&1; then
+  fail "Offline sync: another user replayed someone else's op_id"
+else
+  pass "Offline sync: an op_id presented by a different user is refused (never answered with another user's outcome)"
+fi
+
+SY_OP2="$(psql -d pfe_rls -t -A -c "select gen_random_uuid();" | tail -1)"
+if as_user "$USER_A" "select public.sync_create_manual_transaction('$SY_OP2','$SY_TX','$S_ACCT_A','send_money','out',1,0,now(),null,null);" >/dev/null 2>&1; then
+  fail "Offline sync: a new operation overwrote/adopted an existing transaction id"
+else
+  pass "Offline sync: a different operation cannot reuse an existing transaction id (entity_exists)"
+fi
+
+SY_OP3="$(psql -d pfe_rls -t -A -c "select gen_random_uuid();" | tail -1)"
+SY_TX3="$(psql -d pfe_rls -t -A -c "select gen_random_uuid();" | tail -1)"
+if as_user "$USER_B" "select public.sync_create_manual_transaction('$SY_OP3','$SY_TX3','$S_ACCT_A','send_money','out',100,0,now(),null,null);" >/dev/null 2>&1; then
+  fail "Offline sync: a user outside the workspace created a row"
+else
+  pass "Offline sync: a user outside the account's workspace is refused"
+fi
+
+SY_FEED="$(as_user "$USER_A" "select count(*) from public.sync_transactions_changes(null, null, 500) where id = '$SY_TX';")"
+SY_FEED_B="$(as_user "$USER_B" "select count(*) from public.sync_transactions_changes(null, null, 500) where id = '$SY_TX';")"
+if [ "$SY_FEED" = "1" ] && [ "$SY_FEED_B" = "0" ]; then
+  pass "Offline sync: the incremental feed returns the member's rows and nothing to a non-member (RLS)"
+else
+  fail "Offline sync: feed wrong (member=$SY_FEED outsider=$SY_FEED_B)"
+fi
+
+SY_CUR="$(as_user "$USER_A" "select updated_at||'|'||id from public.sync_transactions_changes(null, null, 500) order by updated_at desc, id desc limit 1;")"
+SY_AFTER="$(as_user "$USER_A" "select count(*) from public.sync_transactions_changes('${SY_CUR%%|*}'::timestamptz, '${SY_CUR##*|}'::uuid, 500);")"
+if [ "$SY_AFTER" = "0" ]; then
+  pass "Offline sync: a cursor at the newest row returns nothing further"
+else
+  fail "Offline sync: cursor returned $SY_AFTER rows after the newest"
+fi
+
+SY_ACL="$(psql -d pfe_rls -t -A -c "select has_function_privilege('anon','public.sync_create_manual_transaction(uuid,uuid,uuid,text,text,bigint,bigint,timestamptz,text,text)','execute') || '|' || has_function_privilege('authenticated','public.sync_create_manual_transaction(uuid,uuid,uuid,text,text,bigint,bigint,timestamptz,text,text)','execute') || '|' || has_table_privilege('authenticated','public.client_operations','select');" | tail -1)"
+if [ "$SY_ACL" = "f|t|f" ] || [ "$SY_ACL" = "false|true|false" ]; then
+  pass "Offline sync: sync function is authenticated-only and client_operations is not readable by users"
+else
+  fail "Offline sync: ACL wrong ('$SY_ACL')"
+fi
+
+# ---------------------------------------------------------------------------
+# Offline category edits (20270103000000): compare-and-set, idempotent, audited.
+# ---------------------------------------------------------------------------
+SC_OP="$(psql -d pfe_rls -t -A -c "select gen_random_uuid();" | tail -1)"
+SC_ARGS="'$SC_OP','$SY_TX','Groceries',null,null,null"
+SC_1="$(as_user "$USER_A" "select public.sync_set_category($SC_ARGS)->>'status';")"
+SC_2="$(as_user "$USER_A" "select public.sync_set_category($SC_ARGS)->>'status';")"
+SC_CAT="$(psql -d pfe_rls -t -A -c "select category||'|'||category_source||'|'||category_decision_status from public.transactions where id='$SY_TX';" | tail -1)"
+SC_HIST="$(psql -d pfe_rls -t -A -c "select count(*) from public.transaction_category_history where transaction_id='$SY_TX' and new_category='Groceries';" | tail -1)"
+if [ "$SC_1" = "applied" ] && [ "$SC_2" = "replayed" ] && [ "$SC_CAT" = "Groceries|manual|confirmed" ] && [ "$SC_HIST" = "1" ]; then
+  pass "Offline category: applied once as a manual decision, replay adds no second history entry"
+else
+  fail "Offline category: wrong (1=$SC_1 2=$SC_2 row=$SC_CAT hist=$SC_HIST)"
+fi
+
+SC_OP2="$(psql -d pfe_rls -t -A -c "select gen_random_uuid();" | tail -1)"
+SC_C="$(as_user "$USER_A" "select public.sync_set_category('$SC_OP2','$SY_TX','Transport',null,'Stale Base',null)->>'status';")"
+SC_AFTER="$(psql -d pfe_rls -t -A -c "select category from public.transactions where id='$SY_TX';" | tail -1)"
+if [ "$SC_C" = "conflict" ] && [ "$SC_AFTER" = "Groceries" ]; then
+  pass "Offline category: a stale base is reported as a conflict and changes nothing"
+else
+  fail "Offline category: conflict handling wrong (status=$SC_C category=$SC_AFTER)"
+fi
+
+SC_F="$(as_user "$USER_A" "select public.sync_set_category('$SC_OP2','$SY_TX','Transport',null,'Stale Base',null,true)->>'status';")"
+SC_AFTER2="$(psql -d pfe_rls -t -A -c "select category from public.transactions where id='$SY_TX';" | tail -1)"
+if [ "$SC_F" = "applied" ] && [ "$SC_AFTER2" = "Transport" ]; then
+  pass "Offline category: 'keep mine' (force) re-sends and applies after a conflict"
+else
+  fail "Offline category: force wrong (status=$SC_F category=$SC_AFTER2)"
+fi
+
+SC_OP3="$(psql -d pfe_rls -t -A -c "select gen_random_uuid();" | tail -1)"
+if as_user "$USER_B" "select public.sync_set_category('$SC_OP3','$SY_TX','Hacked',null,'Transport',null);" >/dev/null 2>&1; then
+  fail "Offline category: a non-member changed a category"
+else
+  pass "Offline category: a user outside the workspace is refused"
 fi
 
 # ===========================================================================

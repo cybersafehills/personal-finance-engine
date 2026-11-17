@@ -45,6 +45,11 @@ export function TransactionItem({
           {!transaction.category ? <Badge variant="attention">Uncategorized</Badge> : null}
           {isFailed(transaction) ? <Badge variant="attention">Failed</Badge> : null}
           {needsReview(transaction) ? <Badge variant="attention">Review</Badge> : null}
+          {transaction.sync_state === "failed" ? (
+            <Badge variant="attention">Not sent</Badge>
+          ) : transaction.sync_state && transaction.sync_state !== "synced" ? (
+            <Badge variant="neutral">Saved on this phone</Badge>
+          ) : null}
         </View>
       </View>
       <MoneyAmount amountRwf={signedAmountRwf(transaction)} masked={masked} />

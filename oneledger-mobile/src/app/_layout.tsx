@@ -10,6 +10,7 @@ import { SessionProvider, useSession } from "@/features/auth/SessionProvider";
 import { ActiveSpaceProvider } from "@/features/spaces/ActiveSpaceProvider";
 import { LockProvider, useLock } from "@/features/lock/LockProvider";
 import { LockScreen } from "@/features/lock/LockScreen";
+import { OfflineProvider } from "@/offline/OfflineProvider";
 import { PrivacyProvider } from "@/features/privacy/PrivacyProvider";
 import { colors } from "@/theme/tokens";
 
@@ -70,10 +71,12 @@ export default function RootLayout() {
     <SessionProvider>
       <LockProvider>
         <PrivacyProvider>
-          <ActiveSpaceProvider>
-            <StatusBar style="dark" />
-            <RootNavigator />
-          </ActiveSpaceProvider>
+          <OfflineProvider>
+            <ActiveSpaceProvider>
+              <StatusBar style="dark" />
+              <RootNavigator />
+            </ActiveSpaceProvider>
+          </OfflineProvider>
         </PrivacyProvider>
       </LockProvider>
     </SessionProvider>

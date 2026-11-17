@@ -13,6 +13,8 @@ export const config = {
   connectShortcutUrl: process.env.EXPO_PUBLIC_MOMO_SHORTCUT_URL ?? "",
   /** iCloud link for "OneLedger Capture", when it was shared separately. */
   captureShortcutUrl: process.env.EXPO_PUBLIC_MOMO_CAPTURE_SHORTCUT_URL ?? "",
+  /** Build-time kill switch for on-device storage and sync: set to "true" to ship a build that is online-only, as before. */
+  offlineDisabled: process.env.EXPO_PUBLIC_OFFLINE_DISABLED === "true",
 } as const;
 
 export const isConfigured =
