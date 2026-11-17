@@ -4,7 +4,10 @@ import { getActiveWorkspaceId, getCurrentBalance } from "../queries";
 import { supabaseSession } from "../supabase-session-server";
 import { isOneLedger3FlagEnabled } from "../oneledger3-flags";
 import { combineHomeBalance, type HomeBalance } from "./home-balance";
+import { formatMoney } from "../insights/insights-facts";
+import { type HomeWalletCard, orderForHome } from "./home-wallets";
 import { loadWallets } from "./wallets-data";
+import { PROVIDER_LABEL, STATUS_LABEL } from "./wallets-display";
 
 // The balance Home and the cash-flow forecast both start from. With the
 // balance-provenance flag on it is built from the per-wallet figures (the same
@@ -13,33 +16,76 @@ import { loadWallets } from "./wallets-data";
 // goes blank because of this.
 //
 // cache(): Home and the forecast (layout + page) share one read per request.
-export const getHomeBalance: () => Promise<HomeBalance | null> = cache(async () => {
-  const workspaceId = await getActiveWorkspaceId();
-  if (workspaceId && isOneLedger3FlagEnabled(process.env, "BALANCE_PROVENANCE", workspaceId)) {
+export const getHomeBalance: () => Promise<HomeBalance | null> = cache(
+  async () => {
+    const workspaceId = await getActiveWorkspaceId();
+    if (
+      workspaceId &&
+      isOneLedger3FlagEnabled(process.env, "BALANCE_PROVENANCE", workspaceId)
+    ) {
+      try {
+        const wallets = await loadWallets(await supabaseSession(), workspaceId);
+        const combined = combineHomeBalance(
+          wallets.map((w) => ({
+            name: w.name,
+            currency: w.currency,
+            amountMinor: w.balance.amountMinor,
+            asOf: w.balance.asOf,
+            basis: w.balance.basis,
+          })),
+        );
+        if (combined) return combined;
+      } catch (e) {
+        console.error(
+          "getHomeBalance wallets failed:",
+          e instanceof Error ? e.message : "unknown",
+        );
+      }
+    }
+    const legacy = await getCurrentBalance();
+    return legacy
+      ? {
+        amountRwf: legacy.amountRwf,
+        asOfIso: legacy.asOfIso,
+        label: "MTN Mobile Money",
+        walletCount: 1,
+        excludedCount: 0,
+      }
+      : null;
+  },
+);
+
+// One card per wallet for Home's swipeable balances (BALANCE_PROVENANCE on).
+// null = flag off, read failed, or no wallets: Home then keeps the single card.
+export const getHomeWalletCards: () => Promise<HomeWalletCard[] | null> = cache(
+  async () => {
+    const workspaceId = await getActiveWorkspaceId();
+    if (
+      !workspaceId ||
+      !isOneLedger3FlagEnabled(process.env, "BALANCE_PROVENANCE", workspaceId)
+    ) {
+      return null;
+    }
     try {
       const wallets = await loadWallets(await supabaseSession(), workspaceId);
-      const combined = combineHomeBalance(
-        wallets.map((w) => ({
-          name: w.name,
-          currency: w.currency,
-          amountMinor: w.balance.amountMinor,
-          asOf: w.balance.asOf,
-          basis: w.balance.basis,
-        })),
-      );
-      if (combined) return combined;
+      if (wallets.length === 0) return null;
+      return orderForHome(wallets.map((w): HomeWalletCard => ({
+        id: w.id,
+        name: w.name,
+        subtitle: `${PROVIDER_LABEL[w.provider] ?? "Other"} · ${w.currency}`,
+        amountText: w.balance.amountMinor === null
+          ? null
+          : formatMoney(w.balance.amountMinor, w.currency),
+        asOfIso: w.balance.asOf,
+        statusLabel: STATUS_LABEL[w.balance.status],
+        isDefault: w.isPrimary,
+      })));
     } catch (e) {
-      console.error("getHomeBalance wallets failed:", e instanceof Error ? e.message : "unknown");
+      console.error(
+        "getHomeWalletCards failed:",
+        e instanceof Error ? e.message : "unknown",
+      );
+      return null;
     }
-  }
-  const legacy = await getCurrentBalance();
-  return legacy
-    ? {
-      amountRwf: legacy.amountRwf,
-      asOfIso: legacy.asOfIso,
-      label: "MTN Mobile Money",
-      walletCount: 1,
-      excludedCount: 0,
-    }
-    : null;
-});
+  },
+);

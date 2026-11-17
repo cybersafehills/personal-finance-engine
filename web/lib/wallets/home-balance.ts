@@ -31,28 +31,39 @@ export type HomeBalance = {
 };
 
 /** null when no RWF wallet has a number - the caller then keeps its old behaviour. */
-export function combineHomeBalance(wallets: readonly HomeWallet[]): HomeBalance | null {
+export function combineHomeBalance(
+  wallets: readonly HomeWallet[],
+): HomeBalance | null {
   const rwf = wallets.filter((w) => w.currency === "RWF");
   // Home has always shown what the provider reported. A balance someone typed
   // in is a statement, not a reading, so it is shown on Wallets and left out of
   // this total (and said so), never silently added.
-  const counted = rwf.filter((w) => w.amountMinor !== null && w.basis === "provider_reported");
+  const counted = rwf.filter((w) =>
+    w.amountMinor !== null && w.basis === "provider_reported"
+  );
   if (counted.length === 0) return null;
 
   const total = counted.reduce((sum, w) => sum + (w.amountMinor as bigint), 0n);
   // Every wallet has a figure within reach of Number for RWF; guard anyway.
-  if (total > BigInt(Number.MAX_SAFE_INTEGER) || total < -BigInt(Number.MAX_SAFE_INTEGER)) {
+  if (
+    total > BigInt(Number.MAX_SAFE_INTEGER) ||
+    total < -BigInt(Number.MAX_SAFE_INTEGER)
+  ) {
     return null;
   }
 
   let oldest: string | null = null;
   for (const w of counted) {
-    if (w.asOf && (oldest === null || Date.parse(w.asOf) < Date.parse(oldest))) oldest = w.asOf;
+    if (
+      w.asOf && (oldest === null || Date.parse(w.asOf) < Date.parse(oldest))
+    ) oldest = w.asOf;
   }
   return {
     amountRwf: Number(total),
     asOfIso: oldest,
-    label: counted.length === 1 ? counted[0].name : `All ${counted.length} wallets`,
+    label: counted.length === 1
+      ? counted[0].name
+      : `All ${counted.length} wallets`,
     walletCount: counted.length,
     excludedCount: rwf.length - counted.length,
   };
