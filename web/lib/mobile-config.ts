@@ -4,7 +4,7 @@ import { isFinancialStatementsEnabled } from "./financial-statements";
 import { isBillsEnabled } from "./bills/gate";
 import { isBusinessSurfacesEnabled } from "./experience-mode/gate";
 import { isIntelligenceEnabled } from "./intelligence/insights";
-import { isIntegrationsEnabled } from "./integrations/gate";
+import { isDeveloperApiEnabled, isIntegrationsEnabled } from "./integrations/gate";
 import {
   isAssistedPayEnabled,
   isPayServicesEnabled,
@@ -29,6 +29,7 @@ export type MobileConfig = {
   bills: boolean;
   spaces: boolean;
   integrations: boolean;
+  developer: boolean;
   businessSurfaces: boolean;
 };
 
@@ -43,6 +44,7 @@ export function mobileConfig(workspaceId: string | null): MobileConfig {
     bills: isBillsEnabled(workspaceId),
     spaces: isSpacesEnabled(workspaceId),
     integrations: isIntegrationsEnabled(workspaceId),
+    developer: isDeveloperApiEnabled(workspaceId),
     businessSurfaces: isBusinessSurfacesEnabled(workspaceId),
   };
 }
