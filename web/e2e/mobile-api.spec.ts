@@ -353,6 +353,60 @@ test.describe("mobile API", () => {
     }
   });
 
+  test("scan to pay: classify, reject, and prepare a hand-off (scan is on in this suite)", async () => {
+    const api = await playwrightRequest.newContext({ baseURL: BASE_URL });
+    try {
+      const signIn = await api.post("/api/mobile/auth/sign-in", {
+        data: { email: E2E_USER.email, password: E2E_USER.password },
+      });
+      expect(signIn.status()).toBe(200);
+      const headers = { authorization: `Bearer ${(await signIn.json()).access_token}` };
+
+      // Not authenticated: refused.
+      expect((await api.post("/api/mobile/pay/scan/classify", { data: { raw: "*182#" } })).status()).toBe(401);
+
+      // Garbage and unsafe schemes are rejected with a coarse reason, never "opened anyway".
+      for (const raw of ["hello world", "javascript:alert(1)"]) {
+        const res = await api.post("/api/mobile/pay/scan/classify", { headers, data: { raw } });
+        expect(res.status()).toBe(200);
+        const body = await res.json();
+        expect(body.result.ok).toBe(false);
+        expect(typeof body.result.reason).toBe("string");
+        // Nothing of the scanned text comes back.
+        expect(JSON.stringify(body)).not.toContain(raw);
+      }
+
+      // A malformed request is a 422, not a crash.
+      expect((await api.post("/api/mobile/pay/scan/classify", { headers, data: { raw: "" } })).status()).toBe(422);
+
+      // A verified balance code: classified, and a hand-off with no payment recorded.
+      const menu = await api.post("/api/mobile/pay/scan/classify", { headers, data: { raw: "*182*6*1#" } });
+      expect((await menu.json()).result.ok).toBe(true);
+      const info = await api.post("/api/mobile/pay/scan/prepare", { headers, data: { raw: "*182*6*1#" } });
+      const infoBody = await info.json();
+      expect(infoBody.outcome.status).toBe("info_only");
+      expect(infoBody.outcome.telHref).toContain("tel:");
+
+      // A send-money code with an amount: a draft is prepared, a repeat is the same draft,
+      // and recording the hand-off moves it on (the existing handoff route).
+      const raw = "*182*1*1*0788123456*1500#";
+      const first = await (await api.post("/api/mobile/pay/scan/prepare", { headers, data: { raw } })).json();
+      expect(first.outcome.status).toBe("prepared");
+      expect(first.outcome.telHref).toContain("tel:");
+      const second = await (await api.post("/api/mobile/pay/scan/prepare", { headers, data: { raw } })).json();
+      expect(second.outcome.intentId).toBe(first.outcome.intentId);
+      expect(second.outcome.existed).toBe(true);
+
+      const handoff = await api.post(`/api/mobile/pay/intents/${first.outcome.intentId}/handoff`, {
+        headers,
+        data: { method: "copy", outcome: "copied" },
+      });
+      expect(handoff.status()).toBe(200);
+    } finally {
+      await api.dispose();
+    }
+  });
+
   test("pay: prepare a draft intent, retry safely, and read it back", async () => {
     const api = await playwrightRequest.newContext({ baseURL: BASE_URL });
     try {
