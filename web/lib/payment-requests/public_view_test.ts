@@ -24,6 +24,7 @@ Deno.test("open request shows amount, name, reference and a formatted number", (
   assertEquals(v.destination, {
     type: "momo_phone",
     display: "+250 793 000 439",
+    value: "250793000439",
   });
   assertEquals(v.statusLabel.includes("not verified"), true);
 });
@@ -43,7 +44,11 @@ Deno.test("merchant code destination", () => {
     destination_type: "merchant_code",
     destination_value: "093011",
   })!;
-  assertEquals(v.destination, { type: "merchant_code", display: "093011" });
+  assertEquals(v.destination, {
+    type: "merchant_code",
+    display: "093011",
+    value: "093011",
+  });
 });
 
 Deno.test("anything malformed is refused rather than rendered", () => {

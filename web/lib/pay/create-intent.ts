@@ -78,6 +78,20 @@ function recipientKindFor(type: string): string | null {
   }
 }
 
+/** The Space that owns `accountId`, or null if unknown / not readable. */
+async function workspaceOfAccount(
+  supabase: Awaited<ReturnType<typeof supabaseSession>>,
+  accountId: string | undefined,
+): Promise<string | null> {
+  if (!accountId) return null;
+  const { data } = await supabase
+    .from("accounts")
+    .select("workspace_id")
+    .eq("id", accountId)
+    .maybeSingle();
+  return (data?.workspace_id as string | undefined) ?? null;
+}
+
 export async function createPaymentIntent(args: {
   supabase: Awaited<ReturnType<typeof supabaseSession>>;
   workspaceId: string | null;
@@ -153,8 +167,18 @@ export async function createPaymentIntent(args: {
     }
   }
 
+  // The intent MUST live in the same Space as the paying account's
+  // transactions: the SMS reconciler only matches an intent to a transaction
+  // in the SAME workspace. Using the *active* Space instead (e.g. paying from a
+  // Household Space while the MoMo account belongs to Personal) saved the intent
+  // where its confirming SMS could never be matched, so it waited forever.
+  const intentWorkspaceId = await workspaceOfAccount(
+    supabase,
+    input.sourceAccountId,
+  ) ?? workspaceId;
+
   const payload: Record<string, unknown> = {
-    workspace_id: workspaceId,
+    workspace_id: intentWorkspaceId,
     idempotency_key: input.idempotencyKey ?? randomUUID(),
     payment_type: input.paymentType,
     provider: providerGuess,
@@ -181,9 +205,19 @@ export async function createPaymentIntent(args: {
     session_fresh: sessionFresh,
   };
 
-  const { data, error } = await supabase.rpc("create_payment_intent", {
+  let { data, error } = await supabase.rpc("create_payment_intent", {
     payload,
   });
+  if (
+    error && /not_authorized/i.test(error.message) &&
+    intentWorkspaceId !== workspaceId
+  ) {
+    // Not a member of the account's Space (e.g. a shared account): fall back
+    // to the Space the user is working in rather than failing the payment.
+    ({ data, error } = await supabase.rpc("create_payment_intent", {
+      payload: { ...payload, workspace_id: workspaceId },
+    }));
+  }
   if (error) {
     if (/not_authorized/i.test(error.message)) {
       return { ok: false, error: "You're not a member of this workspace." };

@@ -78,6 +78,8 @@ export default async function PaymentIntentPage({
 
       <div className="mb-5">
         <PaymentResultStatus
+          intentId={intent.id}
+          since={intent.updated_at}
           state={intent.state}
           verified={!!intent.verified_at}
           amountLabel={`${ussdAmountMajor(intent).toLocaleString()} ${intent.currency}`}
