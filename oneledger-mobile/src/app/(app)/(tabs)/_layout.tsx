@@ -6,6 +6,7 @@ import { fetchPayConfig } from "@/api/mobile-api";
 import { PaySheet } from "@/components/shell/PaySheet";
 import { PayTabButton } from "@/components/shell/PayTabButton";
 import { showPayButton } from "@/features/pay/launcher";
+import { getFavourites } from "@/features/ussd/queries";
 import { useQuery } from "@/hooks/useQuery";
 import { AppHeader } from "@/components/shell/AppHeader";
 import { colors } from "@/theme/tokens";
@@ -30,10 +31,22 @@ const icon = (name: IconName) => {
 
 export default function TabsLayout() {
   const [payOpen, setPayOpen] = useState(false);
+  const [favourite, setFavourite] = useState<{ slug: string; name: string; template: string } | null>(null);
   const loadPay = useCallback(() => fetchPayConfig(), []);
   const { data: payConfig } = useQuery(loadPay);
   // Shown only where Pay is on; while that is unknown, or if it can't be read, there is no button.
   const payOn = payConfig ? showPayButton(payConfig) : false;
+
+  // The favourite is fetched from the same tap that opens the sheet, so it is in
+  // flight while the sheet slides in. A failure just means no favourite line.
+  function openPay() {
+    setPayOpen(true);
+    if (payConfig?.ok && payConfig.ussdDirectory) {
+      getFavourites()
+        .then((list) => setFavourite(list[0] ? { slug: list[0].slug, name: list[0].name, template: list[0].template } : null))
+        .catch(() => setFavourite(null));
+    }
+  }
 
   return (
     <>
@@ -61,7 +74,7 @@ export default function TabsLayout() {
         options={{
           title: "Pay",
           href: payOn ? undefined : null,
-          tabBarButton: () => <PayTabButton onPress={() => setPayOpen(true)} />,
+          tabBarButton: () => <PayTabButton onPress={openPay} />,
         }}
       />
       {/* Inbox is opened from the header icon (as on the web), not the bar. */}
@@ -69,7 +82,7 @@ export default function TabsLayout() {
       <Tabs.Screen name="plan" options={{ title: "Plan", tabBarIcon: icon("target") }} />
       <Tabs.Screen name="more" options={{ title: "More", tabBarIcon: icon("menu") }} />
     </Tabs>
-    <PaySheet open={payOpen} onClose={() => setPayOpen(false)} config={payConfig && payConfig.ok ? payConfig : {}} />
+    <PaySheet open={payOpen} onClose={() => setPayOpen(false)} config={payConfig && payConfig.ok ? payConfig : {}} favourite={favourite} />
     </>
   );
 }

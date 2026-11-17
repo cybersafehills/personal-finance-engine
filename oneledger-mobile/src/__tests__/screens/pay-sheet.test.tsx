@@ -51,4 +51,24 @@ describe("Pay sheet", () => {
     await fireEvent.press(screen.getByRole("button", { name: "Close" }));
     expect(onClose).toHaveBeenCalled();
   });
+
+  it("opens the directory in the app where the server has it on", async () => {
+    await render(<PaySheet open onClose={onClose} config={{ pay: true, ussdDirectory: true }} />);
+    await fireEvent.press(screen.getByRole("button", { name: "Open USSD directory" }));
+    expect(router.push).toHaveBeenCalledWith("/ussd");
+    expect(Linking.openURL).not.toHaveBeenCalled();
+  });
+
+  it("shows the starred favourite and opens it", async () => {
+    await render(
+      <PaySheet open onClose={onClose} config={{ pay: true, ussdDirectory: true }} favourite={{ slug: "mtn-balance", name: "Check balance", template: "*182*6*1#" }} />,
+    );
+    await fireEvent.press(screen.getByRole("button", { name: "Check balance, *182*6*1#" }));
+    expect(router.push).toHaveBeenCalledWith({ pathname: "/ussd/[slug]", params: { slug: "mtn-balance" } });
+  });
+
+  it("shows no favourite line when there is none", async () => {
+    await render(<PaySheet open onClose={onClose} config={{ pay: true }} />);
+    expect(screen.queryByText("Favourite")).toBeNull();
+  });
 });

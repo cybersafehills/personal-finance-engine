@@ -84,11 +84,13 @@ describe("request id", () => {
 });
 
 describe("parseConfigResponse", () => {
-  it("reads the two pay flags and treats anything else as off", () => {
-    expect(parseConfigResponse(200, { ok: true, config: { pay: true, assistedPay: true, bills: true } })).toEqual({
+  it("reads the pay flags and treats anything else as off", () => {
+    expect(parseConfigResponse(200, { ok: true, config: { pay: true, assistedPay: true, ussdDirectory: true, bills: true } })).toEqual({
       ok: true,
       pay: true,
       assistedPay: true,
+      ussdDirectory: true,
+      scanToPay: false,
     });
     expect(parseConfigResponse(200, { ok: true, config: { pay: true } })).toMatchObject({ ok: true, assistedPay: false });
   });

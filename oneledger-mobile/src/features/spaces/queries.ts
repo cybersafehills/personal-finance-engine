@@ -15,9 +15,13 @@ export async function getSpaces(): Promise<Space[]> {
     .order("joined_at", { ascending: true });
   if (error) throw new Error(error.message);
 
+  // A workspace can have more than one active membership row for a user;
+  // each Space must appear once (its id is used as a list key).
+  const seen = new Set<string>();
   return (data ?? []).flatMap((row) => {
     const ws = row.workspaces as unknown as { id: string; name: string; kind: string } | null;
-    if (!ws || !isSpaceKind(ws.kind)) return [];
+    if (!ws || !isSpaceKind(ws.kind) || seen.has(ws.id)) return [];
+    seen.add(ws.id);
     return [{ id: ws.id, name: ws.name, kind: ws.kind, role: String(row.role) }];
   });
 }

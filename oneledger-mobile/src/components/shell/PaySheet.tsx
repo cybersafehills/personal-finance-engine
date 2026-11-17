@@ -28,10 +28,13 @@ export function PaySheet({
   open,
   onClose,
   config,
+  favourite = null,
 }: {
   open: boolean;
   onClose: () => void;
   config: Partial<PayConfig>;
+  /** The one starred USSD code shown under the actions (like the web); null when there is none. */
+  favourite?: { slug: string; name: string; template: string } | null;
 }) {
   const insets = useSafeAreaInsets();
 
@@ -40,6 +43,13 @@ export function PaySheet({
     onClose();
     if (action.kind === "native") router.push({ pathname: "/pay-new", params: { type: action.id } });
     else openWeb(action.path);
+  }
+
+  // The directory opens in the app where the server has it on; otherwise on the web.
+  function openDirectory() {
+    onClose();
+    if (config.ussdDirectory) router.push("/ussd");
+    else openWeb(LAUNCHER_LINKS.ussd.path);
   }
 
   function link(path: string) {
@@ -91,7 +101,7 @@ export function PaySheet({
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={LAUNCHER_LINKS.ussd.label}
-            onPress={() => link(LAUNCHER_LINKS.ussd.path)}
+            onPress={openDirectory}
             style={styles.primary}
           >
             <Text variant="bodyStrong" style={{ color: colors.accentForeground }}>
@@ -117,6 +127,28 @@ export function PaySheet({
               <Text variant="label">{LAUNCHER_LINKS.templates.label}</Text>
             </Pressable>
           </View>
+
+          {favourite ? (
+            <View style={{ gap: space[1] }}>
+              <Text variant="caption" color="textMuted" accessibilityRole="header">
+                Favourite
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`${favourite.name}, ${favourite.template}`}
+                onPress={() => {
+                  onClose();
+                  router.push({ pathname: "/ussd/[slug]", params: { slug: favourite.slug } });
+                }}
+                style={styles.cell}
+              >
+                <Text variant="bodyStrong">{favourite.name}</Text>
+                <Text variant="caption" color="textMuted" tabular>
+                  {favourite.template}
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
 
           <Text variant="caption" color="textMuted">
             OneLedger never asks for your Mobile Money or banking PIN and can&apos;t send money for you.
