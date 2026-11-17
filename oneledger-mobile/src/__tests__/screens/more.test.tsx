@@ -6,20 +6,21 @@ import { resetRouterMock, router } from "@/test/router-mock";
 const mockSignOut = jest.fn();
 const mockHealth = jest.fn();
 const mockUnread = jest.fn();
-const mockBillsOn = jest.fn();
 const mockIsPushEnabled = jest.fn();
 const mockEnablePush = jest.fn();
 const mockDisablePush = jest.fn();
+const mockFlags = jest.fn();
 const flags = { pushSupported: true, captureSupported: true };
 
 jest.mock("expo-router", () => jest.requireActual("@/test/router-mock"));
+jest.mock("@/api/mobile-api", () => ({ fetchMoreFlags: () => mockFlags() }));
 jest.mock("@/features/auth/SessionProvider", () => ({
   useSession: () => ({
     session: { user: { email: "me@example.com" } },
     signOut: () => mockSignOut(),
   }),
 }));
-jest.mock("@/api/mobile-api", () => ({ fetchBillsEnabled: () => mockBillsOn() }));
+jest.mock("@/api/mobile-api", () => ({ fetchMoreFlags: () => mockFlags() }));
 jest.mock("@/features/capture/capture", () => ({
   get captureSupported() {
     return flags.captureSupported;
@@ -46,12 +47,12 @@ jest.mock("@/features/push/push", () => ({
 
 beforeEach(() => {
   resetRouterMock();
-  [mockSignOut, mockHealth, mockUnread, mockBillsOn, mockIsPushEnabled, mockEnablePush, mockDisablePush].forEach((m) => m.mockReset());
+  [mockFlags, mockSignOut, mockHealth, mockUnread, mockIsPushEnabled, mockEnablePush, mockDisablePush].forEach((m) => m.mockReset());
   flags.pushSupported = true;
   flags.captureSupported = true;
+  mockFlags.mockResolvedValue(null);
   mockHealth.mockResolvedValue({ state: "active" });
   mockUnread.mockResolvedValue(0);
-  mockBillsOn.mockResolvedValue(false);
   mockIsPushEnabled.mockResolvedValue(false);
   mockEnablePush.mockResolvedValue({ ok: true });
   mockDisablePush.mockResolvedValue(undefined);
@@ -59,16 +60,23 @@ beforeEach(() => {
 
 describe("More screen: Bills", () => {
   it("offers Bills only where the server says it is on for this Space", async () => {
-    mockBillsOn.mockResolvedValue(true);
+    mockFlags.mockResolvedValue({ bills: true });
     await render(<More />);
-    await fireEvent.press(await screen.findByText("Open bills"));
+    await fireEvent.press(await screen.findByText("Bills"));
     expect(router.push).toHaveBeenCalledWith("/bills");
+  });
+
+  it("hides Bills when the server cannot say", async () => {
+    mockFlags.mockResolvedValue(null);
+    await render(<More />);
+    await waitFor(() => expect(mockFlags).toHaveBeenCalled());
+    expect(screen.queryByText("Bills")).toBeNull();
   });
 
   it("hides Bills when it is off", async () => {
     await render(<More />);
-    await waitFor(() => expect(mockBillsOn).toHaveBeenCalled());
-    expect(screen.queryByText("Open bills")).toBeNull();
+    await waitFor(() => expect(mockFlags).toHaveBeenCalled());
+    expect(screen.queryByText("Bills")).toBeNull();
   });
 });
 
@@ -85,13 +93,28 @@ describe("More screen", () => {
     for (const [label, path] of [
       ["Recording status", "/capture"],
       ["See notifications", "/notifications"],
-      ["Open statements", "/statements"],
-      ["Open goals", "/goals"],
+      ["Statements", "/statements"],
+      ["Goals", "/goals"],
+      ["Payment requests", "/requests"],
       ["App lock", "/security"],
     ] as const) {
       await fireEvent.press(screen.getByText(label));
       expect(router.push).toHaveBeenLastCalledWith(path);
     }
+  });
+
+  it("groups the destinations under the web's headings", async () => {
+    await render(<More />);
+    expect(await screen.findByText("Manage money")).toBeTruthy();
+    expect(screen.getByText("Pay & Services")).toBeTruthy();
+    expect(screen.getByText("Account")).toBeTruthy();
+  });
+
+  it("hides a feature the server says is off", async () => {
+    mockFlags.mockResolvedValue({ statements: false, insights: true });
+    await render(<More />);
+    await screen.findByText("Insights");
+    await waitFor(() => expect(screen.queryByText("Statements")).toBeNull());
   });
 
   it("offers to set up recording only when it needs it", async () => {

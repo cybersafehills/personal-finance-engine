@@ -1,13 +1,14 @@
 import { router } from "expo-router";
 import { useCallback, useState } from "react";
-import { Platform } from "react-native";
+import { Platform, Pressable, View } from "react-native";
 
-import { fetchBillsEnabled } from "@/api/mobile-api";
 import { Badge, Button, Card, Screen, ScreenHeader, Text } from "@/components/ds";
+import { fetchMoreFlags } from "@/api/mobile-api";
 import { useSession } from "@/features/auth/SessionProvider";
 import { captureSupported, getCaptureHealth } from "@/features/capture/capture";
 import { healthDisplay } from "@/features/capture/health-display";
 import { IosStatusCard } from "@/features/ios-shortcuts/IosStatusCard";
+import { visibleGroups } from "@/features/more/groups";
 import { getUnreadNotificationCount } from "@/features/notifications/queries";
 import {
   disablePush,
@@ -16,15 +17,13 @@ import {
   pushSupported,
 } from "@/features/push/push";
 import { useQuery } from "@/hooks/useQuery";
-import { space } from "@/theme/tokens";
+import { colors, space } from "@/theme/tokens";
 
 export default function More() {
   const { session, signOut } = useSession();
   const load = useCallback(() => getCaptureHealth(), []);
   const { data: health } = useQuery(load);
   // Bills is switched on per Space on the server; offer it only where it will work.
-  const loadBills = useCallback(() => fetchBillsEnabled(), []);
-  const { data: billsOn } = useQuery(loadBills);
   const display = health ? healthDisplay(health.state) : null;
 
   return (
@@ -73,134 +72,7 @@ export default function More() {
 
       <NotificationsCard />
 
-      <Card style={{ gap: space[3] }}>
-        <Text variant="bodyStrong">Insights</Text>
-        <Text variant="label" color="textSecondary">
-          Where your money went this month, and what is behind each number.
-        </Text>
-        <Button
-          label="Open insights"
-          variant="secondary"
-          fullWidth
-          onPress={() => router.push("/insights")}
-        />
-      </Card>
-
-      <Card style={{ gap: space[3] }}>
-        <Text variant="bodyStrong">People and merchants</Text>
-        <Text variant="label" color="textSecondary">
-          Who you pay and who pays you, grouped from your transactions.
-        </Text>
-        <Button
-          label="Open people and merchants"
-          variant="secondary"
-          fullWidth
-          onPress={() => router.push("/people")}
-        />
-      </Card>
-
-      <Card style={{ gap: space[3] }}>
-        <Text variant="bodyStrong">Payment requests</Text>
-        <Text variant="label" color="textSecondary">
-          Ask someone to pay you with a link. You confirm the payment yourself.
-        </Text>
-        <Button
-          label="Open payment requests"
-          variant="secondary"
-          fullWidth
-          onPress={() => router.push("/requests")}
-        />
-      </Card>
-
-      <Card style={{ gap: space[3] }}>
-        <Text variant="bodyStrong">Wallets</Text>
-        <Text variant="label" color="textSecondary">
-          Your balances, and how sure we are about each one.
-        </Text>
-        <Button
-          label="Open wallets"
-          variant="secondary"
-          fullWidth
-          onPress={() => router.push("/wallets")}
-        />
-      </Card>
-
-      <Card style={{ gap: space[3] }}>
-        <Text variant="bodyStrong">Reports</Text>
-        <Text variant="label" color="textSecondary">
-          Your daily financial reports.
-        </Text>
-        <Button
-          label="Open reports"
-          variant="secondary"
-          fullWidth
-          onPress={() => router.push("/reports")}
-        />
-      </Card>
-
-      {billsOn ? (
-        <Card style={{ gap: space[3] }}>
-          <Text variant="bodyStrong">Bills</Text>
-          <Text variant="label" color="textSecondary">
-            Invoices and receipts in this Space.
-          </Text>
-          <Button
-            label="Open bills"
-            variant="secondary"
-            fullWidth
-            onPress={() => router.push("/bills")}
-          />
-        </Card>
-      ) : null}
-
-      <Card style={{ gap: space[3] }}>
-        <Text variant="bodyStrong">Statements</Text>
-        <Text variant="label" color="textSecondary">
-          Your generated statements, to view or download.
-        </Text>
-        <Button
-          label="Open statements"
-          variant="secondary"
-          fullWidth
-          onPress={() => router.push("/statements")}
-        />
-      </Card>
-
-      <Card style={{ gap: space[3] }}>
-        <Text variant="bodyStrong">Goals</Text>
-        <Text variant="label" color="textSecondary">
-          See how your savings goals are going.
-        </Text>
-        <Button
-          label="Open goals"
-          variant="secondary"
-          fullWidth
-          onPress={() => router.push("/goals")}
-        />
-      </Card>
-
-      <Card style={{ gap: space[3] }}>
-        <Text variant="bodyStrong">Categories</Text>
-        <Text variant="label" color="textSecondary">
-          See where your money has gone.
-        </Text>
-        <Button
-          label="Open categories"
-          variant="secondary"
-          fullWidth
-          onPress={() => router.push("/categories")}
-        />
-      </Card>
-
-      <Card style={{ gap: space[3] }}>
-        <Text variant="bodyStrong">Security</Text>
-        <Button
-          label="App lock"
-          variant="secondary"
-          fullWidth
-          onPress={() => router.push("/security")}
-        />
-      </Card>
+      <MoreGroups />
 
       <Button label="Sign out" variant="ghost" fullWidth onPress={signOut} />
     </Screen>
@@ -265,5 +137,43 @@ function NotificationsCard() {
         </Text>
       ) : null}
     </Card>
+  );
+}
+
+function MoreGroups() {
+  const load = useCallback(() => fetchMoreFlags(), []);
+  const { data: flags } = useQuery(load);
+  return (
+    <>
+      {visibleGroups(flags ?? null).map((group) => (
+        <View key={group.title} style={{ gap: space[2] }}>
+          <Text variant="bodyStrong" accessibilityRole="header">
+            {group.title}
+          </Text>
+          <Card style={{ paddingVertical: 0 }}>
+            {group.links.map((link, index) => (
+              <Pressable
+                key={link.route}
+                accessibilityRole="link"
+                accessibilityLabel={link.label}
+                onPress={() => router.push(link.route)}
+                style={{
+                  minHeight: 56,
+                  justifyContent: "center",
+                  paddingVertical: space[3],
+                  borderTopWidth: index === 0 ? 0 : 1,
+                  borderTopColor: colors.borderSubtle,
+                }}
+              >
+                <Text variant="bodyStrong">{link.label}</Text>
+                <Text variant="caption" color="textMuted">
+                  {link.hint}
+                </Text>
+              </Pressable>
+            ))}
+          </Card>
+        </View>
+      ))}
+    </>
   );
 }
