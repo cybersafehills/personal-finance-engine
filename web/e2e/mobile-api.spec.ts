@@ -331,6 +331,7 @@ test.describe("mobile API", () => {
         "assistedPay",
         "bills",
         "businessSurfaces",
+        "developer",
         "insights",
         "integrations",
         "pay",
