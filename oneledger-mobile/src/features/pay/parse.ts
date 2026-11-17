@@ -47,6 +47,8 @@ export function parseConfigResponse(status: number, body: unknown): PayConfigRes
       ok: true,
       pay: body.config.pay === true,
       assistedPay: body.config.assistedPay === true,
+      ussdDirectory: body.config.ussdDirectory === true,
+      scanToPay: body.config.scanToPay === true,
     };
   }
   return { ok: false, ...failureForStatus(status, "Payments") };
