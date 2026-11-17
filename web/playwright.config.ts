@@ -44,7 +44,7 @@ export default defineConfig({
     // Visual-regression tolerance: a few pixels of anti-aliasing/font
     // hinting difference across machines is expected; a real layout
     // regression is not. See master prompt §20.5.
-    toHaveScreenshot: { maxDiffPixelRatio: 0.02 },
+    toHaveScreenshot: { maxDiffPixelRatio: 0.02, stylePath: "./e2e/screenshot.css" },
   },
 
   use: {
