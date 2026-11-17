@@ -1,5 +1,6 @@
 import { formatFullDateTime } from "../../lib/format";
 import type { BillProcessingEventRow } from "../../lib/bills/queries";
+import { billActorLabel, billEventLabel } from "../../lib/bills/display";
 
 // Human-readable rendering of the append-only processing journal (master
 // prompt §16/§21). Presentational only - the caller decides whether to
@@ -7,35 +8,8 @@ import type { BillProcessingEventRow } from "../../lib/bills/queries";
 // RLS: a member without it gets an empty list, and the parent shows the
 // "no permission" note instead).
 
-const EVENT_LABEL: Record<string, string> = {
-  document_received: "Document received and original stored",
-  original_stored: "Original stored",
-  status_changed: "Status changed",
-  original_downloaded: "Original downloaded",
-  document_archived: "Document archived",
-  processing_retried: "Processing retried",
-  processing_failed: "Processing failed",
-};
-
-function labelFor(event: BillProcessingEventRow): string {
-  if (event.event_type === "status_changed" && event.previous_state && event.new_state) {
-    return `Status: ${event.previous_state} → ${event.new_state}`;
-  }
-  return EVENT_LABEL[event.event_type] ?? event.event_type.replace(/_/g, " ");
-}
-
-function actorLabel(actorType: BillProcessingEventRow["actor_type"]): string {
-  switch (actorType) {
-    case "user":
-      return "A person";
-    case "system":
-      return "The system";
-    case "provider":
-      return "The extraction provider";
-    case "cron":
-      return "A scheduled job";
-  }
-}
+const labelFor = billEventLabel;
+const actorLabel = billActorLabel;
 
 export function BillProcessingTimeline({
   events,

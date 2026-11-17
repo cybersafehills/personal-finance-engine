@@ -15,6 +15,13 @@ import {
 } from "@/features/pay/parse";
 import { parseCategoriesResponse, type CategoriesResult } from "@/features/categories/parse";
 import {
+  parseBillResponse,
+  parseBillsEnabled,
+  parseBillsResponse,
+  type BillResult,
+  type BillsResult,
+} from "@/features/bills/parse";
+import {
   parseReportDownloadResponse,
   parseReportResponse,
   parseReportsResponse,
@@ -300,6 +307,32 @@ export async function fetchSpacesEnabled(): Promise<boolean> {
 export async function fetchMoreFlags(): Promise<MoreFlags | null> {
   const result = await bearerGet("/api/mobile/config");
   return result.kind === "response" ? parseMoreFlags(result.status, result.body) : null;
+}
+
+/** Whether Bills is on for the active Space. Any failure means "not offered". */
+export async function fetchBillsEnabled(): Promise<boolean> {
+  const result = await bearerGet("/api/mobile/config");
+  return result.kind === "response" && parseBillsEnabled(result.status, result.body);
+}
+
+/** The newest documents in the active Space, optionally one status. */
+export async function fetchBills(status?: string): Promise<BillsResult> {
+  const query = status ? `?status=${encodeURIComponent(status)}` : "";
+  const result = await bearerGet(`/api/mobile/bills${query}`);
+  if (result.kind !== "response") {
+    return { ok: false, ...failureForOutcome(result, "Bills") };
+  }
+  return parseBillsResponse(result.status, result.body);
+}
+
+/** One document: details, extracted fields, checks and history, as the server renders them. */
+export async function fetchBill(id: string): Promise<BillResult> {
+  const result = await bearerGet(`/api/mobile/bills/${encodeURIComponent(id)}`);
+  if (result.kind !== "response") {
+    const f = failureForOutcome(result, "That document");
+    return { ok: false, reason: f.reason, message: f.message };
+  }
+  return parseBillResponse(result.status, result.body);
 }
 
 /** All-time spending per category, from the web's canonical totals (the app never recomputes them). */

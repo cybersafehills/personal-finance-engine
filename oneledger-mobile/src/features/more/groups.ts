@@ -4,13 +4,14 @@
 // answer (offline, older server) hides nothing, so nothing that worked
 // before disappears.
 
-export type MoreFlag = "statements" | "insights" | "spaces";
+export type MoreFlag = "statements" | "insights" | "spaces" | "bills";
 
 export type MoreFlags = Partial<Record<MoreFlag, boolean>>;
 
 export type MoreRoute =
   | "/categories"
   | "/reports"
+  | "/bills"
   | "/statements"
   | "/insights"
   | "/people"
@@ -26,6 +27,8 @@ export type MoreLink = {
   label: string;
   hint: string;
   requires?: MoreFlag;
+  /** Dark by default: shown only when the server says it is on (not when the answer is unknown). */
+  onlyWhenOn?: boolean;
 };
 
 export type MoreGroup = { title: string; links: MoreLink[] };
@@ -39,6 +42,7 @@ export const MORE_GROUPS: readonly MoreGroup[] = [
       { route: "/goals", label: "Goals", hint: "See how your savings goals are going." },
       { route: "/people", label: "People and merchants", hint: "Who you pay and who pays you." },
       { route: "/insights", label: "Insights", hint: "Where your money went this month.", requires: "insights" },
+      { route: "/bills", label: "Bills", hint: "Invoices and receipts in this Space.", requires: "bills", onlyWhenOn: true },
     ],
   },
   {
@@ -62,11 +66,14 @@ export const MORE_GROUPS: readonly MoreGroup[] = [
   },
 ];
 
-/** Groups with switched-off features removed; empty groups are dropped. Only an explicit `false` hides. */
+/** Groups with switched-off features removed; empty groups are dropped. An explicit `false` hides; dark-by-default features need an explicit `true`. */
 export function visibleGroups(flags: MoreFlags | null): MoreGroup[] {
   return MORE_GROUPS.map((group) => ({
     title: group.title,
-    links: group.links.filter((l) => !l.requires || flags?.[l.requires] !== false),
+    links: group.links.filter((l) => {
+      if (!l.requires) return true;
+      return l.onlyWhenOn ? flags?.[l.requires] === true : flags?.[l.requires] !== false;
+    }),
   })).filter((group) => group.links.length > 0);
 }
 
@@ -77,7 +84,7 @@ export function parseMoreFlags(status: number, body: unknown): MoreFlags | null 
   if (b.ok !== true || typeof b.config !== "object" || b.config === null) return null;
   const c = b.config as Record<string, unknown>;
   const flags: MoreFlags = {};
-  for (const key of ["statements", "insights", "spaces"] as const) {
+  for (const key of ["statements", "insights", "spaces", "bills"] as const) {
     if (typeof c[key] === "boolean") flags[key] = c[key];
   }
   return flags;

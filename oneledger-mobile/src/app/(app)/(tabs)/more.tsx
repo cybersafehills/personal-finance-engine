@@ -23,6 +23,7 @@ export default function More() {
   const { session, signOut } = useSession();
   const load = useCallback(() => getCaptureHealth(), []);
   const { data: health } = useQuery(load);
+  // Bills is switched on per Space on the server; offer it only where it will work.
   const display = health ? healthDisplay(health.state) : null;
 
   return (

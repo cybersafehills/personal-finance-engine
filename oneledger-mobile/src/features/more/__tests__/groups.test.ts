@@ -28,6 +28,15 @@ describe("visibleGroups", () => {
   });
 });
 
+describe("Bills (dark by default)", () => {
+  it("shows only on an explicit true", () => {
+    expect(labels(null)).not.toContain("Bills");
+    expect(labels({})).not.toContain("Bills");
+    expect(labels({ bills: false })).not.toContain("Bills");
+    expect(labels({ bills: true })).toContain("Bills");
+  });
+});
+
 describe("parseMoreFlags", () => {
   it("keeps only boolean flags", () => {
     expect(parseMoreFlags(200, { ok: true, config: { statements: false, insights: "yes", spaces: true } })).toEqual({

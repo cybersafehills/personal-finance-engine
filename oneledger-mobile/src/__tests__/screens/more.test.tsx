@@ -20,6 +20,7 @@ jest.mock("@/features/auth/SessionProvider", () => ({
     signOut: () => mockSignOut(),
   }),
 }));
+jest.mock("@/api/mobile-api", () => ({ fetchMoreFlags: () => mockFlags() }));
 jest.mock("@/features/capture/capture", () => ({
   get captureSupported() {
     return flags.captureSupported;
@@ -55,6 +56,28 @@ beforeEach(() => {
   mockIsPushEnabled.mockResolvedValue(false);
   mockEnablePush.mockResolvedValue({ ok: true });
   mockDisablePush.mockResolvedValue(undefined);
+});
+
+describe("More screen: Bills", () => {
+  it("offers Bills only where the server says it is on for this Space", async () => {
+    mockFlags.mockResolvedValue({ bills: true });
+    await render(<More />);
+    await fireEvent.press(await screen.findByText("Bills"));
+    expect(router.push).toHaveBeenCalledWith("/bills");
+  });
+
+  it("hides Bills when the server cannot say", async () => {
+    mockFlags.mockResolvedValue(null);
+    await render(<More />);
+    await waitFor(() => expect(mockFlags).toHaveBeenCalled());
+    expect(screen.queryByText("Bills")).toBeNull();
+  });
+
+  it("hides Bills when it is off", async () => {
+    await render(<More />);
+    await waitFor(() => expect(mockFlags).toHaveBeenCalled());
+    expect(screen.queryByText("Bills")).toBeNull();
+  });
 });
 
 describe("More screen", () => {
