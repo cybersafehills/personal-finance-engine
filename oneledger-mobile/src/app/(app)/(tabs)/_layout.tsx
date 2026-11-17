@@ -71,11 +71,14 @@ export default function TabsLayout() {
       />
       <Tabs.Screen
         name="pay"
-        options={{
-          title: "Pay",
-          href: payOn ? undefined : null,
-          tabBarButton: () => <PayTabButton onPress={openPay} />,
-        }}
+        // expo-router throws if `href` and `tabBarButton` are both set, so a
+        // hidden Pay tab (Pay off, or its config still loading) gets only
+        // `href: null`, and a visible one only the custom centre button.
+        options={
+          payOn
+            ? { title: "Pay", tabBarButton: () => <PayTabButton onPress={openPay} /> }
+            : { title: "Pay", href: null }
+        }
       />
       {/* Inbox is opened from the header icon (as on the web), not the bar. */}
       <Tabs.Screen name="inbox" options={{ title: "Inbox", href: null }} />
