@@ -58,13 +58,27 @@ export function formatMinor(amountMinor: bigint | string, currency: string): str
   return `${currency} ${v.toString()}`;
 }
 
+/**
+ * The pieces of "You sent RWF 10,100 · You received RWF 5,000" for one
+ * currency, with the amount kept apart from its label so a page can mask the
+ * amount in privacy mode. Empty when no money moved.
+ */
+export function flowParts(
+  c: MobileCounterparty["currencies"][number],
+): { label: string; amount: string }[] {
+  const out: { label: string; amount: string }[] = [];
+  if (BigInt(c.sent_minor) > 0n) {
+    out.push({ label: "You sent", amount: formatMinor(c.sent_minor, c.currency) });
+  }
+  if (BigInt(c.received_minor) > 0n) {
+    out.push({ label: "You received", amount: formatMinor(c.received_minor, c.currency) });
+  }
+  return out;
+}
+
 /** "You sent RWF 10,100" / "You received RWF 5,000" / both, for one currency. */
 export function flowText(c: MobileCounterparty["currencies"][number]): string {
-  const parts: string[] = [];
-  if (BigInt(c.sent_minor) > 0n) parts.push(`You sent ${formatMinor(c.sent_minor, c.currency)}`);
-  if (BigInt(c.received_minor) > 0n) {
-    parts.push(`You received ${formatMinor(c.received_minor, c.currency)}`);
-  }
+  const parts = flowParts(c).map((p) => `${p.label} ${p.amount}`);
   return parts.length ? parts.join(" · ") : "No money moved";
 }
 

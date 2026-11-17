@@ -13,6 +13,7 @@ import {
   undoSeparateAction,
 } from "../../app/people/actions";
 import { KIND_LABEL, type PersonKind } from "../../lib/counterparties/directory";
+import { InsightAmount } from "../insights/InsightAmount";
 
 const field =
   "w-full rounded-control border border-border-subtle bg-surface px-3 py-2.5 text-sm text-text-primary outline-none focus:border-accent";
@@ -162,7 +163,7 @@ export function PersonManager({
                         className="h-5 w-5 shrink-0"
                         checked={selected.has(t.id)}
                         onChange={() => toggle(t.id)}
-                        aria-label={`${t.title}, ${t.when}, ${t.amount}`}
+                        aria-label={`${t.title}, ${t.when}`}
                       />
                     )
                     : null}
@@ -174,7 +175,7 @@ export function PersonManager({
                         {t.status && t.status !== "settled" ? ` · ${t.status}` : ""}
                       </span>
                     </span>
-                    <span className="shrink-0 text-sm font-medium text-text-primary">{t.amount}</span>
+                    <InsightAmount text={t.amount} className="shrink-0 text-sm font-medium" />
                   </Link>
                 </li>
               ))}

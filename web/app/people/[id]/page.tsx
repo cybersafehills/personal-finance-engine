@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { Badge } from "../../../components/Badge";
 import { PageHeader } from "../../../components/PageHeader";
+import { InsightAmount } from "../../../components/insights/InsightAmount";
 import { PersonManager } from "../../../components/people/PersonManager";
 import { formatDateTime } from "../../../lib/format";
 import { getActiveWorkspace } from "../../../lib/queries";
@@ -69,17 +70,16 @@ export default async function PersonPage({ params, searchParams }: PageProps<"/p
                   <div key={c.currency} className="grid grid-cols-3 gap-2 text-sm">
                     <div>
                       <dt className="text-xs text-text-muted">You sent</dt>
-                      <dd className="font-medium text-text-primary">{formatMinor(c.sent_minor, c.currency)}</dd>
+                      <dd className="font-medium"><InsightAmount text={formatMinor(c.sent_minor, c.currency)} /></dd>
                     </div>
                     <div>
                       <dt className="text-xs text-text-muted">You received</dt>
-                      <dd className="font-medium text-text-primary">{formatMinor(c.received_minor, c.currency)}</dd>
+                      <dd className="font-medium"><InsightAmount text={formatMinor(c.received_minor, c.currency)} /></dd>
                     </div>
                     <div>
                       <dt className="text-xs text-text-muted">Net</dt>
-                      <dd className="font-medium text-text-primary">
-                        {net > 0n ? "+" : ""}
-                        {formatMinor(net, c.currency)}
+                      <dd className="font-medium">
+                        <InsightAmount text={`${net > 0n ? "+" : ""}${formatMinor(net, c.currency)}`} />
                       </dd>
                     </div>
                   </div>

@@ -34,11 +34,17 @@ test("unsorted transactions are offered for sorting, then search finds them", as
 
   // The banner only shows while something is unsorted; sorting is idempotent.
   const sort = page.getByRole("button", { name: "Sort them now" });
-  if (await sort.isVisible()) {
-    await sort.click();
-    await expect(sort).toBeHidden();
-  }
+  if (await sort.isVisible()) await sort.click();
 
+  // The backfill runs behind the click; poll until our rows exist rather than
+  // asserting anything about the banner (it counts every unsorted row the
+  // shared e2e user has, not just ours).
+  await expect(async () => {
+    await page.goto("/people?q=Peopletest");
+    await expect(page.getByRole("link", { name: new RegExp(`^${BETA}`) })).toBeVisible({ timeout: 3000 });
+  }).toPass({ timeout: 30_000 });
+
+  await page.goto("/people");
   await page.getByLabel("Search by name").fill("Peopletest");
   await page.getByRole("button", { name: "Search" }).click();
   await expect(page).toHaveURL(/[?&]q=Peopletest/);
@@ -95,6 +101,7 @@ test("a combined-away person redirects to who they became", async ({ page }) => 
 
   await page.goto("/people?q=Peopletest+Alpha");
   await page.getByRole("link", { name: new RegExp(`^${ALPHA_K}`) }).click();
+  await expect(page).toHaveURL(/\/people\/[0-9a-f-]{36}$/);
   const survivorUrl = page.url();
   await page.getByRole("button", { name: "Combine with another" }).click();
   await page.getByLabel("Find someone to combine").fill("Peopletest Alpha Renamed");
@@ -116,10 +123,10 @@ test("a malformed or unknown person is a not-found, not an error", async ({ page
   await expect(page.getByText("We couldn't find that.")).toBeVisible();
 });
 
-test("the More menu lists People and merchants and it opens", async ({ page }) => {
-  test.skip(({ isMobile }) => isMobile, DESKTOP_LAYOUT);
+test("the More menu lists People and merchants and it opens", async ({ page, isMobile }) => {
+  test.skip(isMobile, DESKTOP_LAYOUT);
   await page.goto("/");
-  await page.getByRole("navigation", { name: "Primary" }).first().getByRole("button", { name: "More" }).click();
+  await page.locator("header").getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "More" }).click();
   const sheet = page.getByRole("dialog", { name: "More" });
   await sheet.getByRole("link", { name: "People and merchants" }).click();
   await expect(page).toHaveURL(/\/people$/);
@@ -133,4 +140,32 @@ test("People has no serious/critical automated accessibility violations", async 
     (v) => v.impact === "serious" || v.impact === "critical",
   );
   expect(seriousOrWorse, JSON.stringify(seriousOrWorse, null, 2)).toEqual([]);
+});
+
+test("full privacy mode hides people's amounts, and the setting is restored", async ({ page }) => {
+  const privacyMode = () => page.getByRole("checkbox", { name: /Full financial privacy mode/ });
+  await page.goto("/settings/privacy");
+  if (!(await privacyMode().isChecked())) {
+    await privacyMode().click();
+    await expect(page.getByText("Saved")).toBeVisible();
+  }
+  try {
+    await page.goto("/people?q=Peopletest");
+    await expect(page.getByRole("link", { name: new RegExp(`^${BETA}`) })).toBeVisible();
+    await expect(page.getByLabel("Amount hidden").first()).toBeVisible();
+    // The label stays; the figure is nowhere in the page text.
+    await expect(page.getByText(/You received/).first()).toBeVisible();
+    await expect(page.locator("main")).not.toContainText(/7,000/);
+
+    await page.getByRole("link", { name: new RegExp(`^${BETA}`) }).click();
+    await expect(page.getByRole("heading", { name: BETA, exact: true })).toBeVisible();
+    await expect(page.getByLabel("Amount hidden").first()).toBeVisible();
+    await expect(page.locator("main")).not.toContainText(/7,000/);
+  } finally {
+    await page.goto("/settings/privacy");
+    if (await privacyMode().isChecked()) {
+      await privacyMode().click();
+      await expect(page.getByText("Saved")).toBeVisible();
+    }
+  }
 });

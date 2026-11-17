@@ -12,6 +12,7 @@ export function SortTransactionsBanner({ count, canWrite }: { count: number; can
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
 
   return (
     <div className="flex flex-col gap-2 rounded-card border border-border-subtle bg-surface p-4">
@@ -19,7 +20,13 @@ export function SortTransactionsBanner({ count, canWrite }: { count: number; can
         {count} {count === 1 ? "transaction hasn't" : "transactions haven't"} been sorted into people and merchants yet.
       </p>
       {error ? <p role="alert" className="text-sm text-attention">{error}</p> : null}
-      {canWrite
+      {done
+        ? (
+          <p role="status" className="text-sm text-text-secondary">
+            Sorted. Anything still listed has no name or number to group it by.
+          </p>
+        )
+        : canWrite
         ? (
           <div>
             <button
@@ -31,7 +38,10 @@ export function SortTransactionsBanner({ count, canWrite }: { count: number; can
                 startTransition(async () => {
                   const res = await sortTransactionsAction();
                   if (!res.ok) setError(res.error);
-                  else router.refresh();
+                  else {
+                    setDone(true);
+                    router.refresh();
+                  }
                 });
               }}
             >

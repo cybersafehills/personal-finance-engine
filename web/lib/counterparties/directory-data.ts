@@ -15,8 +15,15 @@ const MAX_SUMMARY_ROWS = 2000;
 
 export type CounterpartyList = {
   total: number;
-  /** Transactions not yet resolved to a counterparty (backfill_counterparties sorts them). */
+  /** Transactions not yet resolved to a counterparty (the mobile API's `unresolved_transactions`). */
   unresolvedTransactions: number;
+  /**
+   * The subset backfill_counterparties can sort: it groups by phone number,
+   * merchant code or name, and skips a row with none of them, so those stay
+   * unresolved forever. A "Sort them now" prompt must count only these, or it
+   * would never clear.
+   */
+  sortableTransactions: number;
   counterparties: MobileCounterparty[];
 };
 
@@ -33,14 +40,17 @@ export async function loadCounterpartyList(
   if (p.kind) q = q.eq("kind", p.kind);
   if (p.q) q = q.ilike("display_name", `%${p.q}%`);
 
-  const [rows, unresolved] = await Promise.all([
-    q,
+  const unresolvedBase = () =>
     supabase
       .from("transactions")
       .select("id", { count: "exact", head: true })
       .eq("workspace_id", workspaceId)
       .is("counterparty_id", null)
-      .neq("dedupe_state", "merged"),
+      .neq("dedupe_state", "merged");
+  const [rows, unresolved, sortable] = await Promise.all([
+    q,
+    unresolvedBase(),
+    unresolvedBase().or("counterparty_name.not.is.null,counterparty_reference.not.is.null"),
   ]);
   if (rows.error) throw new Error("counterparties query failed");
 
@@ -48,6 +58,7 @@ export async function loadCounterpartyList(
   return {
     total: all.length,
     unresolvedTransactions: unresolved.count ?? 0,
+    sortableTransactions: sortable.count ?? 0,
     counterparties: all.slice(p.offset, p.offset + p.limit),
   };
 }

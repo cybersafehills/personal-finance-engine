@@ -3,6 +3,7 @@ import {
   confidenceLabel,
   confidenceNote,
   directoryHref,
+  flowParts,
   flowText,
   formatMinor,
   friendlyPeopleError,
@@ -93,4 +94,16 @@ Deno.test("pageWindow and isUuid", () => {
   assert(isUuid(WS));
   assertEquals(isUuid("not-a-uuid"), false);
   assertEquals(isUuid(`${WS}; drop table`), false);
+});
+
+Deno.test("flowParts keeps amounts apart from labels so a page can mask them", () => {
+  const base = { currency: "RWF", net_minor: "0", txn_count: 1 };
+  assertEquals(flowParts({ ...base, sent_minor: "0", received_minor: "0" }), []);
+  const both = flowParts({ ...base, sent_minor: "10100", received_minor: "5000" });
+  assertEquals(both.map((p) => p.label), ["You sent", "You received"]);
+  // The label never carries the figure; the amount is a separate field.
+  assertEquals(both.every((p) => !/\d/.test(p.label)), true);
+  assertEquals(both[0].amount.includes("10,100"), true);
+  // flowText is exactly the parts joined, so the two cannot drift.
+  assertEquals(flowText({ ...base, sent_minor: "10100", received_minor: "5000" }), `${both[0].label} ${both[0].amount} · ${both[1].label} ${both[1].amount}`);
 });

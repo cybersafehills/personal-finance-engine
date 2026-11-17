@@ -3,13 +3,14 @@ import { notFound } from "next/navigation";
 import { Badge } from "../../components/Badge";
 import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
+import { InsightAmount } from "../../components/insights/InsightAmount";
 import { SortTransactionsBanner } from "../../components/people/SortTransactionsBanner";
 import { getActiveWorkspace } from "../../lib/queries";
 import { supabaseSession } from "../../lib/supabase-session-server";
 import {
   confidenceNote,
   directoryHref,
-  flowText,
+  flowParts,
   isCounterpartiesEnabledFor,
   isPersonKind,
   KIND_FILTERS,
@@ -47,8 +48,8 @@ export default async function PeoplePage({ searchParams }: PageProps<"/people">)
         subtitle="Who you pay and who pays you, grouped from your transactions."
       />
 
-      {list.unresolvedTransactions > 0 && !filtered
-        ? <SortTransactionsBanner count={list.unresolvedTransactions} canWrite={canWrite} />
+      {list.sortableTransactions > 0 && !filtered
+        ? <SortTransactionsBanner count={list.sortableTransactions} canWrite={canWrite} />
         : null}
 
       <form action="/people" method="get" role="search" className="flex flex-col gap-3">
@@ -128,11 +129,21 @@ export default async function PeoplePage({ searchParams }: PageProps<"/people">)
                         <span className="text-sm font-medium text-text-primary">{c.display_name}</span>
                         <Badge variant={KIND_VARIANT[kind]}>{KIND_LABEL[kind]}</Badge>
                       </span>
-                      {c.currencies.map((cur) => (
-                        <span key={cur.currency} className="text-xs text-text-secondary">
-                          {flowText(cur)}
-                        </span>
-                      ))}
+                      {c.currencies.map((cur) => {
+                        const parts = flowParts(cur);
+                        return (
+                          <span key={cur.currency} className="text-xs text-text-secondary">
+                            {parts.length === 0
+                              ? "No money moved"
+                              : parts.map((p, i) => (
+                                <span key={p.label}>
+                                  {i > 0 ? " · " : ""}
+                                  {p.label} <InsightAmount text={p.amount} tone="muted" />
+                                </span>
+                              ))}
+                          </span>
+                        );
+                      })}
                       <span className="text-xs text-text-muted">
                         {c.txn_count} {c.txn_count === 1 ? "transaction" : "transactions"}
                         {note ? ` · ${note}` : ""}
