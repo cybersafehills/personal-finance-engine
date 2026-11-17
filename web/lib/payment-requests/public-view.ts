@@ -23,13 +23,16 @@ export type PublicPaymentRequestView = {
   status: EffectiveStatus;
   statusLabel: string;
   amountText: string;
+  /** Whole amount in minor units (RWF has none) and its currency - for building a pay hand-off. */
+  amountMinor: string;
+  currency: string;
   recipientDisplay: string;
   reference: string | null;
   expiresAt: string;
   /** Present only for an open request. */
   destination:
-    | { type: "momo_phone"; display: string }
-    | { type: "merchant_code"; display: string }
+    | { type: "momo_phone"; display: string; value: string }
+    | { type: "merchant_code"; display: string; value: string }
     | null;
 };
 
@@ -71,12 +74,17 @@ export function toPublicView(row: ResolveRow): PublicPaymentRequestView | null {
       destination = {
         type: "momo_phone",
         display: formatMsisdn(row.destination_value),
+        value: normalizeMsisdn(row.destination_value)!,
       };
     } else if (
       row.destination_type === "merchant_code" &&
       /^[0-9]{4,8}$/.test(row.destination_value)
     ) {
-      destination = { type: "merchant_code", display: row.destination_value };
+      destination = {
+        type: "merchant_code",
+        display: row.destination_value,
+        value: row.destination_value,
+      };
     } else {
       return null; // an open request must carry a valid destination
     }
@@ -86,6 +94,8 @@ export function toPublicView(row: ResolveRow): PublicPaymentRequestView | null {
     status,
     statusLabel: payerFacingLabel(status),
     amountText: formatMoney(amount, row.currency),
+    amountMinor: amount.toString(),
+    currency: row.currency,
     recipientDisplay: row.recipient_display,
     reference: row.reference,
     expiresAt: row.expires_at,

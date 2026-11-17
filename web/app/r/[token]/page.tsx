@@ -5,6 +5,9 @@ import { OneLedgerLogo } from "../../../components/brand/OneLedgerLogo";
 import { createRateLimiter, clientIp } from "../../../lib/payment-requests/rate-limit";
 import { isPaymentRequestsEnabled } from "../../../lib/payment-requests/public-view";
 import { resolvePaymentRequestToken } from "../../../lib/payment-requests/resolve";
+import { buildPayerRoute, payerRouteTarget } from "../../../lib/payment-requests/payer-route";
+import { getPayerServiceCode } from "../../../lib/payment-requests/payer-route-data";
+import { PayerPayActions } from "../../../components/pay/PayerPayActions";
 
 // Public payment-request page (/r/<token>). NON-CUSTODIAL: it shows who asked
 // to be paid, how much and where - it never takes or verifies a payment, and
@@ -83,6 +86,10 @@ export default async function PaymentRequestPage(
 
   const v = result.view;
   const open = v.status === "open";
+  const target = payerRouteTarget(v);
+  const route = target
+    ? buildPayerRoute(v, await getPayerServiceCode(target.network, target.intent))
+    : null;
   return (
     <Shell>
       <p
@@ -117,6 +124,15 @@ export default async function PaymentRequestPage(
           })}
         />
       </div>
+      {open && v.destination
+        ? (
+          <PayerPayActions
+            route={route}
+            numberText={v.destination.value}
+            amountText={v.amountText}
+          />
+        )
+        : null}
       {open
         ? (
           <p className="rounded-card border border-attention/30 bg-attention-bg p-4 text-sm text-attention">

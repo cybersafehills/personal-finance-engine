@@ -1,13 +1,16 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { manuallyConfirm, markIntentFailed } from "../../app/pay/assisted-actions";
 
 type Phase = "waiting" | "success" | "failure";
 
 const WAITING_STATES = new Set(["initiated", "awaiting_verification", "processing"]);
 const FAILURE_STATES = new Set(["failed", "expired", "reversed"]);
 const POLL_MS = 4000;
+/** After this long with no provider evidence, let the user settle it themselves. */
+const STALE_AFTER_MS = 90_000;
 
 function phaseOf(state: string): Phase | null {
   if (state === "successful") return "success";
@@ -25,11 +28,16 @@ function phaseOf(state: string): Phase | null {
  * seconds, so the mark flips without a manual reload even if Realtime is down.
  */
 export function PaymentResultStatus({
+  intentId,
+  since,
   state,
   verified,
   amountLabel,
   recipient,
 }: {
+  intentId: string;
+  /** ISO time the intent last changed (hand-off time while waiting). */
+  since: string;
   state: string;
   verified: boolean;
   amountLabel: string;
@@ -37,6 +45,29 @@ export function PaymentResultStatus({
 }) {
   const router = useRouter();
   const phase = phaseOf(state);
+  const [stale, setStale] = useState(false);
+  const [busy, startTransition] = useTransition();
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  // Waiting too long is not an answer: after a while, ask the person who
+  // actually knows. (Evidence still wins - the next poll flips it by itself.)
+  useEffect(() => {
+    if (phase !== "waiting") return;
+    const left = Date.parse(since) + STALE_AFTER_MS - Date.now();
+    const t = setTimeout(() => setStale(true), Math.max(0, left));
+    return () => clearTimeout(t);
+  }, [phase, since]);
+
+  const settle = (kind: "sent" | "failed") => {
+    setActionError(null);
+    startTransition(async () => {
+      const res = kind === "sent"
+        ? await manuallyConfirm(intentId, "Confirmed by me from the payment page")
+        : await markIntentFailed(intentId, "Marked as not sent from the payment page");
+      if (!res.ok) setActionError(res.error);
+      else router.refresh();
+    });
+  };
 
   useEffect(() => {
     if (phase !== "waiting") return;
@@ -56,7 +87,7 @@ export function PaymentResultStatus({
   const copy = {
     waiting: {
       title: "Waiting for confirmation",
-      body: "We'll update this page the moment your provider confirms.",
+      body: "Usually a few seconds. This page updates by itself.",
       color: "var(--color-accent, #f5c400)",
     },
     success: {
@@ -115,6 +146,34 @@ export function PaymentResultStatus({
       </svg>
       <p className="text-base font-semibold text-text-primary">{copy.title}</p>
       <p className="max-w-xs text-sm text-text-muted">{copy.body}</p>
+      {phase === "waiting" && stale && (
+        <div className="mt-2 flex w-full max-w-xs flex-col gap-2 border-t border-border-subtle pt-3">
+          <p className="text-sm text-text-secondary">
+            No confirmation yet. Did the payment go through on your phone?
+          </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => settle("sent")}
+              className="min-h-11 flex-1 rounded-control bg-accent px-3 text-sm font-medium text-accent-foreground disabled:opacity-50"
+            >
+              Yes, it went through
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => settle("failed")}
+              className="min-h-11 flex-1 rounded-control border border-border-strong px-3 text-sm font-medium text-text-primary disabled:opacity-50"
+            >
+              No
+            </button>
+          </div>
+          {actionError && (
+            <p role="alert" className="text-xs text-attention">{actionError}</p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
