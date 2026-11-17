@@ -9,7 +9,9 @@
 //                        + dated recurring inflows/outflows
 //                        + known bill due dates
 //   ESTIMATED          = KNOWN minus a flat daily discretionary rate
-//                        derived from spending history
+//                        derived from spending history, plus a flat daily
+//                        rate of typical money in (when there is enough
+//                        history to trust one)
 //
 // The estimated path is never presented as a guaranteed outcome. Every
 // output carries a `basis` list so the UI can answer "Why am I seeing
@@ -37,6 +39,12 @@ export type CashFlowForecastInput = {
    * estimated path (it then equals the known path).
    */
   estimatedDailyDiscretionaryMinor: number;
+  /**
+   * Flat typical money IN per day (positive minor units) from recent history,
+   * excluding your own wallet-to-wallet transfers. Optional; 0/absent means
+   * "no income estimate", which is the conservative spending-only path.
+   */
+  estimatedDailyInflowMinor?: number;
 };
 
 export type ForecastPoint = {
@@ -55,6 +63,8 @@ export type CashFlowForecast = {
   scheduledInMinor: number;
   scheduledOutMinor: number;
   estimatedOutMinor: number;
+  /** Typical money in over the horizon (0 when no income estimate). */
+  estimatedInMinor: number;
   /** Lowest point the ESTIMATED path reaches over the horizon. */
   projectedLow: {
     dayOffset: number;
@@ -82,6 +92,11 @@ export function computeCashFlowForecast(
     Math.round(input.estimatedDailyDiscretionaryMinor),
   );
 
+  const dailyInflow = Math.max(
+    0,
+    Math.round(input.estimatedDailyInflowMinor ?? 0),
+  );
+
   const inHorizon = input.scheduled
     .filter((m) => m.dayOffset >= 0 && m.dayOffset <= horizon)
     .sort((a, b) => a.dayOffset - b.dayOffset || a.label.localeCompare(b.label));
@@ -93,6 +108,7 @@ export function computeCashFlowForecast(
     .filter((m) => m.amountMinor < 0)
     .reduce((sum, m) => sum + m.amountMinor, 0); // negative
   const estimatedOutMinor = -dailyEstimate * horizon;
+  const estimatedInMinor = dailyInflow * horizon;
 
   // Checkpoint days: 0, every scheduled day, and the horizon end.
   const checkpointDays = Array.from(
@@ -113,7 +129,7 @@ export function computeCashFlowForecast(
       known += inHorizon[scheduledApplied].amountMinor;
       scheduledApplied += 1;
     }
-    const estimated = known - dailyEstimate * day;
+    const estimated = known + (dailyInflow - dailyEstimate) * day;
     const dueHere = inHorizon.filter((m) => m.dayOffset === day);
     points.push({
       dayOffset: day,
@@ -148,8 +164,11 @@ export function computeCashFlowForecast(
       } in the next ${horizon} days` +
         (scheduledInMinor > 0 ? ` (money in and out)` : ` (money out)`) + `.`,
     dailyEstimate > 0
-      ? `Plus an estimated everyday spend from your recent history.`
+      ? `Less an estimated everyday spend from your recent history.`
       : `No everyday-spending estimate (not enough history yet).`,
+    dailyInflow > 0
+      ? `Plus the money you typically receive, from the same history. Moves between your own wallets are not counted.`
+      : `No estimate of money coming in (not enough history yet), so this path assumes none.`,
   ];
 
   return {
@@ -160,6 +179,7 @@ export function computeCashFlowForecast(
     scheduledInMinor,
     scheduledOutMinor,
     estimatedOutMinor,
+    estimatedInMinor,
     projectedLow: {
       dayOffset: low.dayOffset,
       knownBalanceMinor: low.knownBalanceMinor,

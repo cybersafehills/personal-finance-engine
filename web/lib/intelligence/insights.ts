@@ -3,9 +3,12 @@ import "server-only";
 import { cache } from "react";
 import {
   getActiveWorkspaceId,
-  getCurrentBalance,
+  getLinkedTransferIds,
   getTransactions,
 } from "../queries";
+import { getHomeBalance } from "../wallets/home-balance-data";
+import { excludeLinkedTransfers } from "../transfer-exclusion";
+import { estimateDailyRates, type RateTxn } from "./run-rate";
 import { supabaseSession } from "../supabase-session-server";
 import { isBillsEnabled } from "../bills/gate";
 import { kigaliDateKey } from "../kigali-time";
@@ -58,6 +61,7 @@ export function isIntelligenceEnabled(
 const HORIZON_DAYS = 30;
 const HISTORY_MONTHS = 4;
 const DISCRETIONARY_WINDOW_DAYS = 90;
+const TRANSACTION_READ_LIMIT = 500;
 
 export type SpendingBaseline = {
   thisMonthToDateRwf: number;
@@ -138,11 +142,17 @@ async function _getIntelligenceInsights(): Promise<IntelligenceInsights> {
 
   const billsEnabled = isBillsEnabled(workspaceId);
 
-  const [balance, transactions, dueBills] = await Promise.all([
-    getCurrentBalance(),
-    getTransactions({ limit: 500 }),
+  const [balance, fetched, dueBills, linked] = await Promise.all([
+    getHomeBalance(),
+    getTransactions({ limit: TRANSACTION_READ_LIMIT }),
     billsEnabled ? fetchDueBills() : Promise.resolve([]),
+    supabaseSession().then(getLinkedTransferIds),
   ]);
+  // Moving money between your own wallets is neither spending nor income:
+  // drop both legs of every confirmed transfer, as Home, reports and Insights do.
+  const transactions = excludeLinkedTransfers(fetched, linked);
+  // The read is capped, so older rows may be missing from a 90-day window.
+  const readWasCapped = fetched.length >= TRANSACTION_READ_LIMIT;
 
   const nowIso = new Date().toISOString();
   const todayKey = kigaliDateKey(nowIso); // YYYY-MM-DD
@@ -174,23 +184,31 @@ async function _getIntelligenceInsights(): Promise<IntelligenceInsights> {
   const recurringKeys = new Set(
     recurring.map((p) => `${p.counterpartyKey}::${p.category ?? ""}`),
   );
-  const windowCutoff = new Date(
-    Date.now() - DISCRETIONARY_WINDOW_DAYS * 24 * 60 * 60 * 1000,
-  ).toISOString();
-  const discretionary = settledOut.filter(
-    (t) =>
-      t.occurred_at >= windowCutoff &&
-      !recurringKeys.has(
-        `${t.counterparty_name!.trim().toLowerCase()}::${t.category ?? ""}`,
-      ),
-  );
-  const discretionaryTotal = discretionary.reduce(
-    (sum, t) => sum + outflowMinor(t),
-    0,
-  );
-  const estimatedDailyDiscretionaryMinor = discretionary.length >= 10
-    ? Math.round(discretionaryTotal / DISCRETIONARY_WINDOW_DAYS)
-    : 0;
+  // Everyday spending and typical money in, per day, over the recent window.
+  // Both sides, own transfers excluded, divided by the days actually covered
+  // (lib/intelligence/run-rate.ts).
+  const rateTxns: RateTxn[] = transactions
+    .filter((t) =>
+      t.settlement_state === "settled" && (t.direction === "in" || t.direction === "out")
+    )
+    .map((t) => ({
+      id: t.id,
+      direction: t.direction as "in" | "out",
+      amountMinor: outflowMinor(t),
+      occurredAt: t.occurred_at,
+      recurringKey: t.counterparty_name
+        ? `${t.counterparty_name.trim().toLowerCase()}::${t.category ?? ""}`
+        : null,
+    }));
+  const rates = estimateDailyRates(rateTxns, {
+    windowDays: DISCRETIONARY_WINDOW_DAYS,
+    nowMs: Date.now(),
+    linked: new Set<string>(), // already excluded above
+    recurringKeys,
+    truncated: readWasCapped,
+  });
+  const estimatedDailyDiscretionaryMinor = rates.dailyOutMinor;
+  const estimatedDailyInflowMinor = rates.dailyInMinor;
 
   // --- scheduled movements for the horizon -----------------------------
   const dim = daysInMonth(todayMonthKey);
@@ -230,6 +248,7 @@ async function _getIntelligenceInsights(): Promise<IntelligenceInsights> {
       horizonDays: HORIZON_DAYS,
       scheduled,
       estimatedDailyDiscretionaryMinor,
+      estimatedDailyInflowMinor,
     })
     : null;
 

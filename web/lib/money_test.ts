@@ -68,10 +68,15 @@ Deno.test("toMajorUnits: inverse of toMinorUnits for EUR cents", () => {
   assertEquals(toMajorUnits(125050n, "EUR"), 1250.5);
 });
 
-Deno.test("formatMoney: RWF formats with no decimal places", () => {
-  const formatted = formatMoney(500000n, "RWF");
-  assertEquals(formatted.includes("500,000") || formatted.includes("500 000"), true);
-  assertEquals(formatted.includes("."), false);
+Deno.test("formatMoney: RWF is exact and runtime-independent (never the short 'RF')", () => {
+  // Node renders en-RW's currency as "RF 500,000", Deno as "RWF 500,000"; the
+  // live site showed the former while the tests passed. Written by hand now.
+  assertEquals(formatMoney(500000n, "RWF"), "500,000 RWF");
+  assertEquals(formatMoney(0n, "RWF"), "0 RWF");
+  assertEquals(formatMoney(999n, "RWF"), "999 RWF");
+  assertEquals(formatMoney(1234567890n, "RWF"), "1,234,567,890 RWF");
+  assertEquals(formatMoney(-5000n, "RWF"), "\u22125,000 RWF");
+  assertEquals(formatMoney(500000n, "RWF").includes("RF "), false);
 });
 
 Deno.test("formatMoney: EUR/USD format with exactly two decimal places", () => {
