@@ -54,6 +54,11 @@ export function confidenceNote(c: string): string | null {
  */
 export function formatMinor(amountMinor: bigint | string, currency: string): string {
   const v = typeof amountMinor === "bigint" ? amountMinor : BigInt(amountMinor);
+  // RWF has no minor unit and reads "5,000 RWF" everywhere else in the web app
+  // (Home, Insights); Intl's own "RF 5,000" would look like a different currency.
+  if (currency === "RWF") {
+    return `${v < 0n ? "\u2212" : ""}${(v < 0n ? -v : v).toLocaleString("en-US")} RWF`;
+  }
   if (isSupportedCurrency(currency)) return formatMoney(v, currency);
   return `${currency} ${v.toString()}`;
 }

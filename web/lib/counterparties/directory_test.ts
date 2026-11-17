@@ -28,11 +28,13 @@ Deno.test("flag: off unless exactly 'true'; allowlist narrows, never enables", (
 });
 
 Deno.test("formatMinor: scales by the currency, never guesses for unknown ones", () => {
-  assertEquals(formatMinor("10100", "RWF").includes("10,100"), true);
+  // RWF reads like Home and Insights ("5,000 RWF"), not Intl's "RF 5,000".
+  assertEquals(formatMinor("10100", "RWF"), "10,100 RWF");
+  assertEquals(formatMinor(-5000n, "RWF"), "\u22125,000 RWF");
+  assertEquals(formatMinor(0n, "RWF"), "0 RWF");
   assertEquals(formatMinor(2500n, "USD").includes("25.00"), true);
   // An unsupported currency is shown raw with its code, not rescaled.
   assertEquals(formatMinor("2500", "KES"), "KES 2500");
-  assertEquals(formatMinor(-5000n, "RWF").includes("5,000"), true);
 });
 
 Deno.test("flowText: sent, received, both, or nothing", () => {
