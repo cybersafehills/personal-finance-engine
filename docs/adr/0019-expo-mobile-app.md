@@ -399,3 +399,17 @@ wording is shared with the web (`lib/bills/display.ts`) so the two never describ
 a document differently. Not in this slice: upload or capture, review and
 approval, supplier and duplicate handling, comments, and viewing or downloading
 the original file (a signed URL behind `bill.download_original`).
+
+## Implementation notes (Pay button)
+
+- The raised blue centre button in the bottom bar (the web's elevated Pay
+  trigger) opens a native Pay & Services sheet. The bar slot is the `pay` tab; its
+  `tabBarButton` opens the sheet instead of navigating. It appears only when
+  `GET /api/mobile/config` says `pay` is on (any doubt: no button).
+- Person and merchant payments are prepared in the app (`/pay-new`, then the
+  existing review screen) only where `assistedPay` is on; otherwise those two
+  tiles read "Coming later", as on the web. Bill, electricity, airtime and
+  government payments, the USSD directory, activity and templates open the web:
+  the app has no verified route for them (see "Pay intents").
+- Not yet native: Scan to pay (needs a camera module and a new build, plus a
+  `scanToPay` flag in the config response) and a native USSD directory.
