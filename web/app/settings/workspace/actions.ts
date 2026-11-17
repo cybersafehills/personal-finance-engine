@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { supabaseSession } from "../../../lib/supabase-session-server";
 import { generateInviteToken } from "../../../lib/credentials";
 import { sendInviteEmail } from "../../../lib/emails";
@@ -13,6 +13,7 @@ import { trackSpacesEvent } from "../../../lib/spaces/analytics";
 import { getActiveWorkspaceId } from "../../../lib/queries";
 import { logSpacesError } from "../../../lib/spaces/monitoring";
 import { requireMfaForSensitiveAction } from "../../../lib/auth/assurance";
+import { shouldUseSecureCookie } from "../../../lib/cookie-security";
 
 export type WorkspaceActionResult = { ok: true } | { ok: false; error: string };
 export type CreateInviteResult =
@@ -50,7 +51,9 @@ export async function setActiveWorkspace(
   cookieStore.set("active_workspace_id", workspaceId, {
     httpOnly: true,
     sameSite: "lax",
-    secure: true,
+    // Secure everywhere except loopback http (e2e), where WebKit would drop
+    // it - see lib/cookie-security.ts.
+    secure: shouldUseSecureCookie((await headers()).get("host")),
     path: "/",
     maxAge: 60 * 60 * 24 * 365,
   });

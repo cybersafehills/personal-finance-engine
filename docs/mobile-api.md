@@ -331,6 +331,38 @@ Reports screens. Read-only; same guard as the others.
   again on every tap; the URL must never be stored or logged. Its own rate-limit
   bucket, since rendering a PDF is expensive.
 
+## `GET /api/mobile/bills[?status=...]`, `GET /api/mobile/bills/:id`
+
+The invoices and receipts of the **Space the app is viewing** (the web's
+`/bills`), for the app's Bills screens. Read-only; same guard as the others.
+Uploading, reviewing, approving and the original file stay on the web.
+
+- **Per-Space gate.** The web's own gate (`BILLS_ENABLED` plus the optional
+  workspace allowlist) runs for the active Space; when Bills is off the answer is
+  `404 not_found`, like the web page's `notFound()`. `GET /api/mobile/config`
+  carries `bills` for the same Space, and the app shows its entry point only when
+  that is true.
+- **Scoped to one Space explicitly.** RLS on `bill_documents` is plain
+  membership, so a query without a workspace filter would return documents from
+  every Space the user belongs to under the active Space's gate and permissions.
+  The list filters on the active Space, and a document that is in another Space
+  answers `404`, exactly like one that does not exist.
+- **List:** `{ bills: [{ id, filename, status, statusLabel, tone, uploadedLabel,
+  pageCount }], hasMore, pageSize }`, newest 50 (`hasMore` when older exist).
+  `status` must be a real status (`400 invalid_status` otherwise; never silently
+  "all").
+- **Detail:** `{ bill }` with the details, then, **only when automated extraction
+  is on for the Space**, `extraction` (fields and line items; corrected value
+  beats normalised beats raw) and `checks` (findings, worst first; `outOfDate`
+  when a field was corrected after they ran). `history` is `null` for a member
+  without `bill.audit.view` (a different answer from `[]`). Raw provider
+  payloads, `reason`/`error` JSON, model names, the checksum and the storage key
+  are never returned.
+- **Rendered on the server.** Status, event and field wording is the web's
+  (`lib/bills/display.ts`, shared with the web components), dates are Kigali time
+  and amounts use the currency's own minor digits, so the phone formats nothing.
+- Failed reads are `500`, never an empty list that would read as "no documents".
+
 ## Rollout
 
 1. Deploy web with the route (dark).

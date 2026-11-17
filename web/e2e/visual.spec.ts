@@ -22,6 +22,18 @@ test.beforeEach(async ({ page }) => {
   if (await hideBalanceCheckbox.isChecked()) await hideBalanceCheckbox.click();
   const privacyModeCheckbox = page.getByRole("checkbox", { name: /Full financial privacy mode/ });
   if (await privacyModeCheckbox.isChecked()) await privacyModeCheckbox.click();
+
+  // The "Finish setting up" nudge shows while onboarding is incomplete and
+  // undismissed. Other specs (get-started, connections, ...) move the shared
+  // e2e user through setup, so whether it is on Home depended on spec order.
+  // The baselines have no nudge: dismiss it when present. get-started.spec
+  // already tolerates a dismissed nudge.
+  await page.goto("/");
+  const nudge = page.getByRole("region", { name: "Finish setting up" });
+  if (await nudge.isVisible()) {
+    await nudge.getByRole("button", { name: "Dismiss" }).click();
+    await expect(nudge).toBeHidden();
+  }
 });
 
 test("Home dashboard (empty state)", { tag: "@visual" }, async ({ page }) => {
