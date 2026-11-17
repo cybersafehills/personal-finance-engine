@@ -9,6 +9,7 @@ import {
   isAssistedPayEnabled,
   isPayServicesEnabled,
   isScanToPayEnabled,
+  isTrustedRecipientsEnabled,
   isUssdDirectoryEnabled,
 } from "./pay/gate";
 import { isSpacesEnabled } from "./spaces/gate";
@@ -24,6 +25,7 @@ export type MobileConfig = {
   assistedPay: boolean;
   ussdDirectory: boolean;
   scanToPay: boolean;
+  trustedRecipients: boolean;
   statements: boolean;
   insights: boolean;
   bills: boolean;
@@ -39,6 +41,7 @@ export function mobileConfig(workspaceId: string | null): MobileConfig {
     assistedPay: isAssistedPayEnabled(workspaceId),
     ussdDirectory: isUssdDirectoryEnabled(workspaceId),
     scanToPay: isScanToPayEnabled(workspaceId),
+    trustedRecipients: isTrustedRecipientsEnabled(workspaceId),
     statements: isFinancialStatementsEnabled(),
     insights: isIntelligenceEnabled(workspaceId),
     bills: isBillsEnabled(workspaceId),

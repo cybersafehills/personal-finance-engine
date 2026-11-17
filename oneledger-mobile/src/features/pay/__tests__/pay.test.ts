@@ -91,6 +91,7 @@ describe("parseConfigResponse", () => {
       assistedPay: true,
       ussdDirectory: true,
       scanToPay: false,
+      trustedRecipients: false,
     });
     expect(parseConfigResponse(200, { ok: true, config: { pay: true } })).toMatchObject({ ok: true, assistedPay: false });
   });

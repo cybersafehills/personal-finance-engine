@@ -8,6 +8,8 @@ import { createKeyTracker } from "@/features/pay/key";
 import { PAY_COPY } from "@/features/pay/messages";
 import { parseRecipient, type PayKind } from "@/features/pay/new-form";
 import { loadPayableAccounts } from "@/features/pay/payment-accounts";
+import { formatLocalMsisdn } from "@/features/pay/target";
+import { getRecentRecipients, getTrustedRecipients, recentsFor, recipientsFor } from "@/features/pay/recipients";
 import { useQuery } from "@/hooks/useQuery";
 import { space } from "@/theme/tokens";
 
@@ -31,6 +33,17 @@ export default function PayNew() {
 
   const load = useCallback(async () => (kind ? loadPayableAccounts(kind) : []), [kind]);
   const { data: accounts, loading, error } = useQuery(load);
+
+  // Saved and recent recipients are a convenience: if they can't be read the form still works by typing.
+  const loadPeople = useCallback(async () => {
+    if (!kind) return { saved: [], recent: [] };
+    const [saved, recent] = await Promise.all([
+      getTrustedRecipients().catch(() => []),
+      getRecentRecipients().catch(() => []),
+    ]);
+    return { saved: recipientsFor(kind, saved), recent: recentsFor(kind, recent) };
+  }, [kind]);
+  const { data: people } = useQuery(loadPeople);
 
   const tracker = useRef(createKeyTracker()).current;
   const inFlight = useRef(false);
@@ -89,6 +102,27 @@ export default function PayNew() {
       {cancel}
       <ScreenHeader title={person ? "Pay a person" : "Pay a merchant"} subtitle={PAY_COPY.feeNotice} />
 
+      {people && people.saved.length > 0 ? (
+        <Card style={{ gap: space[2] }}>
+          <Text variant="caption" color="textMuted">
+            Saved recipients
+          </Text>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space[2] }}>
+            {people.saved.map((r) => (
+              <Chip
+                key={r.id}
+                label={r.trusted ? `${r.name} (trusted)` : r.name}
+                selected={recipientText === (r.msisdn ? formatLocalMsisdn(r.msisdn) : r.merchantCode ?? "")}
+                onPress={() => {
+                  setRecipientText(r.msisdn ? formatLocalMsisdn(r.msisdn) : r.merchantCode ?? "");
+                  setName(r.name);
+                }}
+              />
+            ))}
+          </View>
+        </Card>
+      ) : null}
+
       <TextField
         label={person ? "Mobile number" : "Merchant code"}
         value={recipientText}
@@ -104,6 +138,19 @@ export default function PayNew() {
         placeholder={person ? "Who is this?" : "Business name"}
         editable={!submitting}
       />
+
+      {people && people.recent.length > 0 ? (
+        <View style={{ gap: space[1] }}>
+          <Text variant="caption" color="textMuted">
+            Recent (fills the name; type the number to check it)
+          </Text>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space[2] }}>
+            {people.recent.map((r, i) => (
+              <Chip key={`${r.name}-${i}`} label={r.name} selected={name === r.name} onPress={() => setName(r.name)} />
+            ))}
+          </View>
+        </View>
+      ) : null}
 
       <Card style={{ gap: space[2] }}>
         <Text variant="caption" color="textMuted">

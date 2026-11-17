@@ -109,6 +109,23 @@ export function PaySheet({
             </Text>
           </Pressable>
 
+          {config.trustedRecipients ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Saved recipients"
+              onPress={() => {
+                onClose();
+                router.push("/recipients");
+              }}
+              style={styles.cell}
+            >
+              <Text variant="bodyStrong">Saved recipients</Text>
+              <Text variant="caption" color="textMuted">
+                People and merchants you pay often
+              </Text>
+            </Pressable>
+          ) : null}
+
           <View style={styles.row}>
             <Pressable
               accessibilityRole="button"

@@ -17,4 +17,4 @@ export type PayIntent = {
   instruction: PayInstruction | null;
 };
 
-export type PayConfig = { pay: boolean; assistedPay: boolean; ussdDirectory: boolean; scanToPay: boolean };
+export type PayConfig = { pay: boolean; assistedPay: boolean; ussdDirectory: boolean; scanToPay: boolean; trustedRecipients: boolean };

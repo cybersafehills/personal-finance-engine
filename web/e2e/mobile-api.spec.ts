@@ -338,6 +338,7 @@ test.describe("mobile API", () => {
         "scanToPay",
         "spaces",
         "statements",
+        "trustedRecipients",
         "ussdDirectory",
       ]);
       for (const k of keys) expect(typeof body.config[k]).toBe("boolean");
@@ -347,6 +348,7 @@ test.describe("mobile API", () => {
       if (body.config.assistedPay || body.config.ussdDirectory || body.config.scanToPay) {
         expect(body.config.pay).toBe(true);
       }
+      if (body.config.trustedRecipients) expect(body.config.assistedPay).toBe(true);
     } finally {
       await api.dispose();
     }
