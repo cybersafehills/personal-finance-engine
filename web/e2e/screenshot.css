@@ -1,0 +1,3 @@
+/* The realtime status pill depends on connection timing, so it is hidden in
+   visual baselines to keep them deterministic. */
+[data-live-status] { display: none !important; }
