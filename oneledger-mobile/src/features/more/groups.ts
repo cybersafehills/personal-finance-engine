@@ -20,7 +20,8 @@ export type MoreRoute =
   | "/requests"
   | "/space-members"
   | "/notifications"
-  | "/security";
+  | "/security"
+  | "/settings";
 
 export type MoreLink = {
   route: MoreRoute;
@@ -61,6 +62,7 @@ export const MORE_GROUPS: readonly MoreGroup[] = [
   {
     title: "Account",
     links: [
+      { route: "/settings", label: "Settings", hint: "Profile, accounts, Spaces, security and plan." },
       { route: "/security", label: "App lock", hint: "Ask for your fingerprint or face when the app opens." },
     ],
   },
