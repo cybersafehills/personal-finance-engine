@@ -71,7 +71,12 @@ export type CashFlowForecast = {
     knownBalanceMinor: number;
     estimatedBalanceMinor: number;
   };
-  projectedEnd: { knownBalanceMinor: number; estimatedBalanceMinor: number };
+  projectedEnd: {
+    knownBalanceMinor: number;
+    estimatedBalanceMinor: number;
+    /** Scheduled items and everyday spending, but NO new money in - the cautious end of the range. */
+    noIncomeBalanceMinor: number;
+  };
   /** Whether the estimated path dips below zero within the horizon. */
   mayGoNegative: boolean;
   /** Human-readable inputs for "Why am I seeing this?". */
@@ -99,7 +104,9 @@ export function computeCashFlowForecast(
 
   const inHorizon = input.scheduled
     .filter((m) => m.dayOffset >= 0 && m.dayOffset <= horizon)
-    .sort((a, b) => a.dayOffset - b.dayOffset || a.label.localeCompare(b.label));
+    .sort((a, b) =>
+      a.dayOffset - b.dayOffset || a.label.localeCompare(b.label)
+    );
 
   const scheduledInMinor = inHorizon
     .filter((m) => m.amountMinor > 0)
@@ -188,6 +195,7 @@ export function computeCashFlowForecast(
     projectedEnd: {
       knownBalanceMinor: end.knownBalanceMinor,
       estimatedBalanceMinor: end.estimatedBalanceMinor,
+      noIncomeBalanceMinor: end.knownBalanceMinor - dailyEstimate * horizon,
     },
     mayGoNegative: low.estimatedBalanceMinor < 0,
     basis,

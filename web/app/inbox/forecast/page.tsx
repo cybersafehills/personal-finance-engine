@@ -14,17 +14,26 @@ export default async function ForecastPage() {
   const insights = await getIntelligenceInsights();
   if (!insights.enabled || !insights.forecast) redirect("/inbox");
 
-  const { forecast, baseline, recurring, anomalies } = insights;
+  const { forecast, baseline, recurring, anomalies, walletForecasts } = insights;
+  // One block per wallet (each has its own balance and history); the default first.
+  const entries = walletForecasts.length > 0
+    ? walletForecasts
+    : [{ walletId: "default", name: "", isDefault: true, forecast: forecast! }];
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Cash-flow forecast"
-        subtitle="A conservative 30-day outlook from your own ledger — no scores, no guesses beyond your recent pace"
+        subtitle="A conservative 30-day outlook for each wallet, from its own ledger — no scores, no guesses beyond your recent pace"
         backHref="/inbox"
         backLabel="Inbox"
       />
 
+      {entries.map(({ walletId, name, forecast }) => (
+        <div key={walletId} className="flex flex-col gap-6">
+          {entries.length > 1 && (
+            <h2 className="text-base font-semibold text-text-primary">{name}</h2>
+          )}
       <section
         aria-label="Projected balance"
         className="flex flex-col gap-3 rounded-card border border-border-subtle bg-surface p-4"
@@ -42,12 +51,22 @@ export default async function ForecastPage() {
           </div>
           <div className="rounded-control bg-background p-3">
             <p className="text-xs text-text-muted">
-              …with everyday spending
+              …with everyday spending{forecast.estimatedInMinor > 0 ? " and your usual income" : ""}
             </p>
             <p className="tabular-nums font-medium text-text-primary">
               {rwf(forecast.projectedEnd.estimatedBalanceMinor)}
             </p>
           </div>
+          {forecast.estimatedInMinor > 0 && (
+            <div className="col-span-2 rounded-control bg-background p-3">
+              <p className="text-xs text-text-muted">
+                …with everyday spending but nothing new coming in (the cautious end)
+              </p>
+              <p className="tabular-nums font-medium text-text-primary">
+                {rwf(forecast.projectedEnd.noIncomeBalanceMinor)}
+              </p>
+            </div>
+          )}
         </div>
 
         {forecast.mayGoNegative && (
@@ -120,6 +139,9 @@ export default async function ForecastPage() {
           </div>
         )}
       </section>
+
+        </div>
+      ))}
 
       {recurring.length > 0 && (
         <section
