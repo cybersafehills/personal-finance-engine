@@ -138,6 +138,32 @@ test("a combined-away person redirects to who they became", async ({ page }) => 
   await expect(page.getByRole("heading", { name: ALPHA_K, exact: true })).toBeVisible();
 });
 
+test("marking someone as my own account explains what it does, and can be put back", async ({ page }) => {
+  await page.goto(search(BETA));
+  await row(page, BETA).click();
+  await expect(page).toHaveURL(DETAIL_URL);
+
+  await page.getByRole("button", { name: "Rename or change type" }).click();
+  await page.getByLabel("Type").selectOption("self");
+  // Choosing it says what it does before anything is saved.
+  await expect(page.getByText(/not income or spending/)).toBeVisible();
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText("My account").first()).toBeVisible();
+
+  // It is a filter on the list, too.
+  await page.goto(search(BETA));
+  await page.getByRole("link", { name: "My accounts" }).click();
+  await expect(page).toHaveURL(/kind=self/);
+  await expect(row(page, BETA)).toBeVisible();
+
+  // Put it back so later runs and other specs see an ordinary person.
+  await row(page, BETA).click();
+  await page.getByRole("button", { name: "Rename or change type" }).click();
+  await page.getByLabel("Type").selectOption("person");
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText("My account")).toHaveCount(0);
+});
+
 test("a malformed or unknown person is a not-found, not an error", async ({ page }) => {
   await page.goto("/people/not-a-uuid");
   await expect(page.getByText("We couldn't find that.")).toBeVisible();

@@ -25,13 +25,24 @@ Deno.test("a pointer cycle terminates instead of looping", () => {
 
 Deno.test("transactions resolve by effective id; unresolved ones keep their raw label", () => {
   const m = buildEffectiveMap(rows);
-  assertEquals(resolveCounterparty("b", "SAM RAW", m), { counterpartyId: "a", counterpartyName: "Sam" });
-  assertEquals(resolveCounterparty(null, "Just a name", m), { counterpartyId: null, counterpartyName: "Just a name" });
-  assertEquals(resolveCounterparty("unknown-id", "Raw", m), { counterpartyId: "unknown-id", counterpartyName: "Raw" });
+  assertEquals(resolveCounterparty("b", "SAM RAW", m), {
+    counterpartyId: "a",
+    counterpartyName: "Sam",
+  });
+  assertEquals(resolveCounterparty(null, "Just a name", m), {
+    counterpartyId: null,
+    counterpartyName: "Just a name",
+  });
+  assertEquals(resolveCounterparty("unknown-id", "Raw", m), {
+    counterpartyId: "unknown-id",
+    counterpartyName: "Raw",
+  });
 });
 
 Deno.test("merging changes the grouping key: two raw ids become one effective id", () => {
   const m = buildEffectiveMap(rows);
-  const keys = new Set(["a", "b"].map((id) => resolveCounterparty(id, null, m).counterpartyId));
+  const keys = new Set(
+    ["a", "b"].map((id) => resolveCounterparty(id, null, m).counterpartyId),
+  );
   assertEquals(keys.size, 1);
 });

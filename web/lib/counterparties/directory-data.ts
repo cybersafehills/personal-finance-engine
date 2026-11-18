@@ -1,6 +1,7 @@
 import "server-only";
 import type { supabaseSession } from "../supabase-session-server";
 import { groupCounterpartyRows, type MobileCounterparty } from "./mobile";
+import type { OwnAccountCandidate } from "./own-account-suggestions";
 
 // The one place the People & merchants list and a person's detail are read.
 // Used by BOTH /api/mobile/counterparties[/id] and the web /people pages, so
@@ -50,7 +51,9 @@ export async function loadCounterpartyList(
   const [rows, unresolved, sortable] = await Promise.all([
     q,
     unresolvedBase(),
-    unresolvedBase().or("counterparty_name.not.is.null,counterparty_reference.not.is.null"),
+    unresolvedBase().or(
+      "counterparty_name.not.is.null,counterparty_reference.not.is.null",
+    ),
   ]);
   if (rows.error) throw new Error("counterparties query failed");
 
@@ -147,13 +150,18 @@ export async function loadCounterpartyDetail(
         last_at: null,
         currencies: [],
       },
-      mergedFrom: (children.data ?? []).map((c) => ({ id: c.id, display_name: c.display_name })),
+      mergedFrom: (children.data ?? []).map((c) => ({
+        id: c.id,
+        display_name: c.display_name,
+      })),
       totalTransactions: txns.count ?? 0,
       transactions: (txns.data ?? []).map((t) => ({
         id: t.id,
         direction: t.direction,
         transaction_type: t.transaction_type,
-        amount_minor: String(Number(t.principal_effect_rwf ?? 0) + Number(t.fee_effect_rwf ?? 0)),
+        amount_minor: String(
+          Number(t.principal_effect_rwf ?? 0) + Number(t.fee_effect_rwf ?? 0),
+        ),
         currency: t.currency,
         category: t.category,
         counterparty_name: t.counterparty_name,
@@ -163,4 +171,31 @@ export async function loadCounterpartyDetail(
       })),
     },
   };
+}
+
+/**
+ * Every counterparty in the Space as a candidate for "is this one of my own accounts?",
+ * with whole-RWF flows (other currencies are left out: the forecast and totals are RWF).
+ */
+export async function loadOwnAccountCandidates(
+  supabase: Session,
+  workspaceId: string,
+): Promise<OwnAccountCandidate[]> {
+  const list = await loadCounterpartyList(supabase, workspaceId, {
+    q: null,
+    kind: null,
+    limit: MAX_SUMMARY_ROWS,
+    offset: 0,
+  });
+  return list.counterparties.map((c) => {
+    const rwf = c.currencies.find((cur) => cur.currency === "RWF");
+    return {
+      id: c.id,
+      name: c.display_name,
+      kind: c.kind,
+      receivedRwf: rwf ? Number(rwf.received_minor) : 0,
+      sentRwf: rwf ? Number(rwf.sent_minor) : 0,
+      txnCount: c.txn_count,
+    };
+  });
 }
