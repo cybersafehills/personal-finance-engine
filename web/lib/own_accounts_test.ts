@@ -38,7 +38,7 @@ function fakeClient(tables: Rows, failOn?: string) {
       return q;
     },
     // deno-lint-ignore no-explicit-any
-  } as any;
+  } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
 }
 
 const cps = [

@@ -12,7 +12,7 @@
 // The few PostgREST calls used here, typed structurally so this stays testable
 // under `deno test` (no package import) and accepts any Supabase client.
 // deno-lint-ignore no-explicit-any
-type Client = { from(table: string): any };
+type Client = { from(table: string): any }; // eslint-disable-line @typescript-eslint/no-explicit-any
 
 const PAGE = 1000;
 const MAX_PAGES = 20; // 20k rows: far beyond any one user's own-account history
