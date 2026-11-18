@@ -8517,6 +8517,16 @@ else
   pass "S4: an invalid kind is rejected"
 fi
 
+# --- own account ('self') -----------------------------------------------------
+as_user "$USER_A" "select public.update_counterparty('$S4_CP_OG', 'Ogabor Julius Ineji', 'self');" >/dev/null
+S4_SELF="$(psql -d pfe_rls -t -A -c "select kind from public.counterparties where id = '$S4_CP_OG';")"
+if [ "$S4_SELF" = "self" ]; then
+  pass "S4: a counterparty can be marked as the user's own account (kind 'self')"
+else
+  fail "S4: kind 'self' not accepted ('$S4_SELF')"
+fi
+as_user "$USER_A" "select public.update_counterparty('$S4_CP_OG', 'Ogabor Julius Ineji', 'person');" >/dev/null
+
 # --- merge / undo ---------------------------------------------------------------
 S4_CP_SHOP="$(psql -d pfe_rls -t -A -c "select counterparty_id from public.transactions where id = '$(S4_T 3)';")"
 S4_CP_AIR="$(psql -d pfe_rls -t -A -c "select counterparty_id from public.transactions where id = '$(S4_T 6)';")"

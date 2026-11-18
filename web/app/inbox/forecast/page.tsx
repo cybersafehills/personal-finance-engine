@@ -1,9 +1,15 @@
 import { redirect } from "next/navigation";
 import { getIntelligenceInsights } from "../../../lib/intelligence/insights";
+import { OwnAccountPrompt } from "../../../components/people/OwnAccountPrompt";
 import { PageHeader } from "../../../components/PageHeader";
 import { ForecastChart } from "../../../components/ForecastChart";
 import { WhyThisInsight } from "../../../components/ds/WhyThisInsight";
 import { formatSignedRwf } from "../../../lib/format";
+import { loadOwnAccountCandidates } from "../../../lib/counterparties/directory-data";
+import { isCounterpartiesEnabledFor } from "../../../lib/counterparties/directory";
+import { topSourcesOfMoneyIn } from "../../../lib/counterparties/own-account-suggestions";
+import { getActiveWorkspace } from "../../../lib/queries";
+import { supabaseSession } from "../../../lib/supabase-session-server";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +25,24 @@ export default async function ForecastPage() {
   const entries = walletForecasts.length > 0
     ? walletForecasts
     : [{ walletId: "default", name: "", isDefault: true, forecast: forecast! }];
+
+  // The "usual income" figure is built from money received. If one of the biggest
+  // senders is really one of your own accounts, it inflates that figure - so ask.
+  const workspace = await getActiveWorkspace();
+  let incomeSources: ReturnType<typeof topSourcesOfMoneyIn> = [];
+  if (
+    workspace && workspace.role !== "viewer" &&
+    isCounterpartiesEnabledFor(process.env, workspace.id) &&
+    entries.some((e) => e.forecast.estimatedInMinor > 0)
+  ) {
+    try {
+      incomeSources = topSourcesOfMoneyIn(
+        await loadOwnAccountCandidates(await supabaseSession(), workspace.id),
+      );
+    } catch (e) {
+      console.error("forecast income sources failed:", e instanceof Error ? e.message : "unknown");
+    }
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -142,6 +166,14 @@ export default async function ForecastPage() {
 
         </div>
       ))}
+
+      {incomeSources.length > 0 && (
+        <OwnAccountPrompt
+          title="Where your usual income comes from"
+          intro="The forecast counts money you receive as income. If one of these is really one of your own accounts, mark it and it stops counting. Amounts are all-time."
+          items={incomeSources}
+        />
+      )}
 
       {recurring.length > 0 && (
         <section

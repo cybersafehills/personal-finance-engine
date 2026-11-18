@@ -2,6 +2,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { supabaseServer } from "./supabase-server";
 import { excludeLinkedTransfers, linkedTransferIdSet } from "./transfer-exclusion";
+import { ownAccountTransactionIds } from "./own-accounts";
 import {
   dailyReportPeriod,
   previousCompleteDayKey,
@@ -196,9 +197,12 @@ async function fetchSettledTransactions(
   if (linksError) {
     throw new Error(`fetchLinkedTransfers failed: ${linksError.message}`);
   }
+  // Strict, like the lookups above: a delivered report must not be inflated by a
+  // silently failed "my own account" lookup.
+  const own = await ownAccountTransactionIds(supabase, workspaceId, { strict: true });
   return excludeLinkedTransfers(
     data ?? [],
-    linkedTransferIdSet(links ?? []),
+    new Set([...linkedTransferIdSet(links ?? []), ...own]),
   );
 }
 

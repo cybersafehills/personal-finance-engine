@@ -1,6 +1,7 @@
 import "server-only";
 import { supabaseSession } from "../supabase-session-server";
 import { linkedTransferIdSet } from "../transfer-exclusion";
+import { ownAccountTransactionIds } from "../own-accounts";
 import {
   buildEffectiveMap,
   type CounterpartyRef,
@@ -91,7 +92,10 @@ export async function fetchInsightFacts(
       settlement: settlement(r.settlement_state),
       occurredAt: r.occurred_at,
     })),
-    linked: linkedTransferIdSet(links ?? []),
+    linked: new Set([
+      ...linkedTransferIdSet(links ?? []),
+      ...(await ownAccountTransactionIds(supabase, workspaceId, { strict: true })),
+    ]),
     truncated,
   };
 }

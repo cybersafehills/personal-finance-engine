@@ -3,6 +3,7 @@ import { MobileApiError, mobileGet, mobileOptions } from "../../../../lib/mobile
 import { requireFlag, resolveMobileWorkspace } from "../../../../lib/mobile-workspace";
 import { supabaseSession } from "../../../../lib/supabase-session-server";
 import { parseCounterpartyListParams } from "../../../../lib/counterparties/mobile";
+import { kindForMobile } from "../../../../lib/counterparties/directory";
 import { loadCounterpartyList } from "../../../../lib/counterparties/directory-data";
 
 // GET /api/mobile/counterparties - the workspace's people & merchants with
@@ -33,7 +34,7 @@ export function GET(request: NextRequest) {
       offset: p.offset,
       // Transactions not yet resolved to a counterparty (run backfill_counterparties).
       unresolved_transactions: list.unresolvedTransactions,
-      counterparties: list.counterparties,
+      counterparties: list.counterparties.map((c) => ({ ...c, kind: kindForMobile(c.kind) })),
     };
   });
 }
