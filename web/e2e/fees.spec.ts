@@ -53,7 +53,8 @@ test("the estimate comes from similar past payments, with its evidence", async (
   await expect(hist.getByText(/Based on 4 similar payments of yours/)).toBeVisible();
   const table = hist.getByRole("table", { name: /most recent similar payments/i });
   await expect(table.getByRole("row")).toHaveCount(5); // header + the 4 similar payments
-  await expect(table.getByText("5,000 RWF")).toHaveCount(0);
+  // exact: "75,000 RWF" also contains the substring "5,000 RWF"
+  await expect(table.getByText("5,000 RWF", { exact: true })).toHaveCount(0);
   await expect(page.getByText(/not guarantees/)).toBeVisible();
 });
 
@@ -66,7 +67,8 @@ test("too little history is said plainly, not padded", async ({ page }) => {
 
 test("an invalid amount is refused with a reason, never rounded", async ({ page }) => {
   await page.goto("/pay/fees?amount=12.5&type=send_money");
-  await expect(page.getByRole("alert")).toContainText("Enter a whole amount");
+  // not getByRole("alert") alone: Next's route announcer is also role=alert
+  await expect(page.locator("#fee-amount-error")).toContainText("Enter a whole amount");
   await expect(page.getByRole("region", { name: "Fees you have paid before" })).toHaveCount(0);
 });
 
