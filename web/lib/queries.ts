@@ -148,7 +148,7 @@ export async function getLinkedTransferIds(
     return new Set();
   }
   // Plus everything with a counterparty marked "my own account".
-  const own = await ownAccountTransactionIds(supabase, null);
+  const own = await ownAccountTransactionIds(supabase, workspaceId);
   return new Set([...linkedTransferIdSet(data ?? []), ...own]);
 }
 
