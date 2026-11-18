@@ -80,3 +80,19 @@ Deno.test("MORE_GROUPS: People and merchants is in Manage money, ungated by mode
   assertEquals(item.requires, "counterparties");
   assertEquals(item.icon, "people");
 });
+
+Deno.test("MORE_GROUPS: Wallets, Goals, Insights and the forecast are reachable, each gated by only its own flag", () => {
+  const find = (href: string) =>
+    MORE_GROUPS.flatMap((g) => g.items).find((i) => i.href === href);
+  assertEquals(find("/wallets")?.requires, "wallets");
+  assertEquals(find("/insights")?.requires, "insights");
+  assertEquals(find("/inbox/forecast")?.requires, "forecast");
+  // Goals are part of Plan: visible whenever Plan is, no extra flag.
+  assertEquals(find("/budgets/goals")?.requires, undefined);
+  assertEquals(find("/budgets/goals")?.surface, "plan");
+});
+
+Deno.test("More highlights for Wallets and Insights pages", () => {
+  assert((MORE_MENU_PREFIXES as readonly string[]).includes("/wallets"));
+  assert((MORE_MENU_PREFIXES as readonly string[]).includes("/insights"));
+});
