@@ -108,8 +108,12 @@ Deno.test("basis explains every input and the disclaimer is present", () => {
 
 Deno.test("income side: typical money in offsets everyday spending, and the low is on the NET path", () => {
   const f = computeCashFlowForecast({
-    currentBalanceMinor: 50_000, currency: "RWF", horizonDays: 30, scheduled: [],
-    estimatedDailyDiscretionaryMinor: 10_000, estimatedDailyInflowMinor: 10_000,
+    currentBalanceMinor: 50_000,
+    currency: "RWF",
+    horizonDays: 30,
+    scheduled: [],
+    estimatedDailyDiscretionaryMinor: 10_000,
+    estimatedDailyInflowMinor: 10_000,
   });
   assertEquals(f.estimatedInMinor, 300_000);
   assertEquals(f.projectedEnd.estimatedBalanceMinor, 50_000); // out and in cancel
@@ -118,7 +122,10 @@ Deno.test("income side: typical money in offsets everyday spending, and the low 
 
 Deno.test("spending-only (no income estimate) still projects the conservative path", () => {
   const f = computeCashFlowForecast({
-    currentBalanceMinor: 50_000, currency: "RWF", horizonDays: 30, scheduled: [],
+    currentBalanceMinor: 50_000,
+    currency: "RWF",
+    horizonDays: 30,
+    scheduled: [],
     estimatedDailyDiscretionaryMinor: 10_000,
   });
   assertEquals(f.estimatedInMinor, 0);
@@ -129,8 +136,25 @@ Deno.test("spending-only (no income estimate) still projects the conservative pa
 
 Deno.test("a negative inflow input is clamped to 0, never turned into spending", () => {
   const f = computeCashFlowForecast({
-    currentBalanceMinor: 100, currency: "RWF", horizonDays: 10, scheduled: [],
-    estimatedDailyDiscretionaryMinor: 0, estimatedDailyInflowMinor: -999,
+    currentBalanceMinor: 100,
+    currency: "RWF",
+    horizonDays: 10,
+    scheduled: [],
+    estimatedDailyDiscretionaryMinor: 0,
+    estimatedDailyInflowMinor: -999,
   });
   assertEquals(f.projectedEnd.estimatedBalanceMinor, 100);
+});
+
+Deno.test("the cautious end of the range assumes no new money in", () => {
+  const f = computeCashFlowForecast({
+    currentBalanceMinor: 100_000,
+    currency: "RWF",
+    horizonDays: 30,
+    scheduled: [],
+    estimatedDailyDiscretionaryMinor: 2_000,
+    estimatedDailyInflowMinor: 5_000,
+  });
+  assertEquals(f.projectedEnd.estimatedBalanceMinor, 100_000 + 3_000 * 30);
+  assertEquals(f.projectedEnd.noIncomeBalanceMinor, 100_000 - 2_000 * 30);
 });

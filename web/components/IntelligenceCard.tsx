@@ -18,7 +18,10 @@ export function IntelligenceCard({
 }: {
   insights: IntelligenceInsights;
 }) {
-  const { forecast, baseline, recurring, anomalies } = insights;
+  const { forecast, baseline, recurring, anomalies, walletForecasts } = insights;
+  // Each wallet has its own forecast; Home shows the default wallet's.
+  const shown = walletForecasts.find((w) => w.isDefault) ?? walletForecasts[0];
+  const walletName = walletForecasts.length > 0 ? shown?.name : null;
   if (!insights.enabled) return null;
   if (
     !forecast && !baseline && recurring.length === 0 && anomalies.length === 0
@@ -47,23 +50,39 @@ export function IntelligenceCard({
       {forecast && (
         <div className="flex flex-col gap-1">
           <p className="text-sm font-medium text-text-primary">
-            Projected balance in {forecast.horizonDays} days
+            {walletName ? `${walletName}: projected` : "Projected"} balance in{" "}
+            {forecast.horizonDays} days
           </p>
-          <p className="text-sm text-text-secondary">
-            Scheduled items only:{" "}
-            <span className="tabular-nums">
-              {rwf(forecast.projectedEnd.knownBalanceMinor)}
-            </span>
-            {forecast.projectedEnd.estimatedBalanceMinor !==
-                forecast.projectedEnd.knownBalanceMinor && (
-              <>
-                {" · with everyday spending: "}
+          {forecast.estimatedInMinor > 0
+            ? (
+              <p className="text-sm text-text-secondary">
+                If nothing new comes in:{" "}
+                <span className="tabular-nums">
+                  {rwf(forecast.projectedEnd.noIncomeBalanceMinor)}
+                </span>
+                {" · with your usual income: "}
                 <span className="tabular-nums">
                   {rwf(forecast.projectedEnd.estimatedBalanceMinor)}
                 </span>
-              </>
+              </p>
+            )
+            : (
+              <p className="text-sm text-text-secondary">
+                Scheduled items only:{" "}
+                <span className="tabular-nums">
+                  {rwf(forecast.projectedEnd.knownBalanceMinor)}
+                </span>
+                {forecast.projectedEnd.estimatedBalanceMinor !==
+                    forecast.projectedEnd.knownBalanceMinor && (
+                  <>
+                    {" · with everyday spending: "}
+                    <span className="tabular-nums">
+                      {rwf(forecast.projectedEnd.estimatedBalanceMinor)}
+                    </span>
+                  </>
+                )}
+              </p>
             )}
-          </p>
           {forecast.mayGoNegative && (
             <p className="rounded-control bg-attention-bg p-2 text-xs text-attention">
               Your balance could dip below zero around day{" "}
