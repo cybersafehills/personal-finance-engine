@@ -17,5 +17,5 @@ The household fixture is now source-backed (one wallet shared into the Space, on
 ## Rollback
 Recreate the old policy (`using (public.is_workspace_member(workspace_id))`) and the previous function body from `20261224000000`. Nothing to undo in the data.
 
-## Siblings not changed here (check before household rollout)
-- `counterparties`, `counterparty_identifiers`, `counterparty_merge_events` are readable by any member of the workspace (`20261225000000_counterparties.sql`). The **amounts** are safe: `counterparty_summaries_v` is `security_invoker` over `transactions`, so it inherits per-source visibility. The **names and identifiers** are not: they are derived from every source's transactions, so in a household a member could read a counterparty name (and its normalised phone number / merchant code) that appears only on a co-member's unshared source. Needs its own decision (filter the rows to counterparties with at least one visible transaction, versus accepting the exposure); not changed here.
+## Siblings
+The counterparty tables had the same exposure (names and identifiers readable by every workspace member); fixed in S9 (`s9-counterparty-visibility.md`, `20270105000000`).
