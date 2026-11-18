@@ -8,6 +8,7 @@ Deno.test("opt-in: only the exact string 'true' enables; allowlist alone never d
       "BALANCE_PROVENANCE",
       "COUNTERPARTIES",
       "PAYMENT_REQUESTS",
+      "FEE_CALCULATOR",
     ] as const
   ) {
     assertEquals(on({}, f, "w"), false);
