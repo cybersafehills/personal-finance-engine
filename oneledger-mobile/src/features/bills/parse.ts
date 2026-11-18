@@ -92,6 +92,8 @@ function parseDetail(raw: unknown): BillDetail | null {
         }
       : null,
     history: Array.isArray(raw.history) ? raw.history.map(parseEvent).filter(notNull) : null,
+    // Anything but an explicit true hides the button.
+    canViewOriginal: raw.canViewOriginal === true,
   };
 }
 
@@ -119,6 +121,25 @@ export function parseBillResponse(status: number, body: unknown): BillResult {
   }
   // 404 is "not in this Space" or Bills off; the server's `error` tells them apart
   // only by wording, so say what is true of both.
+  if (status === 404) return { ok: false, reason: "not_found", message: "That document wasn't found in this Space." };
+  const f = failureForStatus(status, "That document");
+  return { ok: false, reason: f.reason, message: f.message };
+}
+
+export type OriginalResult =
+  | { ok: true; url: string }
+  | { ok: false; reason: "not_found" | "forbidden" | "unauthorized" | "mfa_required" | "unavailable" | "error"; message: string };
+
+/** The link is only ever accepted over https, and is never stored or logged. */
+export function parseOriginalResponse(status: number, body: unknown): OriginalResult {
+  if (status === 200 && isRecord(body) && body.ok === true) {
+    const d = body.download;
+    if (isRecord(d) && str(d.url) && d.url.startsWith("https://")) return { ok: true, url: d.url };
+    return { ok: false, reason: "error", message: "Couldn't prepare the original. Try again." };
+  }
+  if (status === 403 && isRecord(body) && body.error === "forbidden") {
+    return { ok: false, reason: "forbidden", message: "You don't have permission to open the original." };
+  }
   if (status === 404) return { ok: false, reason: "not_found", message: "That document wasn't found in this Space." };
   const f = failureForStatus(status, "That document");
   return { ok: false, reason: f.reason, message: f.message };

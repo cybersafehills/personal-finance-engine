@@ -24,7 +24,9 @@ import {
   parseBillResponse,
   parseBillsEnabled,
   parseBillsResponse,
+  parseOriginalResponse,
   type BillResult,
+  type OriginalResult,
   type BillsResult,
 } from "@/features/bills/parse";
 import {
@@ -355,6 +357,19 @@ export async function fetchBill(id: string): Promise<BillResult> {
     return { ok: false, reason: f.reason, message: f.message };
   }
   return parseBillResponse(result.status, result.body);
+}
+
+/**
+ * A fresh short-lived link to a document's original. Asking is audited on the
+ * server, so ask once per tap, open the link at once, and never store or log it.
+ */
+export async function fetchBillOriginal(id: string): Promise<OriginalResult> {
+  const r = await bearerPost(`/api/mobile/bills/${encodeURIComponent(id)}/original`, {});
+  if (r.kind !== "response") {
+    const f = failureForOutcome(r, "That document");
+    return { ok: false, reason: f.reason, message: f.message };
+  }
+  return parseOriginalResponse(r.status, r.body);
 }
 
 /** All-time spending per category, from the web's canonical totals (the app never recomputes them). */

@@ -362,6 +362,24 @@ Uploading, reviewing, approving and the original file stay on the web.
   (`lib/bills/display.ts`, shared with the web components), dates are Kigali time
   and amounts use the currency's own minor digits, so the phone formats nothing.
 - Failed reads are `500`, never an empty list that would read as "no documents".
+- **`canViewOriginal`** on the detail is the caller's `bill.download_original`
+  capability in the active Space; the app offers "View original" only when it is `true`.
+
+### `POST /api/mobile/bills/:id/original`
+
+A fresh, short-lived signed URL for the document's immutable original, as JSON
+(`{ download: { url } }`); the app fetches with its bearer token and opens the
+URL. The web's `/api/bills/:id/original` does the same behind a cookie.
+
+- **A POST, because it is not read-only:** `record_bill_original_download` writes
+  an audit row and a processing-journal event on every ask, as on the web. The app
+  asks once per tap (double taps are one request), opens the link at once and never
+  stores or logs it. POST rate limit applies (20 a minute).
+- **Active Space first.** That function checks membership and the capability for the
+  document's *own* Space, not the one the app is viewing, so the route requires the
+  document to be in the active Space (otherwise it is `404`, like an unknown id).
+- `403 forbidden` without `bill.download_original`; `404 not_found` for an unknown,
+  malformed or other-Space id, or when Bills is off for the Space.
 
 ## `GET /api/mobile/categorization-rules`, `POST /api/mobile/categorization-rules/active`
 

@@ -397,8 +397,7 @@ keeping: RLS on `bill_documents` is plain membership, so the routes filter on
 the active Space explicitly (a document from another Space answers 404); and the
 wording is shared with the web (`lib/bills/display.ts`) so the two never describe
 a document differently. Not in this slice: upload or capture, review and
-approval, supplier and duplicate handling, comments, and viewing or downloading
-the original file (a signed URL behind `bill.download_original`).
+approval, supplier and duplicate handling and comments.
 
 ## Implementation notes (Pay button)
 
@@ -456,4 +455,11 @@ shared with the web (`lib/categorization/rule-summary.ts`). The write names its
 Space and reads the changed row back, because RLS silently hides an UPDATE a
 viewer is not allowed to make. Not in this slice: create, edit, reorder, apply to
 history, suggestions, templates, history.
+
+Bills: **View original** (`POST /api/mobile/bills/:id/original`) opens the stored
+file through a fresh signed link, shown only to members with
+`bill.download_original`. It is a POST because every ask is audited, and it
+requires the document to be in the active Space because the audit function only
+checks the document's own Space. Still not in the app: upload or capture, review
+and approval, supplier and duplicate handling, comments.
 

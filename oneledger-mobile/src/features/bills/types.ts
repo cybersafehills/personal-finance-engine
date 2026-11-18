@@ -35,4 +35,6 @@ export type BillDetail = BillListItem & {
   checks: { blocking: number; outOfDate: boolean; findings: BillFinding[] } | null;
   /** Null when the member may not see the processing history. */
   history: BillEvent[] | null;
+  /** Whether this member may open the original file; the button is offered only then. */
+  canViewOriginal: boolean;
 };

@@ -110,6 +110,8 @@ export type MobileBillDetail = MobileBillListItem & {
   checks: { blocking: number; outOfDate: boolean; findings: MobileBillFinding[] } | null;
   /** Null when the caller lacks permission to see the processing history. */
   history: MobileBillEvent[] | null;
+  /** Whether this member may open the original file; the app offers the button only then. */
+  canViewOriginal: boolean;
 };
 
 const MIME_LABEL: Record<string, string> = {
@@ -200,6 +202,7 @@ export function toMobileBillDetail(input: {
   extraction: { fields: BillFieldRow[]; lineItems: BillLineItemInput[] } | null;
   checks: { blockingCount: number; outOfDate: boolean; findings: BillFindingRow[] } | null;
   events: BillEventRow[] | null;
+  canViewOriginal: boolean;
 }): MobileBillDetail {
   const { doc } = input;
   return {
@@ -220,5 +223,6 @@ export function toMobileBillDetail(input: {
         }
       : null,
     history: input.events ? toMobileBillEvents(input.events) : null,
+    canViewOriginal: input.canViewOriginal,
   };
 }
