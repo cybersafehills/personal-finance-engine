@@ -22,6 +22,11 @@ export type BudgetActionResult =
   | { ok: true; budgetId: string }
   | { ok: false; error: string };
 
+/** Like BudgetActionResult, plus: when the budget lives in another Space, which one to switch to. */
+export type StartBudgetResult =
+  | { ok: true; budgetId: string }
+  | { ok: false; error: string; switchTo?: { id: string; name: string } };
+
 export type SimpleActionResult = { ok: true } | { ok: false; error: string };
 
 export type BudgetDraftInput = {
@@ -529,18 +534,35 @@ export async function fetchVariableIncomeMonths(
  */
 export async function startCurrentMonthBudget(
   sourceBudgetId: string,
-): Promise<BudgetActionResult> {
+): Promise<StartBudgetResult> {
   const supabase = await supabaseSession();
   const workspaceId = await getActiveWorkspaceId();
   if (!workspaceId) return { ok: false, error: "Could not resolve your workspace." };
 
   const { data: source, error: sourceError } = await supabase
     .from("budgets")
-    .select("id, name, status, currency, period_start, period_end")
+    .select("id, name, status, currency, period_start, period_end, workspace_id")
     .eq("id", sourceBudgetId)
-    .eq("workspace_id", workspaceId)
     .maybeSingle();
-  if (sourceError || !source) return { ok: false, error: "Budget not found." };
+  if (sourceError || !source) {
+    return { ok: false, error: "We couldn't find that budget. It may have been deleted." };
+  }
+  // The budget can be one you can see in another Space (Home lists budgets from
+  // every Space you belong to). Copying it here would put the new budget in the
+  // wrong Space, so say where it lives and offer the switch.
+  if (source.workspace_id !== workspaceId) {
+    const { data: home } = await supabase
+      .from("workspaces")
+      .select("name")
+      .eq("id", source.workspace_id)
+      .maybeSingle();
+    const name = typeof home?.name === "string" ? home.name : "another Space";
+    return {
+      ok: false,
+      error: `This budget belongs to your ${name} Space, and you're in a different one right now.`,
+      switchTo: { id: source.workspace_id as string, name },
+    };
+  }
 
   const todayKey = kigaliDateKey(new Date().toISOString());
   if (budgetPeriodState(source.period_start, source.period_end, todayKey) !== "ended") {

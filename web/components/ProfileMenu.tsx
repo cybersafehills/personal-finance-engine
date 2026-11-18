@@ -77,7 +77,7 @@ export function ProfileMenu({
     <div className="relative flex items-center gap-2">
       {activeWorkspaceName && (
         <span
-          className="hidden max-w-[9rem] truncate rounded-full border border-border-subtle bg-background px-2.5 py-1 text-xs font-medium text-text-secondary sm:inline"
+          className="hidden min-[360px]:inline max-w-[5.5rem] truncate rounded-full border border-border-subtle bg-background px-2.5 py-1 text-xs font-medium text-text-secondary sm:max-w-[9rem]"
           title={`Current Space: ${activeWorkspaceName}`}
         >
           {activeWorkspaceName}

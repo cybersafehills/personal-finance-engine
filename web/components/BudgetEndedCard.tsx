@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { startCurrentMonthBudget } from "../app/budgets/actions";
 import { Badge } from "./Badge";
+import { SwitchSpaceButton } from "./SwitchSpaceButton";
 
 /**
  * Home's budget card once the active budget's period is over. Shows no
@@ -27,6 +28,7 @@ export function BudgetEndedCard({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [switchTo, setSwitchTo] = useState<{ id: string; name: string } | null>(null);
 
   return (
     <div className="flex flex-col gap-2.5 rounded-card border border-border-subtle bg-surface p-4">
@@ -39,17 +41,32 @@ export function BudgetEndedCard({
       <p className="text-sm text-text-primary">
         {budgetName} ended on {periodEnd}. Nothing is being tracked for {monthName} yet.
       </p>
-      {error ? <p role="alert" className="text-sm text-attention">{error}</p> : null}
+      {error
+        ? (
+          <div role="alert" className="flex flex-col gap-2 rounded-control bg-attention-bg p-3 text-sm text-attention">
+            <p>{error}</p>
+            <div className="flex flex-wrap items-center gap-3">
+              {switchTo ? <SwitchSpaceButton workspaceId={switchTo.id} name={switchTo.name} /> : null}
+              <Link href="/budgets/new" className="font-medium underline underline-offset-2">
+                Or create {monthName}&apos;s budget from scratch
+              </Link>
+            </div>
+          </div>
+        )
+        : null}
       <div className="flex flex-wrap items-center gap-3">
         <button
           type="button"
           disabled={pending}
           onClick={() => {
             setError(null);
+            setSwitchTo(null);
             startTransition(async () => {
               const res = await startCurrentMonthBudget(budgetId);
-              if (!res.ok) setError(res.error);
-              else router.refresh();
+              if (!res.ok) {
+                setError(res.error);
+                setSwitchTo(res.switchTo ?? null);
+              } else router.refresh();
             });
           }}
           className="min-h-11 rounded-control bg-accent px-4 py-2.5 text-sm font-semibold text-accent-foreground disabled:opacity-60"

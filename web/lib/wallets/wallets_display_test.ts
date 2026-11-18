@@ -99,3 +99,19 @@ Deno.test("labels match the mobile app's words", () => {
     unavailable: "Not available",
   });
 });
+
+Deno.test("updateHint: every state says how the balance gets (or stays) current", async () => {
+  const { updateHint } = await import("./wallets-display.ts");
+  assertEquals(
+    updateHint(null, false).startsWith("To get a balance here"),
+    true,
+  );
+  assertEquals(
+    updateHint("manual", true).startsWith("You entered this balance"),
+    true,
+  );
+  assertEquals(
+    updateHint("provider_reported", true).startsWith("Updates by itself"),
+    true,
+  );
+});

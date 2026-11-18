@@ -20,7 +20,8 @@ import {
 } from "../lib/intelligence/insights";
 import { BalanceCard } from "../components/BalanceCard";
 import { BalanceCarousel } from "../components/BalanceCarousel";
-import { getHomeBalance, getHomeWalletCards } from "../lib/wallets/home-balance-data";
+import { SwitchSpaceButton } from "../components/SwitchSpaceButton";
+import { getHomeBalance, getHomeSpaceNotice, getHomeWalletCards } from "../lib/wallets/home-balance-data";
 import { IntelligenceCard } from "../components/IntelligenceCard";
 import { OnboardingCard } from "../components/OnboardingCard";
 import { OnboardingJourneyCard } from "../components/OnboardingJourneyCard";
@@ -74,6 +75,10 @@ export default async function HomePage() {
     intelligenceEnabled ? getIntelligenceInsights() : Promise.resolve(null),
     getHomeWalletCards(),
   ]);
+
+  // Wallets live in a Space. If this one has none but another does, say so
+  // (and offer the switch) rather than quietly showing the old single card.
+  const spaceNotice = walletCards ? null : await getHomeSpaceNotice();
 
   // Release 3 first-run surfaces (ADR 0012), dark unless
   // ONBOARDING_JOURNEY_ENABLED. Exactly one shows at a time, in journey
@@ -156,6 +161,19 @@ export default async function HomePage() {
       )}
 
       <div className={`lg:col-start-1 ${mainColumnSpan}`}>
+        {spaceNotice && (
+          <div className="mb-3 flex flex-col gap-2 rounded-card border border-border-subtle bg-surface p-4">
+            <p className="text-sm text-text-primary">
+              You&apos;re in {spaceNotice.activeName ?? "this Space"}, which has no wallets.
+              {" "}Your wallets are in {spaceNotice.others.map((o) => o.name).join(", ")}.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {spaceNotice.others.slice(0, 3).map((o) => (
+                <SwitchSpaceButton key={o.id} workspaceId={o.id} name={o.name} />
+              ))}
+            </div>
+          </div>
+        )}
         {walletCards
           ? <BalanceCarousel cards={walletCards} />
           : (
