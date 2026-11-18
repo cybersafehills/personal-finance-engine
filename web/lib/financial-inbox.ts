@@ -10,6 +10,8 @@ import {
   getSpaceDuplicateReview,
 } from "./queries";
 import { kigaliDateKey } from "./kigali-time";
+import { assessSilence } from "./silence";
+import { supabaseSession } from "./supabase-session-server";
 import { monthPeriodFor } from "./budget-period";
 import { isPaymentIntentSurfaceEnabled } from "./pay/gate";
 import { getReconciliationQueue } from "./pay/intents";
@@ -27,6 +29,36 @@ import {
 } from "./financial-inbox-model";
 
 const CONNECTOR_SETUP_GRACE_MS = 24 * 60 * 60 * 1000;
+const ARRIVAL_LOOKBACK_DAYS = 60;
+const ARRIVAL_READ_LIMIT = 2000;
+
+/** Ingestion times of recent transactions per financial source: the rhythm of each phone. */
+async function getArrivalsBySource(sourceIds: string[]): Promise<Map<string, string[]>> {
+  const bySource = new Map<string, string[]>();
+  if (sourceIds.length === 0) return bySource;
+  const supabase = await supabaseSession();
+  const since = new Date(Date.now() - ARRIVAL_LOOKBACK_DAYS * 86_400_000).toISOString();
+  const { data, error } = await supabase
+    .from("transactions")
+    .select("financial_source_id, created_at")
+    .in("financial_source_id", sourceIds)
+    .gte("created_at", since)
+    .order("created_at", { ascending: false })
+    .limit(ARRIVAL_READ_LIMIT);
+  if (error) {
+    // Without the rhythm the check falls back to its plain 48h minimum.
+    console.error("getArrivalsBySource failed:", error.message);
+    return bySource;
+  }
+  for (const r of data ?? []) {
+    const id = r.financial_source_id as string | null;
+    if (!id) continue;
+    const list = bySource.get(id) ?? [];
+    list.push(r.created_at as string);
+    bySource.set(id, list);
+  }
+  return bySource;
+}
 
 function amountLabel(amountMinor: number, currency = "RWF"): string {
   return `${new Intl.NumberFormat("en-RW").format(amountMinor)} ${currency}`;
@@ -225,7 +257,46 @@ export async function getFinancialInbox(): Promise<FinancialInbox> {
   }
 
   const now = Date.now();
+
+  // A phone that has stopped sending means missing transactions, and nothing
+  // else flags it (the connector status only changes on errors). Judged against
+  // each wallet's own rhythm (lib/silence.ts), phones only, once per installation.
+  const phoneInstallations = installations.filter((i) =>
+    i.canManage && i.authMode === "device_secret" &&
+    (i.status === "healthy" || i.status === "setup" || i.status === "testing")
+  );
+  const arrivals = await getArrivalsBySource(
+    phoneInstallations.flatMap((i) => i.sources.map((src) => src.id)),
+  );
+  const flaggedQuiet = new Set<string>();
+  for (const installation of phoneInstallations) {
+    const lastSeen = [
+      installation.lastSuccessAt,
+      ...installation.credentials.filter((c) => c.status === "active").map((c) => c.lastUsedAt),
+    ].filter((v): v is string => v !== null).sort().pop() ?? null;
+    const res = assessSilence({
+      lastSeenIso: lastSeen,
+      arrivalsIso: installation.sources.flatMap((src) => arrivals.get(src.id) ?? []),
+      nowMs: now,
+    });
+    if (!res.quiet || res.silentHours === null) continue;
+    const days = Math.floor(res.silentHours / 24);
+    flaggedQuiet.add(installation.id);
+    items.push({
+      id: `connector-quiet:${installation.id}`,
+      kind: "connector_health",
+      priority: "high",
+      title: `${installation.displayName} hasn't sent anything for ${days} day${days === 1 ? "" : "s"}`,
+      description:
+        "Transactions from this wallet may be missing until the phone sends again. Open the OneLedger shortcut on that phone, or reconnect it.",
+      href: "/integrations/connections",
+      actionableSince: lastSeen,
+      affectedCount: 1,
+    });
+  }
+
   for (const installation of installations) {
+    if (flaggedQuiet.has(installation.id)) continue;
     if (!installation.canManage || installation.status === "revoked") continue;
     const waitingForFirstSuccess =
       (installation.status === "setup" || installation.status === "testing") &&
