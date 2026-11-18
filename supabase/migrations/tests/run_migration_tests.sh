@@ -1168,6 +1168,24 @@ bootstrap_db "pfe_k"
 # directory" - migrations after the backfill one (e.g. Phase C) exist now
 # and must NOT be applied yet at this point in the test; this test is
 # specifically isolating the backfill migration's own behavior.
+# Two migration files must never share a version (the 14-digit prefix).
+# `supabase db push` keys on the version: with a duplicate it applies ONE file and
+# silently never runs the other, while this harness (which applies every file in
+# name order) stays green. That happened with 20270104000000, which is now
+# allowlisted because production already recorded it; see
+# 20270106000000_counterparty_update_keeps_self_kind.sql. Do not add to the list.
+DUP_VERSIONS="$(ls "$MIGRATIONS_DIR" | grep -E '^[0-9]{14}_.*\.sql$' | cut -c1-14 | sort | uniq -d | grep -vx '20270104000000' || true)"
+if [ -z "$DUP_VERSIONS" ]; then
+  pass "migration versions are unique (the one historic duplicate, 20270104000000, is allowlisted)"
+else
+  fail "duplicate migration version(s): $(echo $DUP_VERSIONS) - supabase db push applies only one file per version"
+fi
+if [ "$(ls "$MIGRATIONS_DIR" | grep -c '^20270104000000_.*\.sql$')" = "2" ]; then
+  pass "the allowlisted duplicate is still exactly the two known files (no third file joined it)"
+else
+  fail "the allowlisted version 20270104000000 no longer has exactly two files - update the allowlist deliberately"
+fi
+
 ALL_MIGRATIONS=("$MIGRATIONS_DIR"/*.sql)
 BACKFILL_MIGRATION_NAME="20260821000100_phase_b_ownership_backfill_and_constraints.sql"
 LAST_MIGRATION=""
@@ -8730,6 +8748,18 @@ if as_user "$R_MEMBER_USER" "select public.update_counterparty('$S4V_VIS', 'Vis 
 else
   fail "S4 visibility: a member could not correct a visible counterparty - write guard over-blocking"
 fi
+
+# 'self' (own account, #283) and the visibility guard must coexist
+# (20270106000000): a member may mark a counterparty they can see as their own
+# account, and still may not touch one they cannot see.
+s4v_refused "marking a hidden counterparty as 'self'" "counterparty_not_found" "$R_MEMBER_USER" "select public.update_counterparty('$S4V_PRIV1', 'Mine', 'self');"
+if as_user "$R_MEMBER_USER" "select public.update_counterparty('$S4V_VIS', 'Vis Vendor (renamed)', 'self');" >/dev/null 2>&1 \
+   && [ "$(psql -d pfe_rls -t -A -c "select kind from public.counterparties where id = '$S4V_VIS';")" = "self" ]; then
+  pass "S4 visibility: a member can mark a counterparty they can see as their own account (self kind and visibility guard coexist)"
+else
+  fail "S4 visibility: the self kind was refused on a visible counterparty - the visibility migration dropped it"
+fi
+as_user "$R_MEMBER_USER" "select public.update_counterparty('$S4V_VIS', 'Vis Vendor (renamed)', 'merchant');" >/dev/null
 
 # --- merges and visibility: a survivor is visible through its parts ----------
 S4V_EV1="$(as_user "$USER_A" "select public.merge_counterparties('$S4V_PRIV1', array['$S4V_VIS']::uuid[]);" | tail -1)"
