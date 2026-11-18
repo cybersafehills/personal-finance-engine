@@ -154,3 +154,19 @@ export function totalsByCurrency(
     .map((t) => ({ ...t, allConfirmed: t.counted > 0 && t.allConfirmed }))
     .sort((a, b) => a.currency.localeCompare(b.currency));
 }
+
+/**
+ * One plain sentence on how a wallet's balance stays current - so "No balance
+ * yet" always comes with the way out. basis: where the figure came from.
+ */
+export function updateHint(
+  basis: "provider_reported" | "manual" | null,
+  hasBalance: boolean,
+): string {
+  if (!hasBalance) {
+    return "To get a balance here: connect this wallet's phone so its messages arrive, import a statement, or enter the balance you see.";
+  }
+  return basis === "manual"
+    ? "You entered this balance. Check your provider and enter it again whenever you like to keep it fresh."
+    : "Updates by itself each time this wallet's phone sends a new message.";
+}

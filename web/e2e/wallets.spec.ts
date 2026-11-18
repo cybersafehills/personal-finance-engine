@@ -28,6 +28,22 @@ test("every wallet shows a balance label and what it means", async ({ page }) =>
     .toBeVisible();
 });
 
+test("Wallets explains itself, says how each balance stays current, and offers to add a wallet", async ({ page }) => {
+  await page.goto("/wallets");
+  await page.getByText("What are wallets for?").click();
+  await expect(page.getByText(/never blended into one number/)).toBeVisible();
+  // Every wallet says how its balance gets (or stays) current.
+  await expect(
+    firstWallet(page).getByText(
+      /Updates by itself|You entered this balance|To get a balance here/,
+    ),
+  ).toBeVisible();
+  // Adding is inline: the form opens, and an empty name cannot be submitted.
+  await page.getByRole("button", { name: "Add a wallet" }).click();
+  await expect(page.getByLabel("Name")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add wallet" })).toBeDisabled();
+});
+
 test("an invalid balance is refused with a reason and nothing is saved", async ({ page }) => {
   await page.goto("/wallets");
   const wallet = firstWallet(page);

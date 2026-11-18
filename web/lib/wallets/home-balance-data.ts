@@ -6,7 +6,11 @@ import { isOneLedger3FlagEnabled } from "../oneledger3-flags";
 import { combineHomeBalance, type HomeBalance } from "./home-balance";
 import { formatMoney } from "../insights/insights-facts";
 import { type HomeWalletCard, orderForHome } from "./home-wallets";
-import { loadWallets } from "./wallets-data";
+import {
+  loadWallets,
+  loadWalletSpaces,
+  type WalletSpaces,
+} from "./wallets-data";
 import { PROVIDER_LABEL, STATUS_LABEL } from "./wallets-display";
 
 // The balance Home and the cash-flow forecast both start from. With the
@@ -83,6 +87,35 @@ export const getHomeWalletCards: () => Promise<HomeWalletCard[] | null> = cache(
     } catch (e) {
       console.error(
         "getHomeWalletCards failed:",
+        e instanceof Error ? e.message : "unknown",
+      );
+      return null;
+    }
+  },
+);
+
+/**
+ * Set when the active Space has no wallets but another Space you belong to does:
+ * Home then says where they are and offers the switch, instead of quietly
+ * showing a different Space's numbers. null = nothing to say.
+ */
+export const getHomeSpaceNotice: () => Promise<WalletSpaces | null> = cache(
+  async () => {
+    const workspaceId = await getActiveWorkspaceId();
+    if (
+      !workspaceId ||
+      !isOneLedger3FlagEnabled(process.env, "BALANCE_PROVENANCE", workspaceId)
+    ) {
+      return null;
+    }
+    try {
+      const supabase = await supabaseSession();
+      if ((await loadWallets(supabase, workspaceId)).length > 0) return null;
+      const spaces = await loadWalletSpaces(supabase, workspaceId);
+      return spaces.others.length > 0 ? spaces : null;
+    } catch (e) {
+      console.error(
+        "getHomeSpaceNotice failed:",
         e instanceof Error ? e.message : "unknown",
       );
       return null;

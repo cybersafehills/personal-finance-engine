@@ -122,3 +122,56 @@ export async function loadEnteredBalances(
     note: (o.note as string | null) ?? null,
   }));
 }
+
+export type WalletSpaces = {
+  activeName: string | null;
+  /** Other Spaces the caller belongs to that DO have wallets, most first. */
+  others: { id: string; name: string; count: number }[];
+};
+
+/**
+ * Which Spaces hold wallets. Wallets are per Space, but you can belong to
+ * several (Personal, a household, ...). When the active Space has none, this
+ * says where they are so the page can offer a switch instead of a dead end.
+ * Reads through RLS (every Space the caller is a member of).
+ */
+export async function loadWalletSpaces(
+  supabase: Session,
+  activeWorkspaceId: string,
+): Promise<WalletSpaces> {
+  const [accounts, active] = await Promise.all([
+    supabase
+      .from("accounts")
+      .select("workspace_id, workspaces(name)")
+      .is("archived_at", null),
+    supabase.from("workspaces").select("name").eq("id", activeWorkspaceId)
+      .maybeSingle(),
+  ]);
+  const activeName = typeof active.data?.name === "string"
+    ? active.data.name
+    : null;
+  if (accounts.error) return { activeName, others: [] };
+
+  const counts = new Map<string, { name: string; count: number }>();
+  for (
+    const row of (accounts.data ?? []) as unknown as {
+      workspace_id: string;
+      workspaces: { name: string } | { name: string }[] | null;
+    }[]
+  ) {
+    if (row.workspace_id === activeWorkspaceId) continue;
+    const ws = Array.isArray(row.workspaces)
+      ? row.workspaces[0]
+      : row.workspaces;
+    const entry = counts.get(row.workspace_id) ??
+      { name: ws?.name ?? "Another Space", count: 0 };
+    entry.count++;
+    counts.set(row.workspace_id, entry);
+  }
+  return {
+    activeName,
+    others: [...counts.entries()]
+      .map(([id, v]) => ({ id, name: v.name, count: v.count }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
+  };
+}

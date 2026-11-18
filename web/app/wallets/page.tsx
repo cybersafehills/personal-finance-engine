@@ -4,7 +4,10 @@ import { Badge } from "../../components/Badge";
 import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
 import { InsightAmount } from "../../components/insights/InsightAmount";
+import { AddWalletForm } from "../../components/wallets/AddWalletForm";
+import { MakeDefaultButton } from "../../components/wallets/MakeDefaultButton";
 import { RecordBalanceForm } from "../../components/wallets/RecordBalanceForm";
+import { SwitchSpaceButton } from "../../components/SwitchSpaceButton";
 import { formatZonedDateTime } from "../../lib/format";
 import { formatMoney, hasKnownScale } from "../../lib/insights/insights-facts";
 import { isSupportedCurrency, minorUnitsPerMajor } from "../../lib/money";
@@ -15,6 +18,7 @@ import { isValidReportTimezone } from "../../lib/timezones";
 import {
   type EnteredBalance,
   loadEnteredBalances,
+  loadWalletSpaces,
   loadWallets,
   type WalletRow,
 } from "../../lib/wallets/wallets-data";
@@ -25,6 +29,7 @@ import {
   STATUS_MEANING,
   STATUS_VARIANT,
   totalsByCurrency,
+  updateHint,
 } from "../../lib/wallets/wallets-display";
 
 export const dynamic = "force-dynamic";
@@ -55,7 +60,7 @@ function WalletCard({
           </h2>
           <p className="text-xs text-text-muted">
             {PROVIDER_LABEL[w.provider] ?? "Other"} · {w.currency}
-            {w.isPrimary ? " · Primary" : ""}
+            {w.isPrimary ? " · Default on Home" : ""}
           </p>
         </div>
         <Badge variant={STATUS_VARIANT[b.status]}>{STATUS_LABEL[b.status]}</Badge>
@@ -74,6 +79,9 @@ function WalletCard({
         </p>
         <p className="mt-1 text-sm text-text-secondary">
           {STATUS_MEANING[b.status]}
+        </p>
+        <p className="mt-1 text-xs text-text-muted">
+          {updateHint(b.basis, b.amountMinor !== null)}
         </p>
         {b.asOf && (
           <p className="mt-1 text-xs text-text-muted">
@@ -147,6 +155,7 @@ function WalletCard({
             Insights<span className="sr-only">{" "}for {w.name}</span>
           </Link>
         )}
+        {!w.isPrimary && <MakeDefaultButton accountId={w.id} walletName={w.name} />}
         <Link href={`/settings/accounts/${w.id}`} className={link}>
           Wallet details<span className="sr-only">{" "}for {w.name}</span>
         </Link>
@@ -223,11 +232,17 @@ export default async function WalletsPage() {
     enteredByAccount.set(o.accountId, list);
   }
 
+  // Wallets belong to a Space. If this Space has none but another of yours does,
+  // say so and offer the switch - not a dead end.
+  const spaces = wallets.length === 0
+    ? await loadWalletSpaces(supabase, workspaceId)
+    : null;
+
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
         title="Wallets"
-        subtitle="What OneLedger knows about each balance, and how sure it is"
+        subtitle="Each account's own balance, how sure OneLedger is about it, and how it stays up to date"
         action={
           <Link href="/settings/accounts" className={link}>
             Manage accounts
@@ -235,18 +250,55 @@ export default async function WalletsPage() {
         }
       />
 
+      <details className={card}>
+        <summary className="cursor-pointer text-sm font-semibold text-text-primary">
+          What are wallets for?
+        </summary>
+        <ul className="mt-2 flex list-disc flex-col gap-1.5 pl-5 text-sm text-text-secondary">
+          <li>
+            <strong>Keep accounts separate.</strong>{" "}
+            MTN, a bank and cash are different accounts with their own balance, so they are never
+            blended into one number.
+          </li>
+          <li>
+            <strong>Know how sure each figure is.</strong>{" "}
+            “Confirmed” is what your provider last told us; anything else says it is estimated or out of date.
+          </li>
+          <li>
+            <strong>Choose what Home shows.</strong>{" "}
+            Make any wallet your default and it is the first card on Home and the one the forecast follows.
+          </li>
+          <li>
+            <strong>Spot gaps early.</strong>{" "}
+            A wallet with no balance, or whose phone has gone quiet, tells you what to do next.
+          </li>
+        </ul>
+      </details>
+
       {wallets.length === 0
         ? (
-          <EmptyState
-            variant="setup"
-            title="No wallets yet"
-            description="Add an account to see its balance here."
-            action={
-              <Link href="/settings/accounts" className={link}>
-                Add an account
-              </Link>
-            }
-          />
+          <>
+            <EmptyState
+              variant="setup"
+              title={spaces?.activeName ? `No wallets in ${spaces.activeName} yet` : "No wallets yet"}
+              description={spaces && spaces.others.length > 0
+                ? "Your wallets are in another Space. Switch to it, or add one here."
+                : "Add the accounts you use, such as MTN Mobile Money, a bank account or cash."}
+            />
+            {spaces && spaces.others.length > 0 && (
+              <div className={`${card} flex flex-col gap-2`}>
+                <p className="text-sm text-text-secondary">
+                  You have wallets in:
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {spaces.others.map((o) => (
+                    <SwitchSpaceButton key={o.id} workspaceId={o.id} name={`${o.name} (${o.count})`} />
+                  ))}
+                </div>
+              </div>
+            )}
+            <AddWalletForm defaultOpen={!spaces || spaces.others.length === 0} />
+          </>
         )
         : (
           <>
@@ -296,6 +348,8 @@ export default async function WalletsPage() {
                 insightsEnabled={insightsEnabled}
               />
             ))}
+
+            <AddWalletForm />
 
             <p className="text-xs text-text-muted">
               OneLedger never asks your provider for a balance. “Confirmed”

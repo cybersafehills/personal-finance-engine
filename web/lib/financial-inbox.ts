@@ -281,12 +281,17 @@ export async function getFinancialInbox(): Promise<FinancialInbox> {
     });
     if (!res.quiet || res.silentHours === null) continue;
     const days = Math.floor(res.silentHours / 24);
+    // "My Phone" says nothing; the wallet it feeds says which money is affected.
+    const walletNames = [
+      ...new Set(installation.sources.flatMap((src) => src.accounts.map((a) => a.name))),
+    ];
+    const label = walletNames.length > 0 ? walletNames.join(" and ") : installation.displayName;
     flaggedQuiet.add(installation.id);
     items.push({
       id: `connector-quiet:${installation.id}`,
       kind: "connector_health",
       priority: "high",
-      title: `${installation.displayName} hasn't sent anything for ${days} day${days === 1 ? "" : "s"}`,
+      title: `${label} hasn't sent anything for ${days} day${days === 1 ? "" : "s"}`,
       description:
         "Transactions from this wallet may be missing until the phone sends again. Open the OneLedger shortcut on that phone, or reconnect it.",
       href: "/integrations/connections",

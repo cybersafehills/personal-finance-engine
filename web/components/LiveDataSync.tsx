@@ -141,7 +141,7 @@ export function LiveDataSync({ workspaceId }: { workspaceId: string | null }) {
     <div
       data-live-status
       aria-hidden="true"
-      className="pointer-events-none fixed left-1/2 top-1 z-20 -translate-x-1/2 lg:left-auto lg:right-4 lg:top-16 lg:translate-x-0"
+      className="pointer-events-none fixed left-[4.5rem] top-1 z-20 sm:left-1/2 sm:-translate-x-1/2 lg:left-auto lg:right-4 lg:top-16 lg:translate-x-0"
     >
       <span className="flex items-center gap-1.5 rounded-full border border-border-subtle bg-surface/90 px-2 py-0.5 text-[11px] font-medium text-text-secondary shadow-sm backdrop-blur">
         <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
