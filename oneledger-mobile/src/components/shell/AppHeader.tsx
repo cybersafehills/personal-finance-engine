@@ -4,7 +4,7 @@ import { useCallback, useState } from "react";
 import { Image, Modal, Pressable, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { Button, Text } from "@/components/ds";
+import { Text } from "@/components/ds";
 import { useSession } from "@/features/auth/SessionProvider";
 import { useActiveSpace } from "@/features/spaces/ActiveSpaceProvider";
 import { kindLabel } from "@/features/spaces/spaces";
@@ -17,7 +17,7 @@ import {
 } from "@/features/shell/badge";
 import { getReviewQueueCount } from "@/features/transactions/queries";
 import { useQuery } from "@/hooks/useQuery";
-import { colors, MIN_TOUCH_TARGET, radii, space } from "@/theme/tokens";
+import { colors, CONTROL_HEIGHT, hitSlopFor, radii, space } from "@/theme/tokens";
 
 // The signed-in header, as on the web: brand mark left; Inbox (with a count
 // badge), Statements and the profile menu right. Shown on the tab roots.
@@ -105,6 +105,7 @@ function IconButton({
       accessibilityRole="button"
       accessibilityLabel={label}
       onPress={onPress}
+      hitSlop={hitSlopFor(CONTROL_HEIGHT.md)}
       style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
     >
       <Feather name={icon} size={20} color={colors.textSecondary} />
@@ -171,15 +172,16 @@ function ProfileMenu({ visible, onClose }: { visible: boolean; onClose(): void }
               })}
             </View>
           ) : null}
-          <View style={styles.menuActions}>
-            <Button label="Space & members" variant="secondary" fullWidth onPress={() => go("/space-members")} />
-            <Button label="Create a Space" variant="secondary" fullWidth onPress={() => go("/create-space")} />
-            <Button label="Notifications" variant="secondary" fullWidth onPress={() => go("/notifications")} />
-            <Button label="App lock" variant="secondary" fullWidth onPress={() => go("/security")} />
-            <Button
+          <View style={styles.group}>
+            <MenuRow icon="users" label="Space & members" onPress={() => go("/space-members")} />
+            <MenuRow icon="plus-circle" label="Create a Space" onPress={() => go("/create-space")} />
+            <MenuRow icon="bell" label="Notifications" onPress={() => go("/notifications")} />
+            <MenuRow icon="lock" label="App lock" onPress={() => go("/security")} />
+            <MenuRow
+              icon="log-out"
               label="Sign out"
-              variant="ghost"
-              fullWidth
+              destructive
+              last
               onPress={() => {
                 onClose();
                 void signOut();
@@ -192,6 +194,36 @@ function ProfileMenu({ visible, onClose }: { visible: boolean; onClose(): void }
   );
 }
 
+function MenuRow({
+  icon,
+  label,
+  onPress,
+  destructive = false,
+  last = false,
+}: {
+  icon: React.ComponentProps<typeof Feather>["name"];
+  label: string;
+  onPress(): void;
+  destructive?: boolean;
+  last?: boolean;
+}) {
+  const tone = destructive ? colors.notificationBadge : colors.textSecondary;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onPress}
+      style={({ pressed }) => [styles.menuRow, !last && styles.menuRowDivider, pressed && styles.pressed]}
+    >
+      <Feather name={icon} size={16} color={tone} />
+      <Text variant="bodyStrong" style={[styles.menuLabel, destructive && { color: colors.notificationBadge }]}>
+        {label}
+      </Text>
+      {destructive ? null : <Feather name="chevron-right" size={16} color={colors.textMuted} />}
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   bar: {
     backgroundColor: colors.surface,
@@ -199,7 +231,7 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.borderSubtle,
   },
   row: {
-    minHeight: 52,
+    minHeight: 48,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -208,12 +240,12 @@ const styles = StyleSheet.create({
     maxWidth: 480,
     alignSelf: "center",
   },
-  logoHit: { minHeight: MIN_TOUCH_TARGET, justifyContent: "center", paddingRight: space[3] },
-  logo: { width: 28, height: 28 },
+  logoHit: { minHeight: CONTROL_HEIGHT.md, justifyContent: "center", paddingRight: space[3] },
+  logo: { width: 26, height: 26 },
   actions: { flexDirection: "row", alignItems: "center", gap: space[1] },
   iconButton: {
-    width: MIN_TOUCH_TARGET,
-    height: MIN_TOUCH_TARGET,
+    width: CONTROL_HEIGHT.md,
+    height: CONTROL_HEIGHT.md,
     borderRadius: radii.pill,
     alignItems: "center",
     justifyContent: "center",
@@ -221,8 +253,8 @@ const styles = StyleSheet.create({
   pressed: { backgroundColor: colors.background },
   badge: {
     position: "absolute",
-    top: 4,
-    right: 4,
+    top: 3,
+    right: 3,
     minWidth: 16,
     height: 16,
     paddingHorizontal: 4,
@@ -241,10 +273,26 @@ const styles = StyleSheet.create({
     paddingBottom: space[8],
     gap: space[1],
   },
-  menuActions: { marginTop: space[3], gap: space[2] },
+  group: {
+    marginTop: space[3],
+    borderRadius: radii.control,
+    borderCurve: "continuous",
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderColor: colors.borderSubtle,
+    overflow: "hidden",
+  },
+  menuRow: {
+    minHeight: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space[3],
+    paddingHorizontal: space[3],
+  },
+  menuRowDivider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.borderSubtle },
+  menuLabel: { flex: 1 },
   chip: {
     maxWidth: 120,
-    minHeight: 32,
+    minHeight: CONTROL_HEIGHT.sm,
     justifyContent: "center",
     paddingHorizontal: space[2],
     borderRadius: radii.pill,
@@ -254,7 +302,7 @@ const styles = StyleSheet.create({
   chipText: { fontSize: 12 },
   spaces: { marginTop: space[3], gap: space[1] },
   spaceRow: {
-    minHeight: MIN_TOUCH_TARGET,
+    minHeight: 44,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",

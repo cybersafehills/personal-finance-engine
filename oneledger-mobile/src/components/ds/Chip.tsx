@@ -1,6 +1,6 @@
 import { Pressable, StyleSheet } from "react-native";
 
-import { colors, MIN_TOUCH_TARGET, radii, space } from "@/theme/tokens";
+import { colors, CONTROL_HEIGHT, hitSlopFor, radii, space } from "@/theme/tokens";
 
 import { Text } from "./Text";
 
@@ -23,6 +23,7 @@ export function Chip({
       accessibilityRole="button"
       accessibilityState={{ selected }}
       accessibilityLabel={selected ? `${label}, selected` : label}
+      hitSlop={hitSlopFor(CONTROL_HEIGHT.sm)}
       onPress={onPress}
       style={({ pressed }) => [
         styles.chip,
@@ -39,9 +40,9 @@ export function Chip({
 
 const styles = StyleSheet.create({
   chip: {
-    minHeight: MIN_TOUCH_TARGET,
+    minHeight: CONTROL_HEIGHT.sm,
     justifyContent: "center",
-    paddingHorizontal: space[4],
+    paddingHorizontal: space[3],
     borderRadius: radii.pill,
     borderWidth: 1,
     borderColor: colors.borderStrong,

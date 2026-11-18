@@ -19,7 +19,7 @@ export function ScreenHeader({
   return (
     <View style={styles.row}>
       <View style={styles.titles}>
-        <Text variant="heading" accessibilityRole="header">
+        <Text variant="title" accessibilityRole="header">
           {title}
         </Text>
         {subtitle ? (
@@ -39,7 +39,7 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
     justifyContent: "space-between",
     gap: space[3],
-    marginBottom: space[4],
+    marginBottom: space[2],
   },
   titles: { flex: 1 },
   subtitle: { marginTop: 2, fontFamily: fonts.regular },
