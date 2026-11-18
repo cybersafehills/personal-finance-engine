@@ -825,6 +825,75 @@ test.describe("mobile API", () => {
     }
   });
 
+  test("categorization rules: list, pause and resume, and the refusals", async () => {
+    const admin = adminClient();
+    const { workspaceId } = await ensureWorkspaceAndAccount(admin);
+    const { data: rule, error } = await admin
+      .from("categorization_policies")
+      .insert({
+        workspace_id: workspaceId,
+        name: "E2E Mobile Rule",
+        category: "Food",
+        match_type: "contains",
+        merchant_pattern: "e2e-mobile-rule",
+        normalized_merchant_name: "e2e-mobile-rule",
+        direction: "out",
+        priority: 99999,
+        rule_source: "manual",
+        confidence: 1,
+        is_active: true,
+      })
+      .select("id")
+      .single();
+    if (error || !rule) throw new Error(`could not seed a rule: ${error?.message}`);
+    const ruleId = rule.id as string;
+
+    const api = await playwrightRequest.newContext({ baseURL: BASE_URL });
+    try {
+      const signIn = await api.post("/api/mobile/auth/sign-in", {
+        data: { email: E2E_USER.email, password: E2E_USER.password },
+      });
+      expect(signIn.status()).toBe(200);
+      const headers = { authorization: `Bearer ${(await signIn.json()).access_token}` };
+
+      const list = await (await api.get("/api/mobile/categorization-rules", { headers })).json();
+      expect(list.ok).toBe(true);
+      const item = list.rules.find((r: { id: string }) => r.id === ruleId);
+      expect(item.title).toBe("E2E Mobile Rule");
+      expect(item.summary).toBe('contains "e2e-mobile-rule" · out');
+      expect(item.active).toBe(true);
+      expect(item.originLabel).toBe("Created by you");
+
+      // Pause, then resume: the answer is the rule as it now is, and it really changed.
+      for (const active of [false, true]) {
+        const res = await api.post("/api/mobile/categorization-rules/active", {
+          headers,
+          data: { workspaceId, ruleId, active },
+        });
+        expect(res.status()).toBe(200);
+        expect((await res.json()).rule.active).toBe(active);
+        const { data: stored } = await admin.from("categorization_policies").select("is_active").eq("id", ruleId).single();
+        expect(stored?.is_active).toBe(active);
+      }
+
+      // Refusals: a body that is not a request, a Space they are not in, and a rule
+      // that is not in the named Space. None of them changes anything.
+      const stranger = "00000000-0000-4000-8000-0000000000aa";
+      const post = (data: unknown) =>
+        api.post("/api/mobile/categorization-rules/active", { headers, data: data as Record<string, unknown> });
+      expect((await post({ workspaceId, ruleId, active: "no" })).status()).toBe(422);
+      expect((await post({ workspaceId: stranger, ruleId, active: false })).status()).toBe(404);
+      expect((await post({ workspaceId, ruleId: stranger, active: false })).status()).toBe(404);
+      const { data: still } = await admin.from("categorization_policies").select("is_active").eq("id", ruleId).single();
+      expect(still?.is_active).toBe(true);
+    } finally {
+      await api.dispose();
+      const removed = await admin.from("categorization_policies").delete().eq("id", ruleId);
+      // authenticated has no delete grant, but the service role does; surface a failure.
+      expect(removed.error).toBeNull();
+    }
+  });
+
   test("X-Workspace-Id: a member's Space is echoed, anything else falls back to Personal", async () => {
     const api = await playwrightRequest.newContext({ baseURL: BASE_URL });
     try {
@@ -916,6 +985,10 @@ test.describe("mobile API", () => {
       expect((await api.get("/api/mobile/statements")).status()).toBe(401);
       expect((await api.get("/api/mobile/config")).status()).toBe(401);
       expect((await api.get("/api/mobile/categories")).status()).toBe(401);
+      expect((await api.get("/api/mobile/categorization-rules")).status()).toBe(401);
+      expect(
+        (await api.post("/api/mobile/categorization-rules/active", { data: {} })).status(),
+      ).toBe(401);
       for (const path of ["/api/mobile/bills", "/api/mobile/bills/00000000-0000-4000-8000-000000000000"]) {
         expect((await api.get(path)).status(), path).toBe(401);
       }

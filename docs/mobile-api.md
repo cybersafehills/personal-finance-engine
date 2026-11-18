@@ -363,6 +363,25 @@ Uploading, reviewing, approving and the original file stay on the web.
   and amounts use the currency's own minor digits, so the phone formats nothing.
 - Failed reads are `500`, never an empty list that would read as "no documents".
 
+## `GET /api/mobile/categorization-rules`, `POST /api/mobile/categorization-rules/active`
+
+The rules that automatically categorize transactions in **the Space the app is
+viewing** (the web's Categorization rules page), in the order they are checked.
+Same guard as the others. The app lists them and can **pause or resume** one;
+creating, editing, reordering, applying to history and suggestions stay on the web.
+
+- **List:** `{ rules: [{ id, title, categoryLabel, summary, active, originLabel,
+  scopeLabel, matchedLabel }] }`. `summary` is the web's condition sentence
+  (`lib/categorization/rule-summary.ts`, shared with the web component) with en-US
+  numbers, so the phone formats nothing. Scoped to the active Space explicitly; a
+  failed read is `500`, never an empty list that would read as "no rules".
+- **Pause or resume:** body `{ workspaceId, ruleId, active }`. The Space is named
+  explicitly and never defaults to Personal: a Space the caller is not in is `404`,
+  a rule that is not in the named Space is `404`, a viewer is `403` (RLS only lets
+  a member or above update, and an UPDATE that RLS hides returns no rows and no
+  error, so the changed row is read back rather than trusted). The answer is the
+  rule as it now is. There is no delete: pausing is how a rule is retired.
+
 ## Rollout
 
 1. Deploy web with the route (dark).

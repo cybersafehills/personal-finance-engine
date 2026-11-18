@@ -20,6 +20,7 @@ export default function Categories() {
     <Screen>
       <Button label="Back" variant="ghost" onPress={() => router.back()} />
       <ScreenHeader title="Categories" subtitle="Where your money has gone, all time" />
+      <Button label="Categorization rules" variant="secondary" onPress={() => router.push("/categorization-rules")} />
 
       {loading && !data ? (
         <Text variant="label" color="textMuted">
