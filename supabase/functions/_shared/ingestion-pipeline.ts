@@ -153,6 +153,8 @@ export type PipelineDeps = {
   }) => Promise<void>;
   reconcilePaymentIntents?: (transactionId: string) => Promise<void>;
   sweepBudgetThresholds: (workspaceId: string) => Promise<void>;
+  /** Attach the new transaction to a person/merchant (idempotent, incremental). Best effort. */
+  sortCounterparties?: (workspaceId: string) => Promise<void>;
   touchConnection: (connectionId: string) => Promise<void>;
 };
 
@@ -418,6 +420,12 @@ export async function normalizeInboundMessage(
     "budget_sweep",
     () => deps.sweepBudgetThresholds(resolvedWorkspaceId),
   );
+  if (deps.sortCounterparties) {
+    await bestEffort(
+      "sort_counterparties",
+      () => deps.sortCounterparties!(resolvedWorkspaceId),
+    );
+  }
   await bestEffort(
     "touch_connection",
     () => deps.touchConnection(route.ingestionConnectionId),

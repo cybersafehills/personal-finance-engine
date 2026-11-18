@@ -1,18 +1,42 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { sortTransactionsAction } from "../../app/people/actions";
 
 /**
  * Shown while some transactions aren't yet attached to a person or merchant.
- * "Sort them now" runs the idempotent backfill; safe to press again.
+ * Members get it sorted automatically once when the page opens (the backfill is
+ * idempotent and only adds links - raw labels never change); "Sort them now" is
+ * the retry if that fails. Viewers just see the count.
  */
 export function SortTransactionsBanner({ count, canWrite }: { count: number; canWrite: boolean }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  const autoStarted = useRef(false);
+
+  function run() {
+    setError(null);
+    startTransition(async () => {
+      const res = await sortTransactionsAction();
+      if (!res.ok) setError(res.error);
+      else {
+        setDone(true);
+        router.refresh();
+      }
+    });
+  }
+
+  // Once per visit. Not retried on failure (that would loop); the button is the retry.
+  useEffect(() => {
+    if (canWrite && count > 0 && !autoStarted.current) {
+      autoStarted.current = true;
+      run();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="flex flex-col gap-2 rounded-card border border-border-subtle bg-surface p-4">
@@ -33,19 +57,9 @@ export function SortTransactionsBanner({ count, canWrite }: { count: number; can
               type="button"
               disabled={pending}
               className="min-h-11 rounded-control bg-accent px-4 py-2.5 text-sm font-semibold text-accent-foreground disabled:opacity-60"
-              onClick={() => {
-                setError(null);
-                startTransition(async () => {
-                  const res = await sortTransactionsAction();
-                  if (!res.ok) setError(res.error);
-                  else {
-                    setDone(true);
-                    router.refresh();
-                  }
-                });
-              }}
+              onClick={run}
             >
-              {pending ? "Sorting…" : "Sort them now"}
+              {pending ? "Sorting…" : error ? "Try again" : "Sort them now"}
             </button>
           </div>
         )

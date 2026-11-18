@@ -46,11 +46,12 @@ test.afterAll(async () => {
   await cleanupSeededTransactions(TAG);
 });
 
-test("unsorted transactions are offered for sorting, then search finds them", async ({ page }) => {
+test("unsorted transactions are sorted automatically, then search finds them", async ({ page }) => {
   await page.goto("/people");
   await expect(page.getByRole("heading", { name: "People and merchants" })).toBeVisible();
 
-  // The banner only shows while something is sortable; sorting is idempotent.
+  // Opening the page sorts automatically (members); the button is only the
+  // retry, so click it if it happens to be showing. Sorting is idempotent.
   const sort = page.getByRole("button", { name: "Sort them now" });
   if (await sort.isVisible()) await sort.click();
 
