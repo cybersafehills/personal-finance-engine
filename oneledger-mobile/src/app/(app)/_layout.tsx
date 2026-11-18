@@ -2,6 +2,7 @@ import { Stack } from "expo-router";
 
 import { PushBridge } from "@/features/push/PushBridge";
 import { colors } from "@/theme/tokens";
+import { fonts } from "@/theme/typography";
 
 // Signed-in area: the tab shell, with detail and setup screens pushed on top.
 export default function AppLayout() {
@@ -10,17 +11,30 @@ export default function AppLayout() {
       <PushBridge />
       <Stack
         screenOptions={{
-          headerShown: false,
+          // Pushed screens get a native navigation header: back arrow, title and
+          // the platform's own back gesture. The tab shell and the sheets/modals
+          // below opt out. A screen's title comes from its ScreenHeader.
+          headerShown: true,
+          headerStyle: { backgroundColor: colors.surface },
+          headerShadowVisible: false,
+          headerTintColor: colors.accent,
+          headerTitleStyle: { fontFamily: fonts.semibold, fontSize: 16, color: colors.textPrimary },
+          headerBackButtonDisplayMode: "minimal",
           contentStyle: { backgroundColor: colors.background },
         }}
       >
-        <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="connect" options={{ presentation: "modal" }} />
+        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        {/* Screens whose body has no ScreenHeader get their title here. */}
+        <Stack.Screen name="transaction/[id]" options={{ title: "Transaction" }} />
+        <Stack.Screen name="category/[id]" options={{ title: "Choose a category" }} />
+        <Stack.Screen name="shortcuts" options={{ title: "Record MoMo on iPhone" }} />
+        <Stack.Screen name="connect" options={{ presentation: "modal", headerShown: false }} />
         {/* The Pay button's launcher: a native bottom sheet (grabber, drag to dismiss, two detents). */}
         <Stack.Screen
           name="pay-sheet"
           options={{
             presentation: "formSheet",
+            headerShown: false,
             sheetGrabberVisible: true,
             sheetAllowedDetents: [0.7, 1],
             sheetCornerRadius: 20,

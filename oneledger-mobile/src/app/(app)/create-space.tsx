@@ -54,7 +54,6 @@ export default function CreateSpace() {
 
   return (
     <Screen>
-      <Button label="Cancel" variant="ghost" onPress={() => router.back()} />
       <ScreenHeader title="Create a Space" subtitle="Personal stays yours alone. A shared Space is for working together." />
 
       {kinds.length > 1 ? (

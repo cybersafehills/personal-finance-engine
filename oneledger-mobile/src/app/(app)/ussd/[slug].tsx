@@ -39,12 +39,10 @@ export default function UssdCode() {
     [data],
   );
 
-  const back = <Button label="Back" variant="ghost" onPress={() => router.back()} />;
 
   if (!data) {
     return (
       <Screen>
-        {back}
         {loading ? (
           <Text variant="label" color="textMuted">
             Loading…
@@ -96,7 +94,6 @@ export default function UssdCode() {
 
   return (
     <Screen>
-      {back}
       <ScreenHeader title={code.name} subtitle={code.provider} />
 
       <View style={{ flexDirection: "row", alignItems: "center", gap: space[2], flexWrap: "wrap" }}>

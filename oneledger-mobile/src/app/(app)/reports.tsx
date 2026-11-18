@@ -17,7 +17,6 @@ export default function Reports() {
 
   return (
     <Screen>
-      <Button label="Back" variant="ghost" onPress={() => router.back()} />
       <ScreenHeader title="Reports" subtitle="Your daily financial reports" />
 
       {loading && !data ? (

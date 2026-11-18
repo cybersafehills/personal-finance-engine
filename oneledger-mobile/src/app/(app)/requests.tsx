@@ -19,7 +19,6 @@ export default function Requests() {
 
   return (
     <Screen>
-      <Button label="Back" variant="ghost" onPress={() => router.back()} />
       <ScreenHeader title="Payment requests" subtitle="Ask someone to pay you with a link" />
       <Button label="New request" onPress={() => router.push("/request-new")} fullWidth />
 

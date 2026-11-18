@@ -54,7 +54,6 @@ export default function People() {
 
   return (
     <Screen>
-      <Button label="Back" variant="ghost" onPress={() => router.back()} />
       <ScreenHeader title="People and merchants" subtitle="Who you pay and who pays you" />
 
       <TextField label="Search" value={text} onChangeText={setText} autoCapitalize="none" autoCorrect={false} returnKeyType="search" />

@@ -1,5 +1,5 @@
 import * as Linking from "expo-linking";
-import { router, useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams } from "expo-router";
 import { useCallback, useState } from "react";
 import { Platform, Share, View } from "react-native";
 
@@ -33,14 +33,12 @@ export default function PayReview() {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
 
-  const back = <Button label="Back" variant="ghost" onPress={() => router.back()} />;
 
   const intent = handedOff ?? (data?.ok ? data.intent : null);
 
   if (!intent) {
     return (
       <Screen>
-        {back}
         {loading && !data ? (
           <Text variant="label" color="textMuted">
             Loading…
@@ -107,7 +105,6 @@ export default function PayReview() {
 
   return (
     <Screen>
-      {back}
       <ScreenHeader title={PAY_COPY.reviewTitle} subtitle={PAY_COPY.feeNotice} />
 
       <Card style={{ gap: space[2] }}>

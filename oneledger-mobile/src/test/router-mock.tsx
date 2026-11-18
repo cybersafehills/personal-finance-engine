@@ -3,7 +3,8 @@
 // (via useQuery) to load when shown. Tests set params with setParams() and
 // assert navigation on the exported `router` mocks.
 
-import { useEffect } from "react";
+import { useEffect, type ReactNode } from "react";
+import { Text } from "react-native";
 
 export const router = {
   push: jest.fn(),
@@ -39,3 +40,14 @@ export function useLocalSearchParams() {
 export function useFocusEffect(effect: () => void | (() => void)) {
   useEffect(effect, [effect]);
 }
+
+/**
+ * Stand-in for the navigator's Stack. `Stack.Screen options={{ title }}` is how a
+ * screen sets its native header title; the mock renders the title as text so tests
+ * can still assert which screen they are on.
+ */
+export const Stack = {
+  Screen({ options }: { options?: { title?: string }; children?: ReactNode }) {
+    return options?.title ? <Text accessibilityRole="header">{options.title}</Text> : null;
+  },
+};

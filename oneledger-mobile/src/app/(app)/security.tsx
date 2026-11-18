@@ -1,8 +1,7 @@
-import { router } from "expo-router";
 import { useState } from "react";
 import { Switch, View } from "react-native";
 
-import { Button, Card, Screen, ScreenHeader, Text } from "@/components/ds";
+import { Card, Screen, ScreenHeader, Text } from "@/components/ds";
 import { useLock } from "@/features/lock/LockProvider";
 import { colors, space } from "@/theme/tokens";
 
@@ -27,9 +26,6 @@ export default function Security() {
       <ScreenHeader
         title="Security"
         subtitle="Protect the app on this phone"
-        action={
-          <Button label="Back" variant="ghost" onPress={() => router.back()} />
-        }
       />
 
       <Card style={{ gap: space[3] }}>
@@ -38,8 +34,7 @@ export default function Security() {
             flexDirection: "row",
             alignItems: "center",
             justifyContent: "space-between",
-            gap: space[3],
-          }}
+            gap: space[3] }}
         >
           <View style={{ flex: 1, gap: 2 }}>
             <Text variant="bodyStrong">App lock</Text>

@@ -1,5 +1,5 @@
 import * as Linking from "expo-linking";
-import { router, useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams } from "expo-router";
 import { useCallback, useRef, useState } from "react";
 import { View } from "react-native";
 
@@ -17,12 +17,10 @@ export default function BillScreen() {
   const load = useCallback(() => fetchBill(id), [id]);
   const { data, loading, refresh } = useQuery(load);
 
-  const back = <Button label="Back" variant="ghost" onPress={() => router.back()} />;
 
   if (!data || !data.ok) {
     return (
       <Screen>
-        {back}
         {loading && !data ? (
           <Text variant="label" color="textMuted">
             Loading…
@@ -40,10 +38,10 @@ export default function BillScreen() {
       </Screen>
     );
   }
-  return <BillBody bill={data.bill} back={back} />;
+  return <BillBody bill={data.bill} />;
 }
 
-function BillBody({ bill, back }: { bill: BillDetail; back: React.ReactElement }) {
+function BillBody({ bill }: { bill: BillDetail }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   // A ref, not state: several taps in one instant all see the old state, and each
@@ -75,7 +73,6 @@ function BillBody({ bill, back }: { bill: BillDetail; back: React.ReactElement }
 
   return (
     <Screen>
-      {back}
       <ScreenHeader title={bill.filename} subtitle="Extracted details are the document's claims, not verified data." />
       <View style={{ flexDirection: "row" }}>
         <Badge variant={bill.tone}>{bill.statusLabel}</Badge>

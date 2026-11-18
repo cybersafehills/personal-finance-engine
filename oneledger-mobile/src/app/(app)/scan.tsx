@@ -38,7 +38,6 @@ export default function Scan() {
   const [torch, setTorch] = useState(false);
   const handled = useRef(false);
 
-  const back = <Button label="Back" variant="ghost" onPress={() => router.back()} />;
 
   function scanAgain() {
     handled.current = false;
@@ -69,7 +68,6 @@ export default function Scan() {
   if (!permission) {
     return (
       <Screen>
-        {back}
         <Text variant="label" color="textMuted">
           Checking camera access…
         </Text>
@@ -80,7 +78,6 @@ export default function Scan() {
   if (!permission.granted) {
     return (
       <Screen>
-        {back}
         <ScreenHeader title="Scan to pay" subtitle="Scan a merchant payment QR code." />
         <EmptyState
           variant="setup"
@@ -101,7 +98,6 @@ export default function Scan() {
   if (phase.step === "scanning" || phase.step === "checking") {
     return (
       <Screen>
-        {back}
         <ScreenHeader title="Scan to pay" subtitle="Point your camera at the merchant's payment QR code and hold steady inside the frame." />
         <View
           style={{ height: 320, borderRadius: radii.card, overflow: "hidden", backgroundColor: colors.surface }}
@@ -131,7 +127,6 @@ export default function Scan() {
   if (phase.step === "notice") {
     return (
       <Screen>
-        {back}
         <ScreenHeader title="Scan to pay" />
         <Card style={{ gap: space[3] }}>
           <Text accessibilityRole="alert">{phase.message}</Text>
@@ -179,7 +174,6 @@ function ReviewStep({
   const again = (
     <View style={{ gap: space[2] }}>
       <Button label="Scan again" variant="secondary" onPress={onScanAgain} />
-      <Button label="Back" variant="ghost" onPress={() => router.back()} />
     </View>
   );
 

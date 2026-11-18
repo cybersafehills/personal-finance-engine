@@ -1,5 +1,5 @@
 import * as Linking from "expo-linking";
-import { router, useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams } from "expo-router";
 import { useCallback, useRef, useState } from "react";
 import { View } from "react-native";
 
@@ -13,8 +13,7 @@ import {
   Screen,
   ScreenHeader,
   StatTile,
-  Text,
-} from "@/components/ds";
+  Text } from "@/components/ds";
 import { barFraction, statusDisplay } from "@/features/budgets/display";
 import { countLabel, inRows, shareFraction, signedPercent, toneColor, toneWord } from "@/features/reports/display";
 import type { Report } from "@/features/reports/types";
@@ -43,12 +42,10 @@ export default function ReportDetail() {
   const load = useCallback(() => fetchReport(id), [id]);
   const { data, loading, refresh } = useQuery(load);
 
-  const back = <Button label="Back" variant="ghost" onPress={() => router.back()} />;
 
   if (!data || !data.ok) {
     return (
       <Screen>
-        {back}
         {loading && !data ? (
           <Text variant="label" color="textMuted">
             Loading…
@@ -67,10 +64,10 @@ export default function ReportDetail() {
     );
   }
 
-  return <ReportBody report={data.report} back={back} />;
+  return <ReportBody report={data.report} />;
 }
 
-function ReportBody({ report, back }: { report: Report; back: React.ReactNode }) {
+function ReportBody({ report }: { report: Report }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   // A ref, not the state above: several taps in the same instant all see the
@@ -113,7 +110,6 @@ function ReportBody({ report, back }: { report: Report; back: React.ReactNode })
 
   return (
     <Screen>
-      {back}
       <ScreenHeader title={report.dateLabel} subtitle={`Daily financial report · ${report.timezone}`} />
       <View style={{ flexDirection: "row", gap: space[2], alignItems: "center", flexWrap: "wrap" }}>
         <Badge variant={report.status === "generation_failed" || report.status === "delivery_failed" ? "attention" : "neutral"}>

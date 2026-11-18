@@ -109,7 +109,7 @@ export default function Inbox() {
         }
         ListHeaderComponent={
           <View style={{ paddingTop: space[4], gap: space[3], marginBottom: space[3] }}>
-            <ScreenHeader title="Inbox" subtitle="Everything that needs a decision" />
+            <ScreenHeader title="Inbox" subtitle="Everything that needs a decision" inline />
             <InboxNotifications />
             {items.length > 0 ? (
               <View style={{ flexDirection: "row", gap: space[2] }}>

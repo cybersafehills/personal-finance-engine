@@ -1,5 +1,4 @@
 import * as Linking from "expo-linking";
-import { router } from "expo-router";
 import { useCallback } from "react";
 import { View } from "react-native";
 
@@ -9,8 +8,7 @@ import {
   isReached,
   paceNotes,
   percentComplete,
-  sortGoals,
-} from "@/features/goals/display";
+  sortGoals } from "@/features/goals/display";
 import { getGoals } from "@/features/goals/queries";
 import type { Goal } from "@/features/goals/types";
 import { useQuery } from "@/hooks/useQuery";
@@ -27,7 +25,6 @@ export default function Goals() {
 
   return (
     <Screen>
-      <Button label="Back" variant="ghost" onPress={() => router.back()} />
       <ScreenHeader title="Goals" subtitle="Emergency funds, investing, purchases and debt" />
 
       {loading && !data ? (
