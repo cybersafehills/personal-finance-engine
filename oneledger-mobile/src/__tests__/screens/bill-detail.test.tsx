@@ -1,15 +1,18 @@
-import { render, screen } from "@testing-library/react-native";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react-native";
 
 import BillScreen from "@/app/(app)/bill/[id]";
 import { resetRouterMock } from "@/test/router-mock";
 
 const mockFetch = jest.fn();
+const mockOriginal = jest.fn();
+const mockOpenURL = jest.fn();
 
 jest.mock("expo-router", () => ({
   ...jest.requireActual("@/test/router-mock"),
   useLocalSearchParams: () => ({ id: "b1" }),
 }));
-jest.mock("@/api/mobile-api", () => ({ fetchBill: (id: string) => mockFetch(id) }));
+jest.mock("@/api/mobile-api", () => ({ fetchBill: (id: string) => mockFetch(id), fetchBillOriginal: (id: string) => mockOriginal(id) }));
+jest.mock("expo-linking", () => ({ openURL: (u: string) => mockOpenURL(u) }));
 
 const bill = (over: Record<string, unknown> = {}) => ({
   id: "b1",
@@ -30,6 +33,7 @@ const bill = (over: Record<string, unknown> = {}) => ({
     outOfDate: true,
     findings: [{ id: "f1", severity: "blocking", severityLabel: "Must fix", title: "Total doesn't add up", detail: "Lines sum to 4,000.", suggestedAction: null }],
   },
+  canViewOriginal: true,
   history: [{ id: "e1", label: "Status: stored → queued", byLabel: "The system", whenLabel: "Monday" }],
   ...over,
 });
@@ -37,6 +41,8 @@ const bill = (over: Record<string, unknown> = {}) => ({
 beforeEach(() => {
   resetRouterMock();
   mockFetch.mockReset();
+  mockOriginal.mockReset();
+  mockOpenURL.mockReset();
 });
 
 describe("Bill detail screen", () => {
@@ -66,5 +72,37 @@ describe("Bill detail screen", () => {
     await render(<BillScreen />);
     expect(await screen.findByText("That document wasn't found in this Space.")).toBeTruthy();
     expect(screen.queryByText("Try again")).toBeNull();
+  });
+
+  it("shows the refusal and lets the member try again", async () => {
+    mockFetch.mockResolvedValue({ ok: true, bill: bill() });
+    mockOriginal.mockResolvedValue({ ok: false, reason: "forbidden", message: "You don't have permission to open the original." });
+    await render(<BillScreen />);
+    await fireEvent.press(await screen.findByText("View original"));
+    expect(await screen.findAllByText("You don't have permission to open the original.")).toHaveLength(1);
+    expect(mockOpenURL).not.toHaveBeenCalled();
+    expect(screen.getByText("View original")).toBeTruthy();
+  });
+
+  it("offers no button without the permission", async () => {
+    mockFetch.mockResolvedValue({ ok: true, bill: bill({ canViewOriginal: false }) });
+    await render(<BillScreen />);
+    expect(await screen.findByText(/You don't have permission to open the original/)).toBeTruthy();
+    expect(screen.queryByText("View original")).toBeNull();
+  });
+
+  it("opens the original with a fresh link, once per tap", async () => {
+    mockFetch.mockResolvedValue({ ok: true, bill: bill() });
+    let release: (v: unknown) => void = () => {};
+    mockOriginal.mockReturnValue(new Promise((r) => (release = r)));
+    mockOpenURL.mockResolvedValue(undefined);
+    await render(<BillScreen />);
+    const button = await screen.findByText("View original");
+    void fireEvent.press(button);
+    void fireEvent.press(button);
+    await waitFor(() => expect(mockOriginal).toHaveBeenCalledTimes(1));
+    release({ ok: true, url: "https://files.test/o?t=1" });
+    await waitFor(() => expect(mockOpenURL).toHaveBeenCalledWith("https://files.test/o?t=1"));
+    expect(mockOriginal).toHaveBeenCalledTimes(1);
   });
 });

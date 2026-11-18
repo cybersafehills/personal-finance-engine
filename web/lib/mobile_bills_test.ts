@@ -61,7 +61,7 @@ Deno.test("line items are ordered and formatted", () => {
 });
 
 Deno.test("history: null means no permission, an empty list means no events", () => {
-  const base = { doc: DOC, extraction: null, checks: null };
+  const base = { doc: DOC, extraction: null, checks: null, canViewOriginal: false };
   assertEquals(toMobileBillDetail({ ...base, events: null }).history, null);
   assertEquals(toMobileBillDetail({ ...base, events: [] }).history, []);
   const withEvent = toMobileBillDetail({
@@ -78,6 +78,7 @@ Deno.test("detail carries no raw provider data", () => {
     extraction: null,
     checks: { blockingCount: 1, outOfDate: true, findings: [{ id: "f", severity: "blocking", title: "t", detail: "d", suggested_action: null }] },
     events: null,
+    canViewOriginal: true,
   });
   const text = JSON.stringify(detail);
   assertEquals(text.includes("abc"), false);
@@ -90,4 +91,10 @@ Deno.test("detail carries no raw provider data", () => {
 Deno.test("event label falls back to a readable phrase", () => {
   assertEquals(billEventLabel({ event_type: "some_new_event", previous_state: null, new_state: null }), "some new event");
   assertEquals(formatBytes(5 * 1024 * 1024), "5.0 MB");
+});
+
+Deno.test("detail says whether the original may be opened", () => {
+  const base = { doc: DOC, extraction: null, checks: null, events: null };
+  assertEquals(toMobileBillDetail({ ...base, canViewOriginal: true }).canViewOriginal, true);
+  assertEquals(toMobileBillDetail({ ...base, canViewOriginal: false }).canViewOriginal, false);
 });

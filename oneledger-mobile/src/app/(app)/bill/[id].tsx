@@ -1,8 +1,9 @@
+import * as Linking from "expo-linking";
 import { router, useLocalSearchParams } from "expo-router";
-import { useCallback } from "react";
+import { useCallback, useRef, useState } from "react";
 import { View } from "react-native";
 
-import { fetchBill } from "@/api/mobile-api";
+import { fetchBill, fetchBillOriginal } from "@/api/mobile-api";
 import { Badge, Button, Card, EmptyState, Screen, ScreenHeader, Text } from "@/components/ds";
 import type { BillDetail } from "@/features/bills/types";
 import { useQuery } from "@/hooks/useQuery";
@@ -43,6 +44,35 @@ export default function BillScreen() {
 }
 
 function BillBody({ bill, back }: { bill: BillDetail; back: React.ReactElement }) {
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  // A ref, not state: several taps in one instant all see the old state, and each
+  // ask is audited on the server, so a double tap must be one request.
+  const inFlight = useRef(false);
+
+  async function openOriginal() {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setBusy(true);
+    setMessage(null);
+    try {
+      // Always a fresh link, opened at once; never stored or logged.
+      const result = await fetchBillOriginal(bill.id);
+      if (!result.ok) {
+        setMessage(result.message);
+        return;
+      }
+      try {
+        await Linking.openURL(result.url);
+      } catch {
+        setMessage("Couldn't open the original. Try again.");
+      }
+    } finally {
+      inFlight.current = false;
+      setBusy(false);
+    }
+  }
+
   return (
     <Screen>
       {back}
@@ -57,6 +87,18 @@ function BillBody({ bill, back }: { bill: BillDetail; back: React.ReactElement }
           {`${bill.typeLabel} · ${bill.sizeLabel}${bill.pageCount ? ` · ${bill.pageCount} page${bill.pageCount === 1 ? "" : "s"}` : ""}`}
         </Text>
         <Text variant="caption" color="textMuted">{`Uploaded ${bill.uploadedLabel}`}</Text>
+        {bill.canViewOriginal ? (
+          <Button label="View original" variant="secondary" fullWidth loading={busy} onPress={openOriginal} />
+        ) : (
+          <Text variant="caption" color="textMuted">
+            You don&apos;t have permission to open the original.
+          </Text>
+        )}
+        {message ? (
+          <Text variant="label" color="attention" accessibilityRole="alert">
+            {message}
+          </Text>
+        ) : null}
       </Card>
 
       {bill.extraction === null ? (

@@ -825,6 +825,116 @@ test.describe("mobile API", () => {
     }
   });
 
+  test("bills: the original opens through a fresh signed link, in the right Space only", async () => {
+    const admin = adminClient();
+    const { workspaceId } = await ensureWorkspaceAndAccount(admin);
+    const stamp = Date.now();
+    const key = `${workspaceId}/e2e-mobile-original-${stamp}.pdf`;
+    const checksum = (n: number) => `${stamp.toString(16)}${n}`.padStart(64, "c");
+    const pdf = Buffer.from("%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n");
+    const up = await admin.storage.from("bill-documents").upload(key, pdf, { contentType: "application/pdf" });
+    if (up.error) throw new Error(`could not upload the original: ${up.error.message}`);
+    const { data: doc, error } = await admin
+      .from("bill_documents")
+      .insert({
+        workspace_id: workspaceId,
+        original_filename: "orig.pdf",
+        sanitized_filename: "orig.pdf",
+        storage_key: key,
+        mime_type: "application/pdf",
+        byte_size: pdf.length,
+        checksum_sha256: checksum(1),
+      })
+      .select("id")
+      .single();
+    if (error || !doc) throw new Error(`could not seed a bill document: ${error?.message}`);
+    const billId = doc.id as string;
+    let householdId: string | null = null;
+
+    const api = await playwrightRequest.newContext({ baseURL: BASE_URL });
+    try {
+      const signIn = await api.post("/api/mobile/auth/sign-in", {
+        data: { email: E2E_USER.email, password: E2E_USER.password },
+      });
+      expect(signIn.status()).toBe(200);
+      const headers = { authorization: `Bearer ${(await signIn.json()).access_token}` };
+
+      // The detail says the owner may open it.
+      const detail = await (await api.get(`/api/mobile/bills/${billId}`, { headers })).json();
+      expect(detail.bill.canViewOriginal).toBe(true);
+
+      // A fresh https link to the real bytes.
+      const res = await api.post(`/api/mobile/bills/${billId}/original`, { headers, data: {} });
+      expect(res.status()).toBe(200);
+      const { download } = await res.json();
+      expect(download.url.startsWith("http")).toBe(true);
+      const file = await playwrightRequest.newContext();
+      try {
+        const got = await file.get(download.url);
+        expect(got.status()).toBe(200);
+        expect((await got.body()).subarray(0, 4).toString()).toBe("%PDF");
+      } finally {
+        await file.dispose();
+      }
+
+      // Asking is audited, as on the web.
+      const { data: events } = await admin
+        .from("bill_processing_events")
+        .select("event_type")
+        .eq("bill_document_id", billId)
+        .eq("event_type", "original_downloaded");
+      expect((events ?? []).length).toBeGreaterThanOrEqual(1);
+
+      // Unknown or malformed ids are plain 404s.
+      for (const id of ["00000000-0000-4000-8000-000000000000", "not-a-uuid"]) {
+        const missing = await api.post(`/api/mobile/bills/${id}/original`, { headers, data: {} });
+        expect(missing.status(), id).toBe(404);
+      }
+
+      // A document in ANOTHER Space the user belongs to must not open under Personal.
+      const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      if (url && anon) {
+        const user = createClient(url, anon, {
+          auth: { persistSession: false, autoRefreshToken: false },
+          global: { headers: { Authorization: headers.authorization } },
+        });
+        const { data: hid, error: hErr } = await user.rpc("create_household_workspace", {
+          p_name: "E2E Bills Original Household",
+        });
+        if (hErr || !hid) throw new Error(`could not create a household: ${hErr?.message}`);
+        householdId = hid as string;
+        const { data: hdoc, error: hdocErr } = await admin
+          .from("bill_documents")
+          .insert({
+            workspace_id: householdId,
+            original_filename: "h-orig.pdf",
+            sanitized_filename: "h-orig.pdf",
+            storage_key: `${householdId}/e2e-mobile-original-${stamp}.pdf`,
+            mime_type: "application/pdf",
+            byte_size: 1024,
+            checksum_sha256: checksum(2),
+          })
+          .select("id")
+          .single();
+        if (hdocErr || !hdoc) throw new Error(`could not seed a household bill: ${hdocErr?.message}`);
+        const other = await api.post(`/api/mobile/bills/${hdoc.id}/original`, { headers, data: {} });
+        expect(other.status()).toBe(404);
+        const inHousehold = await api.post(`/api/mobile/bills/${billId}/original`, {
+          headers: { ...headers, "x-workspace-id": householdId },
+          data: {},
+        });
+        expect(inHousehold.status()).toBe(404);
+      }
+    } finally {
+      await api.dispose();
+      await admin.storage.from("bill-documents").remove([key]);
+      const removed = await admin.from("bill_documents").delete().eq("id", billId);
+      if (householdId) await admin.from("workspaces").delete().eq("id", householdId);
+      expect(removed.error).toBeNull();
+    }
+  });
+
   test("categorization rules: list, pause and resume, and the refusals", async () => {
     const admin = adminClient();
     const { workspaceId } = await ensureWorkspaceAndAccount(admin);
@@ -985,6 +1095,9 @@ test.describe("mobile API", () => {
       expect((await api.get("/api/mobile/statements")).status()).toBe(401);
       expect((await api.get("/api/mobile/config")).status()).toBe(401);
       expect((await api.get("/api/mobile/categories")).status()).toBe(401);
+      expect(
+        (await api.post("/api/mobile/bills/00000000-0000-4000-8000-000000000000/original", { data: {} })).status(),
+      ).toBe(401);
       expect((await api.get("/api/mobile/categorization-rules")).status()).toBe(401);
       expect(
         (await api.post("/api/mobile/categorization-rules/active", { data: {} })).status(),

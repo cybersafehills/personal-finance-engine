@@ -1,4 +1,4 @@
-import { parseBillResponse, parseBillsEnabled, parseBillsResponse } from "../parse";
+import { parseBillResponse, parseBillsEnabled, parseBillsResponse, parseOriginalResponse } from "../parse";
 
 const item = (over: Record<string, unknown> = {}) => ({
   id: "b1",
@@ -18,6 +18,7 @@ const detail = (over: Record<string, unknown> = {}) => ({
   extraction: { fields: [{ key: "total", label: "Total", value: "RWF 5,000" }], lineItems: [] },
   checks: { blocking: 1, outOfDate: false, findings: [] },
   history: [],
+  canViewOriginal: true,
   ...over,
 });
 
@@ -78,5 +79,34 @@ describe("parseBillResponse", () => {
 
   it("rejects a malformed document", () => {
     expect(parseBillResponse(200, { ok: true, bill: { id: "b1" } })).toMatchObject({ ok: false, reason: "error" });
+  });
+});
+
+describe("canViewOriginal", () => {
+  it("is true only for an explicit true", () => {
+    const get = (v: unknown) => {
+      const r = parseBillResponse(200, { ok: true, bill: detail({ canViewOriginal: v }) });
+      return r.ok && r.bill.canViewOriginal;
+    };
+    expect(get(true)).toBe(true);
+    expect(get(false)).toBe(false);
+    expect(get("true")).toBe(false);
+    expect(get(undefined)).toBe(false);
+  });
+});
+
+describe("parseOriginalResponse", () => {
+  it("accepts only an https link", () => {
+    expect(parseOriginalResponse(200, { ok: true, download: { url: "https://x.test/f?t=1" } })).toEqual({ ok: true, url: "https://x.test/f?t=1" });
+    expect(parseOriginalResponse(200, { ok: true, download: { url: "http://x.test/f" } })).toMatchObject({ ok: false, reason: "error" });
+    expect(parseOriginalResponse(200, { ok: true, download: null })).toMatchObject({ ok: false, reason: "error" });
+  });
+
+  it("tells a permission refusal from a missing document", () => {
+    expect(parseOriginalResponse(403, { ok: false, error: "forbidden" })).toMatchObject({ ok: false, reason: "forbidden" });
+    expect(parseOriginalResponse(403, { ok: false, error: "mfa_required" })).toMatchObject({ ok: false, reason: "mfa_required" });
+    expect(parseOriginalResponse(404, { ok: false })).toMatchObject({ ok: false, reason: "not_found" });
+    expect(parseOriginalResponse(401, null)).toMatchObject({ ok: false, reason: "unauthorized" });
+    expect(parseOriginalResponse(500, null)).toMatchObject({ ok: false, reason: "error" });
   });
 });

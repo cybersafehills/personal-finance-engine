@@ -51,6 +51,8 @@ export type MobileBillBundle = {
   extraction: { fields: BillFieldRow[]; lineItems: BillLineItemInput[] } | null;
   checks: { blockingCount: number; outOfDate: boolean; findings: BillFindingRow[] } | null;
   events: BillEventRow[] | null;
+  /** May this member open the original file? (bill.download_original) */
+  canViewOriginal: boolean;
 };
 
 const SEVERITY_ORDER: Record<string, number> = {
@@ -81,14 +83,21 @@ export async function getMobileBillBundle(
   // The processing history is its own capability; RLS would return an empty
   // list for a member without it, which must read as "no permission", not
   // "no history".
-  const { data: canAudit, error: capError } = await supabase.rpc("has_space_capability", {
-    p_workspace_id: workspaceId,
-    p_capability: "bill.audit.view",
-  });
-  if (capError) throw new Error(`bill capability read failed: ${capError.message}`);
+  const has = async (capability: string): Promise<boolean> => {
+    const { data, error: capError } = await supabase.rpc("has_space_capability", {
+      p_workspace_id: workspaceId,
+      p_capability: capability,
+    });
+    if (capError) throw new Error(`bill capability read failed: ${capError.message}`);
+    return data === true;
+  };
+  const [canAudit, canViewOriginal] = await Promise.all([
+    has("bill.audit.view"),
+    has("bill.download_original"),
+  ]);
 
   let events: BillEventRow[] | null = null;
-  if (canAudit === true) {
+  if (canAudit) {
     const { data, error: eventsError } = await supabase
       .from("bill_processing_events")
       .select("id, actor_type, event_type, previous_state, new_state, outcome, created_at")
@@ -161,5 +170,6 @@ export async function getMobileBillBundle(
     extraction,
     checks,
     events,
+    canViewOriginal,
   };
 }
