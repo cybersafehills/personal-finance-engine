@@ -1068,10 +1068,13 @@ AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_p
 # Offline sync (20270102000000): sync_create_manual_transaction (authorized and
 # idempotent) + sync_transactions_changes (SECURITY INVOKER, RLS). 136 + 2 = 138.
 # sync_set_category (20270103000000). 138 + 1 = 139.
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "139" ]; then
-  pass "authenticated holds EXECUTE on exactly the 139 functions expected, no more"
+# Counterparty source visibility (20270105000000): can_view_counterparty, the
+# authorization primitive the four counterparty policies call (read-only,
+# returns a boolean, takes only an id). 139 + 1 = 140.
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "140" ]; then
+  pass "authenticated holds EXECUTE on exactly the 140 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 139 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 140 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -8599,6 +8602,178 @@ if [ "$S4_AUDIT" = "counterparty.merge_undone,counterparty.merged,counterparty.u
   pass "S4: update, merge and undo are each audited"
 else
   fail "S4: audit events wrong: '$S4_AUDIT'"
+fi
+
+
+# ---------------------------------------------------------------------------
+# S4 source visibility (20270105000000_counterparty_source_visibility). In a
+# household a member sees a counterparty only through a transaction they may
+# see; write paths refuse hidden counterparties like missing ones.
+# Fixture: USER_A owns two sources in R_MATRIX_HH - one SHARED into the Space,
+# one PRIVATE - and four people:
+#   VIS   paid from the shared source only
+#   PRIV1 paid from the private source only
+#   BOTH  paid from both (one identity, reachable through a shared source)
+#   PRIV2 paid from the private source only
+# ---------------------------------------------------------------------------
+S4V_SRC_SHARED="$(as_user "$USER_A" "insert into public.financial_sources (owner_user_id, provider, source_type, display_name, currency) values ('$USER_A', 'mtn_momo', 'mobile_money', 'S4V shared wallet', 'RWF') returning id;" | head -1)"
+S4V_SRC_PRIVATE="$(as_user "$USER_A" "insert into public.financial_sources (owner_user_id, provider, source_type, display_name, currency) values ('$USER_A', 'mtn_momo', 'mobile_money', 'S4V private wallet', 'RWF') returning id;" | head -1)"
+as_user "$USER_A" "insert into public.source_space_links (financial_source_id, workspace_id, visibility_mode, created_by) values ('$S4V_SRC_SHARED', '$R_MATRIX_HH', 'share_transactions', '$USER_A');" >/dev/null
+S4V_ACCT_SHARED="00000000-0000-0000-0000-0000000054b1"
+S4V_ACCT_PRIVATE="00000000-0000-0000-0000-0000000054b2"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.accounts (id, workspace_id, name, provider, currency, financial_source_id) values
+    ('$S4V_ACCT_SHARED', '$R_MATRIX_HH', 'S4V shared', 'mtn_momo', 'RWF', '$S4V_SRC_SHARED'),
+    ('$S4V_ACCT_PRIVATE', '$R_MATRIX_HH', 'S4V private', 'mtn_momo', 'RWF', '$S4V_SRC_PRIVATE');
+" >/dev/null
+
+s4v_txn() { # id source account name msisdn
+  psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+    insert into public.transactions
+      (id, source, financial_source_id, account_id, workspace_id, transaction_type, direction, status,
+       amount_rwf, fee_rwf, occurred_at, parser_version, counterparty_name, counterparty_reference,
+       settlement_state, affects_balance, principal_effect_rwf, fee_effect_rwf, effect_reason)
+    values
+      ('$1', 'manual', '$2', '$3', '$R_MATRIX_HH', 'send_money', 'out', 'success',
+       15000, 100, now() - interval '1 hour', 'test', '$4', '$5',
+       'settled', true, -15000, -100, 'settled_outgoing_with_fee');" >/dev/null
+}
+S4V_VIS_MSISDN="250788111001"; S4V_PRIV1_MSISDN="250788222002"; S4V_BOTH_MSISDN="250788333003"; S4V_PRIV2_MSISDN="250788444004"
+s4v_txn 00000000-0000-0000-0000-0000000054c1 "$S4V_SRC_SHARED"  "$S4V_ACCT_SHARED"  "Vis Vendor"   "$S4V_VIS_MSISDN"
+s4v_txn 00000000-0000-0000-0000-0000000054c2 "$S4V_SRC_PRIVATE" "$S4V_ACCT_PRIVATE" "Private One"  "$S4V_PRIV1_MSISDN"
+s4v_txn 00000000-0000-0000-0000-0000000054c3 "$S4V_SRC_SHARED"  "$S4V_ACCT_SHARED"  "Both Sides"   "$S4V_BOTH_MSISDN"
+s4v_txn 00000000-0000-0000-0000-0000000054c4 "$S4V_SRC_PRIVATE" "$S4V_ACCT_PRIVATE" "Both Sides"   "$S4V_BOTH_MSISDN"
+s4v_txn 00000000-0000-0000-0000-0000000054c5 "$S4V_SRC_PRIVATE" "$S4V_ACCT_PRIVATE" "Private Two"  "$S4V_PRIV2_MSISDN"
+as_user "$USER_A" "select public.backfill_counterparties('$R_MATRIX_HH');" >/dev/null
+
+s4v_cp() { psql -d pfe_rls -t -A -c "select counterparty_id from public.counterparty_identifiers where workspace_id = '$R_MATRIX_HH' and normalized_value = '$1';"; }
+S4V_VIS="$(s4v_cp $S4V_VIS_MSISDN)"; S4V_PRIV1="$(s4v_cp $S4V_PRIV1_MSISDN)"; S4V_BOTH="$(s4v_cp $S4V_BOTH_MSISDN)"; S4V_PRIV2="$(s4v_cp $S4V_PRIV2_MSISDN)"
+S4V_IDS="'$S4V_VIS','$S4V_PRIV1','$S4V_BOTH','$S4V_PRIV2'"
+s4v_seen() { # user -> "VIS|PRIV1|BOTH|PRIV2" as 1/0
+  as_user "$1" "select (select count(*) from public.counterparties where id = '$S4V_VIS') || '|' || (select count(*) from public.counterparties where id = '$S4V_PRIV1') || '|' || (select count(*) from public.counterparties where id = '$S4V_BOTH') || '|' || (select count(*) from public.counterparties where id = '$S4V_PRIV2');" | tail -1
+}
+if [ -n "$S4V_VIS" ] && [ -n "$S4V_PRIV1" ] && [ -n "$S4V_BOTH" ] && [ -n "$S4V_PRIV2" ] && [ "$(psql -d pfe_rls -t -A -c "select count(distinct counterparty_id) from public.counterparty_identifiers where normalized_value in ('$S4V_VIS_MSISDN','$S4V_PRIV1_MSISDN','$S4V_BOTH_MSISDN','$S4V_PRIV2_MSISDN');")" = "4" ]; then
+  pass "S4 visibility: fixture resolved to four counterparties (one identity reachable through both sources)"
+else
+  fail "S4 visibility: fixture did not resolve to four counterparties (vis='$S4V_VIS' p1='$S4V_PRIV1' both='$S4V_BOTH' p2='$S4V_PRIV2')"
+fi
+
+S4V_OWN="$(s4v_seen "$USER_A")"
+if [ "$S4V_OWN" = "1|1|1|1" ]; then
+  pass "S4 visibility: the owner of both sources sees all four counterparties (positive control)"
+else
+  fail "S4 visibility: owner sees '$S4V_OWN', want 1|1|1|1 - policy over-blocking"
+fi
+S4V_MEM="$(s4v_seen "$R_MEMBER_USER")"
+if [ "$S4V_MEM" = "1|0|1|0" ]; then
+  pass "S4 visibility: a household member sees counterparties reachable through a shared source, and none that appear only on a private one"
+else
+  fail "S4 visibility: member sees '$S4V_MEM', want 1|0|1|0 - privacy breach"
+fi
+S4V_VWR="$(s4v_seen "$R_VIEWER_USER")"
+if [ "$S4V_VWR" = "1|0|1|0" ]; then
+  pass "S4 visibility: a viewer follows the same visibility as a member"
+else
+  fail "S4 visibility: viewer sees '$S4V_VWR', want 1|0|1|0"
+fi
+
+S4V_MEM_IDENT="$(as_user "$R_MEMBER_USER" "select count(*) from public.counterparty_identifiers where normalized_value in ('$S4V_VIS_MSISDN','$S4V_PRIV1_MSISDN','$S4V_BOTH_MSISDN','$S4V_PRIV2_MSISDN');" | tail -1)"
+S4V_MEM_PRIV_IDENT="$(as_user "$R_MEMBER_USER" "select count(*) from public.counterparty_identifiers where normalized_value in ('$S4V_PRIV1_MSISDN','$S4V_PRIV2_MSISDN');" | tail -1)"
+if [ "$S4V_MEM_IDENT" = "2" ] && [ "$S4V_MEM_PRIV_IDENT" = "0" ]; then
+  pass "S4 visibility: a private source's phone numbers are not readable by other household members"
+else
+  fail "S4 visibility: member reads $S4V_MEM_IDENT identifier(s) of 2 expected, $S4V_MEM_PRIV_IDENT private (want 0) - privacy breach"
+fi
+
+S4V_MEM_SUM="$(as_user "$R_MEMBER_USER" "select count(*) filter (where counterparty_id in ('$S4V_VIS','$S4V_BOTH')) || '|' || count(*) filter (where counterparty_id in ('$S4V_PRIV1','$S4V_PRIV2')) from public.counterparty_summaries_v where workspace_id = '$R_MATRIX_HH';" | tail -1)"
+if [ "$S4V_MEM_SUM" = "2|0" ]; then
+  pass "S4 visibility: the summaries view shows the member only the visible people (amounts and names agree)"
+else
+  fail "S4 visibility: member summary rows visible|private = '$S4V_MEM_SUM', want 2|0"
+fi
+
+# --- write paths: hidden = missing -------------------------------------------
+s4v_refused() { # label expected-error-regex user sql
+  if as_user "$3" "$4" >/dev/null 2>$ARTIFACT_DIR/pfe_s4v.log; then
+    fail "S4 visibility: $1 was accepted"
+  elif grep -qE "$2" $ARTIFACT_DIR/pfe_s4v.log; then
+    pass "S4 visibility: $1 is refused"
+  else
+    fail "S4 visibility: $1 refused with an unexpected error: $(cat $ARTIFACT_DIR/pfe_s4v.log)"
+  fi
+  rm -f $ARTIFACT_DIR/pfe_s4v.log
+}
+s4v_refused "renaming a counterparty the caller cannot see" "counterparty_not_found" "$R_MEMBER_USER" "select public.update_counterparty('$S4V_PRIV1', 'Renamed by member', 'person');"
+s4v_refused "merging a visible counterparty INTO a hidden one" "counterparty_not_found" "$R_MEMBER_USER" "select public.merge_counterparties('$S4V_PRIV1', array['$S4V_VIS']::uuid[]);"
+s4v_refused "merging a hidden counterparty into a visible one" "invalid_merge" "$R_MEMBER_USER" "select public.merge_counterparties('$S4V_VIS', array['$S4V_PRIV1']::uuid[]);"
+s4v_refused "splitting a counterparty the caller cannot see" "counterparty_not_found" "$R_MEMBER_USER" "select public.split_counterparty('$S4V_PRIV1', '{}'::uuid[], array['00000000-0000-0000-0000-0000000054c2']::uuid[], 'x');"
+S4V_UNTOUCHED="$(psql -d pfe_rls -t -A -c "select (select display_name from public.counterparties where id = '$S4V_PRIV1') || '|' || (select count(*) from public.counterparties where id in ('$S4V_VIS','$S4V_PRIV1') and merged_into_id is not null) || '|' || (select count(*) from public.counterparty_split_events where workspace_id = '$R_MATRIX_HH');")"
+if [ "$S4V_UNTOUCHED" = "Private One|0|0" ]; then
+  pass "S4 visibility: the refused attempts changed nothing (name, merge links and split history untouched)"
+else
+  fail "S4 visibility: refused attempts left changes behind: '$S4V_UNTOUCHED'"
+fi
+
+if as_user "$R_MEMBER_USER" "select public.update_counterparty('$S4V_VIS', 'Vis Vendor (renamed)', 'merchant');" >/dev/null 2>&1 \
+   && [ "$(psql -d pfe_rls -t -A -c "select display_name || '|' || kind from public.counterparties where id = '$S4V_VIS';")" = "Vis Vendor (renamed)|merchant" ]; then
+  pass "S4 visibility: a member can still correct a counterparty they can see (positive control)"
+else
+  fail "S4 visibility: a member could not correct a visible counterparty - write guard over-blocking"
+fi
+
+# --- merges and visibility: a survivor is visible through its parts ----------
+S4V_EV1="$(as_user "$USER_A" "select public.merge_counterparties('$S4V_PRIV1', array['$S4V_VIS']::uuid[]);" | tail -1)"
+S4V_AFTER_MERGE="$(s4v_seen "$R_MEMBER_USER")"
+S4V_EV_MEM="$(as_user "$R_MEMBER_USER" "select count(*) from public.counterparty_merge_events where id = '$S4V_EV1';" | tail -1)"
+if [ "$S4V_AFTER_MERGE" = "1|1|1|0" ] && [ "$S4V_EV_MEM" = "1" ]; then
+  pass "S4 visibility: when the owner merges a shared person into a private one, the survivor and the event become visible (one-hop, by design: the member's own transactions now carry that name)"
+else
+  fail "S4 visibility: after merge member sees '$S4V_AFTER_MERGE' (want 1|1|1|0), event rows $S4V_EV_MEM (want 1)"
+fi
+as_user "$USER_A" "select public.undo_counterparty_merge('$S4V_EV1');" >/dev/null
+S4V_AFTER_UNDO="$(s4v_seen "$R_MEMBER_USER")"
+if [ "$S4V_AFTER_UNDO" = "1|0|1|0" ]; then
+  pass "S4 visibility: undoing the merge hides the private survivor again"
+else
+  fail "S4 visibility: after undo member sees '$S4V_AFTER_UNDO', want 1|0|1|0"
+fi
+
+S4V_EV2="$(as_user "$USER_A" "select public.merge_counterparties('$S4V_PRIV1', array['$S4V_PRIV2']::uuid[]);" | tail -1)"
+S4V_EV2_OWNER="$(as_user "$USER_A" "select count(*) from public.counterparty_merge_events where id = '$S4V_EV2';" | tail -1)"
+S4V_EV2_MEM="$(as_user "$R_MEMBER_USER" "select count(*) from public.counterparty_merge_events where id = '$S4V_EV2';" | tail -1)"
+if [ "$S4V_EV2_OWNER" = "1" ] && [ "$S4V_EV2_MEM" = "0" ]; then
+  pass "S4 visibility: a merge event between two private people is visible to the owner and hidden from the member"
+else
+  fail "S4 visibility: merge event rows owner=$S4V_EV2_OWNER (want 1) member=$S4V_EV2_MEM (want 0)"
+fi
+s4v_refused "undoing a merge between counterparties the caller cannot see" "merge_event_not_found" "$R_MEMBER_USER" "select public.undo_counterparty_merge('$S4V_EV2');"
+S4V_STILL_MERGED="$(psql -d pfe_rls -t -A -c "select merged_into_id from public.counterparties where id = '$S4V_PRIV2';")"
+if [ "$S4V_STILL_MERGED" = "$S4V_PRIV1" ]; then
+  pass "S4 visibility: the refused undo left the merge in place"
+else
+  fail "S4 visibility: refused undo changed the merge (merged_into_id='$S4V_STILL_MERGED')"
+fi
+as_user "$USER_A" "select public.undo_counterparty_merge('$S4V_EV2');" >/dev/null
+
+# --- split events follow the same rule -----------------------------------------
+S4V_SPLIT="$(as_user "$USER_A" "select public.split_counterparty('$S4V_BOTH', '{}'::uuid[], array['00000000-0000-0000-0000-0000000054c4']::uuid[], 'Both Sides (private part)');" | tail -1)"
+S4V_SPLIT_OWNER="$(as_user "$USER_A" "select count(*) from public.counterparty_split_events where id = '$S4V_SPLIT';" | tail -1)"
+S4V_SPLIT_MEM="$(as_user "$R_MEMBER_USER" "select count(*) from public.counterparty_split_events where id = '$S4V_SPLIT';" | tail -1)"
+S4V_SPLIT_NEW="$(as_user "$R_MEMBER_USER" "select count(*) from public.counterparties where display_name = 'Both Sides (private part)';" | tail -1)"
+if [ -n "$S4V_SPLIT" ] && [ "$S4V_SPLIT_OWNER" = "1" ] && [ "$S4V_SPLIT_MEM" = "0" ] && [ "$S4V_SPLIT_NEW" = "0" ]; then
+  pass "S4 visibility: splitting off the private part leaves it (and the split event) invisible to the member"
+else
+  fail "S4 visibility: split event owner=$S4V_SPLIT_OWNER (want 1) member=$S4V_SPLIT_MEM (want 0), split-off name visible to member=$S4V_SPLIT_NEW (want 0)"
+fi
+s4v_refused "undoing a split the caller cannot see" "split_event_not_found" "$R_MEMBER_USER" "select public.undo_counterparty_split('$S4V_SPLIT');"
+as_user "$USER_A" "select public.undo_counterparty_split('$S4V_SPLIT');" >/dev/null
+
+# Personal workspaces keep seeing everything (no household rule applies).
+S4V_PERSONAL="$(as_user "$USER_A" "select count(*) from public.counterparties where workspace_id = '$WORKSPACE_A';" | tail -1)"
+if [ "${S4V_PERSONAL:-0}" -ge 1 ] 2>/dev/null; then
+  pass "S4 visibility: a personal workspace owner still sees the workspace's counterparties"
+else
+  fail "S4 visibility: personal workspace owner sees '$S4V_PERSONAL' counterparties - policy over-blocking"
 fi
 
 # ===========================================================================

@@ -78,7 +78,15 @@ insert into tt.overrides values
   ('payment_requests',             'destination_value', $$'250793000439'$$),
   ('payment_requests',             'token_hash',        $$repeat('c', 64)$$),
   ('payment_requests',             'expires_at',        $$now() + interval '1 day'$$),
-  ('counterparty_merge_events',    'merged_ids',        $$array[extensions.gen_random_uuid()]$$),
+  -- counterparty rows are visible only through a REAL counterparty in the tenant's
+  -- workspace (20270105000000): point the child tables at the one the sweep planted
+  -- in public.counterparties (which sorts first). If none exists this falls back to
+  -- a random id and the positive control fails loudly.
+  ('counterparty_identifiers',     'counterparty_id',   $$coalesce((select c.id from public.counterparties c where c.workspace_id = {ws} order by c.id limit 1), extensions.gen_random_uuid())$$),
+  ('counterparty_merge_events',    'survivor_id',       $$coalesce((select c.id from public.counterparties c where c.workspace_id = {ws} order by c.id limit 1), extensions.gen_random_uuid())$$),
+  ('counterparty_merge_events',    'merged_ids',        $$array[coalesce((select c.id from public.counterparties c where c.workspace_id = {ws} order by c.id limit 1), extensions.gen_random_uuid())]$$),
+  ('counterparty_split_events',    'source_id',         $$coalesce((select c.id from public.counterparties c where c.workspace_id = {ws} order by c.id limit 1), extensions.gen_random_uuid())$$),
+  ('counterparty_split_events',    'new_id',            $$coalesce((select c.id from public.counterparties c where c.workspace_id = {ws} order by c.id limit 1), extensions.gen_random_uuid())$$),
   -- balance_observations are visible only through an account the caller may see
   -- (20270104000000), so the planted row must point at a REAL account in the
   -- tenant's workspace. The sweep plants public.accounts first (alphabetical
