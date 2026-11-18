@@ -16,6 +16,7 @@ import { getActiveWorkspaceId } from "../queries";
 import { supabaseSession } from "../supabase-session-server";
 import { isValidReportTimezone } from "../timezones";
 import { linkedTransferIdSet } from "../transfer-exclusion";
+import { ownAccountTransactionIds } from "../own-accounts";
 import {
   buildEffectiveMap,
   type CounterpartyRef,
@@ -154,7 +155,10 @@ async function fetchLinkedIds(
       .order("id", { ascending: true })
       .range(offset, offset + PAGE - 1);
     if (error) throw new Error(`insights transfer links: ${error.message}`);
-    if (!data || data.length === 0) return linkedTransferIdSet(links);
+    if (!data || data.length === 0) {
+      const own = await ownAccountTransactionIds(supabase, workspaceId, { strict: true });
+      return new Set([...linkedTransferIdSet(links), ...own]);
+    }
     links.push(...data);
     if (links.length > MAX_LINK_ROWS) return "too_many_rows";
   }

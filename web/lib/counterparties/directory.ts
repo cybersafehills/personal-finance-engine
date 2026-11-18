@@ -7,23 +7,28 @@ import { formatMoney, isSupportedCurrency } from "../money.ts";
 import { isOneLedger3FlagEnabled } from "../oneledger3-flags.ts";
 import type { MobileCounterparty } from "./mobile.ts";
 
-export type PersonKind = "person" | "merchant" | "unknown";
+export type PersonKind = "person" | "merchant" | "unknown" | "self";
 
 export const KIND_LABEL: Record<PersonKind, string> = {
   person: "Person",
   merchant: "Merchant",
   unknown: "Not sure yet",
+  self: "My account",
 };
 
-export const KIND_FILTERS: readonly { value: PersonKind | null; label: string }[] = [
+export const KIND_FILTERS: readonly {
+  value: PersonKind | null;
+  label: string;
+}[] = [
   { value: null, label: "All" },
   { value: "person", label: "People" },
   { value: "merchant", label: "Merchants" },
   { value: "unknown", label: "Not sure yet" },
+  { value: "self", label: "My accounts" },
 ];
 
 export function isPersonKind(v: unknown): v is PersonKind {
-  return v === "person" || v === "merchant" || v === "unknown";
+  return v === "person" || v === "merchant" || v === "unknown" || v === "self";
 }
 
 /** Same opt-in flag + workspace allowlist as /api/mobile/counterparties. */
@@ -52,12 +57,17 @@ export function confidenceNote(c: string): string | null {
  * An amount in the minor units of `currency`. Unsupported currencies are shown
  * as "CODE 1234" with no decimal guess, never as a wrongly scaled number.
  */
-export function formatMinor(amountMinor: bigint | string, currency: string): string {
+export function formatMinor(
+  amountMinor: bigint | string,
+  currency: string,
+): string {
   const v = typeof amountMinor === "bigint" ? amountMinor : BigInt(amountMinor);
   // RWF has no minor unit and reads "5,000 RWF" everywhere else in the web app
   // (Home, Insights); Intl's own "RF 5,000" would look like a different currency.
   if (currency === "RWF") {
-    return `${v < 0n ? "\u2212" : ""}${(v < 0n ? -v : v).toLocaleString("en-US")} RWF`;
+    return `${v < 0n ? "\u2212" : ""}${
+      (v < 0n ? -v : v).toLocaleString("en-US")
+    } RWF`;
   }
   if (isSupportedCurrency(currency)) return formatMoney(v, currency);
   return `${currency} ${v.toString()}`;
@@ -73,10 +83,16 @@ export function flowParts(
 ): { label: string; amount: string }[] {
   const out: { label: string; amount: string }[] = [];
   if (BigInt(c.sent_minor) > 0n) {
-    out.push({ label: "You sent", amount: formatMinor(c.sent_minor, c.currency) });
+    out.push({
+      label: "You sent",
+      amount: formatMinor(c.sent_minor, c.currency),
+    });
   }
   if (BigInt(c.received_minor) > 0n) {
-    out.push({ label: "You received", amount: formatMinor(c.received_minor, c.currency) });
+    out.push({
+      label: "You received",
+      amount: formatMinor(c.received_minor, c.currency),
+    });
   }
   return out;
 }
@@ -96,7 +112,9 @@ export function friendlyPeopleError(raw: string | null | undefined): string {
   if (/merge_state_changed|split_state_changed/.test(s)) {
     return "Something changed since then. Undo the later change first.";
   }
-  if (/split_would_empty/.test(s)) return "You can't move everything. Rename it instead.";
+  if (/split_would_empty/.test(s)) {
+    return "You can't move everything. Rename it instead.";
+  }
   if (/already_undone/.test(s)) return "That was already undone.";
   if (/invalid_merge|invalid_split|invalid_counterparty/.test(s)) {
     return "That change isn't allowed. Check your choices.";
@@ -116,7 +134,8 @@ export type DirectoryQuery = {
 };
 
 type Raw = Record<string, string | string[] | undefined>;
-const first = (v: string | string[] | undefined): string | undefined => Array.isArray(v) ? v[0] : v;
+const first = (v: string | string[] | undefined): string | undefined =>
+  Array.isArray(v) ? v[0] : v;
 
 /**
  * Lenient URL parsing for a page a person can edit by hand: anything invalid
@@ -125,13 +144,17 @@ const first = (v: string | string[] | undefined): string | undefined => Array.is
  */
 export function parseDirectoryQuery(sp: Raw): DirectoryQuery {
   const rawQ = first(sp.q);
-  const cleaned = rawQ === undefined ? "" : rawQ.replace(/[%_\\,()*]/g, " ").trim().slice(0, 80);
+  const cleaned = rawQ === undefined
+    ? ""
+    : rawQ.replace(/[%_\\,()*]/g, " ").trim().slice(0, 80);
   const kindRaw = first(sp.kind);
   const pageRaw = Number(first(sp.page) ?? 1);
   return {
     q: cleaned === "" ? null : cleaned,
     kind: isPersonKind(kindRaw) ? kindRaw : null,
-    page: Number.isInteger(pageRaw) && pageRaw >= 1 && pageRaw <= 10_000 ? pageRaw : 1,
+    page: Number.isInteger(pageRaw) && pageRaw >= 1 && pageRaw <= 10_000
+      ? pageRaw
+      : 1,
   };
 }
 
@@ -148,4 +171,16 @@ export function directoryHref(q: DirectoryQuery): string {
 /** Page number -> the offset/limit pair the loaders take. */
 export function pageWindow(page: number): { limit: number; offset: number } {
   return { limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE };
+}
+
+/** What marking a name as "my own account" does, in words (shown wherever the choice is offered). */
+export const SELF_EXPLANATION =
+  "Money moving between your own accounts is not income or spending. Marked this way, transactions with this name are left out of your totals, budgets and forecast.";
+
+/**
+ * The mobile app only knows person / merchant / unknown. "My account" is a person
+ * as far as it is concerned, until the app learns the new kind.
+ */
+export function kindForMobile<T extends string | null>(kind: T): T | "person" {
+  return kind === "self" ? "person" : kind;
 }

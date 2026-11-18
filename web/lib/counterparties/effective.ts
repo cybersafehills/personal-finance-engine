@@ -35,7 +35,9 @@ export function resolveCounterparty(
   rawName: string | null,
   map: ReadonlyMap<string, EffectiveCounterparty>,
 ): { counterpartyId: string | null; counterpartyName: string | null } {
-  if (!counterpartyId) return { counterpartyId: null, counterpartyName: rawName };
+  if (!counterpartyId) {
+    return { counterpartyId: null, counterpartyName: rawName };
+  }
   const eff = map.get(counterpartyId);
   return eff
     ? { counterpartyId: eff.id, counterpartyName: eff.displayName }

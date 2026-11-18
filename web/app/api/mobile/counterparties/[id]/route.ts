@@ -1,3 +1,4 @@
+import { kindForMobile } from "../../../../../lib/counterparties/directory";
 import { NextRequest } from "next/server";
 import { MobileApiError, mobileGet, mobileOptions } from "../../../../../lib/mobile-request";
 import { requireFlag, resolveMobileWorkspace } from "../../../../../lib/mobile-workspace";
@@ -37,7 +38,7 @@ export function GET(
     const d = res.detail;
     return {
       workspace_id: workspaceId,
-      counterparty: d.counterparty,
+      counterparty: { ...d.counterparty, kind: kindForMobile(d.counterparty.kind) },
       merged_from: d.mergedFrom,
       total_transactions: d.totalTransactions,
       limit: page.value.limit,

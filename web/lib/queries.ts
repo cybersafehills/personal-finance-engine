@@ -15,6 +15,7 @@ import {
 import { kigaliDateKey, kigaliDayBoundsUtc } from "./kigali-time";
 import { budgetPeriodState } from "./budget-period";
 import { excludeLinkedTransfers, linkedTransferIdSet } from "./transfer-exclusion";
+import { ownAccountTransactionIds } from "./own-accounts";
 import {
   aggregateOutflowsByAllocation,
   ALLOCATION_TYPES,
@@ -141,7 +142,9 @@ export async function getLinkedTransferIds(
     console.error("getLinkedTransferIds failed:", error.message);
     return new Set();
   }
-  return linkedTransferIdSet(data ?? []);
+  // Plus everything with a counterparty marked "my own account".
+  const own = await ownAccountTransactionIds(supabase, null);
+  return new Set([...linkedTransferIdSet(data ?? []), ...own]);
 }
 
 export type TodayTotals = {
@@ -1675,12 +1678,16 @@ export async function getBudgetActuals(
   // Confirmed self-transfers move money between the user's own accounts -
   // never expenditure or income (see the master prompt's own rule, and
   // transfer_links' comment in the Phase E migration).
-  const linkedOutIds = new Set(
-    (transferLinksResult.data ?? []).map((l) => l.out_transaction_id),
-  );
-  const linkedInIds = new Set(
-    (transferLinksResult.data ?? []).map((l) => l.in_transaction_id),
-  );
+  // Transactions with a counterparty marked "my own account" are the same thing.
+  const ownIds = await ownAccountTransactionIds(supabase, budget.workspace_id);
+  const linkedOutIds = new Set([
+    ...(transferLinksResult.data ?? []).map((l) => l.out_transaction_id),
+    ...ownIds,
+  ]);
+  const linkedInIds = new Set([
+    ...(transferLinksResult.data ?? []).map((l) => l.in_transaction_id),
+    ...ownIds,
+  ]);
   const outRows = (outResult.data ?? []).filter((row) =>
     !linkedOutIds.has(row.id)
   );

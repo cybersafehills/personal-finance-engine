@@ -16,6 +16,17 @@ export default function AppLayout() {
       >
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="connect" options={{ presentation: "modal" }} />
+        {/* The Pay button's launcher: a native bottom sheet (grabber, drag to dismiss, two detents). */}
+        <Stack.Screen
+          name="pay-sheet"
+          options={{
+            presentation: "formSheet",
+            sheetGrabberVisible: true,
+            sheetAllowedDetents: [0.7, 1],
+            sheetCornerRadius: 20,
+            contentStyle: { backgroundColor: colors.surface },
+          }}
+        />
       </Stack>
     </>
   );

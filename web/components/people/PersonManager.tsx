@@ -12,7 +12,7 @@ import {
   undoCombineAction,
   undoSeparateAction,
 } from "../../app/people/actions";
-import { KIND_LABEL, type PersonKind } from "../../lib/counterparties/directory";
+import { KIND_LABEL, type PersonKind, SELF_EXPLANATION } from "../../lib/counterparties/directory";
 import { InsightAmount } from "../insights/InsightAmount";
 
 const field =
@@ -229,6 +229,9 @@ export function PersonManager({
                       ))}
                     </select>
                   </label>
+                  {newKind === "self"
+                    ? <p className="text-xs text-text-secondary">{SELF_EXPLANATION}</p>
+                    : null}
                   <div className="flex gap-2">
                     <button type="submit" className={primary} disabled={pending || newName.trim() === ""}>Save</button>
                     <button type="button" className={btn} onClick={close}>Cancel</button>

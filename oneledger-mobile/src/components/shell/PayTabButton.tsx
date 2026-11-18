@@ -16,7 +16,7 @@ export function PayTabButton({ onPress }: { onPress: () => void }) {
         onPress={onPress}
         style={({ pressed }) => [styles.circle, pressed && { opacity: 0.85 }]}
       >
-        <Feather name="send" size={24} color={colors.accentForeground} />
+        <Feather name="send" size={20} color={colors.accentForeground} />
       </Pressable>
       <Text variant="caption" color="textMuted" style={styles.label}>
         Pay
@@ -28,18 +28,14 @@ export function PayTabButton({ onPress }: { onPress: () => void }) {
 const styles = StyleSheet.create({
   slot: { flex: 1, alignItems: "center", justifyContent: "flex-start" },
   circle: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    marginTop: -18,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    marginTop: -14,
     backgroundColor: colors.accent,
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#000",
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 6,
+    boxShadow: "0 2px 8px rgba(51, 80, 158, 0.35)",
   },
-  label: { marginTop: 2 },
+  label: { marginTop: 2, fontSize: 11, lineHeight: 14 },
 });

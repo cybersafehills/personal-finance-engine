@@ -13,7 +13,8 @@ const styles = StyleSheet.create({
     borderColor: colors.borderSubtle,
     borderWidth: StyleSheet.hairlineWidth * 2,
     borderRadius: radii.card,
+    borderCurve: "continuous",
     paddingHorizontal: space[4],
-    paddingVertical: space[4],
+    paddingVertical: space[3],
   },
 });

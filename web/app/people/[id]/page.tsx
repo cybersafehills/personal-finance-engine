@@ -22,7 +22,7 @@ import { loadCounterpartyDetail } from "../../../lib/counterparties/directory-da
 
 export const dynamic = "force-dynamic";
 
-const KIND_VARIANT = { person: "accent", merchant: "positive", unknown: "neutral" } as const;
+const KIND_VARIANT = { person: "accent", merchant: "positive", unknown: "neutral", self: "attention" } as const;
 
 export default async function PersonPage({ params, searchParams }: PageProps<"/people/[id]">) {
   const { id } = await params;

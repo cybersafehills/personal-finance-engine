@@ -4,6 +4,7 @@ import { Badge } from "../../components/Badge";
 import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
 import { InsightAmount } from "../../components/insights/InsightAmount";
+import { OwnAccountPrompt } from "../../components/people/OwnAccountPrompt";
 import { SortTransactionsBanner } from "../../components/people/SortTransactionsBanner";
 import { getActiveWorkspace } from "../../lib/queries";
 import { supabaseSession } from "../../lib/supabase-session-server";
@@ -19,11 +20,12 @@ import {
   pageWindow,
   parseDirectoryQuery,
 } from "../../lib/counterparties/directory";
-import { loadCounterpartyList } from "../../lib/counterparties/directory-data";
+import { loadCounterpartyList, loadOwnAccountCandidates } from "../../lib/counterparties/directory-data";
+import { suggestByName } from "../../lib/counterparties/own-account-suggestions";
 
 export const dynamic = "force-dynamic";
 
-const KIND_VARIANT = { person: "accent", merchant: "positive", unknown: "neutral" } as const;
+const KIND_VARIANT = { person: "accent", merchant: "positive", unknown: "neutral", self: "attention" } as const;
 
 export default async function PeoplePage({ searchParams }: PageProps<"/people">) {
   const workspace = await getActiveWorkspace();
@@ -39,6 +41,18 @@ export default async function PeoplePage({ searchParams }: PageProps<"/people">)
   });
   const canWrite = workspace.role !== "viewer";
   const filtered = query.q !== null || query.kind !== null;
+
+  // "Is this you?": names that match your profile name. Only on the unfiltered
+  // first page, and only for members who can act on it.
+  let ownSuggestions: ReturnType<typeof suggestByName> = [];
+  if (canWrite && !filtered && query.page === 1) {
+    const { data: { user } } = await supabase.auth.getUser();
+    const { data: profile } = user
+      ? await supabase.from("profiles").select("display_name").eq("id", user.id).maybeSingle()
+      : { data: null };
+    const profileName = typeof profile?.display_name === "string" ? profile.display_name : null;
+    ownSuggestions = suggestByName(await loadOwnAccountCandidates(supabase, workspace.id), profileName);
+  }
   const lastPage = Math.max(1, Math.ceil(list.total / PAGE_SIZE));
 
   return (
@@ -50,6 +64,16 @@ export default async function PeoplePage({ searchParams }: PageProps<"/people">)
 
       {list.sortableTransactions > 0 && !filtered
         ? <SortTransactionsBanner count={list.sortableTransactions} canWrite={canWrite} />
+        : null}
+
+      {ownSuggestions.length > 0
+        ? (
+          <OwnAccountPrompt
+            title="Are these you?"
+            intro="These names match your own. Money moving between your accounts is not income or spending."
+            items={ownSuggestions}
+          />
+        )
         : null}
 
       <form action="/people" method="get" role="search" className="flex flex-col gap-3">

@@ -164,3 +164,29 @@ export async function searchPeopleAction(query: string): Promise<ActionResult<Pe
     return { ok: false, error: "Couldn't search right now. Try again." };
   }
 }
+
+/**
+ * "This is me" / "Not me": marks a counterparty as one of the user's own accounts
+ * (or back to "not sure yet"). Own-account transactions are left out of totals,
+ * budgets, reports and the forecast, so every surface that shows money is refreshed.
+ */
+export async function setOwnAccountAction(id: string, isMine: boolean): Promise<ActionResult> {
+  if (!isUuid(id)) return { ok: false, error: friendlyPeopleError("not_found") };
+  const { supabase, enabled, canWrite } = await ctx();
+  if (!enabled) return OFF;
+  if (!canWrite) return READ_ONLY;
+  const { data: cp } = await supabase
+    .from("counterparties")
+    .select("display_name")
+    .eq("id", id)
+    .maybeSingle();
+  if (!cp || typeof cp.display_name !== "string") {
+    return { ok: false, error: friendlyPeopleError("not_found") };
+  }
+  return call(
+    "update_counterparty",
+    { p_id: id, p_display_name: cp.display_name, p_kind: isMine ? "self" : "unknown" },
+    () => null,
+    ["/", "/people", `/people/${id}`, "/inbox/forecast", "/insights", "/budgets", "/reports", "/transactions"],
+  );
+}
