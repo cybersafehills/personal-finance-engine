@@ -193,6 +193,15 @@ function buildDeps(): PipelineDeps {
         p_workspace_id: workspaceId,
       });
     },
+    // Keeps People & merchants current as messages arrive. The function only
+    // looks at not-yet-sorted rows, so it is cheap once caught up; a failure is
+    // swallowed by the pipeline (best effort) and never blocks ingestion.
+    sortCounterparties: async (workspaceId) => {
+      const { error } = await supabase.rpc("backfill_counterparties", {
+        p_workspace_id: workspaceId,
+      });
+      if (error) throw new Error(error.message);
+    },
     touchConnection: async (connectionId) => {
       await supabase
         .from("ingestion_connections")

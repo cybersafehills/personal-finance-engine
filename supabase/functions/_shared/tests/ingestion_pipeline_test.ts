@@ -262,6 +262,29 @@ Deno.test("pipeline: a throwing best-effort dep does not fail the ingestion", as
   assertEquals(res, { status: "processed", transactionId: "txn-1" });
 });
 
+Deno.test("pipeline: sorts the new transaction into a person/merchant, and a failure there never fails ingestion", async () => {
+  let sorted = 0;
+  const ok = fakeDeps({
+    sortCounterparties: () => {
+      sorted++;
+      return Promise.resolve();
+    },
+  });
+  assertEquals(
+    (await normalizeInboundMessage(INPUT, ROUTE, REFS, ok.deps)).status,
+    "processed",
+  );
+  assertEquals(sorted, 1);
+
+  const failing = fakeDeps({
+    sortCounterparties: () => Promise.reject(new Error("boom")),
+  });
+  assertEquals(
+    await normalizeInboundMessage(INPUT, ROUTE, REFS, failing.deps),
+    { status: "processed", transactionId: "txn-1" },
+  );
+});
+
 Deno.test("pipeline: a failing fingerprint lookup leaves the row unique", async () => {
   const { deps, calls } = fakeDeps({
     computeFingerprint: () => Promise.reject(new Error("rpc down")),
