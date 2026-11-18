@@ -36,6 +36,9 @@ export default async function CategorizationRulesPage() {
               <Link href="/categories/rules/suggestions" className="font-medium text-accent">
                 Suggestions{suggestionCount > 0 ? ` (${suggestionCount})` : ""}
               </Link>
+              <Link href="/categories/rules/starter" className="font-medium text-accent">
+                Starter rules
+              </Link>
               <Link href="/categories/rules/history" className="font-medium text-accent">
                 History
               </Link>
