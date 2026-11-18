@@ -8162,8 +8162,13 @@ else
 fi
 
 # Role gate: viewer denied, member allowed (household fixture from Phase R).
+# In a household Space an account is only visible through its financial source,
+# so the fixture accounts are backed by sources owned by USER_A: one SHARED into
+# the household (members may see it) and one PRIVATE (they may not).
 S3_HH_ACCT="00000000-0000-0000-0000-0000000053a1"
-psql -d pfe_rls -v ON_ERROR_STOP=1 -c "insert into public.accounts (id, workspace_id, name, provider, currency) values ('$S3_HH_ACCT', '$R_MATRIX_HH', 'S3 household', 'mtn_momo', 'RWF');" >/dev/null
+S3_SRC_SHARED="$(as_user "$USER_A" "insert into public.financial_sources (owner_user_id, provider, source_type, display_name, currency) values ('$USER_A', 'mtn_momo', 'mobile_money', 'S3 shared wallet', 'RWF') returning id;" | head -1)"
+as_user "$USER_A" "insert into public.source_space_links (financial_source_id, workspace_id, visibility_mode, created_by) values ('$S3_SRC_SHARED', '$R_MATRIX_HH', 'share_account', '$USER_A');" >/dev/null
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "insert into public.accounts (id, workspace_id, name, provider, currency, financial_source_id) values ('$S3_HH_ACCT', '$R_MATRIX_HH', 'S3 household', 'mtn_momo', 'RWF', '$S3_SRC_SHARED');" >/dev/null
 if as_user "$R_VIEWER_USER" "select public.record_manual_balance_observation('$S3_HH_ACCT', 1, now());" >/dev/null 2>&1; then
   fail "S3: a viewer recorded a balance observation"
 else
@@ -8173,6 +8178,87 @@ if as_user "$R_MEMBER_USER" "select public.record_manual_balance_observation('$S
   pass "S3: a household member can record a balance observation"
 else
   fail "S3: a household member was refused"
+fi
+
+# --- source visibility (20270104000000_balance_observations_source_visibility) --
+# A household member may read/write balance observations only for sources they
+# may see: their own, or one the owner shared into the Space.
+S3_PRIV_ACCT="00000000-0000-0000-0000-0000000053a2"
+S3_SRC_PRIVATE="$(as_user "$USER_A" "insert into public.financial_sources (owner_user_id, provider, source_type, display_name, currency) values ('$USER_A', 'mtn_momo', 'mobile_money', 'S3 private wallet', 'RWF') returning id;" | head -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "insert into public.accounts (id, workspace_id, name, provider, currency, financial_source_id) values ('$S3_PRIV_ACCT', '$R_MATRIX_HH', 'S3 private', 'mtn_momo', 'RWF', '$S3_SRC_PRIVATE');" >/dev/null
+
+S3_OWNER_PRIV="$(as_user "$USER_A" "select public.record_manual_balance_observation('$S3_PRIV_ACCT', 99000, now() - interval '1 hour', 'private wallet');" | tail -1)"
+if [ -n "$S3_OWNER_PRIV" ] && [ "$(psql -d pfe_rls -t -A -c "select count(*) from public.balance_observations where id = '$S3_OWNER_PRIV';")" = "1" ]; then
+  pass "S3 visibility: the source owner can record a balance for their own wallet inside the household"
+else
+  fail "S3 visibility: the source owner was refused on their own private wallet (id='$S3_OWNER_PRIV')"
+fi
+
+S3_PRIV_OBS="$(as_user "$USER_A" "select count(*) from public.balance_observations where account_id in ('$S3_HH_ACCT', '$S3_PRIV_ACCT');")"
+if [ "$S3_PRIV_OBS" = "2" ]; then
+  pass "S3 visibility: the source owner reads the observations for both of their wallets (positive control)"
+else
+  fail "S3 visibility: the source owner sees $S3_PRIV_OBS of 2 observations - policy over-blocking"
+fi
+
+S3_M_SHARED="$(as_user "$R_MEMBER_USER" "select count(*) from public.balance_observations where account_id = '$S3_HH_ACCT';")"
+S3_M_PRIVATE="$(as_user "$R_MEMBER_USER" "select count(*) from public.balance_observations where account_id = '$S3_PRIV_ACCT';")"
+if [ "$S3_M_SHARED" = "1" ] && [ "$S3_M_PRIVATE" = "0" ]; then
+  pass "S3 visibility: a household member reads observations for a shared wallet but not for a co-member's private wallet"
+else
+  fail "S3 visibility: member sees shared=$S3_M_SHARED (want 1), private=$S3_M_PRIVATE (want 0) - privacy breach"
+fi
+
+S3_V_SHARED="$(as_user "$R_VIEWER_USER" "select count(*) from public.balance_observations where account_id = '$S3_HH_ACCT';")"
+S3_V_PRIVATE="$(as_user "$R_VIEWER_USER" "select count(*) from public.balance_observations where account_id = '$S3_PRIV_ACCT';")"
+if [ "$S3_V_SHARED" = "1" ] && [ "$S3_V_PRIVATE" = "0" ]; then
+  pass "S3 visibility: a viewer follows the same source visibility as a member"
+else
+  fail "S3 visibility: viewer sees shared=$S3_V_SHARED (want 1), private=$S3_V_PRIVATE (want 0)"
+fi
+
+if as_user "$R_MEMBER_USER" "select public.record_manual_balance_observation('$S3_PRIV_ACCT', 1, now());" >/dev/null 2>$ARTIFACT_DIR/pfe_s3_priv.log; then
+  fail "S3 visibility: a member recorded a balance on a co-member's private wallet"
+else
+  if grep -q "account_not_found" $ARTIFACT_DIR/pfe_s3_priv.log; then
+    pass "S3 visibility: recording on an unshared co-member's wallet is refused with the same error as a missing account"
+  else
+    fail "S3 visibility: refusal had an unexpected error: $(cat $ARTIFACT_DIR/pfe_s3_priv.log)"
+  fi
+fi
+rm -f $ARTIFACT_DIR/pfe_s3_priv.log
+S3_PRIV_ROWS="$(psql -d pfe_rls -t -A -c "select count(*) from public.balance_observations where account_id = '$S3_PRIV_ACCT';")"
+if [ "$S3_PRIV_ROWS" = "1" ]; then
+  pass "S3 visibility: the refused attempt wrote nothing (only the owner's observation exists)"
+else
+  fail "S3 visibility: private wallet has $S3_PRIV_ROWS observation row(s), want 1"
+fi
+
+S3_M_VIEW="$(as_user "$R_MEMBER_USER" "select count(*) from public.account_balance_baselines_v where account_id = '$S3_PRIV_ACCT';")"
+if [ "$S3_M_VIEW" = "0" ]; then
+  pass "S3 visibility: the baselines view also hides a co-member's private wallet"
+else
+  fail "S3 visibility: member sees $S3_M_VIEW baseline row(s) for a private wallet"
+fi
+
+# Pausing the share takes the shared wallet's observations away again; resuming
+# restores them. (Visibility is evaluated at read time, not copied.)
+as_user "$USER_A" "update public.source_space_links set status = 'paused' where financial_source_id = '$S3_SRC_SHARED' and workspace_id = '$R_MATRIX_HH';" >/dev/null
+S3_M_PAUSED="$(as_user "$R_MEMBER_USER" "select count(*) from public.balance_observations where account_id = '$S3_HH_ACCT';")"
+as_user "$USER_A" "update public.source_space_links set status = 'active' where financial_source_id = '$S3_SRC_SHARED' and workspace_id = '$R_MATRIX_HH';" >/dev/null
+S3_M_RESUMED="$(as_user "$R_MEMBER_USER" "select count(*) from public.balance_observations where account_id = '$S3_HH_ACCT';")"
+if [ "$S3_M_PAUSED" = "0" ] && [ "$S3_M_RESUMED" = "1" ]; then
+  pass "S3 visibility: pausing the share hides the shared wallet's observations and resuming restores them"
+else
+  fail "S3 visibility: paused=$S3_M_PAUSED (want 0), resumed=$S3_M_RESUMED (want 1)"
+fi
+
+# Personal workspaces are unaffected: no household, so membership is enough.
+S3_PERSONAL="$(as_user "$USER_A" "select count(*) from public.balance_observations where id = '$S3_OBS_A';")"
+if [ "$S3_PERSONAL" = "1" ]; then
+  pass "S3 visibility: a personal workspace owner still reads their own observations (no household rule applies)"
+else
+  fail "S3 visibility: personal workspace owner sees $S3_PERSONAL of 1 observation - policy over-blocking"
 fi
 
 # --- account_balance_baselines_v -------------------------------------------
