@@ -73,3 +73,20 @@ respect `prefers-reduced-motion` (global) and privacy mode.
   belongs.
 - Figma Code Connect mapping against `brand-source/` /
   `docs/ONELEDGER_BRAND_ASSETS.md`.
+
+## Mobile app (oneledger-mobile): density and sizing
+
+The app follows the web's density, not the platform default. The web's body text is
+14px (`text-sm`, ~1,400 uses; `text-xs` 12px ~680; `text-base` 16px ~90), so the app's
+scale is `display 30`, `title 22`, `heading 17`, `body 14`, `label 13`, `caption 12`
+(`src/theme/typography.ts`). Hierarchy comes from weight and colour, not size.
+
+- **System "Larger Text"** still applies but is capped at 1.25x (`MAX_FONT_SCALE`), so
+  rows and controls stay inside their frames.
+- **Controls look smaller than their hit area.** Buttons are 40pt (32pt `size="sm"`),
+  chips 32pt, icon buttons 40pt; `hitSlopFor()` adds margin so every tap target is still
+  at least 44pt.
+- **Sheets are native.** The Pay launcher is a route presented as a form sheet
+  (`(app)/pay-sheet.tsx`: grabber, drag-to-dismiss, detents), not a custom modal.
+  Group related rows in one bordered list rather than a box per row.
+- Shadows use `boxShadow`, never the legacy shadow/elevation props.

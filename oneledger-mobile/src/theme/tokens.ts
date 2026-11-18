@@ -59,3 +59,15 @@ export const space = {
 
 /** Accessibility floor for every tappable control (docs/design-system.md). */
 export const MIN_TOUCH_TARGET = 44;
+
+/**
+ * Visual heights. A control may look smaller than the 44pt touch floor as long as
+ * its hit area is not: `hitSlopFor` adds the difference around it.
+ */
+export const CONTROL_HEIGHT = { md: 40, sm: 32 } as const;
+
+/** Extra touchable margin that brings a control of `visualHeight` up to the 44pt floor. */
+export function hitSlopFor(visualHeight: number) {
+  const pad = Math.max(0, Math.ceil((MIN_TOUCH_TARGET - visualHeight) / 2));
+  return { top: pad, bottom: pad, left: pad, right: pad };
+}

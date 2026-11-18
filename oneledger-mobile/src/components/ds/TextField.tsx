@@ -7,7 +7,7 @@ import {
 } from "react-native";
 
 import { colors, radii, space } from "@/theme/tokens";
-import { fonts } from "@/theme/typography";
+import { fonts, MAX_FONT_SCALE } from "@/theme/typography";
 
 import { Text } from "./Text";
 
@@ -19,7 +19,7 @@ export type TextFieldProps = Omit<TextInputProps, "style"> & {
 
 /**
  * Labelled text input: label + optional help + error, wired for assistive
- * tech once. Text is 16pt so iOS never zooms on focus; 48pt tall.
+ * tech once. 44pt tall; text is 15pt, one step above body so what you type stays readable.
  */
 export function TextField({ label, help, error, ...input }: TextFieldProps) {
   const id = useId();
@@ -31,6 +31,7 @@ export function TextField({ label, help, error, ...input }: TextFieldProps) {
         {label}
       </Text>
       <TextInput
+        maxFontSizeMultiplier={MAX_FONT_SCALE}
         accessibilityLabel={label}
         accessibilityLabelledBy={`${id}-label`}
         accessibilityHint={error ?? help}
@@ -67,14 +68,14 @@ export function TextField({ label, help, error, ...input }: TextFieldProps) {
 const styles = StyleSheet.create({
   field: { gap: space[1] },
   input: {
-    minHeight: 48,
+    minHeight: 44,
     borderRadius: radii.control,
     borderWidth: 1,
     borderColor: colors.borderStrong,
     backgroundColor: colors.surface,
     paddingHorizontal: space[3],
     fontFamily: fonts.regular,
-    fontSize: 16,
+    fontSize: 15,
     color: colors.textPrimary,
   },
   focused: { borderColor: colors.accent, borderWidth: 2 },

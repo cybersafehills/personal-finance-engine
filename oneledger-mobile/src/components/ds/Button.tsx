@@ -5,7 +5,7 @@ import {
   type PressableProps,
 } from "react-native";
 
-import { colors, MIN_TOUCH_TARGET, radii, space } from "@/theme/tokens";
+import { colors, CONTROL_HEIGHT, hitSlopFor, radii, space } from "@/theme/tokens";
 
 import { Text } from "./Text";
 
@@ -16,14 +16,17 @@ export type ButtonProps = Omit<PressableProps, "children" | "style"> & {
   variant?: ButtonVariant;
   loading?: boolean;
   fullWidth?: boolean;
+  /** `sm` is for inline actions (Back, row actions); `md` is the default. */
+  size?: "md" | "sm";
 };
 
-/** Primary action control. Always at least 44pt tall. */
+/** Primary action control. Looks 40pt (32pt `sm`); the touch area is always 44pt or more. */
 export function Button({
   label,
   variant = "primary",
   loading = false,
   fullWidth = false,
+  size = "md",
   disabled,
   ...rest
 }: ButtonProps) {
@@ -35,9 +38,11 @@ export function Button({
       accessibilityRole="button"
       accessibilityState={{ disabled: !!inactive, busy: loading }}
       disabled={inactive}
+      hitSlop={hitSlopFor(CONTROL_HEIGHT[size])}
       {...rest}
       style={({ pressed }) => [
         styles.base,
+        size === "sm" && styles.small,
         fullWidth && styles.fullWidth,
         variant === "primary" && {
           backgroundColor: pressed ? colors.accentPressed : colors.accent,
@@ -51,9 +56,9 @@ export function Button({
       ]}
     >
       {loading ? (
-        <ActivityIndicator color={colors[foreground]} />
+        <ActivityIndicator size="small" color={colors[foreground]} />
       ) : (
-        <Text variant="bodyStrong" color={foreground}>
+        <Text variant={size === "sm" ? "label" : "bodyStrong"} color={foreground}>
           {label}
         </Text>
       )}
@@ -63,13 +68,19 @@ export function Button({
 
 const styles = StyleSheet.create({
   base: {
-    minHeight: MIN_TOUCH_TARGET,
+    minHeight: CONTROL_HEIGHT.md,
     alignItems: "center",
     justifyContent: "center",
     alignSelf: "flex-start",
     borderRadius: radii.control,
-    paddingHorizontal: space[5],
-    paddingVertical: space[3],
+    borderCurve: "continuous",
+    paddingHorizontal: space[4],
+    paddingVertical: space[2],
+  },
+  small: {
+    minHeight: CONTROL_HEIGHT.sm,
+    paddingHorizontal: space[3],
+    paddingVertical: space[1],
   },
   fullWidth: { alignSelf: "stretch" },
   secondary: {

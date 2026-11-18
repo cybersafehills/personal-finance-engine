@@ -45,8 +45,9 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   flex: { flex: 1 },
   content: {
-    padding: space[4],
-    gap: space[4],
+    paddingHorizontal: space[4],
+    paddingVertical: space[3],
+    gap: space[3],
     width: "100%",
     maxWidth: 480,
     alignSelf: "center",
