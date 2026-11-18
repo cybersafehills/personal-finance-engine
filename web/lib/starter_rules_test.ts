@@ -99,3 +99,11 @@ Deno.test("max caps the list; the link prefills the New rule form and leaves cat
   assertEquals(href.includes("category="), false);
   assertEquals(href.includes("pattern=Shop+A"), true);
 });
+
+Deno.test("totalProposals counts every qualifying name even when the list is capped", () => {
+  const many = Array.from({ length: 10 }, (_, i) => [u(`P${i}`), u(`P${i}`)])
+    .flat();
+  const r = proposeStarterRules(many, [], { max: 3 });
+  assertEquals(r.proposals.length, 3);
+  assertEquals(r.totalProposals, 10);
+});

@@ -1,35 +1,21 @@
 import Link from "next/link";
 import { PageHeader } from "../../../../components/PageHeader";
 import { EmptyState } from "../../../../components/EmptyState";
-import { getTransactions } from "../../../../lib/queries";
 import { formatRwf } from "../../../../lib/format";
-import { newRuleHref, proposeStarterRules, type StarterTxn } from "../../../../lib/starter-rules";
+import { newRuleHref, proposeStarterRules } from "../../../../lib/starter-rules";
+import { loadStarterInputs } from "../../../../lib/starter-rules-data";
 
 export const dynamic = "force-dynamic";
 
-const READ_LIMIT = 500;
 const DIRECTION_LABEL = { in: "Money in", out: "Money out", mixed: "In and out" } as const;
-
-const toStarter = (t: Awaited<ReturnType<typeof getTransactions>>[number]): StarterTxn => ({
-  counterpartyName: t.counterparty_name,
-  direction: t.direction,
-  amountRwf: Math.abs(Number(t.amount_rwf ?? 0)),
-  category: t.category,
-});
 
 // Read-only: it proposes, and every proposal opens the normal New rule form
 // (prefilled), whose own preview and "apply to past transactions" step is where
 // you approve. Nothing is created or changed on this page.
 export default async function StarterRulesPage() {
-  const [uncategorized, recent] = await Promise.all([
-    getTransactions({ category: "Uncategorized", limit: READ_LIMIT }),
-    getTransactions({ limit: READ_LIMIT }),
-  ]);
-  const result = proposeStarterRules(
-    uncategorized.map(toStarter),
-    recent.filter((t) => t.category !== null).map(toStarter),
-  );
-  const capped = uncategorized.length >= READ_LIMIT;
+  const inputs = await loadStarterInputs();
+  const result = proposeStarterRules(inputs.uncategorized, inputs.categorized);
+  const capped = inputs.capped;
 
   return (
     <div className="flex flex-col gap-4">
@@ -53,7 +39,8 @@ export default async function StarterRulesPage() {
             <p className="text-sm text-text-secondary">
               {result.totalUncategorized}
               {capped ? "+" : ""} transactions have no category. These {result.proposals.length}{" "}
-              suggestions would cover {result.coveredCount} of them
+              suggestions{result.totalProposals > result.proposals.length ? ` (the biggest of ${result.totalProposals})` : ""}
+              {" "}would cover {result.coveredCount} of them
               {result.nameless > 0 ? `; ${result.nameless} have no name to match on` : ""}.
             </p>
             <ul className="flex flex-col gap-2">
