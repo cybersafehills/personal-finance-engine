@@ -8,6 +8,7 @@ import { Button, Text } from "@/components/ds";
 import { useSession } from "@/features/auth/SessionProvider";
 import { useActiveSpace } from "@/features/spaces/ActiveSpaceProvider";
 import { kindLabel } from "@/features/spaces/spaces";
+import { SyncStatusChip } from "@/offline/SyncStatusChip";
 import { getUnreadNotificationCount } from "@/features/notifications/queries";
 import {
   badgeText,
@@ -55,6 +56,7 @@ export function AppHeader() {
         </Pressable>
 
         <View style={styles.actions}>
+          <SyncStatusChip />
           {/* As on the web: the current Space as a chip, only with more than one. */}
           {spaces.length > 1 && active ? (
             <Pressable

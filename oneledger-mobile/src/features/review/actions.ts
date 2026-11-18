@@ -1,4 +1,7 @@
 import { supabase } from "@/api/supabase";
+import { getLocalTransaction, setCategoryLocally } from "@/offline/local-store";
+import { localWritten, readableDb } from "@/offline/runtime";
+import { getNewId } from "@/offline/ids";
 
 // Review-queue decisions. These are the same database functions the web's
 // server actions call (web/app/transactions/review/actions.ts), run as the
@@ -27,8 +30,30 @@ async function callRpc(fn: RpcName, args: Record<string, string>) {
   }
 }
 
+/**
+ * Saves a category on the device and queues it (offline-capable). Returns false
+ * when the device copy isn't in use or doesn't hold this row, so callers fall
+ * back to the server path exactly as before.
+ */
+async function queueCategory(transactionId: string, pick: (row: { category: string | null; subcategory: string | null; suggested_category: string | null }) => { category: string; subcategory: string | null } | null): Promise<boolean> {
+  const db = readableDb();
+  if (!db) return false;
+  const row = await getLocalTransaction(db, transactionId);
+  if (!row) return false;
+  const chosen = pick(row);
+  if (!chosen) return false;
+  await setCategoryLocally(db, { transactionId, category: chosen.category, subcategory: chosen.subcategory, opId: getNewId(), nowIso: new Date().toISOString() });
+  localWritten();
+  return true;
+}
+
 /** Accept the suggested (or automatic) category as a manual decision. */
-export function confirmCategory(transactionId: string): Promise<void> {
+export async function confirmCategory(transactionId: string): Promise<void> {
+  const queued = await queueCategory(transactionId, (row) => {
+    const category = row.suggested_category ?? row.category;
+    return category ? { category, subcategory: row.suggested_category ? null : row.subcategory } : null;
+  });
+  if (queued) return;
   return callRpc("confirm_transaction_category", { p_transaction_id: transactionId });
 }
 
@@ -57,6 +82,8 @@ export function dismissSuggestion(transactionId: string): Promise<void> {
 export type CorrectionResult = {
   /** True/false when a rule was requested; null when it was not. */
   ruleSaved: boolean | null;
+  /** True when the change was saved on this device and will sync later. */
+  queued?: boolean;
 };
 
 /**
@@ -75,10 +102,17 @@ export async function correctCategory(
   subcategory: string | null,
   saveAsRule: boolean,
 ): Promise<CorrectionResult> {
-  if (!supabase) throw new ReviewActionError("This build isn't connected to OneLedger yet.");
   const name = category.trim();
   if (!name) throw new ReviewActionError("Choose a category first.");
   const sub = subcategory?.trim() || null;
+
+  // Offline-capable path: saved on the device now, sent when possible. A
+  // "remember as a rule" request is not queued (rules are server-owned); the
+  // caller is told so rather than being shown a false success.
+  if (await queueCategory(transactionId, () => ({ category: name, subcategory: sub }))) {
+    return { ruleSaved: saveAsRule ? false : null, queued: true };
+  }
+  if (!supabase) throw new ReviewActionError("This build isn't connected to OneLedger yet.");
 
   const { data: updated, error } = await supabase.rpc("apply_manual_category_correction", {
     p_transaction_id: transactionId,

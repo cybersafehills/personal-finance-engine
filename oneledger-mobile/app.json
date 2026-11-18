@@ -36,6 +36,12 @@
       "expo-status-bar",
       "expo-font",
       [
+        "expo-sqlite",
+        {
+          "useSQLCipher": true
+        }
+      ],
+      [
         "expo-secure-store",
         {
           "faceIDPermission": "Allow OneLedger to use Face ID to unlock the app."

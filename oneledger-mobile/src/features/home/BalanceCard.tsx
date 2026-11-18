@@ -17,7 +17,7 @@ export function BalanceCard({
   balance,
   nowIso,
 }: {
-  balance: { amountRwf: number; asOfIso: string } | null;
+  balance: { amountRwf: number; asOfIso: string; pendingEffectRwf?: number; pendingCount?: number } | null;
   nowIso: string;
 }) {
   const { amountsHidden, toggleAmountsHidden } = usePrivacy();
@@ -57,6 +57,13 @@ export function BalanceCard({
           </Text>
         ) : null}
       </View>
+      {balance && balance.pendingCount ? (
+        <Text variant="caption" color="accentForeground" style={styles.faint}>
+          {amountsHidden
+            ? `Includes ${balance.pendingCount} unsynced change${balance.pendingCount === 1 ? "" : "s"}`
+            : `Provider balance. ${balance.pendingCount} change${balance.pendingCount === 1 ? "" : "s"} saved on this phone not yet confirmed (${formatRwf(balance.pendingEffectRwf ?? 0)}); estimate ${formatRwf(balance.amountRwf + (balance.pendingEffectRwf ?? 0))}.`}
+        </Text>
+      ) : null}
       {!balance ? (
         <Text variant="caption" color="accentForeground" style={styles.faint}>
           No balance yet. It appears after your first recorded MoMo message.

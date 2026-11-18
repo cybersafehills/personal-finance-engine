@@ -16,6 +16,9 @@ import {
   type When,
 } from "@/features/manual/input";
 import { useQuery } from "@/hooks/useQuery";
+import { listLocalAccounts, recordManualTransaction } from "@/offline/local-store";
+import { useOffline } from "@/offline/offline-context";
+import { readableDb } from "@/offline/runtime";
 import { kigaliDateKey } from "@/lib/kigali-time";
 import { colors, MIN_TOUCH_TARGET, radii, space } from "@/theme/tokens";
 
@@ -23,7 +26,17 @@ import { colors, MIN_TOUCH_TARGET, radii, space } from "@/theme/tokens";
 // automatic recording missed something. It becomes an ordinary transaction
 // (source "manual"); pick its category afterwards on its detail screen.
 export default function AddTransaction() {
-  const loadAccounts = useCallback(() => listManualAccounts(), []);
+  // Accounts come from the device once its first download is done, so the form
+  // works with no connection; otherwise from the server, as before.
+  const loadAccounts = useCallback(async () => {
+    const local = readableDb();
+    if (local) {
+      const accounts = await listLocalAccounts(local);
+      if (accounts.length > 0) return accounts;
+    }
+    return listManualAccounts();
+  }, []);
+  const offline = useOffline();
   const { data: accounts, loading, error, refresh } = useQuery(loadAccounts);
 
   const [accountId, setAccountId] = useState<string | null>(null);
@@ -103,6 +116,22 @@ export default function AddTransaction() {
     setSaving(true);
     setFormError(null);
     try {
+      // Only once the first download is done, so the saved entry is visible in the lists.
+      const local = readableDb();
+      if (local && offline.available) {
+        // Saved on the device first, atomically with its upload entry. Never waits
+        // on the network and never claims the server has it.
+        const id = await recordManualTransaction(local, {
+          args: built.args,
+          account,
+          transactionId: offline.newId(),
+          opId: offline.newId(),
+          nowIso: new Date().toISOString(),
+        });
+        offline.notifyLocalWrite();
+        router.replace({ pathname: "/transaction/[id]", params: { id } });
+        return;
+      }
       const id = await createManualTransaction(built.args);
       router.replace({ pathname: "/transaction/[id]", params: { id } });
     } catch (e) {

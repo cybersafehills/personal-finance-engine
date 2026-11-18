@@ -30,6 +30,7 @@ import {
   historyLine,
   whereFromRows,
 } from "@/features/transactions/detailDisplay";
+import { explainError } from "@/offline/status";
 import { loadPayAgainOffer } from "@/features/pay/context";
 import { useActiveSpace } from "@/features/spaces/ActiveSpaceProvider";
 import { isInRequestedSpace, requestedWorkspaceId } from "@/features/spaces/spaces";
@@ -130,6 +131,19 @@ export default function TransactionDetail() {
           {needsReview(transaction) ? <Badge variant="attention">Needs review</Badge> : null}
         </View>
       </Card>
+
+      {transaction.sync_state && transaction.sync_state !== "synced" ? (
+        <Card style={{ gap: space[1] }} accessibilityRole="summary">
+          <Text variant="bodyStrong">
+            {transaction.sync_state === "failed" ? "Not sent to OneLedger" : "Saved on this phone"}
+          </Text>
+          <Text variant="label" color={transaction.sync_state === "failed" ? "attention" : "textSecondary"}>
+            {transaction.sync_state === "failed"
+              ? `${explainError(transaction.sync_error ?? null)} Open Sync to retry or discard it.`
+              : "It will sync when you're online. Until then it isn't confirmed by OneLedger."}
+          </Text>
+        </Card>
+      ) : null}
 
       {payOffer ? (
         <Button
