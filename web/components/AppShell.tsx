@@ -91,6 +91,9 @@ export function AppShell({
   integrationsEnabled,
   experienceMode,
   businessSurfacesEnabled,
+  walletsEnabled,
+  insightsEnabled,
+  forecastEnabled,
   inboxBadgeCount,
   insightGlimpse,
 }: {
@@ -112,6 +115,12 @@ export function AppShell({
   experienceMode: ExperienceMode;
   /** Whether the dark-by-default Business-only surfaces are switched on. */
   businessSurfacesEnabled: boolean;
+  /** BALANCE_PROVENANCE for the active Space: shows Wallets in More. */
+  walletsEnabled: boolean;
+  /** INSIGHTS_CENTER for the active Space: shows Insights in More. */
+  insightsEnabled: boolean;
+  /** INTELLIGENCE for the active Space: shows the cash-flow forecast in More. */
+  forecastEnabled: boolean;
   /** Count on the header inbox icon (unread notifications + open attention
    *  rows). Already 0 when the caller has the badge preference off. */
   inboxBadgeCount: number;
@@ -291,6 +300,9 @@ export function AppShell({
             integrationsEnabled={integrationsEnabled}
             experienceMode={experienceMode}
             businessSurfacesEnabled={businessSurfacesEnabled}
+            walletsEnabled={walletsEnabled}
+            insightsEnabled={insightsEnabled}
+            forecastEnabled={forecastEnabled}
           />
         </>
       )}

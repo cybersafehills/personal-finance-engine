@@ -65,7 +65,11 @@ export type MoreIconKey =
   | "recipients"
   | "templates"
   | "requests"
-  | "people";
+  | "people"
+  | "wallets"
+  | "insights"
+  | "goals"
+  | "forecast";
 
 export type MoreItem = {
   href: string;
@@ -73,7 +77,15 @@ export type MoreItem = {
   icon: MoreIconKey;
   surface: SurfaceKey | null;
   /** Extra gate beyond the experience mode, checked by MoreSheet. */
-  requires?: "integrations" | "pay" | "assistedPay" | "paymentRequests" | "counterparties";
+  requires?:
+    | "integrations"
+    | "pay"
+    | "assistedPay"
+    | "paymentRequests"
+    | "counterparties"
+    | "wallets"
+    | "insights"
+    | "forecast";
 };
 
 export type MoreGroup = { title: string; items: readonly MoreItem[] };
@@ -88,6 +100,8 @@ export const MORE_GROUPS: readonly MoreGroup[] = [
   {
     title: "Manage money",
     items: [
+      // Each wallet's own balance (BALANCE_PROVENANCE); absent when off.
+      { href: "/wallets", label: "Wallets", icon: "wallets", surface: null, requires: "wallets" },
       { href: "/categories", label: "Categories", icon: "categories", surface: "categories" },
       { href: "/reports", label: "Reports", icon: "reports", surface: "reports" },
       { href: "/settings/sources", label: "Connected sources", icon: "sources", surface: "sources" },
@@ -95,6 +109,20 @@ export const MORE_GROUPS: readonly MoreGroup[] = [
       // People & merchants (OneLedger 3.0): gated by COUNTERPARTIES_ENABLED
       // (+ allowlist) only, so it is absent - not merely disabled - when off.
       { href: "/people", label: "People and merchants", icon: "people", surface: null, requires: "counterparties" },
+    ],
+  },
+  {
+    title: "Plan & understand",
+    items: [
+      { href: "/budgets/goals", label: "Goals", icon: "goals", surface: "plan" },
+      { href: "/insights", label: "Insights", icon: "insights", surface: null, requires: "insights" },
+      {
+        href: "/inbox/forecast",
+        label: "Cash-flow forecast",
+        icon: "forecast",
+        surface: null,
+        requires: "forecast",
+      },
     ],
   },
   {
@@ -169,6 +197,8 @@ export const MORE_MENU_PREFIXES = [
   "/reports",
   "/bills",
   "/people",
+  "/wallets",
+  "/insights",
   "/settings",
   "/pay",
 ] as const;

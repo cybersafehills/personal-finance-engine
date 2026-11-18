@@ -15,12 +15,16 @@ import {
   GearIcon,
   GridIcon,
   LinkIcon,
+  ListIcon,
   PhoneIcon,
+  PieIcon,
   QrScanIcon,
   ReceiptIcon,
   ShieldIcon,
   TagIcon,
+  TargetIcon,
   UsersIcon,
+  WalletIcon,
 } from "./icons";
 
 // key -> glyph, mirroring AppShell's NAV_ICONS indirection so lib/navigation
@@ -43,6 +47,10 @@ const MORE_ICONS: Record<
   templates: BookmarkIcon,
   requests: QrScanIcon,
   people: UsersIcon,
+  wallets: WalletIcon,
+  insights: PieIcon,
+  goals: TargetIcon,
+  forecast: ListIcon,
 };
 
 // The "More" panel - the structured home for everything that is not on the
@@ -74,6 +82,9 @@ export function MoreSheet({
   integrationsEnabled,
   experienceMode,
   businessSurfacesEnabled,
+  walletsEnabled,
+  insightsEnabled,
+  forecastEnabled,
 }: {
   open: boolean;
   onClose: () => void;
@@ -84,6 +95,9 @@ export function MoreSheet({
   integrationsEnabled: boolean;
   experienceMode: ExperienceMode;
   businessSurfacesEnabled: boolean;
+  walletsEnabled: boolean;
+  insightsEnabled: boolean;
+  forecastEnabled: boolean;
 }) {
   if (!open) return null;
   return (
@@ -96,6 +110,9 @@ export function MoreSheet({
       integrationsEnabled={integrationsEnabled}
       experienceMode={experienceMode}
       businessSurfacesEnabled={businessSurfacesEnabled}
+      walletsEnabled={walletsEnabled}
+      insightsEnabled={insightsEnabled}
+      forecastEnabled={forecastEnabled}
     />
   );
 }
@@ -109,6 +126,9 @@ function MorePanel({
   integrationsEnabled,
   experienceMode,
   businessSurfacesEnabled,
+  walletsEnabled,
+  insightsEnabled,
+  forecastEnabled,
 }: {
   onClose: () => void;
   payEnabled: boolean;
@@ -118,6 +138,9 @@ function MorePanel({
   integrationsEnabled: boolean;
   experienceMode: ExperienceMode;
   businessSurfacesEnabled: boolean;
+  walletsEnabled: boolean;
+  insightsEnabled: boolean;
+  forecastEnabled: boolean;
 }) {
   const router = useRouter();
   const panelRef = useRef<HTMLDivElement>(null);
@@ -191,6 +214,9 @@ function MorePanel({
     if (item.requires === "assistedPay" && !assistedPayEnabled) return false;
     if (item.requires === "paymentRequests" && !paymentRequestsEnabled) return false;
     if (item.requires === "counterparties" && !counterpartiesEnabled) return false;
+    if (item.requires === "wallets" && !walletsEnabled) return false;
+    if (item.requires === "insights" && !insightsEnabled) return false;
+    if (item.requires === "forecast" && !forecastEnabled) return false;
     return true;
   }
 

@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 // the `geist` npm package - no Google Fonts fetch, so `next build` works
 // fully offline (audit F13). Same typeface + same `--font-geist-sans`
 // variable as the old `next/font/google` import, so nothing visual moves.
+import { isOneLedger3FlagEnabled } from "../lib/oneledger3-flags";
 import { GeistSans } from "geist/font/sans";
 import { AppShell } from "../components/AppShell";
 import { BrandSplashScreen, SPLASH_CRITICAL_CSS } from "../components/brand/BrandSplashScreen";
@@ -160,6 +161,13 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   // authorization check. Business-only surfaces stay dark until their
   // rollout flag is on.
   const experienceMode = resolveExperienceMode(activeWorkspaceId, workspaces);
+  // More-menu entries for pages that are dark unless their flag covers this
+  // Space (the pages re-check on the server; this only decides what is listed).
+  const walletsEnabled = Boolean(user) &&
+    isOneLedger3FlagEnabled(process.env, "BALANCE_PROVENANCE", activeWorkspaceId);
+  const insightsEnabled = Boolean(user) &&
+    isOneLedger3FlagEnabled(process.env, "INSIGHTS_CENTER", activeWorkspaceId);
+  const forecastEnabled = Boolean(user) && isIntelligenceEnabled(activeWorkspaceId);
   const businessSurfacesEnabled = Boolean(user) &&
     isBusinessSurfacesEnabled(activeWorkspaceId);
 
@@ -206,6 +214,9 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           integrationsEnabled={integrationsEnabled}
           experienceMode={experienceMode}
           businessSurfacesEnabled={businessSurfacesEnabled}
+          walletsEnabled={walletsEnabled}
+          insightsEnabled={insightsEnabled}
+          forecastEnabled={forecastEnabled}
           inboxBadgeCount={uiPreferences.showInboxBadge ? inboxBadgeCount : 0}
           insightGlimpse={insightGlimpse}
         >

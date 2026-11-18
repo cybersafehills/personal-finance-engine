@@ -74,6 +74,21 @@ test("the header More button opens the grouped More sheet", async ({ page, isMob
   await expect(sheet.getByText("Account")).toBeVisible();
 });
 
+test("More lists Goals, and /plan and /goals land on real pages instead of a 404", async ({ page, isMobile }) => {
+  test.skip(isMobile, DESKTOP_LAYOUT);
+  await page.goto("/");
+  await headerNav(page).getByRole("button", { name: "More" }).click();
+  const sheet = page.getByRole("dialog", { name: "More" });
+  await expect(sheet.getByText("Plan & understand")).toBeVisible();
+  await sheet.getByRole("button", { name: "Goals" }).click();
+  await expect(page).toHaveURL(/\/budgets\/goals/);
+
+  await page.goto("/plan");
+  await expect(page).toHaveURL(/\/budgets$/);
+  await page.goto("/goals");
+  await expect(page).toHaveURL(/\/budgets\/goals$/);
+});
+
 test.describe("phone bottom bar", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
