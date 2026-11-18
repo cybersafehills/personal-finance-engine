@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 // Read-only page: it only proposes rules (each links to the normal New rule form).
 test("Starter rules page renders and is reachable from Categorization rules", async ({ page }) => {
