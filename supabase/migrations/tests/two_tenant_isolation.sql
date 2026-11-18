@@ -78,7 +78,13 @@ insert into tt.overrides values
   ('payment_requests',             'destination_value', $$'250793000439'$$),
   ('payment_requests',             'token_hash',        $$repeat('c', 64)$$),
   ('payment_requests',             'expires_at',        $$now() + interval '1 day'$$),
-  ('counterparty_merge_events',    'merged_ids',        $$array[extensions.gen_random_uuid()]$$);
+  ('counterparty_merge_events',    'merged_ids',        $$array[extensions.gen_random_uuid()]$$),
+  -- balance_observations are visible only through an account the caller may see
+  -- (20270104000000), so the planted row must point at a REAL account in the
+  -- tenant's workspace. The sweep plants public.accounts first (alphabetical
+  -- order) so one exists; if it ever does not, this falls back to a random id
+  -- and the positive control fails loudly rather than passing for the wrong reason.
+  ('balance_observations',         'account_id',        $$coalesce((select a.id from public.accounts a where a.workspace_id = {ws} order by a.id limit 1), extensions.gen_random_uuid())$$);
 
 -- Value for one NOT NULL, default-less column, from its type or from the single
 -- column CHECK that lists literals. NULL = cannot synthesise.
@@ -132,6 +138,8 @@ begin
             or exists (select 1 from tt.overrides o where o.tbl = p_tbl and o.col = a.attname::text))
   loop
     select o.expr into v from tt.overrides o where o.tbl = p_tbl and o.col = col.attname::text;
+    -- an override may refer to the tenant being planted with the token {ws}
+    if v is not null then v := replace(v, '{ws}', quote_literal(p_ws)); end if;
     -- rows keyed by user as well as workspace belong to the tenant's user, as a real row would
     if v is null and col.attname::text ~ '(^|_)user_id$' and col.rt = 'uuid'::regtype then v := quote_literal(p_user); end if;
     if v is null then v := tt.synth(col.rt, rel, col.attname); end if;
