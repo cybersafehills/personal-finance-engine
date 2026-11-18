@@ -446,3 +446,14 @@ the original file (a signed URL behind `bill.download_original`).
 - Provider links and EMV merchant QRs are explained but not continued (the web
   does the same: no verified route). Only the first code the camera reports in a
   scan is handled.
+
+### Categorization rules (list, pause and resume)
+
+The Categories screen links to the rules of the active Space
+(`/api/mobile/categorization-rules`, docs/mobile-api.md). Live as soon as the
+mobile API is, since the web has no flag for rules. A rule's condition sentence is
+shared with the web (`lib/categorization/rule-summary.ts`). The write names its
+Space and reads the changed row back, because RLS silently hides an UPDATE a
+viewer is not allowed to make. Not in this slice: create, edit, reorder, apply to
+history, suggestions, templates, history.
+

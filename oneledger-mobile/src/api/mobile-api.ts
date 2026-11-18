@@ -15,6 +15,12 @@ import {
 } from "@/features/pay/parse";
 import { parseCategoriesResponse, type CategoriesResult } from "@/features/categories/parse";
 import {
+  parseRulesResponse,
+  parseSetActiveResponse,
+  type RulesResult,
+  type SetActiveResult,
+} from "@/features/rules/parse";
+import {
   parseBillResponse,
   parseBillsEnabled,
   parseBillsResponse,
@@ -308,6 +314,21 @@ export async function fetchSpacesEnabled(): Promise<boolean> {
 export async function fetchMoreFlags(): Promise<MoreFlags | null> {
   const result = await bearerGet("/api/mobile/config");
   return result.kind === "response" ? parseMoreFlags(result.status, result.body) : null;
+}
+
+/** The categorization rules of the active Space, in the order they are checked. */
+export async function fetchRules(): Promise<RulesResult> {
+  const result = await bearerGet("/api/mobile/categorization-rules");
+  if (result.kind !== "response") {
+    return { ok: false, ...failureForOutcome(result, "Your rules") };
+  }
+  return parseRulesResponse(result.status, result.body);
+}
+
+/** Pause or resume one rule. Names the Space explicitly; the server never defaults a write to Personal. */
+export async function setRuleActive(workspaceId: string, ruleId: string, active: boolean): Promise<SetActiveResult> {
+  const r = await bearerPost("/api/mobile/categorization-rules/active", { workspaceId, ruleId, active });
+  return r.kind === "response" ? parseSetActiveResponse(r.status, r.body) : spaceFailure(r);
 }
 
 /** Whether Bills is on for the active Space. Any failure means "not offered". */
