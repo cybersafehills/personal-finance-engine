@@ -33,6 +33,8 @@ export type StarterProposal = {
 
 export type StarterResult = {
   proposals: StarterProposal[];
+  /** How many names qualified before the list was cut to `max`. */
+  totalProposals: number;
   totalUncategorized: number;
   /** Uncategorized transactions the proposals would cover. */
   coveredCount: number;
@@ -122,6 +124,7 @@ export function proposeStarterRules(
   const top = proposals.slice(0, max);
   return {
     proposals: top,
+    totalProposals: proposals.length,
     totalUncategorized: uncategorized.length,
     coveredCount: top.reduce((s, p) => s + p.txnCount, 0),
     nameless,
