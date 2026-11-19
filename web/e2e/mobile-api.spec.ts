@@ -361,13 +361,17 @@ test.describe("mobile API", () => {
         "businessSurfaces",
         "developer",
         "insights",
+        "insightsCenter",
         "integrations",
         "pay",
+        "paymentRequests",
+        "people",
         "scanToPay",
         "spaces",
         "statements",
         "trustedRecipients",
         "ussdDirectory",
+        "wallets",
       ]);
       for (const k of keys) expect(typeof body.config[k]).toBe("boolean");
       // FINANCIAL_STATEMENTS_ENABLED is on for this suite (playwright.config.ts).
