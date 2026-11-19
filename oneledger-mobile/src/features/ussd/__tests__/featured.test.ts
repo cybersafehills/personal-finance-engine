@@ -15,7 +15,7 @@ describe("pinFeatured", () => {
     pinFeatured(list);
     expect(list.map((c) => c.slug)).toEqual(before);
   });
-  it("pins the MTN eKash code that carries the receiver's ID, *182*1*2*{receiver}#", () => {
+  it("pins the MTN eKash code that carries the receiver's ID and the amount, *182*1*2*{receiver}*{amount}#", () => {
     expect(FEATURED_SLUGS[0]).toBe("ekash-mtn-send");
   });
 });

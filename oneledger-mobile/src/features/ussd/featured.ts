@@ -2,7 +2,7 @@
 // most people open the directory for. Matched by slug (a stable identifier in the
 // published directory); a slug that is not in the list is simply not pinned.
 export const FEATURED_SLUGS: readonly string[] = [
-  // MTN eKash code with the receiver's ID (*182*1*2*{receiver}#): send money to a bank
+  // MTN eKash code with the receiver's ID and the amount (*182*1*2*{receiver}*{amount}#): send money to a bank
   // account or a Mobile Money wallet.
   "ekash-mtn-send",
 ];

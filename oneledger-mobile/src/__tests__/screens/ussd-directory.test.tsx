@@ -62,7 +62,7 @@ describe("USSD directory", () => {
     mockDirectory.mockResolvedValue([
       code({ id: "a", slug: "access-bank", name: "Access Bank Rwanda - eKash transfer" }),
       code({ id: "b", slug: "bk", name: "Bank of Kigali - eKash transfer" }),
-      code({ id: "e", slug: "ekash-mtn-send", name: "eKash - send money to a bank account or Mobile Money wallet", template: "*182*1*2*{receiver}#", acceptsParameters: true }),
+      code({ id: "e", slug: "ekash-mtn-send", name: "eKash - send money to a bank account or Mobile Money wallet", template: "*182*1*2*{receiver}*{amount}#", acceptsParameters: true }),
     ]);
     await render(<UssdDirectory />);
     await screen.findByText("eKash - send money to a bank account or Mobile Money wallet");
@@ -275,15 +275,16 @@ describe("USSD code page", () => {
   });
 });
 
-describe("eKash code: *182*1*2*{receiver}#", () => {
+describe("eKash code: *182*1*2*{receiver}*{amount}#", () => {
   const ekash = () =>
     detail({
       slug: "ekash-mtn-send",
       name: "eKash - send money to a bank account or Mobile Money wallet",
-      template: "*182*1*2*{receiver}#",
+      template: "*182*1*2*{receiver}*{amount}#",
       acceptsParameters: true,
       parameters: [
         { key: "receiver", kind: "account_reference", label: "Receiver's ID", required: true, position: 0, formatRegex: null, formatHint: "The receiver's phone number or account number (letters, digits and dashes).", minLength: null, maxLength: null },
+        { key: "amount", kind: "amount", label: "Amount (RWF)", required: true, position: 1, formatRegex: null, formatHint: "Whole RWF amount, no decimals.", minLength: null, maxLength: null },
       ],
       steps: [],
     });
@@ -293,27 +294,42 @@ describe("eKash code: *182*1*2*{receiver}#", () => {
     mockBySlug.mockResolvedValue(ekash());
   });
 
-  it("asks for the receiver's ID and builds the code with it", async () => {
+  it("asks for the receiver's ID and the amount, and builds the code with both", async () => {
     await render(<UssdCode />);
     await fireEvent.changeText(await screen.findByLabelText("Receiver's ID"), "0781234567");
-    expect(await screen.findByLabelText("Code to dial: *182*1*2*0781234567#")).toBeTruthy();
+    await fireEvent.changeText(screen.getByLabelText("Amount (RWF)"), "5000");
+    expect(await screen.findByLabelText("Code to dial: *182*1*2*0781234567*5000#")).toBeTruthy();
   });
 
   it("works for a bank account number too", async () => {
     await render(<UssdCode />);
     await fireEvent.changeText(await screen.findByLabelText("Receiver's ID"), "00012345678");
-    expect(await screen.findByLabelText("Code to dial: *182*1*2*00012345678#")).toBeTruthy();
+    await fireEvent.changeText(screen.getByLabelText("Amount (RWF)"), "25000");
+    expect(await screen.findByLabelText("Code to dial: *182*1*2*00012345678*25000#")).toBeTruthy();
   });
 
-  it("cannot be dialled until the receiver's ID is in, and then opens the dialer with it", async () => {
+  it("cannot be dialled until both are in, and then opens the dialer with the finished code", async () => {
     await render(<UssdCode />);
     const dial = await screen.findByRole("button", { name: "Dial this code" });
     expect(dial.props.accessibilityState.disabled).toBe(true);
-    expect(screen.getByLabelText("Code template: *182*1*2*{receiver}#")).toBeTruthy();
+    expect(screen.getByLabelText("Code template: *182*1*2*{receiver}*{amount}#")).toBeTruthy();
 
+    // The ID alone is not enough: the amount is part of the code.
     await fireEvent.changeText(screen.getByLabelText("Receiver's ID"), "0781234567");
+    expect((await screen.findByRole("button", { name: "Dial this code" })).props.accessibilityState.disabled).toBe(true);
+
+    await fireEvent.changeText(screen.getByLabelText("Amount (RWF)"), "5000");
     await fireEvent.press(await screen.findByRole("button", { name: "Dial this code" }));
-    await waitFor(() => expect(Linking.openURL).toHaveBeenCalledWith("tel:*182*1*2*0781234567%23"));
+    await waitFor(() => expect(Linking.openURL).toHaveBeenCalledWith("tel:*182*1*2*0781234567*5000%23"));
+  });
+
+  it("refuses an amount with separators or decimals, and zero", async () => {
+    await render(<UssdCode />);
+    await fireEvent.changeText(await screen.findByLabelText("Receiver's ID"), "0781234567");
+    for (const bad of ["5,000", "50.5", "0"]) {
+      await fireEvent.changeText(screen.getByLabelText("Amount (RWF)"), bad);
+      expect(screen.queryByLabelText(/Code to dial/)).toBeNull();
+    }
   });
 
   it("refuses an ID that could rewrite the code", async () => {
