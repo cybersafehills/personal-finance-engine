@@ -5,6 +5,7 @@ import { useState, useTransition } from "react";
 import {
   archiveAccount,
   renameAccount,
+  restoreAccount,
   setPrimaryAccount,
 } from "../app/settings/accounts/actions";
 import { Badge } from "./Badge";
@@ -131,6 +132,23 @@ export function AccountItem({ account }: { account: AccountRow }) {
             Archive
           </button>
         </div>
+      )}
+
+      {isArchived && (
+        <button
+          type="button"
+          disabled={isPending}
+          onClick={() => {
+            setErrorMessage(null);
+            startTransition(async () => {
+              const result = await restoreAccount(account.id);
+              if (!result.ok) setErrorMessage(result.error);
+            });
+          }}
+          className="min-h-8 w-fit text-xs font-medium text-accent hover:underline disabled:opacity-50"
+        >
+          Restore wallet
+        </button>
       )}
 
       {errorMessage && (

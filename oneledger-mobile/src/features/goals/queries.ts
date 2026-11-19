@@ -1,3 +1,4 @@
+import { selectedWorkspaceId } from "@/features/spaces/selected-space";
 import { supabase } from "@/api/supabase";
 import { QueryError } from "@/features/transactions/queries";
 
@@ -6,8 +7,7 @@ import type { Currency, Goal, GoalProgress, GoalStatus, GoalType } from "./types
 // Reads under the signed-in user's RLS, like the web's getGoals / getGoalProgress
 // (web/lib/queries.ts). Progress, the required monthly saving and the projection
 // come from the database's own goal_progress() (a SECURITY DEFINER function that
-// checks Space membership itself), never from client maths. Contributing to a
-// goal stays on the web.
+// checks Space membership itself).
 
 const COLUMNS =
   "id, goal_type, name, description, currency, target_amount_minor, current_amount_minor, target_date, status";
@@ -54,6 +54,7 @@ export async function getGoals(): Promise<Goal[]> {
   const { data, error } = await supabase
     .from("financial_goals")
     .select(COLUMNS)
+    .eq("workspace_id", selectedWorkspaceId())
     .order("created_at", { ascending: false })
     .limit(MAX_GOALS);
   if (error) throw new QueryError(error.message);

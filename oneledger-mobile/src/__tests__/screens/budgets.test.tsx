@@ -6,8 +6,19 @@ import { resetRouterMock, router } from "@/test/router-mock";
 import Budgets from "@/app/(app)/budgets";
 
 const mockFetchBudgets = jest.fn();
+const mockCanEdit = jest.fn();
+jest.mock("@/features/budgets/budget-lifecycle", () => ({ loadDraftBudgets: async () => [] }));
 jest.mock("expo-router", () => jest.requireActual("@/test/router-mock"));
 jest.mock("@/api/mobile-api", () => ({ fetchBudgets: () => mockFetchBudgets() }));
+jest.mock("@/features/auth/SessionProvider", () => ({
+  useSession: () => ({ session: { user: { id: "user-a" } } }),
+}));
+jest.mock("@/features/spaces/ActiveSpaceProvider", () => ({
+  useActiveSpace: () => ({ activeId: "space-a" }),
+}));
+jest.mock("@/features/budgets/allocation-editor", () => ({
+  canEditAllocations: (workspaceId: string) => mockCanEdit(workspaceId),
+}));
 
 const budget: Budget = {
   id: "b1",
@@ -49,6 +60,7 @@ const budget: Budget = {
 beforeEach(() => {
   resetRouterMock();
   mockFetchBudgets.mockReset();
+  mockCanEdit.mockReset().mockResolvedValue(false);
 });
 
 describe("Budgets screen", () => {
@@ -67,6 +79,17 @@ describe("Budgets screen", () => {
     expect(screen.getByLabelText("Essentials budget used")).toBeTruthy();
     // Over-target reads as "over", never as a negative amount.
     expect(screen.getByText(/RWF 20,000 over/)).toBeTruthy();
+    expect(screen.queryByText("Edit allocations")).toBeNull();
+    expect(screen.queryByText("Create budget")).toBeNull();
+  });
+
+  it("offers allocation editing when the server confirms budget.manage for this Space", async () => {
+    mockCanEdit.mockResolvedValue(true);
+    mockFetchBudgets.mockResolvedValue({ ok: true, budgets: [budget] });
+    await render(<Budgets />);
+    expect(await screen.findByText("Edit allocations")).toBeTruthy();
+    expect(screen.getByText("Create budget")).toBeTruthy();
+    expect(mockCanEdit).toHaveBeenCalledWith("space-a");
   });
 
   it("offers to categorise transactions when some are uncategorised", async () => {

@@ -48,10 +48,10 @@ const cps = [
   { id: "me-other-ws", kind: "self", merged_into_id: null, workspace_id: "x" },
 ];
 const txns = [
-  { id: "t1", counterparty_id: "me" },
-  { id: "t2", counterparty_id: "me2" },
-  { id: "t3", counterparty_id: "bob" },
-  { id: "t4", counterparty_id: "me-other-ws" },
+  { id: "t1", counterparty_id: "me", workspace_id: "w" },
+  { id: "t2", counterparty_id: "me2", workspace_id: "w" },
+  { id: "t3", counterparty_id: "bob", workspace_id: "w" },
+  { id: "t4", counterparty_id: "me-other-ws", workspace_id: "x" },
 ];
 
 Deno.test("own-account transactions include ones on a merged duplicate, and exclude other people", async () => {
@@ -86,15 +86,14 @@ Deno.test("nobody marked: empty set and no transaction query", async () => {
   assertEquals(ids.size, 0);
 });
 
-Deno.test("a failed lookup is empty and logged by default, but throws when strict (reports)", async () => {
+Deno.test("a failed own-account lookup never silently returns an empty exclusion set", async () => {
   const bad = fakeClient(
     { counterparties: cps, transactions: txns },
     "transactions",
   );
-  assertEquals((await ownAccountTransactionIds(bad, "w")).size, 0);
   let threw = false;
   try {
-    await ownAccountTransactionIds(bad, "w", { strict: true });
+    await ownAccountTransactionIds(bad, "w");
   } catch {
     threw = true;
   }

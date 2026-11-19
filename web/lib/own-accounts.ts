@@ -14,58 +14,51 @@
 // deno-lint-ignore no-explicit-any
 type Client = { from(table: string): any }; // eslint-disable-line @typescript-eslint/no-explicit-any
 
-const PAGE = 1000;
-const MAX_PAGES = 20; // 20k rows: far beyond any one user's own-account history
-
+import { completePages } from "../../shared/financial.ts";
 export async function ownAccountTransactionIds(
   supabase: Client,
   workspaceId: string | null,
   opts: { strict?: boolean } = {},
 ): Promise<Set<string>> {
-  const fail = (what: string, message: string): Set<string> => {
-    if (opts.strict) {
-      throw new Error(`ownAccountTransactionIds ${what}: ${message}`);
+  void opts; // retained call signature; financial read failures always propagate.
+  const people = await completePages<
+    { id: string; kind: string; merged_into_id: string | null }
+  >(async (offset, size) => {
+    let query = supabase.from("counterparties").select("id,kind,merged_into_id")
+      .order("id");
+    if (workspaceId) query = query.eq("workspace_id", workspaceId);
+    const { data, error } = await query.range(offset, offset + size - 1);
+    if (error) throw new Error("Own-account classification is unavailable.");
+    return data ?? [];
+  });
+  const byId = new Map(people.map((p) => [p.id, p]));
+  const selfIds = people.filter((p) => {
+    let current: typeof p | undefined = p;
+    const seen = new Set<string>();
+    while (current) {
+      if (seen.has(current.id)) {
+        throw new Error("Invalid counterparty merge cycle.");
+      }
+      seen.add(current.id);
+      if (!current.merged_into_id) return current.kind === "self";
+      current = byId.get(current.merged_into_id);
     }
-    console.error(`ownAccountTransactionIds ${what} failed:`, message);
-    return new Set();
-  };
-
-  let selfQuery = supabase
-    .from("counterparties")
-    .select("id")
-    .eq("kind", "self")
-    .is("merged_into_id", null)
-    .limit(1000);
-  if (workspaceId) selfQuery = selfQuery.eq("workspace_id", workspaceId);
-  const selfRes = await selfQuery;
-  if (selfRes.error) return fail("counterparties", selfRes.error.message);
-  const selfIds = ((selfRes.data ?? []) as { id: string }[]).map((r) => r.id);
-  if (selfIds.length === 0) return new Set();
-
-  const mergedRes = await supabase
-    .from("counterparties")
-    .select("id")
-    .in("merged_into_id", selfIds)
-    .limit(5000);
-  if (mergedRes.error) {
-    return fail("merged counterparties", mergedRes.error.message);
-  }
-  const allIds = [
-    ...selfIds,
-    ...((mergedRes.data ?? []) as { id: string }[]).map((r) => r.id),
-  ];
-
+    return false;
+  }).map((p) => p.id);
   const ids = new Set<string>();
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const { data, error } = await supabase
-      .from("transactions")
-      .select("id")
-      .in("counterparty_id", allIds)
-      .order("id", { ascending: true })
-      .range(page * PAGE, page * PAGE + PAGE - 1);
-    if (error) return fail("transactions", error.message);
-    for (const r of (data ?? []) as { id: string }[]) ids.add(r.id);
-    if (!data || data.length < PAGE) break;
+  for (let start = 0; start < selfIds.length; start += 200) {
+    const group = selfIds.slice(start, start + 200);
+    const rows = await completePages<{ id: string }>(async (offset, size) => {
+      let query = supabase.from("transactions").select("id").in(
+        "counterparty_id",
+        group,
+      ).order("id");
+      if (workspaceId) query = query.eq("workspace_id", workspaceId);
+      const { data, error } = await query.range(offset, offset + size - 1);
+      if (error) throw new Error("Own-account history is unavailable.");
+      return data ?? [];
+    });
+    rows.forEach((r) => ids.add(r.id));
   }
   return ids;
 }

@@ -1,3 +1,4 @@
+import { completePages } from "../../shared/financial";
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { supabaseServer } from "./supabase-server";
@@ -167,36 +168,21 @@ async function fetchSettledTransactions(
   endUtc: Date,
   visibility: SourceVisibility,
 ): Promise<SettledTransactionRow[]> {
-  const { data, error } = await withSourceVisibility(
-    supabase
-      .from("transactions")
-      .select(SETTLED_TRANSACTION_COLUMNS)
-      .eq("workspace_id", workspaceId)
-      .eq("settlement_state", "settled")
-      // Phase V: a transaction merged into its canonical duplicate is kept
-      // for evidence but must never be counted in a report.
-      .neq("dedupe_state", "merged")
-      .gte("occurred_at", startUtc.toISOString())
-      .lt("occurred_at", endUtc.toISOString()),
-    visibility,
-  );
-
-  if (error) {
-    throw new Error(`fetchSettledTransactions failed: ${error.message}`);
-  }
-
-  // Confirmed self-transfers (transfer_links.status = 'linked') are neither
-  // income nor spending - same rule getBudgetActuals applies - so reports and
-  // emails agree with budgets and Home. A failed lookup must not silently
-  // inflate a delivered report, so it throws like the fetch above.
-  const { data: links, error: linksError } = await supabase
-    .from("transfer_links")
-    .select("out_transaction_id, in_transaction_id")
-    .eq("workspace_id", workspaceId)
-    .eq("status", "linked");
-  if (linksError) {
-    throw new Error(`fetchLinkedTransfers failed: ${linksError.message}`);
-  }
+  // RWF-only report contract; never fold another currency into RWF.
+  const data = await completePages<SettledTransactionRow>(async (offset, size) => {
+    const { data, error } = await withSourceVisibility(supabase.from("transactions").select(SETTLED_TRANSACTION_COLUMNS)
+      .eq("workspace_id", workspaceId).eq("currency", "RWF").eq("settlement_state", "settled")
+      .neq("dedupe_state", "merged").gte("occurred_at", startUtc.toISOString()).lt("occurred_at", endUtc.toISOString())
+      .order("id").range(offset, offset + size - 1), visibility);
+    if (error) throw new Error("Report transactions are unavailable.");
+    return data ?? [];
+  });
+  const links = await completePages<{ out_transaction_id: string; in_transaction_id: string }>(async (offset, size) => {
+    const { data, error } = await supabase.from("transfer_links").select("out_transaction_id,in_transaction_id")
+      .eq("workspace_id", workspaceId).eq("status", "linked").order("id").range(offset, offset + size - 1);
+    if (error) throw new Error("Report transfer classification is unavailable.");
+    return data ?? [];
+  });
   // Strict, like the lookups above: a delivered report must not be inflated by a
   // silently failed "my own account" lookup.
   const own = await ownAccountTransactionIds(supabase, workspaceId, { strict: true });

@@ -1,3 +1,4 @@
+import { usePrivacy } from "@/features/privacy/PrivacyProvider";
 import * as Linking from "expo-linking";
 import { router } from "expo-router";
 import { useCallback } from "react";
@@ -13,6 +14,7 @@ import { colors, space } from "@/theme/tokens";
 // Settings, grouped like the web's. Rows with a native screen open it; the
 // rest open the web page (the browser may ask you to sign in once).
 export default function Settings() {
+  const privacy = usePrivacy();
   const load = useCallback(() => fetchMoreFlags(), []);
   const { data: flags } = useQuery(load);
   function open(row: SettingsRow) {
@@ -24,6 +26,12 @@ export default function Settings() {
     <Screen>
       <Button label="Back" variant="ghost" onPress={() => router.back()} />
       <ScreenHeader title="Settings" />
+      <Card>
+        <Text variant="bodyStrong">Full financial privacy</Text>
+        <Text variant="caption">Hide amounts on financial screens, including their screen-reader labels.</Text>
+        <Button label={privacy.fullPrivacy ? "Turn off full privacy" : "Turn on full privacy"} onPress={() => privacy.setFullPrivacy(!privacy.fullPrivacy)} />
+        {privacy.saveError ? <Text accessibilityRole="alert">{privacy.saveError}</Text> : null}
+      </Card>
       {visibleSettingsGroups(flags ?? null).map((group) => (
         <View key={group.title} style={{ gap: space[2] }}>
           <Text variant="bodyStrong" accessibilityRole="header">

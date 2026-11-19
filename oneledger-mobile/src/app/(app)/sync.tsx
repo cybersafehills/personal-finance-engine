@@ -1,3 +1,4 @@
+import { formatAmount } from "../../../../shared/financial";
 import { router } from "expo-router";
 import { useCallback, useState } from "react";
 import { View } from "react-native";
@@ -6,7 +7,6 @@ import { Button, Card, EmptyState, Screen, ScreenHeader, Text } from "@/componen
 import { captureSupported, getCaptureHealth } from "@/features/capture/capture";
 import { useQuery } from "@/hooks/useQuery";
 import { formatDateTime } from "@/lib/kigali-time";
-import { formatRwf } from "@/lib/money";
 import { discardRejected, listOutboxEntries, resolveConflict, type OutboxEntry } from "@/offline/outbox";
 import { useOffline } from "@/offline/offline-context";
 import { getOfflineRuntime } from "@/offline/runtime";
@@ -111,7 +111,7 @@ export default function SyncDetails() {
           ) : (
           <Card key={e.opId} style={{ gap: space[1] }}>
             <Text variant="bodyStrong">
-              {e.opType === "set_category" ? `Category for ${e.counterparty ?? "a transaction"}` : `${e.direction === "in" ? "+" : "−"}${e.amountRwf !== null ? formatRwf(e.amountRwf) : ""}${e.counterparty ? ` · ${e.counterparty}` : ""}`}
+              {e.opType === "set_category" ? `Category for ${e.counterparty ?? "a transaction"}` : `${e.direction === "in" ? "+" : "−"}${e.amountRwf !== null ? formatAmount(e.amountRwf, e.currency ?? "RWF", false) : ""}${e.counterparty ? ` · ${e.counterparty}` : ""}`}
             </Text>
             <Text variant="caption" color={e.state === "rejected" || e.state === "stalled" ? "attention" : "textMuted"}>
               {e.state === "rejected" || e.state === "stalled"

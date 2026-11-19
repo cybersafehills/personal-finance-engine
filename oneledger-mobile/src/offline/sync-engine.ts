@@ -1,3 +1,4 @@
+import { reconcileVisibility, type SnapshotPage } from "./visibility";
 import type { ManualAccount } from "@/features/manual/input";
 
 import { applyServerPage, getCursor, markPullComplete, upsertAccounts, type ServerTransaction } from "./local-store";
@@ -29,6 +30,8 @@ export interface SyncTransport {
   >;
   fetchChanges(after: { updatedAt: string | null; id: string | null }, limit: number): Promise<ServerTransaction[]>;
   fetchAccounts(): Promise<ManualAccount[]>;
+  fetchSnapshotPage?(afterId: string | null): Promise<SnapshotPage>;
+  visibleIds?(ids: string[]): Promise<string[]>;
 }
 
 export type SyncReport = {
@@ -48,35 +51,40 @@ export type SyncDeps = {
   random?: () => number;
   /** Ignore retry timers (used when connectivity has just returned or the user taps Retry). */
   ignoreBackoff?: boolean;
+  isActive?: () => boolean;
 };
 
-let running: Promise<SyncReport> | null = null;
-
-/** Single-flight: overlapping triggers (launch + foreground + connectivity) share one run. */
+const running = new WeakMap<SqlDb, Promise<SyncReport>>();
 export function runSync(deps: SyncDeps): Promise<SyncReport> {
-  if (!running) {
-    running = syncOnce(deps).finally(() => {
-      running = null;
-    });
-  }
-  return running;
+  const existing = running.get(deps.db);
+  if (existing) return existing;
+  const task = syncOnce(deps).finally(() => running.delete(deps.db));
+  running.set(deps.db, task);
+  return task;
 }
+export async function finishSync(db: SqlDb): Promise<void> { await running.get(db)?.catch(() => undefined); }
 
 async function syncOnce(deps: SyncDeps): Promise<SyncReport> {
   const { db, transport } = deps;
   const now = deps.now ?? Date.now;
   const random = deps.random ?? Math.random;
+  const active = deps.isActive ?? (() => true);
+  const guard = () => { if (!active()) throw new TransportError("auth", "session_changed"); };
   const report: SyncReport = { pushed: 0, replayed: 0, rejected: 0, conflicts: 0, retrying: 0, pulled: 0, stoppedFor: null };
 
+  if (!active()) return { ...report, stoppedFor: "auth" };
   await recoverInFlight(db);
 
   // ---- Push: oldest first, dependencies respected, stop on offline/auth. ----
   for (;;) {
+    if (!active()) return { ...report, stoppedFor: "auth" };
     const op = await nextEligible(db, now(), deps.ignoreBackoff === true);
     if (!op) break;
     await markInFlight(db, op);
     try {
+      guard();
       const result = await transport.applyOp(op);
+      guard();
       if (result.status === "conflict") {
         await holdConflict(db, op, result.server);
         report.conflicts += 1;
@@ -117,22 +125,34 @@ async function syncOnce(deps: SyncDeps): Promise<SyncReport> {
 
   // ---- Pull: accounts, then incremental transaction changes. ----
   try {
-    await upsertAccounts(db, await transport.fetchAccounts());
+    guard();
+    const accounts = await transport.fetchAccounts();
+    guard();
+    await upsertAccounts(db, accounts);
+    if (transport.fetchSnapshotPage && transport.visibleIds) {
+      report.pulled = await reconcileVisibility({ db, fetchPage: transport.fetchSnapshotPage.bind(transport), visibleIds: transport.visibleIds.bind(transport), active });
+      return report;
+    }
 
     const cursor = await getCursor(db, TX_STREAM);
     let after = {
       updatedAt: cursor.updatedAt ? new Date(Date.parse(cursor.updatedAt) - CURSOR_OVERLAP_MS).toISOString() : null,
       id: null as string | null,
     };
+    let exhausted = false;
     for (let page = 0; page < MAX_PULL_PAGES; page++) {
+      guard();
       const rows = await transport.fetchChanges(after, PAGE_SIZE);
+      guard();
       const nowIso = new Date(now()).toISOString();
       await applyServerPage(db, TX_STREAM, rows, nowIso, { advanceCursor: true });
       report.pulled += rows.length;
-      if (rows.length < PAGE_SIZE) break;
+      if (rows.length < PAGE_SIZE) { exhausted = true; break; }
       const last = rows[rows.length - 1];
       after = { updatedAt: last.updated_at, id: last.id };
     }
+    if (!exhausted) throw new Error("snapshot_incomplete");
+    guard();
     await markPullComplete(db, TX_STREAM, new Date(now()).toISOString());
   } catch (error) {
     const failure = error instanceof TransportError ? error : null;

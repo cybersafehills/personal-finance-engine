@@ -12,6 +12,7 @@ export function deriveSyncStatus(input: {
   syncing: boolean;
   summary: OutboxSummary;
   authNeeded: boolean;
+  refreshFailed?: boolean;
 }): SyncStatus {
   const { summary } = input;
   const waiting = summary.pending + summary.inFlight + summary.retrying;
@@ -32,6 +33,7 @@ export function deriveSyncStatus(input: {
         : `${summary.needsAttention} change${summary.needsAttention === 1 ? "" : "s"} couldn't be sent. Your data is safe on this device.`,
     };
   }
+  if (input.refreshFailed && !input.syncing) return { kind: "attention", label: "Refresh failed", detail: "Saved activity may be out of date. Try syncing again; pending changes have been kept." };
   if (!input.online) {
     return {
       kind: "offline",

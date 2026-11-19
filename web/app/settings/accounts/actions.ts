@@ -75,11 +75,16 @@ export async function renameAccount(
     return { ok: false, error: "Account name cannot be empty." };
   }
 
+  const workspaceId = await getActiveWorkspaceId();
+  if (!workspaceId) return { ok: false, error: "Could not resolve your workspace." };
+
   const supabase = await supabaseSession();
-  const { error } = await supabase
-    .from("accounts")
-    .update({ name: trimmedName })
-    .eq("id", accountId);
+  const { error } = await supabase.rpc("manage_wallet", {
+    p_workspace_id: workspaceId,
+    p_account_id: accountId,
+    p_action: "rename",
+    p_name: trimmedName,
+  });
 
   if (error) {
     return { ok: false, error: "Could not rename the account." };
@@ -92,11 +97,9 @@ export async function renameAccount(
 }
 
 /**
- * Makes this account the workspace's primary account. Two updates rather
- * than one: idx_accounts_one_primary_per_workspace allows at most one
- * is_primary = true row per workspace, so any existing primary must be
- * cleared first. Both updates go through RLS (accounts_update_owner)
- * exactly like any other write here.
+ * Makes the account primary through the atomic owner/source/AAL-checked RPC.
+ * The database locks the Space and changes both flags in one transaction, so
+ * a denied target cannot clear the existing default.
  */
 export async function setPrimaryAccount(
   accountId: string,
@@ -109,24 +112,8 @@ export async function setPrimaryAccount(
 
   const supabase = await supabaseSession();
 
-  const { error: clearError } = await supabase
-    .from("accounts")
-    .update({ is_primary: false })
-    .eq("workspace_id", workspaceId)
-    .neq("id", accountId);
-
-  if (clearError) {
-    return { ok: false, error: "Could not update the primary account." };
-  }
-
-  const { error: setError } = await supabase
-    .from("accounts")
-    .update({ is_primary: true })
-    .eq("id", accountId);
-
-  if (setError) {
-    return { ok: false, error: "Could not update the primary account." };
-  }
+  const { error } = await supabase.rpc("set_default_wallet", { p_workspace_id: workspaceId, p_account_id: accountId });
+  if (error) return { ok: false, error: "Could not change the default wallet. Check your permissions and two-step verification." };
 
   revalidatePath("/settings/accounts");
 
@@ -144,15 +131,15 @@ export async function setPrimaryAccount(
 export async function archiveAccount(
   accountId: string,
 ): Promise<AccountActionResult> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!workspaceId) return { ok: false, error: "Could not resolve your workspace." };
+
   const supabase = await supabaseSession();
-  const { error } = await supabase
-    .from("accounts")
-    .update({
-      is_active: false,
-      archived_at: new Date().toISOString(),
-      is_primary: false,
-    })
-    .eq("id", accountId);
+  const { error } = await supabase.rpc("manage_wallet", {
+    p_workspace_id: workspaceId,
+    p_account_id: accountId,
+    p_action: "archive",
+  });
 
   if (error) {
     return { ok: false, error: "Could not archive the account." };
@@ -161,5 +148,21 @@ export async function archiveAccount(
   revalidatePath("/settings/accounts");
   revalidatePath("/integrations/connections");
 
+  return { ok: true };
+}
+
+export async function restoreAccount(accountId: string): Promise<AccountActionResult> {
+  const workspaceId = await getActiveWorkspaceId();
+  if (!workspaceId) return { ok: false, error: "Could not resolve your workspace." };
+
+  const supabase = await supabaseSession();
+  const { error } = await supabase.rpc("manage_wallet", {
+    p_workspace_id: workspaceId,
+    p_account_id: accountId,
+    p_action: "restore",
+  });
+  if (error) return { ok: false, error: "Could not restore the wallet. Check your permissions and two-step verification." };
+  revalidatePath("/settings/accounts");
+  revalidatePath("/integrations/connections");
   return { ok: true };
 }

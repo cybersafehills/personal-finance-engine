@@ -1,4 +1,6 @@
+import { completePages, currencyFlows, type FinancialRow, type CurrencyFlow } from "../../shared/financial";
 import "server-only";
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { supabaseSession } from "./supabase-session-server";
 import {
@@ -37,16 +39,9 @@ import {
 } from "./connector-read-model";
 export type { ConnectorAdapterCanaryStatus } from "./connector-read-model";
 
-// Every function here queries through the session-authenticated Supabase
-// client (lib/supabase-session-server.ts), never the service-role one -
-// Phase B's actual security boundary is RLS, enforced by Postgres for
-// whichever workspace(s) the signed-in user is a member of. There is
-// deliberately no manual `.eq("workspace_id", ...)` filtering here: adding
-// one would either duplicate what RLS already guarantees, or - if it were
-// ever wrong - silently mask an RLS bug instead of surfacing it. If a
-// caller isn't signed in, these queries simply return nothing (RLS denies
-// unauthenticated access to every table here), never an error that could
-// leak whether data exists.
+// Financial reads use the session client and explicit validated active Space.
+// Selection chooses context; independent database RLS enforces authorization.
+// Failed primary financial reads throw so callers cannot render a false zero.
 
 export type TransactionRow = {
   id: string;
@@ -79,6 +74,7 @@ const TRANSACTION_COLUMNS =
 
 export type CurrentBalance = {
   amountRwf: number;
+  accountId: string | null;
   /** occurred_at of the transaction this balance is derived from - the
    *  natural "as of" freshness signal (master prompt §7/§11.4): this
    *  balance is only ever as current as the most recent transaction
@@ -88,9 +84,12 @@ export type CurrentBalance = {
 
 export async function getCurrentBalance(): Promise<CurrentBalance | null> {
   const supabase = await supabaseSession();
+  const workspaceId = await activeWorkspaceIdOrNone();
   const { data, error } = await supabase
     .from("transactions")
-    .select("balance_after_rwf, occurred_at, direction, principal_effect_rwf")
+    .select("balance_after_rwf, occurred_at, direction, principal_effect_rwf, account_id")
+    .eq("currency", "RWF")
+    .eq("workspace_id", workspaceId)
     .not("balance_after_rwf", "is", null)
     // Phase U: a transaction merged into its canonical duplicate is kept
     // for evidence but is never a live transaction - here it must not be
@@ -111,7 +110,7 @@ export async function getCurrentBalance(): Promise<CurrentBalance | null> {
 
   if (error) {
     console.error("getCurrentBalance failed:", error.message);
-    return null;
+    throw new Error("The balance is unavailable. Try again.");
   }
 
   const plausible = (data ?? []).find((row) => {
@@ -123,7 +122,7 @@ export async function getCurrentBalance(): Promise<CurrentBalance | null> {
 
   if (!plausible) return null;
 
-  return { amountRwf: plausible.balance_after_rwf, asOfIso: plausible.occurred_at };
+  return { amountRwf: plausible.balance_after_rwf, asOfIso: plausible.occurred_at, accountId: plausible.account_id };
 }
 
 /**
@@ -131,70 +130,46 @@ export async function getCurrentBalance(): Promise<CurrentBalance | null> {
  * (RLS-scoped, same source getBudgetActuals uses). A failed lookup yields an
  * empty set (totals then match the pre-fix behaviour) and is logged.
  */
-export async function getLinkedTransferIds(
-  supabase: Awaited<ReturnType<typeof supabaseSession>>,
-): Promise<Set<string>> {
-  const { data, error } = await supabase
-    .from("transfer_links")
-    .select("out_transaction_id, in_transaction_id")
-    .eq("status", "linked");
-  if (error) {
-    console.error("getLinkedTransferIds failed:", error.message);
-    return new Set();
-  }
-  // Plus everything with a counterparty marked "my own account".
-  const own = await ownAccountTransactionIds(supabase, null);
-  return new Set([...linkedTransferIdSet(data ?? []), ...own]);
+export async function getLinkedTransferIds(supabase: Awaited<ReturnType<typeof supabaseSession>>): Promise<Set<string>> {
+  const workspaceId = await activeWorkspaceIdOrNone();
+  const links = await completePages<{ out_transaction_id: string; in_transaction_id: string }>(async (offset, size) => {
+    const { data, error } = await supabase.from("transfer_links").select("out_transaction_id,in_transaction_id")
+      .eq("workspace_id", workspaceId).eq("status", "linked").order("id").range(offset, offset + size - 1);
+    if (error) throw new Error("Transfer classification is unavailable.");
+    return data ?? [];
+  });
+  return new Set([...linkedTransferIdSet(links), ...(await ownAccountTransactionIds(supabase, workspaceId, { strict: true }))]);
 }
 
 export type TodayTotals = {
+  byCurrency?: CurrencyFlow[];
   spentRwf: number;
   receivedRwf: number;
 };
 
 export async function getTodayTotals(): Promise<TodayTotals> {
   const supabase = await supabaseSession();
-  const todayKey = kigaliDateKey(new Date().toISOString());
-  const { startUtc, endUtc } = kigaliDayBoundsUtc(todayKey);
-
-  const { data, error } = await supabase
-    .from("transactions")
-    .select("id, direction, principal_effect_rwf, fee_effect_rwf")
-    .eq("settlement_state", "settled")
-    // Phase U: exclude rows merged into a canonical duplicate (kept for
-    // evidence, never counted).
-    .neq("dedupe_state", "merged")
-    .gte("occurred_at", startUtc.toISOString())
-    .lte("occurred_at", endUtc.toISOString());
-
-  if (error) {
-    console.error("getTodayTotals failed:", error.message);
-    return { spentRwf: 0, receivedRwf: 0 };
-  }
-
-  let spentRwf = 0;
-  let receivedRwf = 0;
-
-  // Confirmed self-transfers are neither spending nor income.
-  const linked = await getLinkedTransferIds(supabase);
-  for (const row of excludeLinkedTransfers(data ?? [], linked)) {
-    const effect = Number(row.principal_effect_rwf) +
-      Number(row.fee_effect_rwf);
-    if (row.direction === "out") {
-      spentRwf += Math.abs(effect);
-    } else if (row.direction === "in") {
-      receivedRwf += effect;
-    }
-  }
-
-  return { spentRwf, receivedRwf };
+  const workspaceId = await activeWorkspaceIdOrNone();
+  const { startUtc, endUtc } = kigaliDayBoundsUtc(kigaliDateKey(new Date().toISOString()));
+  const rows = await completePages<FinancialRow>(async (offset, size) => {
+    const { data, error } = await supabase.from("financial_activity_v")
+      .select("id,currency,direction,principal_effect_rwf,fee_effect_rwf,settlement_state,dedupe_state,is_own_transfer")
+      .eq("workspace_id", workspaceId).gte("occurred_at", startUtc.toISOString()).lte("occurred_at", endUtc.toISOString())
+      .order("id").range(offset, offset + size - 1);
+    if (error) throw new Error("Today's financial totals are unavailable.");
+    return data ?? [];
+  });
+  const byCurrency = currencyFlows(rows);
+  const rwf = byCurrency.find((r) => r.currency === "RWF");
+  return { spentRwf: rwf?.sentMinor ?? 0, receivedRwf: rwf?.receivedMinor ?? 0, byCurrency };
 }
 
 export type LifetimeFlowTotals = {
-  /** All settled outgoing principal + fees, every currency folded to RWF,
+  byCurrency?: CurrencyFlow[];
+  /** RWF settled outgoing principal + fees only; other currencies are separate,
    *  no time bound - the total a user has moved *out* through OneLedger. */
   sentRwf: number;
-  /** All settled incoming principal + fees, folded to RWF - the total
+  /** RWF settled incoming principal + fees only - the total
    *  received and recorded by OneLedger. */
   receivedRwf: number;
   /** auth.users.created_at for the signed-in user - "since your account
@@ -214,51 +189,30 @@ export type LifetimeFlowTotals = {
  */
 export async function getLifetimeFlowTotals(): Promise<LifetimeFlowTotals> {
   const supabase = await supabaseSession();
-
-  const [{ data, error }, { data: { user } }] = await Promise.all([
-    supabase
-      .from("transactions")
-      .select("direction, principal_effect_rwf, fee_effect_rwf")
-      .eq("settlement_state", "settled")
-      // Phase U: merged duplicates stay as evidence but are never counted.
-      .neq("dedupe_state", "merged"),
-    supabase.auth.getUser(),
-  ]);
-
-  const accountCreatedIso = user?.created_at ?? null;
-
-  if (error) {
-    console.error("getLifetimeFlowTotals failed:", error.message);
-    return { sentRwf: 0, receivedRwf: 0, accountCreatedIso, count: 0 };
-  }
-
-  let sentRwf = 0;
-  let receivedRwf = 0;
-  let count = 0;
-
-  for (const row of data ?? []) {
-    const effect = Number(row.principal_effect_rwf) +
-      Number(row.fee_effect_rwf);
-    if (row.direction === "out") {
-      sentRwf += Math.abs(effect);
-    } else if (row.direction === "in") {
-      receivedRwf += effect;
-    } else {
-      continue;
-    }
-    count += 1;
-  }
-
-  return { sentRwf, receivedRwf, accountCreatedIso, count };
+  const workspaceId = await activeWorkspaceIdOrNone();
+  const rows = await completePages<FinancialRow>(async (offset, size) => {
+    const { data, error } = await supabase.from("financial_activity_v")
+      .select("id,currency,direction,principal_effect_rwf,fee_effect_rwf,settlement_state,dedupe_state,is_own_transfer")
+      .eq("workspace_id", workspaceId).order("id").range(offset, offset + size - 1);
+    if (error) throw new Error("Lifetime financial totals are unavailable.");
+    return data ?? [];
+  });
+  const byCurrency = currencyFlows(rows);
+  const rwf = byCurrency.find((r) => r.currency === "RWF");
+  const { data: { user } } = await supabase.auth.getUser();
+  return { sentRwf: rwf?.sentMinor ?? 0, receivedRwf: rwf?.receivedMinor ?? 0,
+    count: byCurrency.reduce((n, r) => n + r.count, 0), accountCreatedIso: user?.created_at ?? null, byCurrency };
 }
 
 export async function getRecentTransactions(
   limit = 8,
 ): Promise<TransactionRow[]> {
   const supabase = await supabaseSession();
+  const workspaceId = await activeWorkspaceIdOrNone();
   const { data, error } = await supabase
     .from("transactions")
     .select(TRANSACTION_COLUMNS)
+    .eq("workspace_id", workspaceId)
     // Phase U: merged duplicates stay in the DB as evidence but never in a
     // ledger listing.
     .neq("dedupe_state", "merged")
@@ -267,7 +221,7 @@ export async function getRecentTransactions(
 
   if (error) {
     console.error("getRecentTransactions failed:", error.message);
-    return [];
+    throw new Error("Financial data is unavailable. Try again.");
   }
 
   return data ?? [];
@@ -301,9 +255,11 @@ export async function getTransactions(
   }: TransactionListFilters = {},
 ): Promise<TransactionRow[]> {
   const supabase = await supabaseSession();
+  const workspaceId = await activeWorkspaceIdOrNone();
   let query = supabase
     .from("transactions")
     .select(TRANSACTION_COLUMNS)
+    .eq("workspace_id", workspaceId)
     // Phase U: merged duplicates stay in the DB as evidence but never in a
     // ledger listing.
     .neq("dedupe_state", "merged")
@@ -334,7 +290,7 @@ export async function getTransactions(
 
   if (error) {
     console.error("getTransactions failed:", error.message);
-    return [];
+    throw new Error("Financial data is unavailable. Try again.");
   }
 
   return data ?? [];
@@ -343,16 +299,14 @@ export async function getTransactions(
 const REVIEW_QUEUE_STATUSES = ["provisional", "suggested", "conflict"] as const;
 const REVIEW_QUEUE_LIMIT = 100;
 
-// Unlike most reads in this file, review-queue rows are read through RLS
-// alone (no active-workspace filter) - same as getTransactions/
-// getTransactionById above - since a review item belongs to whichever
-// workspace its transaction does, and RLS already scopes that correctly
-// per-row.
+// Review rows and counts use the same active Space as the ledger.
 export async function getReviewQueueTransactions(): Promise<TransactionRow[]> {
   const supabase = await supabaseSession();
+  const workspaceId = await activeWorkspaceIdOrNone();
   const { data, error } = await supabase
     .from("transactions")
     .select(TRANSACTION_COLUMNS)
+    .eq("workspace_id", workspaceId)
     .in("category_decision_status", REVIEW_QUEUE_STATUSES)
     .order("occurred_at", { ascending: false })
     .limit(REVIEW_QUEUE_LIMIT);
@@ -367,9 +321,11 @@ export async function getReviewQueueTransactions(): Promise<TransactionRow[]> {
 
 export async function getReviewQueueCount(): Promise<number> {
   const supabase = await supabaseSession();
+  const workspaceId = await activeWorkspaceIdOrNone();
   const { count, error } = await supabase
     .from("transactions")
     .select("id", { count: "exact", head: true })
+    .eq("workspace_id", workspaceId)
     .in("category_decision_status", REVIEW_QUEUE_STATUSES);
 
   if (error) {
@@ -809,10 +765,13 @@ export async function getCategoryTotalsComplete(): Promise<
   { totals: CategoryTotalRow[]; truncated: boolean }
 > {
   const supabase = await supabaseSession();
+  const workspaceId = await activeWorkspaceIdOrNone();
   const { rows, truncated } = await collectPages<TotalsRow & { id: string }>(async (from, to) => {
     const { data, error } = await supabase
       .from("transactions")
       .select("id, category, principal_effect_rwf, fee_effect_rwf")
+    .eq("workspace_id", workspaceId)
+      .eq("currency", "RWF")
       .eq("direction", "out")
       .eq("settlement_state", "settled")
       // Phase U: exclude rows merged into a canonical duplicate.
@@ -839,24 +798,9 @@ export async function getCategoryTotalsComplete(): Promise<
  * themselves are shown (the Categories page, the mobile API).
  */
 export async function getCategoryTotals(): Promise<CategoryTotalRow[]> {
-  const supabase = await supabaseSession();
-  const { data, error } = await supabase
-    .from("transactions")
-    .select("id, category, principal_effect_rwf, fee_effect_rwf")
-    .eq("direction", "out")
-    .eq("settlement_state", "settled")
-    // Phase U: exclude rows merged into a canonical duplicate.
-    .neq("dedupe_state", "merged");
-
-  if (error) {
-    console.error("getCategoryTotals failed:", error.message);
-    return [];
-  }
-  // Confirmed self-transfers are not spending.
-  const linked = await getLinkedTransferIds(supabase);
-  return aggregateCategoryTotals(
-    excludeLinkedTransfers((data ?? []) as (TotalsRow & { id: string })[], linked),
-  );
+  const result = await getCategoryTotalsComplete();
+  if (result.truncated) throw new Error("Category totals are incomplete. Narrow the period.");
+  return result.totals;
 }
 
 // ===========================================================================
@@ -964,7 +908,7 @@ export async function getCategorySuggestions(): Promise<string[]> {
  * unlike the single-workspace assumption this replaced, "the caller's
  * workspace" is no longer unambiguous without this resolution.
  */
-export async function getActiveWorkspaceId(): Promise<string | null> {
+async function resolveActiveWorkspaceId(): Promise<string | null> {
   const cookieStore = await cookies();
   const supabase = await supabaseSession();
   // The web sends a cookie; the mobile app (no cookie) sends X-Workspace-Id.
@@ -1002,6 +946,15 @@ export async function getActiveWorkspaceId(): Promise<string | null> {
   return data?.workspace_id ?? null;
 }
 
+/** Per-request memoised: many reads below scope themselves to it. */
+export const getActiveWorkspaceId: () => Promise<string | null> = cache(resolveActiveWorkspaceId);
+
+/** A workspace id that matches nothing: reads scoped to "no Space" come back empty. */
+const NO_WORKSPACE = "00000000-0000-0000-0000-000000000000";
+async function activeWorkspaceIdOrNone(): Promise<string> {
+  return (await getActiveWorkspaceId()) ?? NO_WORKSPACE;
+}
+
 /** The caller's active workspace's default_currency, or "RWF" if it can't be resolved - used to pre-select a currency in the budget/goal creation forms. */
 export async function getWorkspaceDefaultCurrency(): Promise<string> {
   const workspaceId = await getActiveWorkspaceId();
@@ -1032,9 +985,11 @@ const ACCOUNT_COLUMNS =
 
 export async function getAccounts(): Promise<AccountRow[]> {
   const supabase = await supabaseSession();
+  const workspaceId = await activeWorkspaceIdOrNone();
   const { data, error } = await supabase
     .from("accounts")
     .select(ACCOUNT_COLUMNS)
+    .eq("workspace_id", workspaceId)
     .order("is_primary", { ascending: false })
     .order("created_at", { ascending: true });
 
@@ -1352,15 +1307,17 @@ const BUDGET_COLUMNS =
 
 export async function getBudgets(): Promise<BudgetRow[]> {
   const supabase = await supabaseSession();
+  const workspaceId = await activeWorkspaceIdOrNone();
   const { data, error } = await supabase
     .from("budgets")
     .select(BUDGET_COLUMNS)
+    .eq("workspace_id", workspaceId)
     .order("status", { ascending: true })
     .order("period_start", { ascending: false });
 
   if (error) {
     console.error("getBudgets failed:", error.message);
-    return [];
+    throw new Error("Financial data is unavailable. Try again.");
   }
 
   return data ?? [];
@@ -2022,15 +1979,17 @@ const GOAL_COLUMNS =
 
 export async function getGoals(): Promise<GoalRow[]> {
   const supabase = await supabaseSession();
+  const workspaceId = await activeWorkspaceIdOrNone();
   const { data, error } = await supabase
     .from("financial_goals")
     .select(GOAL_COLUMNS)
+    .eq("workspace_id", workspaceId)
     .order("status", { ascending: true })
     .order("created_at", { ascending: false });
 
   if (error) {
     console.error("getGoals failed:", error.message);
-    return [];
+    throw new Error("Financial data is unavailable. Try again.");
   }
 
   return data ?? [];
@@ -2580,6 +2539,7 @@ export async function getCategorizationInsights(): Promise<
   CategorizationInsights
 > {
   const supabase = await supabaseSession();
+  const workspaceId = await activeWorkspaceIdOrNone();
 
   const [
     { data: transactions, error: txnError },
@@ -2589,7 +2549,8 @@ export async function getCategorizationInsights(): Promise<
       error: historyError,
     },
   ] = await Promise.all([
-    supabase.from("transactions").select("category_decision_status"),
+    supabase.from("transactions").select("category_decision_status")
+    .eq("workspace_id", workspaceId),
     supabase.from("categorization_policies").select(
       "id, name, category, is_active, usage_count",
     ).eq(
@@ -2755,9 +2716,12 @@ export type WorkspaceSummary = {
 /** Every workspace the caller is an active member of - drives the workspace switcher. */
 export async function getUserWorkspaces(): Promise<WorkspaceSummary[]> {
   const supabase = await supabaseSession();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
   const { data, error } = await supabase
     .from("workspace_memberships")
     .select("role, workspaces(id, name, kind)")
+    .eq("user_id", user.id)
     .eq("status", "active")
     .order("joined_at", { ascending: true });
 

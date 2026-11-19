@@ -1,3 +1,4 @@
+import { formatAmount, isCurrency } from "../../shared/financial";
 import { formatSignedRwf } from "../lib/format";
 
 const SIZE_CLASSES = {
@@ -21,10 +22,12 @@ const SIZE_CLASSES = {
  */
 export function MoneyAmount({
   amountRwf,
+  currency,
   size = "md",
   masked = false,
 }: {
   amountRwf: number;
+  currency?: string;
   size?: keyof typeof SIZE_CLASSES;
   masked?: boolean;
 }) {
@@ -39,6 +42,8 @@ export function MoneyAmount({
     );
   }
 
+  if (!Number.isSafeInteger(amountRwf) || (currency && !isCurrency(currency))) return <span>Amount unavailable</span>;
+
   const isIncoming = amountRwf > 0;
   const isOutgoing = amountRwf < 0;
 
@@ -52,7 +57,7 @@ export function MoneyAmount({
     <span
       className={`font-semibold tabular-nums ${SIZE_CLASSES[size]} ${colorClass}`}
     >
-      {formatSignedRwf(amountRwf)}
+      {currency && currency !== "RWF" ? formatAmount(amountRwf, currency) : formatSignedRwf(amountRwf)}
     </span>
   );
 }

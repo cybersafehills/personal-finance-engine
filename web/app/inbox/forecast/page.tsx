@@ -4,6 +4,7 @@ import { OwnAccountPrompt } from "../../../components/people/OwnAccountPrompt";
 import { PageHeader } from "../../../components/PageHeader";
 import { ForecastChart } from "../../../components/ForecastChart";
 import { WhyThisInsight } from "../../../components/ds/WhyThisInsight";
+import { kigaliDateKey } from "../../../lib/kigali-time";
 import { formatSignedRwf } from "../../../lib/format";
 import { loadOwnAccountCandidates } from "../../../lib/counterparties/directory-data";
 import { isCounterpartiesEnabledFor } from "../../../lib/counterparties/directory";
@@ -20,11 +21,7 @@ export default async function ForecastPage() {
   const insights = await getIntelligenceInsights();
   if (!insights.enabled || !insights.forecast) redirect("/inbox");
 
-  const { forecast, baseline, recurring, anomalies, walletForecasts } = insights;
-  // One block per wallet (each has its own balance and history); the default first.
-  const entries = walletForecasts.length > 0
-    ? walletForecasts
-    : [{ walletId: "default", name: "", isDefault: true, forecast: forecast! }];
+  const { baseline, recurring, anomalies, walletForecasts: entries } = insights;
 
   // The "usual income" figure is built from money received. If one of the biggest
   // senders is really one of your own accounts, it inflates that figure - so ask.
@@ -53,7 +50,7 @@ export default async function ForecastPage() {
         backLabel="Inbox"
       />
 
-      {entries.map(({ walletId, name, forecast }) => (
+      {entries.map(({ walletId, name, balanceAsOf, forecast }) => (
         <div key={walletId} className="flex flex-col gap-6">
           {entries.length > 1 && (
             <h2 className="text-base font-semibold text-text-primary">{name}</h2>
@@ -62,6 +59,7 @@ export default async function ForecastPage() {
         aria-label="Projected balance"
         className="flex flex-col gap-3 rounded-card border border-border-subtle bg-surface p-4"
       >
+        {balanceAsOf ? <p className="text-xs text-text-muted">Starting balance as of {kigaliDateKey(balanceAsOf)}.</p> : null}
         <ForecastChart forecast={forecast} />
 
         <div className="grid grid-cols-2 gap-3 text-sm">

@@ -1,3 +1,4 @@
+import { minor } from "../../shared/financial.ts";
 // Category totals ("where your money has gone"), as pure functions so they can be
 // unit-tested with `deno test` (category_totals_test.ts).
 //
@@ -25,9 +26,14 @@ export function aggregateCategoryTotals(rows: readonly TotalsRow[]): CategoryTot
   const totals = new Map<string, { total: number; count: number }>();
   for (const row of rows) {
     const key = row.category ?? "Uncategorized";
-    const effect = Math.abs(Number(row.principal_effect_rwf) + Number(row.fee_effect_rwf));
+    if (row.principal_effect_rwf === null || row.fee_effect_rwf === null) throw new Error("Category accounting is unavailable.");
+    const signed = minor(row.principal_effect_rwf) + minor(row.fee_effect_rwf);
+    const effect = Number(signed < 0n ? -signed : signed);
+    if (!Number.isSafeInteger(effect)) throw new RangeError("unsafe_money_total");
     const existing = totals.get(key) ?? { total: 0, count: 0 };
-    totals.set(key, { total: existing.total + effect, count: existing.count + 1 });
+    const total = existing.total + effect;
+    if (!Number.isSafeInteger(total)) throw new RangeError("unsafe_money_total");
+    totals.set(key, { total, count: existing.count + 1 });
   }
   return Array.from(totals.entries())
     .map(([category, { total, count }]) => ({ category, totalRwf: total, transactionCount: count }))

@@ -12,18 +12,17 @@ export const dynamic = "force-dynamic";
 
 export default async function CategoriesPage() {
   // The complete, paged totals (a single request silently stopped at 1000 rows).
-  // A failed read still shows an empty list here, as it always has.
-  const [{ totals: categories }, spaceCategories] = await Promise.all([
-    getCategoryTotalsComplete().catch((error: Error) => {
-      console.error("getCategoryTotals failed:", error.message);
-      return { totals: [], truncated: false };
-    }),
+  // Failed reads use the error boundary; they are never "no spending".
+  const [{ totals: categories, truncated }, spaceCategories] = await Promise.all([
+    getCategoryTotalsComplete(),
     getSpaceCategoryManagement(true),
   ]);
   const grandTotal = categories.reduce((sum, c) => sum + c.totalRwf, 0);
 
   return (
     <div>
+      <p className="text-sm text-text-muted">Category totals below are RWF only. Use Insights for separate totals in other currencies.</p>
+      {truncated ? <p role="alert">These category figures are incomplete. Some history is outside the verified coverage limit.</p> : null}
       <PageHeader
         title="Categories"
         subtitle="Where your money has gone, all time"

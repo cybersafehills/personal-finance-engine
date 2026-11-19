@@ -1,3 +1,4 @@
+import { selectWorkspace } from "./selected-space";
 import {
   createContext,
   useCallback,
@@ -56,6 +57,7 @@ export function ActiveSpaceProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!userId) {
+      selectWorkspace(null);
       setRequestedWorkspace(null);
       return;
     }
@@ -63,21 +65,32 @@ export function ActiveSpaceProvider({ children }: { children: ReactNode }) {
     (async () => {
       try {
         const [list, stored] = await Promise.all([
-          getSpaces(),
+          getSpaces(userId),
           deviceStore.get(storageKey(userId)),
         ]);
         if (cancelled) return;
         const next = resolveActiveSpace(list, stored);
+        selectWorkspace(next?.id ?? null);
         setRequestedWorkspace(requestedWorkspaceId(next));
+        await deviceStore.set(`oneledger.spaces.${userId}`, JSON.stringify(list));
         setLoaded({ userId, spaces: list, active: next });
       } catch {
         // Not fatal: no Space means the server default (Personal).
         if (cancelled) return;
-        setRequestedWorkspace(null);
-        setLoaded({ userId, spaces: [], active: null });
+        const cached = await deviceStore.get(`oneledger.spaces.${userId}`);
+        if (cancelled) return;
+        let list: Space[] = [];
+        try { list = cached ? JSON.parse(cached) : []; } catch { /* no cached membership list */ }
+        const stored = await deviceStore.get(storageKey(userId));
+        if (cancelled) return;
+        const next = resolveActiveSpace(list, stored);
+        selectWorkspace(next?.id ?? null);
+        setRequestedWorkspace(requestedWorkspaceId(next));
+        setLoaded({ userId, spaces: list, active: next });
       }
     })();
     return () => {
+      selectWorkspace(null);
       cancelled = true;
     };
   }, [userId]);
@@ -88,6 +101,7 @@ export function ActiveSpaceProvider({ children }: { children: ReactNode }) {
       if (!next || !userId) return;
       void deviceStore.set(storageKey(userId), id);
       // Before state, so the reload that follows already names the new Space.
+      selectWorkspace(next?.id ?? null);
       setRequestedWorkspace(requestedWorkspaceId(next));
       setLoaded({ userId, spaces, active: next });
     },
@@ -100,9 +114,10 @@ export function ActiveSpaceProvider({ children }: { children: ReactNode }) {
       // The new Space is not in the list yet: read it, then switch to it. If
       // the read fails the Space still exists; it shows up on the next load.
       try {
-        const list = await getSpaces();
+        const list = await getSpaces(userId);
         const next = list.find((s) => s.id === id) ?? resolveActiveSpace(list, null);
         void deviceStore.set(storageKey(userId), next?.id ?? id);
+        selectWorkspace(next?.id ?? null);
         setRequestedWorkspace(requestedWorkspaceId(next));
         setLoaded({ userId, spaces: list, active: next });
       } catch {

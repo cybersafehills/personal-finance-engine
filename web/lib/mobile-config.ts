@@ -1,3 +1,4 @@
+import { isOneLedger3FlagEnabled } from "./oneledger3-flags";
 import "server-only";
 
 import { isFinancialStatementsEnabled } from "./financial-statements";
@@ -21,6 +22,10 @@ import { isSpacesEnabled } from "./spaces/gate";
 // the server will accept. Booleans only: no env values, allowlists or ids.
 
 export type MobileConfig = {
+  wallets: boolean;
+  people: boolean;
+  paymentRequests: boolean;
+  insightsCenter: boolean;
   pay: boolean;
   assistedPay: boolean;
   ussdDirectory: boolean;
@@ -37,6 +42,10 @@ export type MobileConfig = {
 
 export function mobileConfig(workspaceId: string | null): MobileConfig {
   return {
+    wallets: isOneLedger3FlagEnabled(process.env, "BALANCE_PROVENANCE", workspaceId),
+    people: isOneLedger3FlagEnabled(process.env, "COUNTERPARTIES", workspaceId),
+    paymentRequests: isOneLedger3FlagEnabled(process.env, "PAYMENT_REQUESTS", workspaceId),
+    insightsCenter: isOneLedger3FlagEnabled(process.env, "INSIGHTS_CENTER", workspaceId),
     pay: isPayServicesEnabled(workspaceId),
     assistedPay: isAssistedPayEnabled(workspaceId),
     ussdDirectory: isUssdDirectoryEnabled(workspaceId),

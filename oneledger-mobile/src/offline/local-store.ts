@@ -34,6 +34,8 @@ export type ServerTransaction = {
   dedupe_state: string;
   notes: string | null;
   updated_at: string;
+  is_own_transfer?: boolean | number;
+  visibility_revoked?: number;
 };
 
 export type LocalTransaction = Omit<ServerTransaction, "updated_at"> & {
@@ -101,14 +103,16 @@ export async function recordManualTransaction(
 }
 
 const COLUMNS =
-  "id, account_id, workspace_id, source, transaction_type, direction, status, currency, amount_rwf, fee_rwf, principal_effect_rwf, fee_effect_rwf, settlement_state, balance_after_rwf, counterparty_name, counterparty_reference, occurred_at, category, subcategory, category_decision_status, suggested_category, dedupe_state, notes, server_updated_at, sync_state, sync_error";
+  "id, account_id, workspace_id, source, transaction_type, direction, status, currency, amount_rwf, fee_rwf, principal_effect_rwf, fee_effect_rwf, settlement_state, balance_after_rwf, counterparty_name, counterparty_reference, occurred_at, category, subcategory, category_decision_status, suggested_category, dedupe_state, notes, server_updated_at, sync_state, sync_error, is_own_transfer, visibility_revoked";
 
 export async function listLocalTransactions(
   db: SqlDb,
-  opts: { limit?: number; offset?: number; direction?: "in" | "out"; sinceIso?: string; needsReview?: boolean; q?: string; category?: string } = {},
+  opts: { workspaceId?: string; accountId?: string; limit?: number; offset?: number; direction?: "in" | "out"; sinceIso?: string; needsReview?: boolean; q?: string; category?: string } = {},
 ): Promise<LocalTransaction[]> {
-  const where = ["dedupe_state <> 'merged'"];
+  const where = ["dedupe_state <> 'merged'", "visibility_revoked = 0"];
   const params: (string | number)[] = [];
+  if (opts.workspaceId) { where.push("workspace_id = ?"); params.push(opts.workspaceId); }
+  if (opts.accountId) { where.push("account_id = ?"); params.push(opts.accountId); }
   if (opts.direction) {
     where.push("direction = ?");
     params.push(opts.direction);
@@ -150,9 +154,9 @@ export async function upsertAccounts(db: SqlDb, accounts: ManualAccount[] & { is
   });
 }
 
-export async function listLocalAccounts(db: SqlDb): Promise<ManualAccount[]> {
+export async function listLocalAccounts(db: SqlDb, workspaceId?: string): Promise<ManualAccount[]> {
   const rows = await db.all<{ id: string; workspace_id: string; name: string; currency: string }>(
-    "SELECT id, workspace_id, name, currency FROM accounts ORDER BY is_primary DESC, name",
+    "SELECT id, workspace_id, name, currency FROM accounts WHERE (? IS NULL OR workspace_id = ?) ORDER BY is_primary DESC, name", [workspaceId ?? null, workspaceId ?? null],
   );
   return rows.map((r) => ({ id: r.id, workspaceId: r.workspace_id, name: r.name, currency: r.currency as ManualAccount["currency"] }));
 }
@@ -238,6 +242,7 @@ export async function applyServerPage(
       if (existing && ["local_only", "pending", "syncing", "conflict", "failed"].includes(existing.sync_state)) {
         // A server row for an id this device is still uploading is the ack
         // arriving by the other road. Keep the local copy; completeOp will mark it synced.
+        await tx.run("UPDATE transactions SET is_own_transfer = ? WHERE id = ?", [r.is_own_transfer ? 1 : 0, r.id]);
         skippedLocal += 1;
         continue;
       }
@@ -267,6 +272,7 @@ export async function applyServerPage(
           r.category_decision_status, r.suggested_category, r.dedupe_state, r.notes, r.updated_at,
         ],
       );
+      await tx.run("UPDATE transactions SET is_own_transfer = ? WHERE id = ?", [r.is_own_transfer ? 1 : 0, r.id]);
       stored += 1;
     }
     if (opts.advanceCursor && rows.length > 0) {
