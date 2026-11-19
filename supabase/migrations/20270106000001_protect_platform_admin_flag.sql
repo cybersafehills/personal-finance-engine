@@ -3,10 +3,12 @@
 -- A BEFORE UPDATE trigger rejects changes to the flag from signed-in user
 -- sessions (auth.uid() is not null). service_role, the SQL editor and
 -- migrations (no JWT subject) are unaffected. Other profile columns stay
--- user-editable.
+-- user-editable. SECURITY DEFINER so the auth.uid() lookup does not depend on the
+-- calling role's access to the auth schema.
 create or replace function public.protect_platform_admin_flag()
   returns trigger
   language plpgsql
+  security definer
   set search_path = public
 as $$
 begin
