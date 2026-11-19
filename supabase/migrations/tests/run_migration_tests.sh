@@ -702,7 +702,10 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # write) - 139 tables, 138 with RLS.
 # Offline sync (20270102000000) adds client_operations (RLS enabled, no grant for
 # users; written only by the SECURITY DEFINER sync function) - 140 tables, 139 with RLS.
-if [ "$TABLE_COUNT" = "140" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Platform Console foundation (20270107000000) adds 3 RPC-only tables (RLS on, no
+# authenticated grants): console_staff, console_role_permissions,
+# console_audit_events. 140 + 3 = 143.
+if [ "$TABLE_COUNT" = "143" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -1071,10 +1074,13 @@ AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_p
 # Counterparty source visibility (20270105000000): can_view_counterparty, the
 # authorization primitive the four counterparty policies call (read-only,
 # returns a boolean, takes only an id). 139 + 1 = 140.
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "140" ]; then
-  pass "authenticated holds EXECUTE on exactly the 140 functions expected, no more"
+# Platform Console foundation (20270107000000) adds 7 authenticated-callable
+# RPCs (console_my_access, _record_audit, _dashboard_summary, _activity_feed,
+# _audit_log, _staff_list, _health_snapshot). 140 + 7 = 147.
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "147" ]; then
+  pass "authenticated holds EXECUTE on exactly the 147 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 140 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 147 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -9663,6 +9669,103 @@ if [ "$TT_SEEN" -lt 100 ]; then
   fail "Two-tenant sweep produced only $TT_SEEN assertions (expected 100+) - the sweep did not run to completion"
 fi
 rm -f "$ARTIFACT_DIR/pfe_tt_stderr.log"
+
+# ===========================================================================
+# Platform Console foundation (20270107000000): staff gate, MFA, permission
+# matrix, append-only audit, no direct table access. Reuses pfe_rls.
+# ===========================================================================
+echo "=== Platform Console: staff access, MFA, audit ==="
+
+console_call() {
+  # console_call <user_id> <aal> <sql>: run as `authenticated` with a JWT; returns
+  # stdout+stderr (errors are part of the assertion) with command tags dropped.
+  local user_id="$1" aal="$2" sql="$3"
+  psql -d pfe_rls -t -A -c "set role authenticated; select set_config('request.jwt.claim.sub', '$user_id', false); select set_config('request.jwt.claims', '{\"sub\":\"$user_id\",\"aal\":\"$aal\"}', false); $sql" 2>&1 \
+    | grep -Ev '^(SET|INSERT [0-9]+ [0-9]+|UPDATE [0-9]+|DELETE [0-9]+)$' \
+    | grep -Ev '^\s*$' | grep -v 'set_config' | tr '\n' ' '
+}
+
+CON_OWNER="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('console-owner@example.com') returning id;" | head -1)"
+CON_SUPPORT="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('console-support@example.com') returning id;" | head -1)"
+CON_SUSPENDED="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('console-suspended@example.com') returning id;" | head -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.console_staff (user_id, role, status) values
+    ('$CON_OWNER', 'platform_owner', 'active'),
+    ('$CON_SUPPORT', 'support_agent', 'active'),
+    ('$CON_SUSPENDED', 'platform_owner', 'suspended');" >/dev/null
+
+check_console() { # check_console <label> <haystack> <needle>
+  if printf '%s' "$2" | grep -q "$3"; then pass "Console: $1"; else fail "Console: $1 (got: $2)"; fi
+}
+
+check_console "non-staff user (even at aal2) is denied the dashboard" \
+  "$(console_call "$USER_A" aal2 "select public.console_dashboard_summary(7);")" "not_authorized"
+check_console "console_my_access reports a non-staff user as is_staff=false" \
+  "$(console_call "$USER_A" aal2 "select public.console_my_access();")" '"is_staff": false'
+check_console "staff at aal1 is refused with mfa_required" \
+  "$(console_call "$CON_OWNER" aal1 "select public.console_dashboard_summary(7);")" "mfa_required"
+AAL1_ACCESS="$(console_call "$CON_OWNER" aal1 "select public.console_my_access();")"
+check_console "staff at aal1 sees mfa_ok=false" "$AAL1_ACCESS" '"mfa_ok": false'
+if printf '%s' "$AAL1_ACCESS" | grep -q 'permissions'; then
+  fail "Console: permissions leaked at aal1 ($AAL1_ACCESS)"
+else
+  pass "Console: permissions are not disclosed at aal1"
+fi
+check_console "owner at aal2 gets dashboard aggregates" \
+  "$(console_call "$CON_OWNER" aal2 "select public.console_dashboard_summary(7);")" "registrations"
+check_console "owner at aal2 gets the health snapshot" \
+  "$(console_call "$CON_OWNER" aal2 "select public.console_health_snapshot(60);")" "captured_at"
+check_console "suspended staff is denied" \
+  "$(console_call "$CON_SUSPENDED" aal2 "select public.console_dashboard_summary(7);")" "not_authorized"
+check_console "support agent may read aggregates" \
+  "$(console_call "$CON_SUPPORT" aal2 "select public.console_dashboard_summary(7);")" "registrations"
+check_console "support agent lacks view_audit_logs" \
+  "$(console_call "$CON_SUPPORT" aal2 "select public.console_audit_log(10, null);")" "not_authorized"
+check_console "support agent lacks view_staff" \
+  "$(console_call "$CON_SUPPORT" aal2 "select public.console_staff_list();")" "not_authorized"
+check_console "support agent lacks view_system_health" \
+  "$(console_call "$CON_SUPPORT" aal2 "select public.console_health_snapshot(60);")" "not_authorized"
+
+# Least privilege: the Owner does not bypass privacy / money controls.
+OWNER_PRIVILEGED="$(psql -d pfe_rls -t -A -c "select count(*) from public.console_role_permissions where role = 'platform_owner' and permission in ('approve_refunds','export_sensitive_reports');")"
+if [ "$OWNER_PRIVILEGED" = "0" ]; then
+  pass "Console: platform_owner is not seeded with approve_refunds or export_sensitive_reports"
+else
+  fail "Console: platform_owner holds a privacy/money permission it should not ($OWNER_PRIVILEGED)"
+fi
+
+# Audit: actor and role come from the session; the trail is append-only.
+AUDIT_ID="$(console_call "$CON_OWNER" aal2 "select public.console_record_audit('audit_log.viewed', 'page', 'audit-logs');" | grep -Eo '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | tail -1)"
+if printf '%s' "$AUDIT_ID" | grep -Eq '^[0-9a-f-]{36}$'; then pass "Console: staff can record an audit event"; else fail "Console: console_record_audit failed ($AUDIT_ID)"; fi
+STAMPED="$(psql -d pfe_rls -t -A -c "select actor_role || '|' || (actor_user_id = '$CON_OWNER')::text from public.console_audit_events where id = '$AUDIT_ID';")"
+if [ "$STAMPED" = "platform_owner|true" ]; then pass "Console: audit actor/role are derived from the session"; else fail "Console: audit stamping wrong ($STAMPED)"; fi
+check_console "non-staff cannot write audit events" \
+  "$(console_call "$USER_A" aal2 "select public.console_record_audit('x.y');")" "not_authorized"
+check_console "staff at aal1 cannot write audit events" \
+  "$(console_call "$CON_OWNER" aal1 "select public.console_record_audit('x.y');")" "mfa_required"
+check_console "audit UPDATE is rejected (superuser)" \
+  "$(psql -d pfe_rls -t -A -c "update public.console_audit_events set outcome = 'failed' where id = '$AUDIT_ID';" 2>&1)" "append-only"
+check_console "audit DELETE is rejected (superuser)" \
+  "$(psql -d pfe_rls -t -A -c "delete from public.console_audit_events where id = '$AUDIT_ID';" 2>&1)" "append-only"
+check_console "audit TRUNCATE is rejected" \
+  "$(psql -d pfe_rls -t -A -c "truncate public.console_audit_events;" 2>&1)" "append-only"
+check_console "audit UPDATE is rejected for service_role too" \
+  "$(psql -d pfe_rls -t -A -c "set role service_role; update public.console_audit_events set outcome = 'failed';" 2>&1)" "permission denied"
+check_console "owner can read the audit log and sees the entry" \
+  "$(console_call "$CON_OWNER" aal2 "select public.console_audit_log(10, null);")" "audit_log.viewed"
+
+# No direct table access for any client role; internal helper not callable.
+check_console "authenticated cannot read console_staff directly" \
+  "$(console_call "$CON_OWNER" aal2 "select count(*) from public.console_staff;")" "permission denied"
+check_console "authenticated cannot read console_audit_events directly" \
+  "$(console_call "$CON_OWNER" aal2 "select count(*) from public.console_audit_events;")" "permission denied"
+check_console "authenticated cannot insert into console_audit_events directly" \
+  "$(console_call "$CON_OWNER" aal2 "insert into public.console_audit_events (action, outcome) values ('forged.event', 'success');")" "permission denied"
+check_console "authenticated cannot self-grant staff access" \
+  "$(console_call "$USER_A" aal2 "insert into public.console_staff (user_id, role) values ('$USER_A', 'platform_owner');")" "permission denied"
+check_console "console_assert is not callable by clients" \
+  "$(console_call "$CON_OWNER" aal2 "select public.console_assert('view_audit_logs');")" "permission denied"
+
 
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="
