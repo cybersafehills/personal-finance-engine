@@ -5,15 +5,28 @@ import { Text } from "@/components/ds";
 import { colors } from "@/theme/tokens";
 
 // The raised, blue, round Pay button in the middle of the bottom bar (the web's
-// elevated centre trigger). It never navigates: it opens the Pay sheet.
-export function PayTabButton({ onPress }: { onPress: () => void }) {
+// elevated centre trigger). A tap opens the Pay sheet. A hold, when one is set
+// (`onHold`), jumps straight to the chosen action after `holdMs`.
+export function PayTabButton({
+  onPress,
+  onHold,
+  holdMs = 500,
+  hint = "Opens Pay and Services",
+}: {
+  onPress: () => void;
+  onHold?: () => void;
+  holdMs?: number;
+  hint?: string;
+}) {
   return (
     <View style={styles.slot}>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Pay"
-        accessibilityHint="Opens Pay and Services"
+        accessibilityHint={hint}
         onPress={onPress}
+        onLongPress={onHold}
+        delayLongPress={holdMs}
         style={({ pressed }) => [styles.circle, pressed && { opacity: 0.85 }]}
       >
         <Feather name="send" size={20} color={colors.accentForeground} />

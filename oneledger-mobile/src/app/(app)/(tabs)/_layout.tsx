@@ -5,6 +5,8 @@ import { useCallback } from "react";
 import { fetchPayConfig } from "@/api/mobile-api";
 import { PayTabButton } from "@/components/shell/PayTabButton";
 import { setPayConfigCache } from "@/features/pay/config-cache";
+import { holdHint, resolveHoldTarget } from "@/features/pay/hold-action";
+import { useHoldPrefs } from "@/features/pay/hold-store";
 import { showPayButton } from "@/features/pay/launcher";
 import { useQuery } from "@/hooks/useQuery";
 import { AppHeader } from "@/components/shell/AppHeader";
@@ -38,6 +40,10 @@ export default function TabsLayout() {
   const { data: payConfig } = useQuery(loadPay);
   // Shown only where Pay is on; while that is unknown, or if it can't be read, there is no button.
   const payOn = payConfig ? showPayButton(payConfig) : false;
+  // What holding the button does (Scan to pay unless the user chose otherwise).
+  const holdPrefs = useHoldPrefs();
+  const readyConfig = payConfig?.ok ? payConfig : null;
+  const holdTarget = resolveHoldTarget(holdPrefs, readyConfig);
 
   return (
     <Tabs
@@ -66,7 +72,15 @@ export default function TabsLayout() {
         // `href: null`, and a visible one only the custom centre button.
         options={
           payOn
-            ? { title: "Pay", tabBarButton: () => <PayTabButton onPress={() => router.push("/pay-sheet")} /> }
+            ? { title: "Pay", tabBarButton: () => (
+                <PayTabButton
+                  onPress={() => router.push("/pay-sheet")}
+                  onHold={holdTarget ? () => router.push(holdTarget) : undefined}
+                  holdMs={holdPrefs.durationMs}
+                  hint={holdHint(holdPrefs, readyConfig)}
+                />
+              ),
+            }
             : { title: "Pay", href: null }
         }
       />
