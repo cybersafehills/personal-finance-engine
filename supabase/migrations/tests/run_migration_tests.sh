@@ -287,6 +287,7 @@ create table if not exists auth.users (
   id uuid primary key default extensions.gen_random_uuid(),
   email text,
   email_confirmed_at timestamptz,
+  last_sign_in_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -1077,11 +1078,13 @@ AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_p
 # Platform Console foundation (20270120000000) adds 7 authenticated-callable
 # RPCs (console_my_access, _record_audit, _dashboard_summary, _activity_feed,
 # _audit_log, _staff_list, _health_snapshot) and 20270120000001 adds
-# console_customer_directory. 140 + 8 = 148.
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "148" ]; then
-  pass "authenticated holds EXECUTE on exactly the 148 functions expected, no more"
+# console_customer_directory; 20270121000000 adds 6 more (activity_page,
+# registrations, organizations, reports_overview, security_overview,
+# customer_detail). 140 + 14 = 154.
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "154" ]; then
+  pass "authenticated holds EXECUTE on exactly the 154 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 148 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 154 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -9783,6 +9786,22 @@ check_console "directory rejects an invalid status filter" \
   "$(console_call "$CON_OWNER" aal2 "select public.console_customer_directory(null, 'bogus', 5);")" "invalid_status"
 check_console "analyst (no view_customer_metadata) cannot list the directory" \
   "$(psql -d pfe_rls -t -A -c "insert into public.console_staff (user_id, role) select id, 'read_only_analyst' from auth.users where email = 'b@example.com';" >/dev/null; console_call "$USER_B" aal2 "select public.console_customer_directory(null, null, 5);")" "not_authorized"
+
+# --- console v2 reads (20270121000000) ---
+for fn in "console_activity_page(20, null, null)" "console_registrations(null, 5)" "console_organizations(null, 5)" "console_reports_overview(12)"; do
+  check_console "owner at aal2 can call $fn" "$(console_call "$CON_OWNER" aal2 "select public.$fn;")" "[{]"
+  check_console "non-staff cannot call $fn" "$(console_call "$USER_A" aal2 "select public.$fn;")" "not_authorized"
+  check_console "staff at aal1 cannot call $fn" "$(console_call "$CON_OWNER" aal1 "select public.$fn;")" "mfa_required"
+done
+check_console "owner can read the security overview" "$(console_call "$CON_OWNER" aal2 "select public.console_security_overview();")" "with_verified_mfa"
+check_console "support agent cannot read the security overview" "$(console_call "$CON_SUPPORT" aal2 "select public.console_security_overview();")" "not_authorized"
+check_console "owner can open a customer detail" "$(console_call "$CON_OWNER" aal2 "select public.console_customer_detail('$USER_A');")" "customer_ref"
+check_console "customer detail for an unknown id is not_found" "$(console_call "$CON_OWNER" aal2 "select public.console_customer_detail('00000000-0000-0000-0000-00000000dead');")" "not_found"
+check_console "non-staff cannot open a customer detail" "$(console_call "$USER_A" aal2 "select public.console_customer_detail('$USER_A');")" "not_authorized"
+DETAIL="$(console_call "$CON_OWNER" aal2 "select public.console_customer_detail('$USER_A');")"
+if printf '%s' "$DETAIL" | grep -Eq 'a@example\.com|"email"'; then fail "Console: customer detail leaked an email"; else pass "Console: customer detail returns no email"; fi
+check_console "registrations rejects an invalid state" "$(console_call "$CON_OWNER" aal2 "select public.console_registrations('bogus', 5);")" "invalid_state"
+check_console "activity page rejects an invalid type" "$(console_call "$CON_OWNER" aal2 "select public.console_activity_page(5, null, 'bogus');")" "invalid_type"
 
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="

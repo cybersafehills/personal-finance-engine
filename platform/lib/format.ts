@@ -60,3 +60,15 @@ export const PLAN_LABELS: Record<string, string> = {
   household: "Household",
   business: "Business",
 };
+
+/** "staff_directory.viewed" -> "Staff directory viewed". Unknown input is tidied, never dropped. */
+export function humanizeAction(action: string): string {
+  const t = action.replace(/[._]+/g, " ").trim();
+  return t ? t.charAt(0).toUpperCase() + t.slice(1) : "—";
+}
+
+export function formatDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return new Intl.DateTimeFormat("en-GB", { timeZone: "Africa/Kigali", day: "2-digit", month: "short", year: "numeric" }).format(d);
+}

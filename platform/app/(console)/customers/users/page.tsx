@@ -104,7 +104,7 @@ export default async function UsersPage({
               {res.data.map((r) => (
                 <tr key={r.id}>
                   <td className="px-2 py-2 font-mono text-xs text-text-2">{r.customer_ref}</td>
-                  <td className="px-2 py-2">{r.display_name ?? "—"}</td>
+                  <td className="px-2 py-2"><Link href={`/customers/users/${r.id}`} className="font-medium text-accent hover:underline">{r.display_name ?? "Unnamed"}</Link></td>
                   <td className="px-2 py-2 text-text-2">{r.top_plan ? (PLAN_LABELS[r.top_plan] ?? r.top_plan) : "—"}</td>
                   <td className="whitespace-nowrap px-2 py-2 text-text-2">{formatDateTime(r.created_at)}</td>
                   <td className="whitespace-nowrap px-2 py-2 text-text-2">{r.last_activity ? timeAgo(r.last_activity) : "None"}</td>

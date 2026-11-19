@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { cookies } from "next/headers";
 import { GeistSans } from "geist/font/sans";
 import "./globals.css";
 
@@ -13,9 +14,11 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const raw = (await cookies()).get("oc_theme")?.value;
+  const theme = raw === "dark" || raw === "light" ? raw : undefined;
   return (
-    <html lang="en" className={GeistSans.variable}>
+    <html lang="en" className={GeistSans.variable} data-theme={theme}>
       <body className="min-h-screen bg-canvas font-sans text-text antialiased">
         {children}
       </body>

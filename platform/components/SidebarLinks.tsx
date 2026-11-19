@@ -2,49 +2,50 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { ResolvedNavItem } from "../lib/console/nav";
+import { activeHref, type ResolvedNavGroup } from "../lib/console/nav";
+import { Icon } from "./ui/Icon";
 
 export function SidebarLinks({
   groups,
+  onNavigate,
 }: {
-  groups: { label: string; items: ResolvedNavItem[] }[];
+  groups: ResolvedNavGroup[];
+  onNavigate?: () => void;
 }) {
   const pathname = usePathname();
+  const current = activeHref(pathname, groups);
   return (
-    <nav aria-label="Console" className="px-2 pb-4">
+    <nav aria-label="Console" className="px-3 pb-6">
       {groups.map((g) => (
-        <div key={g.label} className="mt-3 first:mt-0">
-          <p className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-text-3">
-            {g.label}
-          </p>
+        <div key={g.label} className="mt-5 first:mt-1">
+          <p className="px-2 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-side-muted">{g.label}</p>
           <ul className="space-y-0.5">
             {g.items.map((i) => {
               if (i.state === "soon" || !i.href) {
                 return (
                   <li key={i.label}>
-                    <span
-                      aria-disabled="true"
-                      className="flex items-center justify-between rounded-control px-2 py-1.5 text-sm text-text-3"
-                    >
-                      {i.label}
-                      <span className="rounded-full bg-surface-muted px-1.5 py-0.5 text-[10px]">Soon</span>
+                    <span aria-disabled="true" className="flex items-center gap-2.5 rounded-control px-2 py-1.5 text-[13px] text-side-muted/80">
+                      <Icon name={i.icon} className="shrink-0 opacity-60" />
+                      <span className="flex-1">{i.label}</span>
+                      <span className="rounded-full border border-side-border px-1.5 py-px text-[10px] font-medium text-side-muted">Soon</span>
                     </span>
                   </li>
                 );
               }
-              const active = pathname === i.href || pathname.startsWith(`${i.href}/`);
+              const active = i.href === current;
               return (
                 <li key={i.label}>
                   <Link
                     href={i.href}
+                    onClick={onNavigate}
                     aria-current={active ? "page" : undefined}
-                    className={`block rounded-control px-2 py-1.5 text-sm ${
-                      active
-                        ? "bg-accent-soft font-medium text-accent"
-                        : "text-text-2 hover:bg-surface-muted hover:text-text"
+                    className={`relative flex items-center gap-2.5 rounded-control px-2 py-1.5 text-[13px] transition-colors ${
+                      active ? "bg-side-active font-medium text-side-strong" : "text-side-text hover:bg-side-bg-2 hover:text-side-strong"
                     }`}
                   >
-                    {i.label}
+                    {active ? <span aria-hidden className="absolute left-0 top-1.5 h-[calc(100%-0.75rem)] w-[3px] rounded-full bg-side-bar" /> : null}
+                    <Icon name={i.icon} className="shrink-0" />
+                    <span className="truncate">{i.label}</span>
                   </Link>
                 </li>
               );

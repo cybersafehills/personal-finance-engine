@@ -24,6 +24,15 @@ small modules that fall out of the data already available.
 
 Everything else in the navigation is shown as a non-interactive **Soon** entry. No control in the console is decorative.
 
+## 1a. v2 (2026-11-19): design system, shell and data-backed pages
+
+Migration `20270121000000` (6 more read RPCs; harness tripwires now 143 tables / 154 authenticated functions) and a rebuilt UI:
+
+- **Design system v2** (`platform/app/globals.css`): AA-checked light theme, refined dark theme, user toggle (cookie, no flash), navy sidebar, status "ink" colours, chart palette, focus ring. Components: Card, KpiCard (+sparkline), StatusPill, Tabs, Segmented, DataTable, Pager, Skeleton, Unavailable/Empty/Error states, ColumnChart, ShareBars, Funnel.
+- **Shell**: grouped icon sidebar with active bar, mobile drawer, breadcrumb, sticky header, working **⌘K command palette** (pages + customer lookup, 3+ chars, same permission/masking as Users).
+- **New pages**: Activity Center (`/overview/activity`), Reports & Intelligence (`/overview/reports`: monthly registrations, activation funnel, workspace types, plan mix), Registrations (`/customers/registrations`: derived state pending verification / incomplete / verified / restricted), Organizations (`/customers/organizations`), Security Center (`/security`: staff MFA coverage, denials, audited actions, customer sign-in ledger), Customer detail (`/customers/users/[id]`: metadata only).
+- Still **Soon** (need a data source or product decision): Customer Support, all Revenue pages, Incidents, Integrations, Communications, Feature Management, Configuration, Approvals, Administrative Actions.
+
 ## 2. Repository audit (Part III)
 
 | # | Question | Finding |
@@ -190,7 +199,7 @@ Open before production:
 
 ## 8. Test results (this branch)
 
-- `supabase/migrations/tests/run_migration_tests.sh` (Homebrew PG17, full chain applied twice): **1020 passed, 0 failed** (tripwires now 143 tables / 148 authenticated functions). Added: tripwires (+3 tables, +7 authenticated functions) and a 34-assertion "Platform Console" block. The block caught two real defects before this was written up: `service_role` inheriting UPDATE/DELETE on the audit table via default privileges (fixed with an explicit `revoke`), and a test-helper capture bug.
+- `supabase/migrations/tests/run_migration_tests.sh` (Homebrew PG17, full chain applied twice): **1040 passed, 0 failed** (tripwires now 143 tables / 154 authenticated functions). Added: tripwires (+3 tables, +7 authenticated functions) and a 34-assertion "Platform Console" block. The block caught two real defects before this was written up: `service_role` inheriting UPDATE/DELETE on the audit table via default privileges (fixed with an explicit `revoke`), and a test-helper capture bug.
 - `platform`: `npm run typecheck` clean · `npm run lint` clean · `npm test` 8/8 · `next build` succeeds · unauthenticated `curl` of `/dashboard`, `/security/audit-logs`, `/platform/health`, `/mfa` → 307 `/login`; headers present on `/login`.
 - **Not done:** signed-in browser walkthrough (no Supabase project/credentials were used), accessibility audit (axe), responsive/mobile check, performance measurement, comparison with the reference screenshots.
 
