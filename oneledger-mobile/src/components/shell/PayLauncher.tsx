@@ -115,9 +115,6 @@ export function PayLauncher({
   return (
     <View style={styles.root}>
       <Animated.View entering={rise(step++)} style={styles.header}>
-        <View style={styles.badge}>
-          <Feather name="send" size={16} color={colors.accentForeground} />
-        </View>
         <View style={styles.headerText}>
           <Text variant="heading" accessibilityRole="header">
             Pay & Services
@@ -319,14 +316,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: space[4],
     paddingTop: space[4],
     paddingBottom: space[3],
-  },
-  badge: {
-    width: 32,
-    height: 32,
-    borderRadius: radii.pill,
-    backgroundColor: colors.accent,
-    alignItems: "center",
-    justifyContent: "center",
   },
   headerText: { flex: 1 },
   body: { paddingHorizontal: space[4], paddingBottom: space[6], gap: space[3] },

@@ -9,7 +9,8 @@ import { colors, CONTROL_HEIGHT, hitSlopFor, radii, space } from "@/theme/tokens
 
 import { Text } from "./Text";
 
-export type ButtonVariant = "primary" | "secondary" | "ghost";
+/** `positive` (green) is for the one action that moves money forward, such as paying someone. */
+export type ButtonVariant = "primary" | "secondary" | "ghost" | "positive";
 
 export type ButtonProps = Omit<PressableProps, "children" | "style"> & {
   label: string;
@@ -31,7 +32,7 @@ export function Button({
   ...rest
 }: ButtonProps) {
   const inactive = disabled || loading;
-  const foreground = variant === "primary" ? "accentForeground" : "accent";
+  const foreground = variant === "primary" || variant === "positive" ? "accentForeground" : "accent";
 
   return (
     <Pressable
@@ -46,6 +47,9 @@ export function Button({
         fullWidth && styles.fullWidth,
         variant === "primary" && {
           backgroundColor: pressed ? colors.accentPressed : colors.accent,
+        },
+        variant === "positive" && {
+          backgroundColor: pressed ? colors.moneyPositivePressed : colors.moneyPositive,
         },
         variant === "secondary" && [
           styles.secondary,
