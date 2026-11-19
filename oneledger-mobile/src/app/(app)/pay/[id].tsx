@@ -1,11 +1,13 @@
 import * as Linking from "expo-linking";
-import { useLocalSearchParams } from "expo-router";
-import { useCallback, useState } from "react";
-import { Platform, Share, View } from "react-native";
+import { router, useLocalSearchParams } from "expo-router";
+import { useCallback, useEffect, useState } from "react";
+import { AppState, Share, View } from "react-native";
 
-import { fetchPayIntent, recordPayHandoff } from "@/api/mobile-api";
+import { fetchPayIntent, recordPayHandoff, settlePayIntent } from "@/api/mobile-api";
 import { Badge, Button, Card, EmptyState, Screen, ScreenHeader, Text } from "@/components/ds";
 import { PAY_COPY, stateLabel } from "@/features/pay/messages";
+import { PaymentStatus } from "@/features/pay/PaymentStatus";
+import { isStale, payPhase, POLL_MS, STALE_AFTER_MS } from "@/features/pay/status";
 import type { PayIntent } from "@/features/pay/types";
 import { useQuery } from "@/hooks/useQuery";
 import { formatMoney, formatRwf } from "@/lib/money";
@@ -20,21 +22,43 @@ const amountText = (intent: PayIntent) =>
       ? formatMoney(BigInt(Math.round(intent.amountMinor)), intent.currency)
       : `${intent.amountMinor} ${intent.currency}`;
 
-// Review a prepared payment and hand it off to your own phone. OneLedger shows
-// the code the server built from the published directory; you authorise it with
-// your provider. Nothing here claims the payment went through - opening the
-// dialer or sharing the code is only recorded as a hand-off.
+// Review a prepared payment, open your phone's dialer with the code, then watch the
+// result. OneLedger shows the code the server built from the published directory;
+// you authorise it with your provider, on your own phone. Opening the dialer is only
+// a hand-off: the screen shows a spinner until the provider's message confirms the
+// payment (a blue tick) or it fails (a red cross), and never claims success before.
 export default function PayReview() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const load = useCallback(() => fetchPayIntent(id), [id]);
   const { data, loading, refresh } = useQuery(load);
 
-  const [handedOff, setHandedOff] = useState<PayIntent | null>(null);
+  const [latest, setLatest] = useState<PayIntent | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const [settleError, setSettleError] = useState<string | null>(null);
 
+  const intent = latest ?? (data?.ok ? data.intent : null);
+  const phase = intent ? payPhase(intent.state) : null;
 
-  const intent = handedOff ?? (data?.ok ? data.intent : null);
+  // While it waits, ask the server every few seconds (when the app is in front),
+  // so the mark flips by itself even if nothing else prompts a refresh.
+  useEffect(() => {
+    if (phase !== "waiting") return;
+    let active = true;
+    const tick = async () => {
+      // Skip while the app is in the background (the next tick after it returns catches up).
+      if (AppState.currentState === "background" || AppState.currentState === "inactive") return;
+      setNow(Date.now());
+      const result = await fetchPayIntent(id);
+      if (active && result.ok) setLatest(result.intent);
+    };
+    const timer = setInterval(tick, POLL_MS);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [phase, id]);
 
   if (!intent) {
     return (
@@ -58,13 +82,15 @@ export default function PayReview() {
   }
 
   const instruction = intent.instruction;
+  const recipient = intent.recipientName ?? (intent.merchantCode ? `merchant ${intent.merchantCode}` : null);
 
   async function report(body: Handoff, keepNote?: string) {
     const result = await recordPayHandoff(intent!.id, body);
     if (result.ok) {
-      setHandedOff(result.intent);
+      setLatest(result.intent);
+      setNow(Date.now());
       // A failure the user must see (the dialer didn't open) outranks the generic line.
-      setNote(keepNote ?? PAY_COPY.afterHandoff);
+      setNote(keepNote ?? null);
     } else {
       setNote("Couldn't record that. Your payment isn't affected.");
     }
@@ -88,7 +114,8 @@ export default function PayReview() {
     }
   }
 
-  // Only ever on an explicit tap, never automatically.
+  // Only ever on an explicit tap, never automatically. iOS shows its own
+  // "Call?" confirmation for the USSD code.
   async function onDial() {
     if (!instruction?.ok || busy) return;
     setBusy(true);
@@ -103,23 +130,90 @@ export default function PayReview() {
     }
   }
 
+  async function settle(outcome: "sent" | "failed") {
+    if (busy) return;
+    setBusy(true);
+    setSettleError(null);
+    const result = await settlePayIntent(intent!.id, outcome);
+    setBusy(false);
+    if (result.ok) setLatest(result.intent);
+    else setSettleError(result.message);
+  }
+
+  const summary = (
+    <Card style={{ gap: space[2] }}>
+      <View style={{ flexDirection: "row" }}>
+        <Badge variant="neutral">{stateLabel(intent.state)}</Badge>
+      </View>
+      <Text variant="title" tabular>
+        {amountText(intent)}
+      </Text>
+      <Text variant="label" color="textSecondary">
+        {intent.recipientName ?? (intent.merchantCode ? "Merchant" : "Recipient")}
+        {intent.recipientMasked ? ` · ${intent.recipientMasked}` : ""}
+        {intent.merchantCode ? ` · code ${intent.merchantCode}` : ""}
+      </Text>
+    </Card>
+  );
+
+  // The live result, once the payment has been handed off.
+  if (phase) {
+    const stale = phase === "waiting" && isStale(intent.updatedAt, now);
+    return (
+      <Screen>
+        <ScreenHeader title="Payment status" />
+        {summary}
+        <Card>
+          <PaymentStatus phase={phase} intent={intent} amountLabel={amountText(intent)} recipient={recipient} />
+        </Card>
+
+        {phase === "waiting" ? (
+          <>
+            {stale ? (
+              <Card style={{ gap: space[2] }}>
+                <Text variant="bodyStrong">Still waiting?</Text>
+                <Text variant="label" color="textSecondary">
+                  No message from your provider yet. If you finished the payment on your phone, tell us. We still
+                  update this by ourselves when the provider&apos;s message arrives.
+                </Text>
+                <Button label="I sent it" fullWidth loading={busy} onPress={() => settle("sent")} />
+                <Button label="It didn't go through" variant="secondary" fullWidth disabled={busy} onPress={() => settle("failed")} />
+                {settleError ? (
+                  <Text variant="caption" color="attention" accessibilityRole="alert">
+                    {settleError}
+                  </Text>
+                ) : null}
+              </Card>
+            ) : (
+              <Text variant="caption" color="textMuted" style={{ textAlign: "center" }}>
+                {`If nothing changes within ${Math.round(STALE_AFTER_MS / 1000)} seconds you can tell us what happened.`}
+              </Text>
+            )}
+            {instruction?.ok ? (
+              <Button label="Open the dialer again" variant="ghost" fullWidth disabled={busy} onPress={onDial} />
+            ) : null}
+          </>
+        ) : (
+          <View style={{ gap: space[2] }}>
+            <Button label="Done" fullWidth onPress={() => router.back()} />
+            {phase === "failure" ? (
+              <Button label="Try again" variant="secondary" fullWidth onPress={() => router.replace("/pay-sheet")} />
+            ) : null}
+          </View>
+        )}
+        {note ? (
+          <Text variant="label" color="textSecondary" accessibilityLiveRegion="polite">
+            {note}
+          </Text>
+        ) : null}
+      </Screen>
+    );
+  }
+
   return (
     <Screen>
       <ScreenHeader title={PAY_COPY.reviewTitle} subtitle={PAY_COPY.feeNotice} />
-
-      <Card style={{ gap: space[2] }}>
-        <View style={{ flexDirection: "row" }}>
-          <Badge variant="neutral">{stateLabel(intent.state)}</Badge>
-        </View>
-        <Text variant="title" tabular>
-          {amountText(intent)}
-        </Text>
-        <Text variant="label" color="textSecondary">
-          {intent.recipientName ?? (intent.merchantCode ? "Merchant" : "Recipient")}
-          {intent.recipientMasked ? ` · ${intent.recipientMasked}` : ""}
-          {intent.merchantCode ? ` · code ${intent.merchantCode}` : ""}
-        </Text>
-      </Card>
+      {summary}
 
       {instruction === null ? (
         <EmptyState title="No verified route yet" description={PAY_COPY.noRoute} />
@@ -141,14 +235,8 @@ export default function PayReview() {
           <Text variant="caption" color="textMuted">
             {PAY_COPY.handoffNotice}
           </Text>
-          <Button label="Share or copy code" variant="secondary" fullWidth loading={busy} onPress={onShare} />
-          {Platform.OS === "android" ? (
-            <Button label="Open phone dialer" fullWidth disabled={busy} onPress={onDial} />
-          ) : (
-            <Text variant="caption" color="textSecondary">
-              {PAY_COPY.iosHint}
-            </Text>
-          )}
+          <Button label="Open phone dialer" fullWidth loading={busy} onPress={onDial} />
+          <Button label="Share or copy code" variant="secondary" fullWidth disabled={busy} onPress={onShare} />
         </Card>
       )}
 

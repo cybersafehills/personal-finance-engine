@@ -306,6 +306,13 @@ export async function recordPayHandoff(
   return parseIntentResponse(result.status, result.body);
 }
 
+/** Say whether a handed-off payment was sent or didn't go through, when no provider message has settled it. */
+export async function settlePayIntent(id: string, outcome: "sent" | "failed"): Promise<PayIntentResult> {
+  const result = await bearerPost(`/api/mobile/pay/intents/${encodeURIComponent(id)}/settle`, { outcome });
+  if (result.kind !== "response") return intentFailure(result);
+  return parseIntentResponse(result.status, result.body);
+}
+
 /** Whether households are on for this user. Any failure means "not offered". */
 export async function fetchSpacesEnabled(): Promise<boolean> {
   const result = await bearerGet("/api/mobile/config");

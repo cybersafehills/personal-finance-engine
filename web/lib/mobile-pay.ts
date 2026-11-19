@@ -135,6 +135,11 @@ export type IntentInput = {
   billing_reference: string | null;
   expires_at: string | null;
   created_at: string;
+  /** Set when the provider's own message matched this payment. */
+  verified_at?: string | null;
+  /** Set when the user confirmed the payment themselves. */
+  manually_confirmed_at?: string | null;
+  updated_at?: string | null;
 };
 
 export type MobileInstruction =
@@ -154,6 +159,10 @@ export type MobileIntent = {
   billingReference: string | null;
   expiresAt: string | null;
   createdAt: string;
+  /** When the payment last changed (hand-off time while it waits). */
+  updatedAt: string;
+  /** A "successful" payment the provider's message confirmed (true), or one the user confirmed (false). */
+  verified: boolean;
   /** null = no verified USSD route for this payment (the app says so). */
   instruction: MobileInstruction | null;
 };
@@ -175,6 +184,8 @@ export function toMobileIntent(
     billingReference: intent.billing_reference,
     expiresAt: intent.expires_at,
     createdAt: intent.created_at,
+    updatedAt: intent.updated_at ?? intent.created_at,
+    verified: intent.verified_at != null,
     instruction: filled === null ? null : filled.ok
       ? {
         ok: true,
@@ -220,3 +231,31 @@ export function parseHandoff(body: unknown): ParsedHandoff {
   }
   return { ok: true, value: { method, outcome } as HandoffRequest };
 }
+
+// ---------------------------------------------------------------------------
+// Settling a payment yourself (POST /api/mobile/pay/intents/:id/settle)
+// ---------------------------------------------------------------------------
+
+/**
+ * When no provider message arrives, the person who actually dialled knows: they
+ * can confirm they sent it, or say it did not go through. Same two actions as the
+ * web's payment page (manually_confirm_payment / transition to "failed"); neither
+ * is ever shown as provider-verified.
+ */
+export type SettleRequest = { outcome: "sent" | "failed" };
+
+export type ParsedSettle =
+  | { ok: true; value: SettleRequest }
+  | { ok: false; message: string };
+
+export function parseSettle(body: unknown): ParsedSettle {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, message: "Send the outcome as JSON." };
+  }
+  const outcome = (body as Record<string, unknown>).outcome;
+  if (outcome !== "sent" && outcome !== "failed") {
+    return { ok: false, message: "Say whether it was sent or did not go through." };
+  }
+  return { ok: true, value: { outcome } };
+}
+

@@ -1,9 +1,10 @@
 import Feather from "@expo/vector-icons/Feather";
 import * as Linking from "expo-linking";
 import { router } from "expo-router";
-import { Pressable, StyleSheet, View } from "react-native";
+import { useState } from "react";
+import { Modal, Pressable, StyleSheet, View } from "react-native";
 
-import { Text } from "@/components/ds";
+import { Button, Text } from "@/components/ds";
 import {
   actionAvailableHere,
   LAUNCHER_ACTIONS,
@@ -41,6 +42,8 @@ export function PayLauncher({
   /** Called before navigating, so the sheet can be dismissed first. */
   onClose: () => void;
 }) {
+  const [aboutRequests, setAboutRequests] = useState(false);
+
   function pick(action: LauncherAction) {
     if (!actionAvailableHere(action, config)) return;
     onClose();
@@ -73,15 +76,6 @@ export function PayLauncher({
             Prepare a payment or find a USSD code.
           </Text>
         </View>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Close"
-          onPress={onClose}
-          hitSlop={hitSlopFor(CONTROL_HEIGHT.sm)}
-          style={({ pressed }) => [styles.close, pressed && { backgroundColor: colors.background }]}
-        >
-          <Feather name="x" size={18} color={colors.textSecondary} />
-        </Pressable>
       </View>
 
       <View style={styles.body}>
@@ -106,6 +100,40 @@ export function PayLauncher({
             </View>
             <Feather name="chevron-right" size={18} color={colors.textMuted} />
           </Pressable>
+        ) : null}
+
+        {config.paymentRequests ? (
+          <View style={styles.request}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Request payment"
+              onPress={() => {
+                onClose();
+                router.push("/request-new");
+              }}
+              style={({ pressed }) => [styles.requestMain, pressed && { backgroundColor: colors.background }]}
+            >
+              <View style={styles.requestIcon}>
+                <Feather name="arrow-down-left" size={16} color={colors.accent} />
+              </View>
+              <View style={styles.flex}>
+                <Text variant="bodyStrong">Request payment</Text>
+                <Text variant="caption" color="textMuted" numberOfLines={1}>
+                  Ask someone to pay you with a link.
+                </Text>
+              </View>
+              <Feather name="chevron-right" size={18} color={colors.textMuted} />
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="About requesting payment"
+              onPress={() => setAboutRequests(true)}
+              hitSlop={hitSlopFor(CONTROL_HEIGHT.sm)}
+              style={({ pressed }) => [styles.info, pressed && { backgroundColor: colors.background }]}
+            >
+              <Feather name="info" size={16} color={colors.textSecondary} />
+            </Pressable>
+          </View>
         ) : null}
 
         <View style={styles.grid}>
@@ -152,7 +180,37 @@ export function PayLauncher({
         <Text variant="caption" color="textMuted" style={styles.note}>
           OneLedger never asks for your Mobile Money or banking PIN and can&apos;t send money for you.
         </Text>
+
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Close"
+          onPress={onClose}
+          style={({ pressed }) => [styles.close, pressed && { backgroundColor: colors.background }]}
+        >
+          <Feather name="x" size={16} color={colors.textSecondary} />
+          <Text variant="bodyStrong" color="textSecondary">
+            Close
+          </Text>
+        </Pressable>
       </View>
+
+      <Modal visible={aboutRequests} transparent animationType="fade" onRequestClose={() => setAboutRequests(false)}>
+        <View style={styles.scrim} accessibilityViewIsModal>
+          <View style={styles.dialog}>
+            <Text variant="heading" accessibilityRole="header">
+              Why request a payment?
+            </Text>
+            <Text color="textSecondary">
+              Use it when someone owes you money. Choose an amount and send them a link. They open it, see how to pay you, and
+              pay from their own phone, so you don&apos;t have to explain your number or details again and again.
+            </Text>
+            <Text color="textSecondary">
+              When the money arrives, it shows up in OneLedger. Nobody is charged: they choose whether to pay.
+            </Text>
+            <Button label="Got it" fullWidth onPress={() => setAboutRequests(false)} />
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -177,13 +235,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   headerText: { flex: 1 },
-  close: {
-    width: CONTROL_HEIGHT.sm,
-    height: CONTROL_HEIGHT.sm,
-    borderRadius: radii.pill,
-    alignItems: "center",
-    justifyContent: "center",
-  },
   body: { paddingHorizontal: space[4], paddingBottom: space[6], gap: space[3] },
   scan: {
     flexDirection: "row",
@@ -232,4 +283,35 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accent,
   },
   note: { textAlign: "center" },
+  // "Close" sits below the content, centred, so it is the last thing under the thumb.
+  close: {
+    alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space[1],
+    minHeight: CONTROL_HEIGHT.md,
+    paddingHorizontal: space[5],
+    borderRadius: radii.pill,
+  },
+  request: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: radii.control,
+    borderCurve: "continuous",
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    overflow: "hidden",
+  },
+  requestMain: { flex: 1, flexDirection: "row", alignItems: "center", gap: space[3], minHeight: 52, paddingHorizontal: space[3] },
+  requestIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: radii.pill,
+    backgroundColor: colors.background,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  info: { width: 44, minHeight: 52, alignItems: "center", justifyContent: "center", borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: colors.borderSubtle },
+  scrim: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", alignItems: "center", justifyContent: "center", padding: space[6] },
+  dialog: { width: "100%", maxWidth: 360, gap: space[3], padding: space[5], borderRadius: radii.card, borderCurve: "continuous", backgroundColor: colors.surface },
 });
