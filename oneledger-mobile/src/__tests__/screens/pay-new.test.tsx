@@ -17,6 +17,8 @@ jest.mock("@/features/pay/recipients", () => ({
   getTrustedRecipients: () => mockSaved(),
   getRecentRecipients: () => mockRecent(),
 }));
+const mockTemplate = jest.fn();
+jest.mock("@/features/pay/activity", () => ({ getPaymentTemplate: (id: string) => mockTemplate(id) }));
 jest.mock("@/features/pay/payment-accounts", () => ({ loadPayableAccounts: () => mockAccounts() }));
 
 const account = { id: "acc1", name: "MTN MoMo" };
@@ -26,6 +28,8 @@ beforeEach(() => {
   mockCreate.mockReset();
   mockAccounts.mockReset();
   mockSaved.mockReset();
+  mockTemplate.mockReset();
+  mockTemplate.mockResolvedValue(null);
   mockSaveContact.mockReset();
   mockSaveContact.mockResolvedValue(null);
   mockRecent.mockReset();
@@ -164,6 +168,26 @@ describe("save as contact", () => {
     await render(<PayNew />);
     await waitFor(() => expect(screen.getByLabelText("Mobile number").props.value).toBe("078 123 4567"));
     expect(screen.getByLabelText("Name (optional)").props.value).toBe("Amy");
+  });
+});
+
+describe("from a payment template", () => {
+  it("fills a merchant's code, name and usual amount", async () => {
+    setParams({ type: "pay_merchant", template: "t1" });
+    mockTemplate.mockResolvedValue({ id: "t1", name: "Rent", type: "pay_merchant", defaultAmountMinor: 150000, recipientName: "Landlord", merchantCode: "445566", trustedRecipientId: null });
+    await render(<PayNew />);
+    await waitFor(() => expect(screen.getByLabelText("Merchant code").props.value).toBe("445566"));
+    expect(screen.getByLabelText("Name (optional)").props.value).toBe("Landlord");
+    expect(screen.getByLabelText("Amount (RWF)").props.value).toBe("150000");
+  });
+
+  it("gets a person's full number from the saved contact the template was linked to", async () => {
+    setParams({ type: "pay_person", template: "t2" });
+    mockTemplate.mockResolvedValue({ id: "t2", name: "Mum", type: "pay_person", defaultAmountMinor: null, recipientName: null, merchantCode: null, trustedRecipientId: "r9" });
+    mockSaved.mockResolvedValue([{ id: "r9", name: "Mum", kind: "phone", msisdn: "250781234567", merchantCode: null, trusted: true, relationship: null }]);
+    await render(<PayNew />);
+    await waitFor(() => expect(screen.getByLabelText("Mobile number").props.value).toBe("078 123 4567"));
+    expect(screen.getByLabelText("Name (optional)").props.value).toBe("Mum");
   });
 });
 

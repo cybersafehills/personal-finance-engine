@@ -4,6 +4,7 @@ import Feather from "@expo/vector-icons/Feather";
 import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 
 import { createPayIntent } from "@/api/mobile-api";
+import { getPaymentTemplate } from "@/features/pay/activity";
 import { Button, Chip, EmptyState, Screen, ScreenHeader, Text, TextField } from "@/components/ds";
 import { createKeyTracker } from "@/features/pay/key";
 import { PAY_COPY } from "@/features/pay/messages";
@@ -34,7 +35,7 @@ function parseAmountRwf(text: string): number | null {
 // and nothing is charged or sent from here. The type is read from the route but
 // anything other than the two supported kinds shows nothing to pay.
 export default function PayNew() {
-  const params = useLocalSearchParams<{ type?: string; saved?: string }>();
+  const params = useLocalSearchParams<{ type?: string; saved?: string; template?: string }>();
   const kind: PayKind | null =
     params.type === "pay_person" || params.type === "pay_merchant" ? params.type : null;
 
@@ -63,6 +64,27 @@ export default function PayNew() {
   const [prefilled, setPrefilled] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+
+  // Opened from a payment template: fill the recipient and the usual amount once.
+  // (A template keeps only a masked phone number, so for a person the full number
+  // comes from the saved contact it was linked to; otherwise it is left to type.)
+  const loadTemplate = useCallback(async () => {
+    if (!params.template) return null;
+    const t = await getPaymentTemplate(params.template).catch(() => null);
+    if (!t) return null;
+    const contact = t.trustedRecipientId ? (await getTrustedRecipients().catch(() => [])).find((r) => r.id === t.trustedRecipientId) : undefined;
+    return { template: t, contact };
+  }, [params.template]);
+  const { data: tpl } = useQuery(loadTemplate);
+  const [templateApplied, setTemplateApplied] = useState(false);
+  if (!templateApplied && tpl) {
+    setTemplateApplied(true);
+    const { template, contact } = tpl;
+    const number = contact?.msisdn ? formatLocalMsisdn(contact.msisdn) : (contact?.merchantCode ?? template.merchantCode ?? "");
+    if (number) setRecipientText(number);
+    setName(contact?.name ?? template.recipientName ?? "");
+    if (template.defaultAmountMinor) setAmountText(String(template.defaultAmountMinor));
+  }
 
   // Opened from a saved contact: fill its number and name once.
   if (!prefilled && people && params.saved) {
