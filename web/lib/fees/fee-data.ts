@@ -5,6 +5,7 @@ import type {
   FeeSchedule,
   HistorySample,
   LimitRow,
+  ProviderTariff,
 } from "./fee-estimate";
 
 // Server loaders for the fee calculator. Both read through the caller's
@@ -131,4 +132,56 @@ export async function loadViewerTimezone(
     .maybeSingle();
   const tz = typeof data?.timezone === "string" ? data.timezone : "";
   return isValidReportTimezone(tz) ? tz : "Africa/Kigali";
+}
+
+export type TariffProvider = { slug: string; name: string };
+
+/**
+ * Providers that have at least one VERIFIED tariff. Clients can only read
+ * verified rows (RLS), so an unverified draft never appears here. Empty until
+ * the first tariff is loaded - the page then simply has no provider choice.
+ */
+export async function loadTariffProviders(supabase: Session): Promise<TariffProvider[]> {
+  const { data, error } = await supabase
+    .from("provider_tariffs")
+    .select("service_provider:service_providers(slug, display_name)");
+  if (error) throw new Error("tariff providers query failed");
+  const seen = new Map<string, TariffProvider>();
+  for (const row of (data ?? []) as unknown as {
+    service_provider: { slug: string; display_name: string } | null;
+  }[]) {
+    const p = row.service_provider;
+    if (p && !seen.has(p.slug)) seen.set(p.slug, { slug: p.slug, name: p.display_name });
+  }
+  return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** The provider's verified tariffs for one payment type, each with its tiers. */
+export async function loadProviderTariffs(
+  supabase: Session,
+  providerSlug: string,
+  type: string,
+): Promise<{ slug: string; name: string; tariffs: ProviderTariff[] } | null> {
+  const { data: provider, error: pErr } = await supabase
+    .from("service_providers")
+    .select("id, slug, display_name")
+    .eq("slug", providerSlug)
+    .maybeSingle();
+  if (pErr) throw new Error("tariff provider query failed");
+  if (!provider) return null;
+
+  const { data, error } = await supabase
+    .from("provider_tariffs")
+    .select(
+      "transaction_type, recipient_scope, currency, effective_from, effective_to, source_label, source_url, note_en, verified_at, tiers:provider_tariff_tiers(min_amount_minor, max_amount_minor, fee_type, fixed_fee_minor, percentage_bps, min_fee_minor, max_fee_minor)",
+    )
+    .eq("service_provider_id", provider.id)
+    .eq("transaction_type", type);
+  if (error) throw new Error("provider tariffs query failed");
+
+  return {
+    slug: provider.slug as string,
+    name: provider.display_name as string,
+    tariffs: (data ?? []) as unknown as ProviderTariff[],
+  };
 }

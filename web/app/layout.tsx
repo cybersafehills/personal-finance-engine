@@ -168,6 +168,11 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   const insightsEnabled = Boolean(user) &&
     isOneLedger3FlagEnabled(process.env, "INSIGHTS_CENTER", activeWorkspaceId);
   const forecastEnabled = Boolean(user) && isIntelligenceEnabled(activeWorkspaceId);
+  // Fee calculator (OneLedger 3.0): its own opt-in flag + allowlist, and it lives
+  // under Pay & Services, so that gate must cover the workspace too. The page and
+  // the mobile endpoint re-check both on the server.
+  const feeCalculatorEnabled = payEnabled &&
+    isOneLedger3FlagEnabled(process.env, "FEE_CALCULATOR", activeWorkspaceId);
   const businessSurfacesEnabled = Boolean(user) &&
     isBusinessSurfacesEnabled(activeWorkspaceId);
 
@@ -217,6 +222,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           walletsEnabled={walletsEnabled}
           insightsEnabled={insightsEnabled}
           forecastEnabled={forecastEnabled}
+          feeCalculatorEnabled={feeCalculatorEnabled}
           inboxBadgeCount={uiPreferences.showInboxBadge ? inboxBadgeCount : 0}
           insightGlimpse={insightGlimpse}
         >

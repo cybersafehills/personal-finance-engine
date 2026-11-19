@@ -702,7 +702,9 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # write) - 139 tables, 138 with RLS.
 # Offline sync (20270102000000) adds client_operations (RLS enabled, no grant for
 # users; written only by the SECURITY DEFINER sync function) - 140 tables, 139 with RLS.
-if [ "$TABLE_COUNT" = "140" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Provider tariffs (20270107000000) add provider_tariffs and provider_tariff_tiers
+# (RLS enabled, SELECT-only for authenticated, verified rows only) - 142 tables, 141 with RLS.
+if [ "$TABLE_COUNT" = "142" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -852,10 +854,11 @@ AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from inform
 # OneLedger 3.0 S5 (20261226000000): SELECT on payment_requests,
 # payment_request_events and payment_requests_v (security_invoker). 172 + 3 = 175.
 # OneLedger 3.0 E4 (20261228000000): SELECT on counterparty_split_events. 175 + 1 = 176.
-if [ "$AUTHENTICATED_GRANT_COUNT" = "176" ]; then
-  pass "authenticated holds exactly the 176 table grants expected, no more"
+# Provider tariffs (20270107000000): SELECT on provider_tariffs and provider_tariff_tiers. 176 + 2 = 178.
+if [ "$AUTHENTICATED_GRANT_COUNT" = "178" ]; then
+  pass "authenticated holds exactly the 178 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 176 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 178 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -9663,6 +9666,110 @@ if [ "$TT_SEEN" -lt 100 ]; then
   fail "Two-tenant sweep produced only $TT_SEEN assertions (expected 100+) - the sweep did not run to completion"
 fi
 rm -f "$ARTIFACT_DIR/pfe_tt_stderr.log"
+
+
+# ===========================================================================
+# Provider tariffs (20270107000000_provider_tariffs). Clients see verified
+# tariffs only; verification needs tiers; verified tariffs are frozen; tiers
+# cannot overlap; no client can write. Uses USER_A / USER_B.
+# ===========================================================================
+echo "=== Provider tariffs ==="
+
+PT_PROV="$(psql -d pfe_rls -t -A -c "insert into public.service_providers (slug, display_name, kind, networks) values ('pt-test-provider', 'PT Test Provider', 'mno', array['mtn']) returning id;" | head -1)"
+PT_T="$(psql -d pfe_rls -t -A -c "insert into public.provider_tariffs (service_provider_id, transaction_type, recipient_scope, effective_from, source_label, source_url) values ('$PT_PROV', 'send_money', 'any', '2026-01-01', 'PT fictional tariff (test data)', 'https://example.invalid/tariff') returning id;" | head -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.provider_tariff_tiers (tariff_id, min_amount_minor, max_amount_minor, fee_type, fixed_fee_minor) values ('$PT_T', 0, 1000, 'fixed', 100);
+  insert into public.provider_tariff_tiers (tariff_id, min_amount_minor, max_amount_minor, fee_type, percentage_bps, min_fee_minor, max_fee_minor) values ('$PT_T', 1001, null, 'percentage', 100, 150, 5000);
+" >/dev/null && pass "provider tariffs: adjacent, non-overlapping tiers (a closed band then an open one) are accepted" || fail "provider tariffs: valid tiers were refused"
+
+pt_sql_fails() { # label regex sql
+  if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "$3" >/dev/null 2>$ARTIFACT_DIR/pfe_pt.log; then
+    fail "provider tariffs: $1 was accepted"
+  elif grep -qE "$2" $ARTIFACT_DIR/pfe_pt.log; then
+    pass "provider tariffs: $1 is refused"
+  else
+    fail "provider tariffs: $1 refused with an unexpected error: $(cat $ARTIFACT_DIR/pfe_pt.log)"
+  fi
+  rm -f $ARTIFACT_DIR/pfe_pt.log
+}
+
+# --- drafts are invisible to every client ---
+PT_DRAFT_A="$(as_user "$USER_A" "select (select count(*) from public.provider_tariffs where id = '$PT_T') || '|' || (select count(*) from public.provider_tariff_tiers where tariff_id = '$PT_T');" | tail -1)"
+if [ "$PT_DRAFT_A" = "0|0" ]; then
+  pass "provider tariffs: a draft (unverified) tariff and its tiers are invisible to clients"
+else
+  fail "provider tariffs: a client sees a draft ('$PT_DRAFT_A', want 0|0)"
+fi
+
+# --- verification needs evidence ---
+PT_EMPTY="$(psql -d pfe_rls -t -A -c "insert into public.provider_tariffs (service_provider_id, transaction_type, recipient_scope, effective_from, source_label) values ('$PT_PROV', 'cash_withdrawal', 'any', '2026-01-01', 'PT empty tariff') returning id;" | head -1)"
+pt_sql_fails "verifying a tariff that has no tiers" "tariff_needs_tiers" "update public.provider_tariffs set verified_at = now() where id = '$PT_EMPTY';"
+pt_sql_fails "a tariff with no source label" "violates check constraint" "insert into public.provider_tariffs (service_provider_id, transaction_type, effective_from, source_label) values ('$PT_PROV', 'airtime', '2026-01-01', '   ');"
+pt_sql_fails "a plain-http source link" "violates check constraint" "insert into public.provider_tariffs (service_provider_id, transaction_type, effective_from, source_label, source_url) values ('$PT_PROV', 'airtime', '2026-01-01', 'x', 'http://example.invalid');"
+pt_sql_fails "a window that ends before it starts" "violates check constraint" "insert into public.provider_tariffs (service_provider_id, transaction_type, effective_from, effective_to, source_label) values ('$PT_PROV', 'airtime', '2026-06-01', '2026-01-01', 'x');"
+
+# --- tier shape and overlap ---
+pt_sql_fails "an overlapping band" "tier_overlap" "insert into public.provider_tariff_tiers (tariff_id, min_amount_minor, max_amount_minor, fee_type, fixed_fee_minor) values ('$PT_T', 500, 2000, 'fixed', 1);"
+pt_sql_fails "a band that overlaps the open-ended one" "tier_overlap" "insert into public.provider_tariff_tiers (tariff_id, min_amount_minor, max_amount_minor, fee_type, fixed_fee_minor) values ('$PT_T', 999999, 9999999, 'fixed', 1);"
+pt_sql_fails "a fixed tier with no fixed fee" "violates check constraint" "insert into public.provider_tariff_tiers (tariff_id, min_amount_minor, max_amount_minor, fee_type) values ('$PT_EMPTY', 0, 10, 'fixed');"
+pt_sql_fails "a percentage tier that also carries a fixed fee" "violates check constraint" "insert into public.provider_tariff_tiers (tariff_id, min_amount_minor, max_amount_minor, fee_type, fixed_fee_minor, percentage_bps) values ('$PT_EMPTY', 0, 10, 'percentage', 5, 100);"
+pt_sql_fails "a band whose maximum is below its minimum" "violates check constraint" "insert into public.provider_tariff_tiers (tariff_id, min_amount_minor, max_amount_minor, fee_type, fixed_fee_minor) values ('$PT_EMPTY', 100, 10, 'fixed', 1);"
+
+# --- verify, then clients see exactly the verified tariff and its tiers ---
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "update public.provider_tariffs set verified_at = now() where id = '$PT_T';" >/dev/null && pass "provider tariffs: a tariff with tiers can be verified" || fail "provider tariffs: verification of a complete tariff failed"
+PT_VIS_A="$(as_user "$USER_A" "select (select count(*) from public.provider_tariffs where id = '$PT_T') || '|' || (select count(*) from public.provider_tariff_tiers where tariff_id = '$PT_T');" | tail -1)"
+PT_VIS_B="$(as_user "$USER_B" "select (select count(*) from public.provider_tariffs where id = '$PT_T') || '|' || (select count(*) from public.provider_tariff_tiers where tariff_id = '$PT_T');" | tail -1)"
+PT_EMPTY_VIS="$(as_user "$USER_A" "select count(*) from public.provider_tariffs where id = '$PT_EMPTY';" | tail -1)"
+if [ "$PT_VIS_A" = "1|2" ] && [ "$PT_VIS_B" = "1|2" ] && [ "$PT_EMPTY_VIS" = "0" ]; then
+  pass "provider tariffs: once verified, every signed-in user reads the tariff and its two tiers; an unverified one stays hidden"
+else
+  fail "provider tariffs: visibility wrong (A='$PT_VIS_A' B='$PT_VIS_B' unverified='$PT_EMPTY_VIS')"
+fi
+
+# --- verified means frozen ---
+pt_sql_fails "changing a tier of a verified tariff" "tariff_verified_immutable" "update public.provider_tariff_tiers set fixed_fee_minor = 1 where tariff_id = '$PT_T' and min_amount_minor = 0;"
+pt_sql_fails "adding a tier to a verified tariff" "tariff_verified_immutable" "insert into public.provider_tariff_tiers (tariff_id, min_amount_minor, fee_type) values ('$PT_T', 5000000000, 'none');"
+pt_sql_fails "deleting a tier of a verified tariff" "tariff_verified_immutable" "delete from public.provider_tariff_tiers where tariff_id = '$PT_T' and min_amount_minor = 0;"
+pt_sql_fails "re-pointing a verified tariff at another source" "tariff_verified_immutable" "update public.provider_tariffs set source_label = 'something else' where id = '$PT_T';"
+pt_sql_fails "changing the window of a verified tariff" "tariff_verified_immutable" "update public.provider_tariffs set effective_to = '2030-01-01' where id = '$PT_T';"
+
+# --- the correction path: unverify (it disappears), fix, verify again ---
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "update public.provider_tariffs set verified_at = null where id = '$PT_T';" >/dev/null
+PT_GONE="$(as_user "$USER_A" "select count(*) from public.provider_tariffs where id = '$PT_T';" | tail -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "update public.provider_tariff_tiers set fixed_fee_minor = 110 where tariff_id = '$PT_T' and min_amount_minor = 0; update public.provider_tariffs set verified_at = now() where id = '$PT_T';" >/dev/null && PT_FIXED=ok || PT_FIXED=failed
+PT_FEE="$(as_user "$USER_A" "select fixed_fee_minor from public.provider_tariff_tiers where tariff_id = '$PT_T' and min_amount_minor = 0;" | tail -1)"
+if [ "$PT_GONE" = "0" ] && [ "$PT_FIXED" = "ok" ] && [ "$PT_FEE" = "110" ]; then
+  pass "provider tariffs: clearing verified_at hides the tariff, allows a correction, and re-verifying publishes the corrected figure"
+else
+  fail "provider tariffs: correction path wrong (hidden='$PT_GONE' fixed='$PT_FIXED' fee='$PT_FEE')"
+fi
+
+# --- no client can write; anon has nothing ---
+for op in "insert into public.provider_tariffs (service_provider_id, transaction_type, effective_from, source_label) values ('$PT_PROV', 'airtime', '2026-01-01', 'forged')" \
+          "update public.provider_tariffs set verified_at = now() where id = '$PT_EMPTY'" \
+          "delete from public.provider_tariffs where id = '$PT_T'" \
+          "insert into public.provider_tariff_tiers (tariff_id, min_amount_minor, fee_type) values ('$PT_EMPTY', 0, 'none')" \
+          "update public.provider_tariff_tiers set fixed_fee_minor = 0 where tariff_id = '$PT_T'" \
+          "delete from public.provider_tariff_tiers where tariff_id = '$PT_T'"; do
+  if as_user "$USER_A" "$op;" >/dev/null 2>&1; then
+    PT_WROTE="${PT_WROTE:-}yes "
+  fi
+done
+PT_STILL="$(psql -d pfe_rls -t -A -c "select (select count(*) from public.provider_tariffs where source_label = 'forged') || '|' || (select verified_at is null from public.provider_tariffs where id = '$PT_EMPTY') || '|' || (select count(*) from public.provider_tariff_tiers where tariff_id = '$PT_T');")"
+if [ -z "${PT_WROTE:-}" ] && [ "$PT_STILL" = "0|true|2" ]; then
+  pass "provider tariffs: a signed-in user cannot insert, update or delete a tariff or a tier"
+else
+  fail "provider tariffs: a client write got through (flags='${PT_WROTE:-none}', state='$PT_STILL')"
+fi
+PT_PRIV="$(psql -d pfe_rls -t -A -c "select has_table_privilege('anon','public.provider_tariffs','SELECT')::text || has_table_privilege('anon','public.provider_tariff_tiers','SELECT')::text || has_table_privilege('authenticated','public.provider_tariffs','INSERT')::text || has_table_privilege('authenticated','public.provider_tariff_tiers','DELETE')::text;")"
+if [ "$PT_PRIV" = "falsefalsefalsefalse" ]; then
+  pass "provider tariffs: anon has no access and authenticated has no write privilege (SELECT only)"
+else
+  fail "provider tariffs: privileges wrong ('$PT_PRIV')"
+fi
+
+# cleanup (deleting a verified tariff cascades its tiers)
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "delete from public.provider_tariffs where service_provider_id = '$PT_PROV'; delete from public.service_providers where id = '$PT_PROV';" >/dev/null && pass "provider tariffs: deleting a verified tariff cascades its tiers" || fail "provider tariffs: cleanup failed"
 
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="

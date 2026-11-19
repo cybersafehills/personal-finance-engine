@@ -10,10 +10,13 @@ import {
   type LimitWarning,
   parseFeeQuery,
   type PublishedEstimate,
+  RECIPIENT_SCOPE_LABEL,
 } from "../../../lib/fees/fee-estimate";
 import {
   loadFeeHistory,
   loadNetworkFees,
+  loadProviderTariffs,
+  loadTariffProviders,
   loadViewerTimezone,
 } from "../../../lib/fees/fee-data";
 import { buildFeeResult, FEE_DISCLAIMER } from "../../../lib/fees/fee-result";
@@ -40,6 +43,10 @@ const NOT_COMPUTABLE: Record<string, string> = {
     "The fee varies by bank or provider. Ask yours before you pay.",
   incomplete: "The published fee is incomplete, so it can't be turned into a number.",
   currency_mismatch: "The published fee is in a different currency from your amount.",
+  no_tiers: "This tariff has no amount bands recorded, so it can't give you a number.",
+  amount_outside_bands:
+    "This amount falls outside the bands the provider has published, so OneLedger won't guess a fee for it.",
+  not_verified: "This tariff has not been verified yet.",
   unrecognised: "OneLedger doesn't recognise this kind of fee yet.",
 };
 
@@ -141,27 +148,33 @@ export default async function FeesPage({ searchParams }: PageProps<"/pay/fees">)
   const kindLabel = FEE_TRANSACTION_TYPES.find((t) => t.value === q.type)?.label ??
     q.type;
 
-  const [tz, networks] = await Promise.all([
+  const [tz, networks, tariffProviders] = await Promise.all([
     loadViewerTimezone(supabase, user.id),
     networksOn ? getPublishedNetworks() : Promise.resolve([]),
+    // empty until a verified tariff has been loaded: the choice then does not appear
+    loadTariffProviders(supabase).catch(() => []),
   ]);
 
   let failed = false;
   let unknownNetwork = false;
+  let unknownProvider = false;
   let result: ReturnType<typeof buildFeeResult> | null = null;
   if (q.amountMinor !== null) {
     try {
-      const [history, network] = await Promise.all([
+      const [history, network, provider] = await Promise.all([
         loadFeeHistory(supabase, workspaceId, q.type, q.currency),
         q.network && networksOn ? loadNetworkFees(supabase, q.network) : Promise.resolve(null),
+        q.provider ? loadProviderTariffs(supabase, q.provider, q.type) : Promise.resolve(null),
       ]);
       unknownNetwork = Boolean(q.network && networksOn && !network);
+      unknownProvider = Boolean(q.provider && !provider);
       result = buildFeeResult({
         amountMinor: q.amountMinor,
         currency: q.currency,
         type: q.type,
         history,
         network,
+        provider,
         now: new Date(),
       });
     } catch (e) {
@@ -173,6 +186,7 @@ export default async function FeesPage({ searchParams }: PageProps<"/pay/fees">)
   const m = (v: bigint) => formatMoney(v, q.currency);
   const h = result?.history;
   const pub = result?.published;
+  const prov = result?.provider;
   const sourceUrl = safeHttpsUrl(pub?.schedule?.source_url ?? null);
 
   return (
@@ -219,6 +233,17 @@ export default async function FeesPage({ searchParams }: PageProps<"/pay/fees">)
             ))}
           </select>
         </label>
+        {tariffProviders.length > 0 && (
+          <label className={label}>
+            Provider’s own tariff
+            <select name="provider" defaultValue={q.provider ?? ""} className={control}>
+              <option value="">None</option>
+              {tariffProviders.map((p) => (
+                <option key={p.slug} value={p.slug}>{p.name}</option>
+              ))}
+            </select>
+          </label>
+        )}
         {networks.length > 0 && (
           <label className={label}>
             Published fees from
@@ -338,6 +363,64 @@ export default async function FeesPage({ searchParams }: PageProps<"/pay/fees">)
         <p role="note" className={`${card} text-sm text-text-secondary`}>
           We couldn’t find that payment network.
         </p>
+      )}
+
+      {result && unknownProvider && (
+        <p role="note" className={`${card} text-sm text-text-secondary`}>
+          We couldn’t find that provider.
+        </p>
+      )}
+
+      {result && prov && (
+        <section aria-label={`Tariff published by ${prov.provider.name}`} className={`${card} flex flex-col gap-3`}>
+          <h2 className="text-base font-semibold text-text-primary">
+            {prov.provider.name}’s own tariff
+          </h2>
+          {!prov.hasTariff
+            ? (
+              <p className="text-sm text-text-secondary">
+                OneLedger has no verified {prov.provider.name} tariff on record for “{kindLabel}”.
+                Nothing is shown rather than a figure that hasn’t been checked against its source.
+              </p>
+            )
+            : (
+              <ul className="flex flex-col divide-y divide-border-subtle">
+                {prov.rows.map((row) => {
+                  const url = safeHttpsUrl(row.tariff.source_url);
+                  return (
+                    <li key={row.recipientScope} className="flex flex-col gap-1 py-3 first:pt-0 last:pb-0">
+                      <p className="text-sm font-medium text-text-secondary">
+                        {RECIPIENT_SCOPE_LABEL[row.recipientScope]}
+                      </p>
+                      <PublishedLine
+                        e={row.estimate}
+                        currency={q.currency}
+                        tz={tz}
+                        effectiveFrom={row.tariff.effective_from}
+                        effectiveTo={row.tariff.effective_to}
+                      />
+                      <p className="text-xs text-text-muted">
+                        {row.tariff.source_label ?? "Source not named"}
+                        {url && (
+                          <>
+                            {" · "}
+                            <a href={url} target="_blank" rel="noopener noreferrer" className={link}>
+                              View the source<span className="sr-only"> (opens in a new tab)</span>
+                            </a>
+                          </>
+                        )}
+                        {row.tariff.effective_from && ` · in effect since ${formatZonedDate(row.tariff.effective_from, tz)}`}
+                        {row.tariff.verified_at && ` · checked against its source on ${formatZonedDate(row.tariff.verified_at, tz)}`}
+                      </p>
+                      {row.tariff.note_en && (
+                        <p className="text-sm text-text-secondary">{row.tariff.note_en}</p>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+        </section>
       )}
 
       {result && pub && (

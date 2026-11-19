@@ -8,10 +8,21 @@ The spec asks for "versioned, source-attributed fee schedules". The repo has the
 1. **What you have actually paid** — the fees charged on your own past settled outgoing payments of the same type and currency, within ±20% of the requested amount, read from the ledger (`fee_rwf`, from the provider's own SMS). With ≥3 similar payments it shows the observed range, the usual fee if ≥60% paid the same one (ties go to the larger, never understating), the date span, and the most recent matching payments so every figure traces to rows. With fewer it says so and shows nothing.
 2. **What a network publishes** (optional, network-scope rows only) — fixed fee, no fee, percentage (exact integer maths: whole-unit floor..ceiling, clamped to published min/max), or a published **maximum shown as an upper bound, never as a prediction**. Tiered, unknown, varies-by-institution, incomplete or wrong-currency rows produce **no number** and say why. Rows not yet or no longer in effect are reported as such. Source label, link (https only), validity date and the row's note are always shown. Per-transaction and daily limits produce a warning only.
 
+## Provider tariffs (added 2026-11-19, migration `20270107000000_provider_tariffs.sql`)
+MTN and Airtel are `service_providers`, not payment networks, so `route_fees` had nowhere to hold a MoMo tariff and no tier storage. Two small tables now do: `provider_tariffs` (provider + payment type + recipient scope + currency + validity window + **mandatory source label** + optional https link) and `provider_tariff_tiers` (inclusive amount bands in minor units, each fixed / percentage / no fee, with optional min/max fee clamps). **The migration seeds no tariff.** Safety rules, enforced by the database:
+- **Invisible until verified.** Clients read only tariffs with `verified_at` set, and only their tiers; drafts exist only for the service role.
+- **Verification needs evidence:** a source label on every tariff, and at least one tier before `verified_at` can be set.
+- **Verified means frozen:** tiers cannot be inserted, changed or deleted, and the tariff's provider/type/scope/currency/window/source cannot change. To correct: clear `verified_at` (it disappears from clients), fix, verify again.
+- **No overlapping bands** (gaps are allowed and reported as "outside the published bands" - never interpolated). Writes are service-role only.
+The calculator turns the band containing the amount into a number with the same exact rules as a published schedule; the page shows one line per recipient scope with its source, validity and the date it was checked. With no verified tariff there is no provider choice and no section at all. `GET /api/mobile/fees/estimate` takes `provider=<slug>` and returns `provider_tariff`. See `fee-tariff-intake.md` for what to supply and how a tariff is loaded.
+
+## Menu entry
+"Estimate a fee" is in More > Pay & Services, shown only when `FEE_CALCULATOR_ENABLED` (+ allowlist) and the Pay gate cover the workspace. Still no mobile screen.
+
 ## Deliberately not built
 - **No comparison of one transfer versus several smaller ones.** The spec forbids automating splits to get around provider limits or rules; nothing computes, suggests or hints at one (a unit test and the e2e spec check the output contains no such text outside the disclaimer).
 - Institution-level (per-bank route) fee overrides: only network scope is read. The existing route pages show route fees.
-- Any MTN/Airtel tariff table. If the owner supplies a verified, source-attributed tariff, it should go in `route_fees` through the directory admin tools (needs a `payment_network` row for the provider and, for tiered fees, a tier table — a migration), after which this calculator picks it up.
+- **Any MTN/Airtel figure.** The tariff model exists; the data does not, and it is not invented. It arrives from a verified, source-cited seed migration (`fee-tariff-intake.md`).
 
 ## Files
 | Path | Purpose |
@@ -35,7 +46,6 @@ The spec asks for "versioned, source-attributed fee schedules". The repo has the
 ## Known limits
 - History assumes the fee scales with amount only roughly: "similar" is ±20%. Fee bands narrower than that can give a range wider than the true fee for one amount; the recent-payments table shows why.
 - The history estimate reflects *past* tariffs; the page says the provider may have changed them.
-- No More-menu or bottom-nav entry in this slice (placement is a product call; both have baselines); entry is the link on a network page and the URL.
 - No mobile screen yet; the API is ready for one.
 - Only outgoing types listed in `FEE_TRANSACTION_TYPES`; incoming payments carry no sender-paid fee.
 
