@@ -17,24 +17,29 @@ export type TextFieldProps = Omit<TextInputProps, "style"> & {
   error?: string;
   /** An icon or small control drawn inside the box, on the left (e.g. "save as contact"). */
   leading?: ReactNode;
+  /** A 40pt box with no visible label (the label is still its accessible name): search bars. */
+  compact?: boolean;
 };
 
 /**
  * Labelled text input: label + optional help + error, wired for assistive
  * tech once. 44pt tall; text is 15pt, one step above body so what you type stays readable.
  */
-export function TextField({ label, help, error, leading, ...input }: TextFieldProps) {
+export function TextField({ label, help, error, leading, compact = false, ...input }: TextFieldProps) {
   const id = useId();
   const [focused, setFocused] = useState(false);
 
   return (
     <View style={styles.field}>
-      <Text variant="label" color="textSecondary" nativeID={`${id}-label`}>
-        {label}
-      </Text>
+      {compact ? null : (
+        <Text variant="label" color="textSecondary" nativeID={`${id}-label`}>
+          {label}
+        </Text>
+      )}
       <View
         style={[
           styles.box,
+          compact && styles.boxCompact,
           focused && styles.focused,
           !!error && styles.invalid,
         ]}
@@ -43,7 +48,7 @@ export function TextField({ label, help, error, leading, ...input }: TextFieldPr
         <TextInput
           maxFontSizeMultiplier={MAX_FONT_SCALE}
           accessibilityLabel={label}
-          accessibilityLabelledBy={`${id}-label`}
+          accessibilityLabelledBy={compact ? undefined : `${id}-label`}
           accessibilityHint={error ?? help}
           aria-invalid={!!error}
           placeholderTextColor={colors.textMuted}
@@ -84,7 +89,8 @@ const styles = StyleSheet.create({
     borderColor: colors.borderStrong,
     backgroundColor: colors.surface,
   },
-  leading: { paddingLeft: space[2] },
+  boxCompact: { minHeight: 40 },
+  leading: { paddingLeft: space[3] },
   input: {
     flex: 1,
     alignSelf: "stretch",

@@ -1,3 +1,4 @@
+import Feather from "@expo/vector-icons/Feather";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshControl, SectionList, View } from "react-native";
@@ -115,6 +116,30 @@ export default function Transactions() {
 
   return (
     <ListScreen edges={["left", "right"]}>
+      {/* Search and filters stay put above the list, so they are always one thumb away. */}
+      <View style={{ paddingHorizontal: space[4], paddingTop: space[3], paddingBottom: space[2], gap: space[2], backgroundColor: colors.background }}>
+        <TextField
+          compact
+          label="Search"
+          value={input}
+          onChangeText={setInput}
+          placeholder="Search name, reference or category"
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="search"
+          clearButtonMode="while-editing"
+          leading={<Feather name="search" size={16} color={colors.textMuted} />}
+        />
+        {category ? (
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: space[2] }}>
+            <Text variant="label" color="textSecondary" style={{ flex: 1 }}>
+              {`Category: ${category}`}
+            </Text>
+            <Button label="Clear" size="sm" variant="ghost" onPress={() => router.setParams({ category: undefined })} />
+          </View>
+        ) : null}
+        <FilterChips value={filters} onChange={setFilters} />
+      </View>
       <SectionList
         sections={groupByDay(rows, loadedAt)}
         keyExtractor={(row) => row.id}
@@ -129,52 +154,31 @@ export default function Transactions() {
           />
         }
         ListHeaderComponent={
-          <View style={{ paddingTop: space[4], gap: space[3] }}>
+          <View style={{ gap: space[2] }}>
             <ScreenHeader
               inline
               title="Transactions"
               action={
                 <Button
-                  label="Add transaction"
+                  label="Add"
+                  size="sm"
                   variant="secondary"
+                  accessibilityLabel="Add transaction"
                   onPress={() => router.push("/add-transaction")}
                 />
               }
             />
             {stats ? (
-              <>
-                <View style={{ flexDirection: "row" }}>
-                  <Button
-                    label={stats.reviewCount > 0 ? `Review queue (${stats.reviewCount})` : "Review queue"}
-                    variant="ghost"
-                    onPress={() => router.push("/inbox")}
-                  />
-                </View>
-                <LifetimeChips
-                  totals={stats.lifetime}
-                  accountCreatedIso={stats.lifetime.accountCreatedIso}
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: space[2] }}>
+                <LifetimeChips totals={stats.lifetime} accountCreatedIso={stats.lifetime.accountCreatedIso} />
+                <Button
+                  label={stats.reviewCount > 0 ? `Review queue (${stats.reviewCount})` : "Review queue"}
+                  size="sm"
+                  variant="ghost"
+                  onPress={() => router.push("/inbox")}
                 />
-              </>
-            ) : null}
-            <TextField
-              label="Search"
-              value={input}
-              onChangeText={setInput}
-              placeholder="Name, reference or category"
-              autoCapitalize="none"
-              autoCorrect={false}
-              returnKeyType="search"
-              clearButtonMode="while-editing"
-            />
-            {category ? (
-              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: space[2] }}>
-                <Text variant="label" color="textSecondary" style={{ flex: 1 }}>
-                  {`Category: ${category}`}
-                </Text>
-                <Button label="Clear" variant="ghost" onPress={() => router.setParams({ category: undefined })} />
               </View>
             ) : null}
-            <FilterChips value={filters} onChange={setFilters} />
           </View>
         }
         renderSectionHeader={({ section }) => (

@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, View } from "react-native";
 
 import { Text } from "@/components/ds";
 import { formatRwf } from "@/lib/money";
-import { colors, MIN_TOUCH_TARGET, radii, space } from "@/theme/tokens";
+import { colors, hitSlopFor, radii, space } from "@/theme/tokens";
 
 import { lifetimeInfo, type LifetimeFlow } from "./lifetime";
 
@@ -33,6 +33,7 @@ export function LifetimeChips({
       accessibilityLabel={`Total ${kind} through OneLedger: ${formatRwf(amountRwf)}. More information`}
       accessibilityState={{ expanded: open === kind }}
       onPress={() => setOpen(open === kind ? null : kind)}
+      hitSlop={hitSlopFor(22)}
       style={styles.hit}
     >
       <View style={styles.chip}>
@@ -68,8 +69,8 @@ export function LifetimeChips({
 const styles = StyleSheet.create({
   wrap: { gap: space[2] },
   row: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: space[1] },
-  // A 44pt tap area around a small visual chip.
-  hit: { minHeight: MIN_TOUCH_TARGET, justifyContent: "center" },
+  // Small visual chip; hitSlop brings the tap area up to 44pt.
+  hit: { justifyContent: "center" },
   chip: {
     flexDirection: "row",
     alignItems: "center",
