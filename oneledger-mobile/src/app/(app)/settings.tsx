@@ -4,7 +4,7 @@ import { useCallback } from "react";
 import { Pressable, View } from "react-native";
 
 import { fetchMoreFlags } from "@/api/mobile-api";
-import { Button, Card, Screen, ScreenHeader, Text } from "@/components/ds";
+import { Card, Screen, ScreenHeader, Text } from "@/components/ds";
 import { visibleSettingsGroups, type SettingsRow } from "@/features/settings/groups";
 import { useQuery } from "@/hooks/useQuery";
 import { config } from "@/lib/config";
@@ -22,7 +22,6 @@ export default function Settings() {
 
   return (
     <Screen>
-      <Button label="Back" variant="ghost" onPress={() => router.back()} />
       <ScreenHeader title="Settings" />
       {visibleSettingsGroups(flags ?? null).map((group) => (
         <View key={group.title} style={{ gap: space[2] }}>
@@ -44,8 +43,7 @@ export default function Settings() {
                   justifyContent: "center",
                   paddingVertical: space[3],
                   borderTopWidth: index === 0 ? 0 : 1,
-                  borderTopColor: colors.borderSubtle,
-                }}
+                  borderTopColor: colors.borderSubtle }}
               >
                 <Text variant="bodyStrong">{row.label}</Text>
                 <Text variant="caption" color="textMuted">

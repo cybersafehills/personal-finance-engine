@@ -1,5 +1,4 @@
 import * as Linking from "expo-linking";
-import { router } from "expo-router";
 import { useCallback, useState } from "react";
 import { View } from "react-native";
 
@@ -23,7 +22,6 @@ export default function Statements() {
 
   return (
     <Screen>
-      <Button label="Back" variant="ghost" onPress={() => router.back()} />
       <ScreenHeader
         title="Statements"
         subtitle="Records generated from your OneLedger activity. Not an official statement from your provider."

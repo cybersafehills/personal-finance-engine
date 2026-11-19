@@ -28,7 +28,7 @@ export default function More() {
 
   return (
     <Screen edges={["left", "right", "bottom"]}>
-      <ScreenHeader title="More" />
+      <ScreenHeader title="More" inline />
 
       <Card style={{ gap: space[1] }}>
         <Text variant="caption" color="textMuted">

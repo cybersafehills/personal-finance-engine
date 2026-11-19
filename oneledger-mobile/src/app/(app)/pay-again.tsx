@@ -44,12 +44,10 @@ export default function PayAgain() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const back = <Button label="Cancel" variant="ghost" onPress={() => router.back()} />;
 
   if (!offer) {
     return (
       <Screen>
-        {back}
         {loading ? (
           <Text variant="label" color="textMuted">
             Loading…
@@ -100,7 +98,6 @@ export default function PayAgain() {
 
   return (
     <Screen>
-      {back}
       <ScreenHeader
         title={target.type === "pay_person" ? "Pay a person" : "Pay a business"}
         subtitle={PAY_COPY.feeNotice}

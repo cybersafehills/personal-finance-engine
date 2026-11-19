@@ -80,7 +80,6 @@ export default function Insights() {
 
   return (
     <Screen>
-      <Button label="Back" variant="ghost" onPress={() => router.back()} />
       <ScreenHeader title="Insights" subtitle="Where your money went" />
 
       <View accessibilityRole="tablist" style={{ flexDirection: "row", flexWrap: "wrap", gap: space[2] }}>

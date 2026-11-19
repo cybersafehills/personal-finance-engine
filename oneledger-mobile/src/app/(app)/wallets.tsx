@@ -1,4 +1,3 @@
-import { router } from "expo-router";
 import { useCallback, useState } from "react";
 import { View } from "react-native";
 
@@ -20,7 +19,6 @@ export default function Wallets() {
 
   return (
     <Screen>
-      <Button label="Back" variant="ghost" onPress={() => router.back()} />
       <ScreenHeader title="Wallets" subtitle="Your balances, and how sure we are" />
       {loading && !data ? (
         <Text variant="label" color="textMuted">

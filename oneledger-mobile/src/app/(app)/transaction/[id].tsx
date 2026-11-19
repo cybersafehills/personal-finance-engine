@@ -61,14 +61,10 @@ export default function TransactionDetail() {
   const loadExtras = useCallback(() => loadDetailExtras(id), [id]);
   const { data: extras, refresh: refreshExtras } = useQuery(loadExtras);
 
-  const back = (
-    <Button label="Back" variant="ghost" onPress={() => router.back()} />
-  );
 
   if (!transaction) {
     return (
       <Screen>
-        {back}
         {loading ? (
           <Text variant="label" color="textMuted">
             Loading…
@@ -111,7 +107,6 @@ export default function TransactionDetail() {
 
   return (
     <Screen>
-      {back}
 
       {/* Centred hero, like the web: who, how much, when. */}
       <Card style={{ gap: space[2], alignItems: "center" }}>

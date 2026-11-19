@@ -94,9 +94,6 @@ export default function Capture() {
     <ScreenHeader
       title="Automatic recording"
       subtitle="MoMo messages on this phone"
-      action={
-        <Button label="Back" variant="ghost" onPress={() => router.back()} />
-      }
     />
   );
 

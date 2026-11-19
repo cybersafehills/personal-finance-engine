@@ -73,7 +73,7 @@ export default function Connect() {
 
   if (!captureSupported) {
     return (
-      <Screen>
+      <Screen edges={["top", "left", "right", "bottom"]}>
         <Header />
         <EmptyState
           variant="setup"
@@ -94,7 +94,7 @@ export default function Connect() {
   }
   if (!health) {
     return (
-      <Screen>
+      <Screen edges={["top", "left", "right", "bottom"]}>
         <Header />
       </Screen>
     );
@@ -105,7 +105,7 @@ export default function Connect() {
     CONNECT_STEPS.find((s) => s.key === step)?.title ?? "All set";
 
   return (
-    <Screen>
+    <Screen edges={["top", "left", "right", "bottom"]}>
       <Header />
       {captureIsDemo ? (
         <Badge variant="attention">Preview demo: nothing is really connected</Badge>

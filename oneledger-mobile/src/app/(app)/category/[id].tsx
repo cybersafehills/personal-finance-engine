@@ -34,12 +34,10 @@ export default function CategoryPicker() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [ruleFailed, setRuleFailed] = useState(false);
 
-  const back = <Button label="Back" variant="ghost" onPress={() => router.back()} />;
 
   if (!transaction) {
     return (
       <Screen>
-        {back}
         {loading ? (
           <Text variant="label" color="textMuted">
             Loading…
@@ -101,7 +99,6 @@ export default function CategoryPicker() {
 
   return (
     <Screen>
-      {back}
       <View style={{ gap: space[1] }}>
         <Text variant="heading">Choose a category</Text>
         <Text variant="label" color="textMuted" numberOfLines={1}>

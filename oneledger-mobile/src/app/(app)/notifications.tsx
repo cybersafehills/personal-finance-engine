@@ -59,7 +59,6 @@ export default function NotificationsScreen() {
           <View style={{ paddingTop: space[4], marginBottom: space[2] }}>
             <ScreenHeader
               title="Notifications"
-              action={<Button label="Back" variant="ghost" onPress={() => router.back()} />}
             />
             {hasUnread ? (
               <Text variant="label" color="textMuted" style={{ marginBottom: space[2] }}>
