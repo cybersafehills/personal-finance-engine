@@ -4,6 +4,7 @@ import { useCallback } from "react";
 
 import { fetchPayConfig } from "@/api/mobile-api";
 import { PayTabButton } from "@/components/shell/PayTabButton";
+import { setPayConfigCache } from "@/features/pay/config-cache";
 import { showPayButton } from "@/features/pay/launcher";
 import { useQuery } from "@/hooks/useQuery";
 import { AppHeader } from "@/components/shell/AppHeader";
@@ -28,7 +29,12 @@ const icon = (name: IconName) => {
 };
 
 export default function TabsLayout() {
-  const loadPay = useCallback(() => fetchPayConfig(), []);
+  const loadPay = useCallback(async () => {
+    const result = await fetchPayConfig();
+    // The sheet reads this so it can open instantly.
+    setPayConfigCache(result.ok ? result : null);
+    return result;
+  }, []);
   const { data: payConfig } = useQuery(loadPay);
   // Shown only where Pay is on; while that is unknown, or if it can't be read, there is no button.
   const payOn = payConfig ? showPayButton(payConfig) : false;

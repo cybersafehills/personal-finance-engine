@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 import {
   StyleSheet,
   TextInput,
@@ -15,13 +15,15 @@ export type TextFieldProps = Omit<TextInputProps, "style"> & {
   label: string;
   help?: string;
   error?: string;
+  /** An icon or small control drawn inside the box, on the left (e.g. "save as contact"). */
+  leading?: ReactNode;
 };
 
 /**
  * Labelled text input: label + optional help + error, wired for assistive
  * tech once. 44pt tall; text is 15pt, one step above body so what you type stays readable.
  */
-export function TextField({ label, help, error, ...input }: TextFieldProps) {
+export function TextField({ label, help, error, leading, ...input }: TextFieldProps) {
   const id = useId();
   const [focused, setFocused] = useState(false);
 
@@ -30,28 +32,33 @@ export function TextField({ label, help, error, ...input }: TextFieldProps) {
       <Text variant="label" color="textSecondary" nativeID={`${id}-label`}>
         {label}
       </Text>
-      <TextInput
-        maxFontSizeMultiplier={MAX_FONT_SCALE}
-        accessibilityLabel={label}
-        accessibilityLabelledBy={`${id}-label`}
-        accessibilityHint={error ?? help}
-        aria-invalid={!!error}
-        placeholderTextColor={colors.textMuted}
-        {...input}
-        onFocus={(event) => {
-          setFocused(true);
-          input.onFocus?.(event);
-        }}
-        onBlur={(event) => {
-          setFocused(false);
-          input.onBlur?.(event);
-        }}
+      <View
         style={[
-          styles.input,
+          styles.box,
           focused && styles.focused,
           !!error && styles.invalid,
         ]}
-      />
+      >
+        {leading ? <View style={styles.leading}>{leading}</View> : null}
+        <TextInput
+          maxFontSizeMultiplier={MAX_FONT_SCALE}
+          accessibilityLabel={label}
+          accessibilityLabelledBy={`${id}-label`}
+          accessibilityHint={error ?? help}
+          aria-invalid={!!error}
+          placeholderTextColor={colors.textMuted}
+          {...input}
+          onFocus={(event) => {
+            setFocused(true);
+            input.onFocus?.(event);
+          }}
+          onBlur={(event) => {
+            setFocused(false);
+            input.onBlur?.(event);
+          }}
+          style={styles.input}
+        />
+      </View>
       {error ? (
         <Text variant="caption" color="attention" accessibilityRole="alert">
           {error}
@@ -67,12 +74,20 @@ export function TextField({ label, help, error, ...input }: TextFieldProps) {
 
 const styles = StyleSheet.create({
   field: { gap: space[1] },
-  input: {
+  box: {
     minHeight: 44,
+    flexDirection: "row",
+    alignItems: "center",
     borderRadius: radii.control,
+    borderCurve: "continuous",
     borderWidth: 1,
     borderColor: colors.borderStrong,
     backgroundColor: colors.surface,
+  },
+  leading: { paddingLeft: space[2] },
+  input: {
+    flex: 1,
+    alignSelf: "stretch",
     paddingHorizontal: space[3],
     fontFamily: fonts.regular,
     fontSize: 15,

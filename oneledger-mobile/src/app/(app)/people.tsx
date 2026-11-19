@@ -3,10 +3,12 @@ import { useCallback, useEffect, useState } from "react";
 import { Pressable, View } from "react-native";
 
 import { fetchPeople } from "@/api/mobile-api";
-import { Badge, Button, Card, Chip, EmptyState, Screen, ScreenHeader, Text, TextField } from "@/components/ds";
+import { Badge, Button, Card, Chip, EmptyState, ListGroup, ListRow, Screen, ScreenHeader, Text, TextField } from "@/components/ds";
 import { sortTransactions } from "@/features/people/actions";
 import { KIND_LABEL, KIND_VARIANT, flowText, personSummary } from "@/features/people/display";
 import type { PersonKind } from "@/features/people/types";
+import { getTrustedRecipients } from "@/features/pay/recipients";
+import { formatLocalMsisdn } from "@/features/pay/target";
 import { useQuery } from "@/hooks/useQuery";
 import { space } from "@/theme/tokens";
 
@@ -40,6 +42,19 @@ export default function People() {
     [key, q, kind],
   );
   const { data, loading, refresh } = useQuery(load);
+
+  // Contacts you saved from the Pay form. They are not in the list below until
+  // your first payment to them is recorded, so they get their own section here.
+  const loadSaved = useCallback(() => getTrustedRecipients().catch(() => []), []);
+  const { data: savedAll } = useQuery(loadSaved);
+  const needle = q.trim().toLowerCase();
+  const saved = (savedAll ?? []).filter((r) => {
+    if (kind === "unknown") return false;
+    if (kind === "person" && r.kind !== "phone") return false;
+    if (kind === "merchant" && r.kind !== "merchant") return false;
+    if (!(r.kind === "phone" ? r.msisdn : r.merchantCode)) return false;
+    return !needle || r.name.toLowerCase().includes(needle) || (r.msisdn ?? r.merchantCode ?? "").includes(needle);
+  });
   const switching = data !== null && data.key !== key;
   const result = data && !switching ? data.result : null;
 
@@ -62,6 +77,23 @@ export default function People() {
           <Chip key={f.id} label={f.label} selected={kind === f.id} onPress={() => setKind(f.id)} />
         ))}
       </View>
+
+      {saved.length > 0 ? (
+        <ListGroup title="Saved contacts" footer="Saved from the Pay form. Tap one to pay again.">
+          {saved.map((r) => (
+            <ListRow
+              key={r.id}
+              icon={r.kind === "phone" ? "user" : "shopping-bag"}
+              label={r.name}
+              hint={r.msisdn ? formatLocalMsisdn(r.msisdn) : `Merchant code ${r.merchantCode}`}
+              value={<Badge variant={r.kind === "phone" ? "accent" : "neutral"}>{r.kind === "phone" ? "Person" : "Merchant"}</Badge>}
+              onPress={() =>
+                router.push({ pathname: "/pay-new", params: { type: r.kind === "phone" ? "pay_person" : "pay_merchant", saved: r.id } })
+              }
+            />
+          ))}
+        </ListGroup>
+      ) : null}
 
       {(loading && !data) || switching ? (
         <Text variant="label" color="textMuted" accessibilityLiveRegion="polite">

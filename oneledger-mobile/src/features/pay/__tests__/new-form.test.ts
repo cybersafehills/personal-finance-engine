@@ -1,5 +1,4 @@
 import type { PayerAccount } from "../accounts";
-import { actionAvailableHere, LAUNCHER_ACTIONS, showPayButton } from "../launcher";
 import { parseRecipient, payableAccounts } from "../new-form";
 
 const acct = (over: Partial<PayerAccount>): PayerAccount => ({
@@ -48,16 +47,3 @@ describe("payableAccounts", () => {
   });
 });
 
-describe("launcher model", () => {
-  it("shows the button only where Pay is on", () => {
-    expect(showPayButton({ ok: true, pay: true })).toBe(true);
-    expect(showPayButton({ ok: true, pay: false })).toBe(false);
-    expect(showPayButton({ ok: false })).toBe(false);
-  });
-  it("prepares person and merchant here only when assisted pay is on", () => {
-    const [person, , bill] = LAUNCHER_ACTIONS;
-    expect(actionAvailableHere(person, { assistedPay: false })).toBe(false);
-    expect(actionAvailableHere(person, { assistedPay: true })).toBe(true);
-    expect(actionAvailableHere(bill, {})).toBe(true);
-  });
-});

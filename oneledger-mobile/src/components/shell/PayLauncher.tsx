@@ -1,13 +1,14 @@
 import Feather from "@expo/vector-icons/Feather";
 import * as Linking from "expo-linking";
 import { router } from "expo-router";
-import { Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
 
-import { ListGroup, ListRow, Text } from "@/components/ds";
+import { Text } from "@/components/ds";
 import {
   actionAvailableHere,
   LAUNCHER_ACTIONS,
   LAUNCHER_LINKS,
+  opensInApp,
   type LauncherAction,
 } from "@/features/pay/launcher";
 import type { PayConfig } from "@/features/pay/types";
@@ -15,10 +16,11 @@ import { config as appConfig } from "@/lib/config";
 import { colors, CONTROL_HEIGHT, hitSlopFor, radii, space } from "@/theme/tokens";
 
 // The Pay & Services launcher, shown in a native form sheet (see
-// (app)/pay-sheet.tsx), mirroring the web's launcher
-// (web/components/pay/PayLauncher.tsx). One tap never executes a payment: person
-// and merchant payments are prepared here and reviewed before anything is
-// dialled; the rest open the web or the in-app directory.
+// (app)/pay-sheet.tsx), mirroring the web's launcher. It holds only what you need
+// to start a payment; everything else (activity, templates, saved recipients) lives
+// in More. It is a plain View, not a ScrollView: the sheet sizes itself to this
+// content, so there is no blank space below and nothing to scroll or mis-lay-out.
+// One tap never executes a payment.
 
 type FeatherName = React.ComponentProps<typeof Feather>["name"];
 
@@ -31,38 +33,30 @@ const TILE_ICONS: Record<LauncherAction["id"], FeatherName> = {
   government: "flag",
 };
 
-function openWeb(path: string) {
-  Linking.openURL(`${appConfig.apiBaseUrl}${path}`);
-}
-
 export function PayLauncher({
   config,
-  favourite = null,
   onClose,
 }: {
   config: Partial<PayConfig>;
-  /** The one starred USSD code shown under the actions (like the web); null when there is none. */
-  favourite?: { slug: string; name: string; template: string } | null;
   /** Called before navigating, so the sheet can be dismissed first. */
   onClose: () => void;
 }) {
   function pick(action: LauncherAction) {
     if (!actionAvailableHere(action, config)) return;
     onClose();
-    if (action.kind === "native") router.push({ pathname: "/pay-new", params: { type: action.id } });
-    else openWeb(action.path);
+    if (action.kind === "native") {
+      router.push({ pathname: "/pay-new", params: { type: action.id } });
+    } else if (opensInApp(config)) {
+      router.push({ pathname: "/ussd", params: { category: action.category, title: action.label } });
+    } else {
+      Linking.openURL(`${appConfig.apiBaseUrl}${action.webPath}`);
+    }
   }
 
-  // The directory opens in the app where the server has it on; otherwise on the web.
   function openDirectory() {
     onClose();
-    if (config.ussdDirectory) router.push("/ussd");
-    else openWeb(LAUNCHER_LINKS.ussd.path);
-  }
-
-  function web(path: string) {
-    onClose();
-    openWeb(path);
+    if (opensInApp(config)) router.push("/ussd");
+    else Linking.openURL(`${appConfig.apiBaseUrl}${LAUNCHER_LINKS.ussd.path}`);
   }
 
   return (
@@ -75,8 +69,8 @@ export function PayLauncher({
           <Text variant="heading" accessibilityRole="header">
             Pay & Services
           </Text>
-          <Text variant="label" color="textMuted">
-            Prepare a payment or find a verified USSD code.
+          <Text variant="label" color="textMuted" numberOfLines={1}>
+            Prepare a payment or find a USSD code.
           </Text>
         </View>
         <Pressable
@@ -90,7 +84,7 @@ export function PayLauncher({
         </Pressable>
       </View>
 
-      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+      <View style={styles.body}>
         {config.scanToPay ? (
           <Pressable
             accessibilityRole="button"
@@ -106,7 +100,7 @@ export function PayLauncher({
             </View>
             <View style={styles.flex}>
               <Text variant="bodyStrong">Scan to pay</Text>
-              <Text variant="caption" color="textMuted">
+              <Text variant="caption" color="textMuted" numberOfLines={1}>
                 Scan a merchant payment QR code.
               </Text>
             </View>
@@ -125,11 +119,7 @@ export function PayLauncher({
                 accessibilityState={{ disabled: !available }}
                 disabled={!available}
                 onPress={() => pick(action)}
-                style={({ pressed }) => [
-                  styles.tile,
-                  !available && styles.tileOff,
-                  pressed && { borderColor: colors.accent },
-                ]}
+                style={({ pressed }) => [styles.tile, !available && styles.tileOff, pressed && { borderColor: colors.accent }]}
               >
                 <Feather name={TILE_ICONS[action.id]} size={18} color={available ? colors.accent : colors.textMuted} />
                 <View style={styles.flex}>
@@ -142,9 +132,6 @@ export function PayLauncher({
                     </Text>
                   ) : null}
                 </View>
-                {available && action.kind === "web" ? (
-                  <Feather name="external-link" size={12} color={colors.textMuted} accessibilityElementsHidden />
-                ) : null}
               </Pressable>
             );
           })}
@@ -162,44 +149,16 @@ export function PayLauncher({
           <Feather name="arrow-right" size={16} color={colors.accentForeground} />
         </Pressable>
 
-        <ListGroup>
-          {favourite ? (
-            <ListRow
-              icon="star"
-              label={favourite.name}
-              hint={favourite.template}
-              a11yLabel={`${favourite.name}, ${favourite.template}`}
-              onPress={() => {
-                onClose();
-                router.push({ pathname: "/ussd/[slug]", params: { slug: favourite.slug } });
-              }}
-            />
-          ) : null}
-          {config.trustedRecipients ? (
-            <ListRow
-              icon="users"
-              label="Saved recipients"
-              hint="People and merchants you pay often"
-              onPress={() => {
-                onClose();
-                router.push("/recipients");
-              }}
-            />
-          ) : null}
-          <ListRow icon="activity" label={LAUNCHER_LINKS.activity.label} external onPress={() => web(LAUNCHER_LINKS.activity.path)} />
-          <ListRow icon="copy" label={LAUNCHER_LINKS.templates.label} external onPress={() => web(LAUNCHER_LINKS.templates.path)} />
-        </ListGroup>
-
         <Text variant="caption" color="textMuted" style={styles.note}>
           OneLedger never asks for your Mobile Money or banking PIN and can&apos;t send money for you.
         </Text>
-      </ScrollView>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.surface },
+  root: { backgroundColor: colors.surface },
   flex: { flex: 1 },
   header: {
     flexDirection: "row",
