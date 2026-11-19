@@ -438,8 +438,11 @@ test.describe("mobile API", () => {
       expect(created.intent.state).toBe("draft");
       expect(created.intent.amountMinor).toBe(1500);
       expect(created.intent.recipientMasked).toContain("3456");
-      // The full number only ever appears inside the dialable instruction.
-      const { instruction, ...rest } = created.intent;
+      // The full number only ever appears in the receiver field (shown on the
+      // payment screens) and inside the dialable instruction; the masked
+      // recipient and everything else stay masked.
+      const { instruction, recipientMsisdn, ...rest } = created.intent;
+      expect(String(recipientMsisdn)).toContain("788123456");
       expect(JSON.stringify(rest)).not.toContain("0788123456");
       expect(JSON.stringify(rest)).not.toContain("250788123456");
       if (instruction) {
