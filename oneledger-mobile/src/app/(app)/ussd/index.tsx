@@ -1,5 +1,5 @@
 import Feather from "@expo/vector-icons/Feather";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
 
@@ -13,8 +13,13 @@ import { colors, MIN_TOUCH_TARGET, space } from "@/theme/tokens";
 // Money, banking and government services, searchable, with starred favourites.
 // Nothing here dials or pays anything; a code opens its own page.
 export default function UssdDirectory() {
+  // The Pay sheet opens this on a category ("Buy airtime or data" -> airtime_data).
+  const params = useLocalSearchParams<{ category?: string; title?: string }>();
+  const initial = (DIRECTORY_CATEGORIES as readonly string[]).includes(params.category ?? "")
+    ? (params.category as DirectoryCategory)
+    : null;
   const [query, setQuery] = useState("");
-  const [category, setCategory] = useState<DirectoryCategory | null>(null);
+  const [category, setCategory] = useState<DirectoryCategory | null>(initial);
   const filtered = query.trim() !== "" || category !== null;
 
   const load = useCallback(async () => {
@@ -44,7 +49,7 @@ export default function UssdDirectory() {
 
   return (
     <Screen>
-      <ScreenHeader title="USSD directory" subtitle="Verified USSD codes for Mobile Money, banking and government services in Rwanda." />
+      <ScreenHeader title={params.title || "USSD directory"} subtitle="Verified USSD codes for Mobile Money, banking and government services in Rwanda." />
 
       <TextField label="Search" value={query} onChangeText={setQuery} placeholder="Name, service or code" autoCapitalize="none" returnKeyType="search" />
 

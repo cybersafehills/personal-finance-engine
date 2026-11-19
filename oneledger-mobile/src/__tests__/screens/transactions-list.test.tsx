@@ -59,7 +59,7 @@ describe("Transactions screen", () => {
     expect(await screen.findByText("Kigali Fresh")).toBeTruthy();
     expect(screen.getByText("Simba Market")).toBeTruthy();
 
-    await fireEvent.press(screen.getByText("Add transaction"));
+    await fireEvent.press(screen.getByRole("button", { name: "Add transaction" }));
     expect(router.push).toHaveBeenCalledWith("/add-transaction");
   });
 
@@ -173,5 +173,15 @@ describe("Transactions screen", () => {
       await render(<Transactions />);
       expect(await screen.findByText("Nothing matches that search")).toBeTruthy();
     });
+  });
+
+  it("keeps search and the filters in one compact block above the list", async () => {
+    mockGetTransactions.mockResolvedValue([]);
+    await render(<Transactions />);
+    expect(await screen.findByLabelText("Search")).toBeTruthy();
+    // Direction, period and review are chips on a single row.
+    for (const label of ["All", "In", "Out", "All time", "7 days", "30 days", "This month", "To review"]) {
+      expect(screen.getAllByRole("button", { name: new RegExp(`^${label}(, selected)?$`) }).length).toBeGreaterThan(0);
+    }
   });
 });
