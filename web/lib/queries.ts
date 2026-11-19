@@ -485,13 +485,15 @@ export async function getSpaceMemberDirectory(
 }
 
 /** The signed-in user's id, or null. */
-export async function getAuthUserId(): Promise<string | null> {
+// Memoised per request (React cache): several loaders on one page ask for the user
+// id, and each uncached call is a round trip to the auth server.
+export const getAuthUserId = cache(async (): Promise<string | null> => {
   const supabase = await supabaseSession();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   return user?.id ?? null;
-}
+});
 
 export type TransactionAttributionType =
   | "shared"
@@ -994,11 +996,18 @@ async function resolveActiveWorkspaceId(): Promise<string | null> {
     mobileRequestedWorkspaceId() ?? undefined;
 
   if (requestedId) {
+    // RLS lets a member read EVERY member's membership row of their workspaces
+    // (workspace_memberships_select_member), so a household or organization with
+    // two or more members returns several rows here. `.maybeSingle()` on that
+    // errors, which used to drop the caller silently back to their personal
+    // workspace. `.limit(1)` is enough: a row is only visible at all when the
+    // caller is an active member of that workspace.
     const { data } = await supabase
       .from("workspace_memberships")
       .select("workspace_id")
       .eq("workspace_id", requestedId)
       .eq("status", "active")
+      .limit(1)
       .maybeSingle();
 
     if (data?.workspace_id) return data.workspace_id;
@@ -2792,10 +2801,17 @@ export type WorkspaceSummary = {
 
 /** Every workspace the caller is an active member of - drives the workspace switcher. */
 export async function getUserWorkspaces(): Promise<WorkspaceSummary[]> {
+  const userId = await getAuthUserId();
+  if (!userId) return [];
   const supabase = await supabaseSession();
+  // Only the caller's OWN membership rows. RLS exposes every member's row of a
+  // shared workspace, so without this filter a two-member household was listed
+  // twice, and `role` could be another member's role (getActiveWorkspace takes
+  // the first row for the workspace).
   const { data, error } = await supabase
     .from("workspace_memberships")
     .select("role, workspaces(id, name, kind)")
+    .eq("user_id", userId)
     .eq("status", "active")
     .order("joined_at", { ascending: true });
 
