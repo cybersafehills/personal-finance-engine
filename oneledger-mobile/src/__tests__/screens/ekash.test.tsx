@@ -75,6 +75,23 @@ describe("Use eKash screen", () => {
     await render(<Ekash />);
     await fireEvent.press(screen.getByRole("button", { name: "Choose from my phone's contacts" }));
     expect(await screen.findByText("That contact has no Rwandan mobile number.")).toBeTruthy();
+    // The message sits on the Receiver's ID field, and goes away when they type.
+    expect(screen.getByLabelText("Receiver's ID").props["aria-invalid"]).toBe(true);
+    await fireEvent.changeText(screen.getByLabelText("Receiver's ID"), "0788");
+    expect(screen.queryByText("That contact has no Rwandan mobile number.")).toBeNull();
+  });
+
+  it("can pick a second contact after the first, replacing the number", async () => {
+    mockPick
+      .mockResolvedValueOnce({ ok: true, contact: { name: "Joe Doe", number: "0788123456" } })
+      .mockResolvedValueOnce({ ok: true, contact: { name: "Amy", number: "0722000111" } });
+    await render(<Ekash />);
+    const button = () => screen.getByRole("button", { name: "Choose from my phone's contacts" });
+    await fireEvent.press(button());
+    await waitFor(() => expect(screen.getByLabelText("Receiver's ID").props.value).toBe("0788123456"));
+    await fireEvent.press(button());
+    await waitFor(() => expect(screen.getByLabelText("Receiver's ID").props.value).toBe("0722000111"));
+    expect(screen.getByLabelText("Name (optional)").props.value).toBe("Amy");
   });
 
   it("saves the receiver as a contact when asked, a bank account as an account", async () => {

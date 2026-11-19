@@ -22,6 +22,8 @@ export default function Ekash() {
   const [reference, setReference] = useState("");
   const [saveContact, setSaveContact] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  // Why a phone contact could not be used: shown right under the Receiver's ID, where it is seen.
+  const [contactProblem, setContactProblem] = useState<string | null>(null);
 
   // Saved contacts are a convenience: if they can't be read the page still works by typing.
   const loadContacts = useCallback(async () => ekashRecipients(await getTrustedRecipients().catch(() => [])), []);
@@ -97,7 +99,11 @@ export default function Ekash() {
         <TextField
           label="Receiver's ID"
           value={receiver}
-          onChangeText={setReceiver}
+          onChangeText={(t) => {
+            setReceiver(t);
+            setContactProblem(null);
+          }}
+          error={contactProblem ?? undefined}
           placeholder="Phone number or account number"
           autoCapitalize="none"
           autoCorrect={false}
@@ -108,9 +114,10 @@ export default function Ekash() {
                 setReceiver(c.number);
                 if (c.name) setName(c.name);
                 setSaveContact(false);
+                setContactProblem(null);
                 setNote(null);
               }}
-              onProblem={setNote}
+              onProblem={setContactProblem}
             />
           }
         />
@@ -120,7 +127,7 @@ export default function Ekash() {
           value={name}
           onChangeText={setName}
           placeholder="Who is this?"
-          leading={<SaveContactToggle value={saveContact} onChange={setSaveContact} />}
+          trailing={<SaveContactToggle value={saveContact} onChange={setSaveContact} />}
           help={saveContact ? "This receiver will be saved to your contacts." : undefined}
         />
         <TextField

@@ -65,6 +65,8 @@ export default function PayNew() {
   const [prefilled, setPrefilled] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  // Why a phone contact could not be used: shown under the number it was meant to fill.
+  const [contactProblem, setContactProblem] = useState<string | null>(null);
 
   // Opened from a payment template: fill the recipient and the usual amount once.
   // (A template keeps only a masked phone number, so for a person the full number
@@ -179,7 +181,11 @@ export default function PayNew() {
       <TextField
         label={person ? "Mobile number" : "Merchant code"}
         value={recipientText}
-        onChangeText={setRecipientText}
+        onChangeText={(t) => {
+          setRecipientText(t);
+          setContactProblem(null);
+        }}
+        error={contactProblem ?? undefined}
         keyboardType="phone-pad"
         placeholder={person ? "078 123 4567" : "e.g. 123456"}
         editable={!submitting}
@@ -192,9 +198,10 @@ export default function PayNew() {
                 // The saved name fills in, and can still be changed before paying.
                 if (c.name) setName(c.name);
                 setSaveContact(false);
+                setContactProblem(null);
                 setMessage(null);
               }}
-              onProblem={setMessage}
+              onProblem={setContactProblem}
             />
           ) : undefined
         }
@@ -217,7 +224,7 @@ export default function PayNew() {
         onChangeText={setName}
         placeholder={person ? "Who is this?" : "Business name"}
         editable={!submitting}
-        leading={<SaveContactToggle value={saveContact} onChange={setSaveContact} />}
+        trailing={<SaveContactToggle value={saveContact} onChange={setSaveContact} />}
         help={saveContact ? "This contact will be saved under People and merchants." : undefined}
       />
 
