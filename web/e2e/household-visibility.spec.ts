@@ -212,7 +212,10 @@ async function asHousehold(context: BrowserContext) {
   ]);
 }
 
-async function memberPage(browser: Browser): Promise<{ page: Page; context: BrowserContext }> {
+async function memberPage(
+  browser: Browser,
+  opts: { household?: boolean } = {},
+): Promise<{ page: Page; context: BrowserContext }> {
   // A genuinely empty context. In @playwright/test, browser.newContext() inherits the
   // project's `use.storageState` (the signed-in e2e user A), so without this override
   // the "member" browser is already logged in as A and /login redirects to Home - which
@@ -222,7 +225,12 @@ async function memberPage(browser: Browser): Promise<{ page: Page; context: Brow
     baseURL: BASE_URL,
     storageState: { cookies: [], origins: [] },
   });
-  await asHousehold(context);
+  if (opts.household === false) {
+    // start on the member's own (personal) Space, like a real first visit
+    await context.addCookies([{ name: "oneledger_splash_off", value: "1", url: BASE_URL }]);
+  } else {
+    await asHousehold(context);
+  }
   const page = await context.newPage();
   // This context bypasses the shared `page` fixture, so surface the same browser
   // errors it would, with a prefix that says whose browser this is.
@@ -357,6 +365,49 @@ test.describe("as the household OWNER (A): everything, as a positive control", (
 
     await page.goto("/pay/fees?amount=22222&type=send_money");
     await expect(page.getByRole("region", { name: "Fees you have paid before" })).toContainText(/only 1 similar/);
+  });
+});
+
+test.describe("switching Spaces in a household with more than one member", () => {
+  // Regression for a bug this spec found: workspace_memberships is readable by every
+  // member of a workspace, and the web's membership lookups did not filter to the
+  // caller. With two or more members, (a) switching into the household failed with
+  // "You're not a member of that workspace", (b) a saved selection silently fell back
+  // to the personal Space, and (c) the switcher listed the household once per member.
+  const openSpaces = async (page: Page) => {
+    await page.getByLabel("Account menu").click();
+    const spaces = page.getByRole("listbox", { name: "Switch Space" });
+    await expect(spaces).toBeVisible();
+    return spaces;
+  };
+
+  test("the member sees each Space once and can switch into the household", async ({ browser }) => {
+    test.setTimeout(150_000);
+    const { page, context } = await memberPage(browser, { household: false });
+    try {
+      const spaces = await openSpaces(page);
+      await expect(spaces.getByRole("option")).toHaveCount(2); // personal + household, each once
+      await expect(spaces.getByRole("option", { name: new RegExp(HH_NAME) })).toHaveCount(1);
+
+      // The switch is a server action (a POST carrying a Next-Action header). Wait for
+      // it to finish so the cookie is set before the next navigation.
+      const switched = page.waitForResponse((r) =>
+        r.request().method() === "POST" && "next-action" in r.request().headers()
+      );
+      await spaces.getByRole("option", { name: new RegExp(HH_NAME) }).click();
+      await switched;
+      await page.goto("/wallets");
+      await expect(page.getByRole("heading", { name: SHARED_WALLET })).toBeVisible();
+      await expect(main(page)).not.toContainText(PRIVATE_WALLET);
+    } finally {
+      await context.close();
+    }
+  });
+
+  test("the owner also sees the household once, not once per member", async ({ page }) => {
+    await page.goto("/");
+    const spaces = await openSpaces(page);
+    await expect(spaces.getByRole("option", { name: new RegExp(HH_NAME) })).toHaveCount(1);
   });
 });
 
