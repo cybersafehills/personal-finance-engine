@@ -1,5 +1,6 @@
 import { buildTelHref, fillUssdTemplate, type ParamSpec } from "../capability";
 import { safeSearchTerm, toListItem } from "../queries";
+import { firstSentence } from "../text";
 
 // Mirrors web/lib/ussd/capability_test.ts: the app must fill a code exactly as the web does.
 
@@ -73,3 +74,20 @@ describe("directory queries", () => {
     expect(item.verified).toBe(false);
   });
 });
+
+describe("firstSentence", () => {
+  it("keeps just the first sentence", () => {
+    expect(firstSentence("Buys MTN airtime for the SIM you are dialling from, paid with MTN Mobile Money. More detail here.")).toBe(
+      "Buys MTN airtime for the SIM you are dialling from, paid with MTN Mobile Money.",
+    );
+  });
+  it("returns a single sentence, or text with no full stop, as is", () => {
+    expect(firstSentence("Check your balance.")).toBe("Check your balance.");
+    expect(firstSentence("Check your balance")).toBe("Check your balance");
+  });
+  it("copes with nothing", () => {
+    expect(firstSentence(null)).toBeNull();
+    expect(firstSentence("")).toBeNull();
+  });
+});
+

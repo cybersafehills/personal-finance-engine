@@ -487,3 +487,17 @@ and approval, supplier and duplicate handling, comments.
   button that explains it in plain words, shown only where `paymentRequests` is on in
   `GET /api/mobile/config`. Close moved to the bottom centre of the sheet.
 
+### USSD code page: built around dialing the code
+
+- The page now leads with the code and a **Dial this code** button (iPhone and
+  Android alike; iOS shows its own "Call?" prompt), a one-line summary, and the
+  verification badge. Codes that need your details show them first ("Your details")
+  and the code fills in as you type; the button stays off until it is valid, and
+  never dials by itself. Share/copy is the secondary action.
+- Everything explanatory (full description, caution, "How to use it" steps, source) is
+  in a collapsed **About this code**; reporting a mistake is a quiet link at the
+  bottom. The native header just says "USSD code"; the service's own name is the
+  heading, so long names no longer truncate in the title bar.
+- Unavailable services cannot be dialled; deprecated ones say so and link to the
+  current code.
+

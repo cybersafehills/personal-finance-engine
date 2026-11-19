@@ -1,4 +1,5 @@
 import * as Linking from "expo-linking";
+import { Platform, Share } from "react-native";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react-native";
 
 import UssdDirectory from "@/app/(app)/ussd/index";
@@ -142,10 +143,81 @@ describe("USSD code page", () => {
     expect(screen.queryByLabelText(/Code to dial/)).toBeNull();
   });
 
-  it("shows steps and the source", async () => {
+  it("puts the code first: the name, a one-line summary, and details only below", async () => {
     await render(<UssdCode />);
-    expect(await screen.findByText("1. Enter your PIN when asked.")).toBeTruthy();
+    expect(await screen.findByText("Send money")).toBeTruthy();
+    expect(screen.getByText("Send to a number.")).toBeTruthy();
+    // The long-form material is tucked away until asked for.
+    expect(screen.queryByText("1. Enter your PIN when asked.")).toBeNull();
+    expect(screen.queryByText("Official MTN price list")).toBeNull();
+  });
+
+  it("opens the steps and the source under About this code", async () => {
+    await render(<UssdCode />);
+    await fireEvent.press(await screen.findByRole("button", { name: "About this code" }));
+    expect(screen.getByText("1. Enter your PIN when asked.")).toBeTruthy();
     expect(screen.getByText("Official MTN price list")).toBeTruthy();
+    await fireEvent.press(screen.getByRole("button", { name: "About this code" }));
+    expect(screen.queryByText("1. Enter your PIN when asked.")).toBeNull();
+  });
+
+  describe.each(["ios", "android"] as const)("dialing on %s", (os) => {
+    beforeEach(() => jest.replaceProperty(Platform, "OS", os));
+    afterEach(() => jest.restoreAllMocks());
+
+    it("has a Dial button that is off until the code is complete, then opens the dialer with it", async () => {
+      await render(<UssdCode />);
+      const dial = await screen.findByRole("button", { name: "Dial this code" });
+      expect(dial.props.accessibilityState.disabled).toBe(true);
+      expect(screen.getByText("Fill in your details above to get your code.")).toBeTruthy();
+
+      await fireEvent.changeText(screen.getByLabelText("Phone number"), "0781234567");
+      await fireEvent.changeText(screen.getByLabelText("Amount"), "5000");
+      await fireEvent.press(await screen.findByRole("button", { name: "Dial this code" }));
+      await waitFor(() => expect(Linking.openURL).toHaveBeenCalledWith("tel:*182*1*1*0781234567*5000%23"));
+    });
+
+    it("never dials by itself", async () => {
+      mockBySlug.mockResolvedValue(detail({ acceptsParameters: false, template: "*182*6*1#", parameters: [] }));
+      await render(<UssdCode />);
+      expect(await screen.findByLabelText("Code to dial: *182*6*1#")).toBeTruthy();
+      expect(Linking.openURL).not.toHaveBeenCalled();
+    });
+  });
+
+  it("a code with no details is ready to dial straight away", async () => {
+    mockBySlug.mockResolvedValue(detail({ acceptsParameters: false, template: "*182*6*1#", parameters: [] }));
+    await render(<UssdCode />);
+    const dial = await screen.findByRole("button", { name: "Dial this code" });
+    expect(dial.props.accessibilityState.disabled).toBe(false);
+    expect(screen.queryByText("Your details")).toBeNull();
+    await fireEvent.press(dial);
+    await waitFor(() => expect(Linking.openURL).toHaveBeenCalledWith("tel:*182*6*1%23"));
+  });
+
+  it("says so when the dialer can't open", async () => {
+    mockBySlug.mockResolvedValue(detail({ acceptsParameters: false, template: "*182*6*1#", parameters: [] }));
+    (Linking.openURL as jest.Mock).mockRejectedValue(new Error("no handler"));
+    await render(<UssdCode />);
+    await fireEvent.press(await screen.findByRole("button", { name: "Dial this code" }));
+    expect(await screen.findByText(/Couldn't open the dialer/)).toBeTruthy();
+  });
+
+  it("shares or copies the finished code", async () => {
+    const share = jest.spyOn(Share, "share").mockResolvedValue({ action: Share.sharedAction, activityType: undefined });
+    mockBySlug.mockResolvedValue(detail({ acceptsParameters: false, template: "*182*6*1#", parameters: [] }));
+    await render(<UssdCode />);
+    await fireEvent.press(await screen.findByRole("button", { name: "Share or copy code" }));
+    await waitFor(() => expect(share).toHaveBeenCalledWith({ message: "*182*6*1#" }));
+    share.mockRestore();
+  });
+
+  it("cannot be dialled while the service is unavailable", async () => {
+    mockBySlug.mockResolvedValue(detail({ state: "temporarily_unavailable", acceptsParameters: false, template: "*182*6*1#", parameters: [] }));
+    await render(<UssdCode />);
+    const dial = await screen.findByRole("button", { name: "Dial this code" });
+    expect(dial.props.accessibilityState.disabled).toBe(true);
+    expect(screen.getByText("This service is temporarily unavailable.")).toBeTruthy();
   });
 
   it("warns when a code is deprecated and links to its replacement", async () => {
