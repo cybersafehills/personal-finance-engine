@@ -22,7 +22,7 @@ export const NAV: NavGroup[] = [
   {
     label: "Customers",
     items: [
-      { label: "Users" },
+      { label: "Users", href: "/customers/users", permission: "view_customer_metadata" },
       { label: "Registrations" },
       { label: "Organizations" },
       { label: "Customer Support" },

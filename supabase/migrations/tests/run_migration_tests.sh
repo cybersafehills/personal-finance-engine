@@ -1076,11 +1076,12 @@ AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_p
 # returns a boolean, takes only an id). 139 + 1 = 140.
 # Platform Console foundation (20270107000000) adds 7 authenticated-callable
 # RPCs (console_my_access, _record_audit, _dashboard_summary, _activity_feed,
-# _audit_log, _staff_list, _health_snapshot). 140 + 7 = 147.
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "147" ]; then
-  pass "authenticated holds EXECUTE on exactly the 147 functions expected, no more"
+# _audit_log, _staff_list, _health_snapshot) and 20270107000001 adds
+# console_customer_directory. 140 + 8 = 148.
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "148" ]; then
+  pass "authenticated holds EXECUTE on exactly the 148 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 147 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 148 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -9766,6 +9767,22 @@ check_console "authenticated cannot self-grant staff access" \
 check_console "console_assert is not callable by clients" \
   "$(console_call "$CON_OWNER" aal2 "select public.console_assert('view_audit_logs');")" "permission denied"
 
+
+# --- customer directory (20270107000001) ---
+check_console "owner at aal2 can list the customer directory" \
+  "$(console_call "$CON_OWNER" aal2 "select public.console_customer_directory(null, null, 5);")" "customer_ref"
+check_console "support agent (view_customer_metadata) can list the directory" \
+  "$(console_call "$CON_SUPPORT" aal2 "select public.console_customer_directory(null, null, 5);")" "customer_ref"
+check_console "non-staff cannot list the directory" \
+  "$(console_call "$USER_A" aal2 "select public.console_customer_directory(null, null, 5);")" "not_authorized"
+check_console "staff at aal1 cannot list the directory" \
+  "$(console_call "$CON_OWNER" aal1 "select public.console_customer_directory(null, null, 5);")" "mfa_required"
+CD_ROW="$(console_call "$CON_OWNER" aal2 "select public.console_customer_directory(null, null, 100);")"
+if printf '%s' "$CD_ROW" | grep -Eq 'email|example\.com'; then fail "Console: directory leaked an email"; else pass "Console: directory returns no email"; fi
+check_console "directory rejects an invalid status filter" \
+  "$(console_call "$CON_OWNER" aal2 "select public.console_customer_directory(null, 'bogus', 5);")" "invalid_status"
+check_console "analyst (no view_customer_metadata) cannot list the directory" \
+  "$(psql -d pfe_rls -t -A -c "insert into public.console_staff (user_id, role) select id, 'read_only_analyst' from auth.users where email = 'b@example.com';" >/dev/null; console_call "$USER_B" aal2 "select public.console_customer_directory(null, null, 5);")" "not_authorized"
 
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="
