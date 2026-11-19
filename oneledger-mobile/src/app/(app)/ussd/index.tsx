@@ -120,7 +120,7 @@ function Section({
                 accessibilityRole="link"
                 accessibilityLabel={code.name}
                 onPress={() => router.push({ pathname: "/ussd/[slug]", params: { slug: code.slug } })}
-                style={{ flex: 1, minHeight: 64, justifyContent: "center", paddingVertical: space[3], gap: 2 }}
+                style={{ flex: 1, minHeight: 56, justifyContent: "center", paddingVertical: space[3], gap: 2 }}
               >
                 <View style={{ flexDirection: "row", alignItems: "center", gap: space[2] }}>
                   <Text variant="bodyStrong" style={{ flexShrink: 1 }}>
