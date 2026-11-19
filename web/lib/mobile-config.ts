@@ -13,6 +13,7 @@ import {
   isUssdDirectoryEnabled,
 } from "./pay/gate";
 import { isSpacesEnabled } from "./spaces/gate";
+import { isPaymentRequestsEnabledForWorkspace } from "./payment-requests/owner";
 
 // Which optional surfaces are switched on for the caller's workspace, so the
 // mobile app can show a feature only when it will actually work (GET
@@ -26,6 +27,7 @@ export type MobileConfig = {
   ussdDirectory: boolean;
   scanToPay: boolean;
   trustedRecipients: boolean;
+  paymentRequests: boolean;
   statements: boolean;
   insights: boolean;
   bills: boolean;
@@ -42,6 +44,13 @@ export function mobileConfig(workspaceId: string | null): MobileConfig {
     ussdDirectory: isUssdDirectoryEnabled(workspaceId),
     scanToPay: isScanToPayEnabled(workspaceId),
     trustedRecipients: isTrustedRecipientsEnabled(workspaceId),
+    paymentRequests: isPaymentRequestsEnabledForWorkspace(
+      {
+        PAYMENT_REQUESTS_ENABLED: process.env.PAYMENT_REQUESTS_ENABLED,
+        PAYMENT_REQUESTS_WORKSPACE_ALLOWLIST: process.env.PAYMENT_REQUESTS_WORKSPACE_ALLOWLIST,
+      },
+      workspaceId,
+    ),
     statements: isFinancialStatementsEnabled(),
     insights: isIntelligenceEnabled(workspaceId),
     bills: isBillsEnabled(workspaceId),

@@ -87,4 +87,71 @@ describe("Pay launcher", () => {
     await fireEvent.press(screen.getByRole("button", { name: "Close" }));
     expect(onClose).toHaveBeenCalled();
   });
+
+  describe("Request payment shortcut", () => {
+    it("is offered only where payment requests are on", async () => {
+      await render(<PayLauncher onClose={onClose} config={ON} />);
+      expect(screen.queryByRole("button", { name: "Request payment" })).toBeNull();
+    });
+
+    it("opens the request form and closes the sheet", async () => {
+      await render(<PayLauncher onClose={onClose} config={{ ...ON, paymentRequests: true }} />);
+      await fireEvent.press(screen.getByRole("button", { name: "Request payment" }));
+      expect(router.push).toHaveBeenCalledWith("/request-new");
+      expect(onClose).toHaveBeenCalled();
+    });
+
+    it("has an info button that explains why, in plain words, and can be dismissed", async () => {
+      await render(<PayLauncher onClose={onClose} config={{ ...ON, paymentRequests: true }} />);
+      expect(screen.queryByText("Why request a payment?")).toBeNull();
+      await fireEvent.press(screen.getByRole("button", { name: "About requesting payment" }));
+      expect(await screen.findByText("Why request a payment?")).toBeTruthy();
+      expect(screen.getByText(/Use it when someone owes you money/)).toBeTruthy();
+      // Opening the explanation does not navigate or close the sheet.
+      expect(router.push).not.toHaveBeenCalled();
+      expect(onClose).not.toHaveBeenCalled();
+      await fireEvent.press(screen.getByRole("button", { name: "Got it" }));
+      expect(screen.queryByText("Why request a payment?")).toBeNull();
+    });
+  });
+
+  it("puts Close below the content, not in the header", async () => {
+    await render(<PayLauncher onClose={onClose} config={ON} />);
+    const nodes = screen.getAllByRole("button").map((n) => n.props.accessibilityLabel);
+    // Close is the last control, after the USSD directory button.
+    expect(nodes[nodes.length - 1]).toBe("Close");
+    expect(nodes.indexOf("Close")).toBeGreaterThan(nodes.indexOf("Open USSD directory"));
+  });
+
+  describe("highlighted shortcuts", () => {
+    const BOTH = { ...ON, paymentRequests: true };
+
+    it("have no arrow: they are features, not links to follow", async () => {
+      await render(<PayLauncher onClose={onClose} config={BOTH} />);
+      expect(screen.queryByTestId("icon-chevron-right")).toBeNull();
+    });
+
+    it("Request payment has its own hand-and-coin icon, not the generic arrow", async () => {
+      await render(<PayLauncher onClose={onClose} config={BOTH} />);
+      expect(screen.getByTestId("icon-hand-coin")).toBeTruthy();
+    });
+
+    it("Scan to pay has an info button too, with its own plain-words explanation", async () => {
+      await render(<PayLauncher onClose={onClose} config={BOTH} />);
+      await fireEvent.press(screen.getByRole("button", { name: "About scan to pay" }));
+      expect(await screen.findByText("When to use Scan to pay")).toBeTruthy();
+      expect(screen.getByText(/no photo is taken or saved/)).toBeTruthy();
+      expect(router.push).not.toHaveBeenCalled();
+      await fireEvent.press(screen.getByRole("button", { name: "Got it" }));
+      expect(screen.queryByText("When to use Scan to pay")).toBeNull();
+    });
+
+    it("shows one explanation at a time", async () => {
+      await render(<PayLauncher onClose={onClose} config={BOTH} />);
+      await fireEvent.press(screen.getByRole("button", { name: "About requesting payment" }));
+      expect(await screen.findByText("Why request a payment?")).toBeTruthy();
+      expect(screen.queryByText("When to use Scan to pay")).toBeNull();
+    });
+  });
 });
+

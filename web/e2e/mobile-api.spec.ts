@@ -335,6 +335,7 @@ test.describe("mobile API", () => {
         "insights",
         "integrations",
         "pay",
+        "paymentRequests",
         "scanToPay",
         "spaces",
         "statements",
@@ -437,8 +438,11 @@ test.describe("mobile API", () => {
       expect(created.intent.state).toBe("draft");
       expect(created.intent.amountMinor).toBe(1500);
       expect(created.intent.recipientMasked).toContain("3456");
-      // The full number only ever appears inside the dialable instruction.
-      const { instruction, ...rest } = created.intent;
+      // The full number only ever appears in the receiver field (shown on the
+      // payment screens) and inside the dialable instruction; the masked
+      // recipient and everything else stay masked.
+      const { instruction, recipientMsisdn, ...rest } = created.intent;
+      expect(String(recipientMsisdn)).toContain("788123456");
       expect(JSON.stringify(rest)).not.toContain("0788123456");
       expect(JSON.stringify(rest)).not.toContain("250788123456");
       if (instruction) {
@@ -527,6 +531,36 @@ test.describe("mobile API", () => {
       });
       expect(bad.status()).toBe(422);
       expect((await bad.json()).ok).toBe(false);
+
+      // Settling it yourself: a bad outcome is a 422, an unknown id a 404, and the
+      // intent now carries when it last changed and whether a provider verified it.
+      expect(created.intent.verified).toBe(false);
+      expect(typeof created.intent.updatedAt).toBe("string");
+      const noOutcome = await api.post(`/api/mobile/pay/intents/${created.intent.id}/settle`, {
+        headers,
+        data: { outcome: "paid" },
+      });
+      expect(noOutcome.status()).toBe(422);
+      const ghostSettle = await api.post("/api/mobile/pay/intents/00000000-0000-4000-8000-000000000000/settle", {
+        headers,
+        data: { outcome: "failed" },
+      });
+      expect(ghostSettle.status()).toBe(404);
+      // "It didn't go through" moves a handed-off payment to failed (never verified).
+      const settled = await api.post(`/api/mobile/pay/intents/${created.intent.id}/settle`, {
+        headers,
+        data: { outcome: "failed" },
+      });
+      expect(settled.status()).toBe(200);
+      const settledBody = await settled.json();
+      expect(settledBody.intent.state).toBe("failed");
+      expect(settledBody.intent.verified).toBe(false);
+      // A payment that has already failed can't be settled again.
+      const settleAgain = await api.post(`/api/mobile/pay/intents/${created.intent.id}/settle`, {
+        headers,
+        data: { outcome: "sent" },
+      });
+      expect(settleAgain.status()).toBe(409);
 
       // A paying account that is not this workspace's is refused.
       const foreign = await api.post("/api/mobile/pay/intents", {

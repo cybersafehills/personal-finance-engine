@@ -432,3 +432,17 @@ balance code, nothing recorded), `amount_required`, `currency_unsupported`,
 `unsupported`, `feature_disabled` or `error`. Idempotent on the code and amount.
 Never charges anything and never dials. Recording that the user opened the
 dialer uses `POST /api/mobile/pay/intents/:id/handoff`.
+
+## `POST /api/mobile/pay/intents/:id/settle`
+
+Body `{ "outcome": "sent" | "failed" }`. The person who dialled says what happened
+when no provider message has settled a handed-off payment: `sent` runs the web's
+`manually_confirm_payment` (the intent becomes `successful` with `verified: false`),
+`failed` transitions it to `failed`. 404 for an unknown or foreign id, 409 when the
+current state does not allow it, 422 for a bad outcome. Returns the refreshed
+`intent`. Never marks a payment provider-verified.
+
+The pay intent payload now also carries `updatedAt` (when it last changed) and
+`verified` (true only when the provider's message confirmed it). `GET
+/api/mobile/config` gains `paymentRequests`.
+

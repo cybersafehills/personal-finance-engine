@@ -31,8 +31,11 @@ function parseIntent(raw: unknown): PayIntent | null {
     amountMinor: raw.amountMinor,
     recipientName: strOrNull(raw.recipientName),
     recipientMasked: strOrNull(raw.recipientMasked),
+    recipientMsisdn: strOrNull(raw.recipientMsisdn),
     merchantCode: strOrNull(raw.merchantCode),
     expiresAt: strOrNull(raw.expiresAt),
+    updatedAt: str(raw.updatedAt) ? raw.updatedAt : new Date().toISOString(),
+    verified: raw.verified === true,
     instruction: parseInstruction(raw.instruction),
   };
 }
@@ -50,6 +53,7 @@ export function parseConfigResponse(status: number, body: unknown): PayConfigRes
       ussdDirectory: body.config.ussdDirectory === true,
       scanToPay: body.config.scanToPay === true,
       trustedRecipients: body.config.trustedRecipients === true,
+      paymentRequests: body.config.paymentRequests === true,
     };
   }
   return { ok: false, ...failureForStatus(status, "Payments") };
@@ -79,7 +83,7 @@ export function parseIntentResponse(status: number, body: unknown): PayIntentRes
   if (status === 404 && isRecord(body) && body.error === "not_found") {
     return { ok: false, reason: "not_found", message: NOT_FOUND };
   }
-  if ((status === 403 || status === 422) && isRecord(body) && body.ok === false && str(body.message)) {
+  if ((status === 403 || status === 409 || status === 422) && isRecord(body) && body.ok === false && str(body.message)) {
     return { ok: false, reason: "error", message: body.message };
   }
   const f = failureForStatus(status, "That payment");

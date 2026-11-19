@@ -17,6 +17,7 @@ export { ScreenHeader } from "./ScreenHeader";
 export { StatTile } from "./StatTile";
 export { Text, type TextProps } from "./Text";
 export { TextField, type TextFieldProps } from "./TextField";
+export { PressableScale } from "./PressableScale";
 export { Screen } from "./Screen";
 export { StepWizard } from "./StepWizard";
 export { ListScreen, listContentStyle } from "./ListScreen";

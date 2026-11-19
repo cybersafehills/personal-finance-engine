@@ -17,6 +17,8 @@ describe("payment activity rows", () => {
   it("names the recipient, falling back to the masked number, merchant code or type", () => {
     expect(toPaymentRow(intent()).recipient).toBe("Amy");
     expect(toPaymentRow(intent({ recipient_name: null })).recipient).toBe("•••• ••• 4567");
+    // The whole number is preferred over the masked one when the server sends it.
+    expect(toPaymentRow(intent({ recipient_name: null, recipient_msisdn_normalized: "250781234567" })).recipient).toBe("078 123 4567");
     expect(toPaymentRow(intent({ recipient_name: null, recipient_msisdn_masked: null, merchant_code: "123456" })).recipient).toBe("Merchant 123456");
     expect(toPaymentRow(intent({ recipient_name: null, recipient_msisdn_masked: null, payment_type: "buy_electricity" })).recipient).toBe("Electricity");
   });
