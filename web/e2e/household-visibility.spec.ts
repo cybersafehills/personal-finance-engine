@@ -85,6 +85,7 @@ async function cleanup() {
 test.describe.configure({ mode: "serial" });
 
 test.beforeAll(async () => {
+  test.setTimeout(120_000);
   await cleanup(); // a crashed earlier run must not leave a second household behind
   const { url, serviceKey, anonKey } = local();
   svc = createClient(url, serviceKey, noSession);
@@ -216,11 +217,26 @@ async function memberPage(browser: Browser): Promise<{ page: Page; context: Brow
   const context = await browser.newContext({ baseURL: BASE_URL });
   await asHousehold(context);
   const page = await context.newPage();
-  await page.goto("/login");
-  await page.getByLabel("Email").fill(MEMBER.email);
+  // This context bypasses the shared `page` fixture, so surface the same browser
+  // errors it would, with a prefix that says whose browser this is.
+  page.on("console", (m) => {
+    if (m.type() === "error") console.log(`[member console.error] ${m.text()}`);
+  });
+  page.on("pageerror", (e) => console.log(`[member pageerror] ${e.message}`));
+
+  await page.goto("/login", { waitUntil: "domcontentloaded" });
+  const email = page.getByLabel("Email");
+  try {
+    await email.waitFor({ state: "visible", timeout: 45_000 });
+  } catch {
+    // Say what the member's browser actually got, instead of timing out blind.
+    const body = (await page.locator("body").innerText().catch(() => "")).replace(/\s+/g, " ").slice(0, 400);
+    throw new Error(`the member's login form never appeared; url=${page.url()} body="${body}"`);
+  }
+  await email.fill(MEMBER.email);
   await page.getByLabel("Password", { exact: true }).fill(MEMBER.password);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByLabel("Account menu")).toBeVisible();
+  await expect(page.getByLabel("Account menu")).toBeVisible({ timeout: 45_000 });
   return { page, context };
 }
 
@@ -231,6 +247,7 @@ test.describe("as the household MEMBER (B): the shared wallet only", () => {
   let context: BrowserContext;
 
   test.beforeAll(async ({ browser }) => {
+    test.setTimeout(150_000); // fixtures + a real login through the UI
     ({ page, context } = await memberPage(browser));
   });
   test.afterAll(async () => {
@@ -338,6 +355,7 @@ test.describe("as the household OWNER (A): everything, as a positive control", (
 
 test.describe("sharing is evaluated live", () => {
   test("pausing the share removes the shared wallet and person from the member; resuming restores them", async ({ browser }) => {
+    test.setTimeout(150_000);
     const { page, context } = await memberPage(browser);
     try {
       const setStatus = async (status: "paused" | "active") => {
