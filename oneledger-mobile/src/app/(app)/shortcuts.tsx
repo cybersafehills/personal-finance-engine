@@ -7,6 +7,8 @@ import {
   Button,
   Card,
   EmptyState,
+  ListGroup,
+  ListRow,
   Screen,
   StepWizard,
   Text,
@@ -28,6 +30,7 @@ import {
   expiryLabel,
   IOS_GUIDE_STEPS,
   iosGuideStepNumber,
+  MANUAL_BUILD,
   SHORTCUTS_APP_URL,
   type IosGuideStep,
   type PairingStatus,
@@ -166,10 +169,15 @@ function Install({ onNext }: { onNext: () => void }) {
             </Text>
           </>
         ) : (
-          <Text variant="label" color="attention">
-            One-tap setup isn&apos;t available yet. The Shortcuts haven&apos;t
-            been published, so there is nothing to add from here for now.
-          </Text>
+          <>
+            <Text variant="label" color="textSecondary">
+              One-tap setup isn&apos;t published yet, so you build the two
+              Shortcuts yourself once (about 10 minutes). Open the Shortcuts app,
+              create each one with the exact name below, add the actions in
+              order, then come back and continue.
+            </Text>
+            <Button label="Open the Shortcuts app" variant="secondary" fullWidth onPress={() => open(SHORTCUTS_APP_URL)} />
+          </>
         )}
         {failed ? (
           <Text variant="label" color="attention" accessibilityRole="alert">
@@ -178,8 +186,19 @@ function Install({ onNext }: { onNext: () => void }) {
           </Text>
         ) : null}
       </Card>
+      {hasLinks ? null : (
+        <>
+          {MANUAL_BUILD.map((shortcut, index) => (
+            <ListGroup key={shortcut.name} title={`Shortcut ${index + 1}: ${shortcut.name}`} footer={shortcut.purpose}>
+              {shortcut.steps.map((text, i) => (
+                <ListRow key={i} label={`${i + 1}. ${text}`} />
+              ))}
+            </ListGroup>
+          ))}
+        </>
+      )}
       <Button
-        label={hasLinks ? "I've added them" : "Continue anyway"}
+        label={hasLinks ? "I've added them" : "I've built them"}
         variant={hasLinks ? "primary" : "secondary"}
         fullWidth
         onPress={onNext}
