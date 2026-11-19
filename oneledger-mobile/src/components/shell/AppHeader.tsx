@@ -4,7 +4,7 @@ import { useCallback, useState } from "react";
 import { Image, Modal, Pressable, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { Text } from "@/components/ds";
+import { ListGroup, ListRow, Text } from "@/components/ds";
 import { useSession } from "@/features/auth/SessionProvider";
 import { useActiveSpace } from "@/features/spaces/ActiveSpaceProvider";
 import { kindLabel } from "@/features/spaces/spaces";
@@ -172,55 +172,26 @@ function ProfileMenu({ visible, onClose }: { visible: boolean; onClose(): void }
               })}
             </View>
           ) : null}
-          <View style={styles.group}>
-            <MenuRow icon="users" label="Space & members" onPress={() => go("/space-members")} />
-            <MenuRow icon="plus-circle" label="Create a Space" onPress={() => go("/create-space")} />
-            <MenuRow icon="bell" label="Notifications" onPress={() => go("/notifications")} />
-            <MenuRow icon="lock" label="App lock" onPress={() => go("/security")} />
-            <MenuRow
-              icon="log-out"
-              label="Sign out"
-              destructive
-              last
-              onPress={() => {
-                onClose();
-                void signOut();
-              }}
-            />
+          <View style={styles.menu}>
+            <ListGroup>
+              <ListRow icon="users" label="Space & members" onPress={() => go("/space-members")} />
+              <ListRow icon="plus-circle" label="Create a Space" onPress={() => go("/create-space")} />
+              <ListRow icon="bell" label="Notifications" onPress={() => go("/notifications")} />
+              <ListRow icon="lock" label="App lock" onPress={() => go("/security")} />
+              <ListRow
+                icon="log-out"
+                label="Sign out"
+                destructive
+                onPress={() => {
+                  onClose();
+                  void signOut();
+                }}
+              />
+            </ListGroup>
           </View>
         </Pressable>
       </Pressable>
     </Modal>
-  );
-}
-
-function MenuRow({
-  icon,
-  label,
-  onPress,
-  destructive = false,
-  last = false,
-}: {
-  icon: React.ComponentProps<typeof Feather>["name"];
-  label: string;
-  onPress(): void;
-  destructive?: boolean;
-  last?: boolean;
-}) {
-  const tone = destructive ? colors.notificationBadge : colors.textSecondary;
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      onPress={onPress}
-      style={({ pressed }) => [styles.menuRow, !last && styles.menuRowDivider, pressed && styles.pressed]}
-    >
-      <Feather name={icon} size={16} color={tone} />
-      <Text variant="bodyStrong" style={[styles.menuLabel, destructive && { color: colors.notificationBadge }]}>
-        {label}
-      </Text>
-      {destructive ? null : <Feather name="chevron-right" size={16} color={colors.textMuted} />}
-    </Pressable>
   );
 }
 
@@ -273,23 +244,7 @@ const styles = StyleSheet.create({
     paddingBottom: space[8],
     gap: space[1],
   },
-  group: {
-    marginTop: space[3],
-    borderRadius: radii.control,
-    borderCurve: "continuous",
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderColor: colors.borderSubtle,
-    overflow: "hidden",
-  },
-  menuRow: {
-    minHeight: 48,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: space[3],
-    paddingHorizontal: space[3],
-  },
-  menuRowDivider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.borderSubtle },
-  menuLabel: { flex: 1 },
+  menu: { marginTop: space[3] },
   chip: {
     maxWidth: 120,
     minHeight: CONTROL_HEIGHT.sm,
