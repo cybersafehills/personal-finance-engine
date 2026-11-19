@@ -1,7 +1,7 @@
-import { distinctRecents, recentsFor, recipientsFor, toTrusted, validateNewRecipient, type TrustedRecipient } from "../recipients";
+import { distinctRecents, ekashRecipients, recentsFor, recentsNotSaved, recipientsFor, toTrusted, validateNewRecipient, type TrustedRecipient } from "../recipients";
 
 const saved = (over: Partial<TrustedRecipient>): TrustedRecipient => ({
-  id: "r1", name: "Amy", kind: "phone", msisdn: "250781234567", merchantCode: null, trusted: false, relationship: null, ...over,
+  id: "r1", name: "Amy", kind: "phone", msisdn: "250781234567", merchantCode: null, accountReference: null, trusted: false, relationship: null, ...over,
 });
 
 describe("distinctRecents", () => {
@@ -54,5 +54,29 @@ describe("validateNewRecipient (same checks as the web)", () => {
   it("accepts a merchant code", () => {
     const r = validateNewRecipient({ name: "Shop", kind: "merchant", number: "123 456", trusted: false });
     expect(r.ok && r.row).toMatchObject({ merchant_code: "123456", normalized_msisdn: null, trust_status: "saved" });
+  });
+});
+
+describe("eKash contacts", () => {
+  it("offers phone contacts and saved account numbers, each with the ID to put in the code", () => {
+    const list = [
+      saved({ id: "a", name: "Mum" }),
+      saved({ id: "b", name: "Bank", kind: "other", msisdn: null, accountReference: "00012345678" }),
+      saved({ id: "c", name: "Shop", kind: "merchant", msisdn: null, merchantCode: "123456" }),
+    ];
+    expect(ekashRecipients(list).map((r) => [r.name, r.receiverId])).toEqual([["Mum", "0781234567"], ["Bank", "00012345678"]]);
+  });
+  it("saves a bank account number as an 'other' contact and refuses a malformed one", () => {
+    const ok = validateNewRecipient({ name: "Bank", kind: "account", number: "0001 2345 678", trusted: false });
+    expect(ok).toMatchObject({ ok: true, row: { kind: "other", account_reference: "00012345678", normalized_msisdn: null, merchant_code: null } });
+    expect(validateNewRecipient({ name: "Bank", kind: "account", number: "12", trusted: false }).ok).toBe(false);
+    expect(validateNewRecipient({ name: "Bank", kind: "account", number: "00*1#", trusted: false }).ok).toBe(false);
+  });
+});
+
+describe("recentsNotSaved", () => {
+  it("hides a recent payee that is already a saved contact (same name), keeping the others", () => {
+    const recent = [{ name: "Mum", maskedMsisdn: null, kind: "phone" }, { name: "Joe", maskedMsisdn: null, kind: "phone" }];
+    expect(recentsNotSaved(recent, [{ name: " mum " }]).map((r) => r.name)).toEqual(["Joe"]);
   });
 });

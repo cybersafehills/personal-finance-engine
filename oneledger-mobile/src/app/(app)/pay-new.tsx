@@ -1,11 +1,11 @@
 import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useRef, useState } from "react";
-import Feather from "@expo/vector-icons/Feather";
-import { Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { ScrollView, View } from "react-native";
 
 import { createPayIntent } from "@/api/mobile-api";
 import { getPaymentTemplate } from "@/features/pay/activity";
 import { Button, Chip, EmptyState, Screen, ScreenHeader, Text, TextField } from "@/components/ds";
+import { ContactPickButton, SaveContactToggle } from "@/features/pay/ContactControls";
 import { createKeyTracker } from "@/features/pay/key";
 import { PAY_COPY } from "@/features/pay/messages";
 import { parseRecipient, type PayKind } from "@/features/pay/new-form";
@@ -16,10 +16,11 @@ import {
   getRecentRecipients,
   getTrustedRecipients,
   recentsFor,
+  recentsNotSaved,
   recipientsFor,
 } from "@/features/pay/recipients";
 import { useQuery } from "@/hooks/useQuery";
-import { colors, space } from "@/theme/tokens";
+import { space } from "@/theme/tokens";
 
 const MAX_RWF = 999_999_999;
 
@@ -182,6 +183,21 @@ export default function PayNew() {
         keyboardType="phone-pad"
         placeholder={person ? "078 123 4567" : "e.g. 123456"}
         editable={!submitting}
+        // A merchant code isn't something a phone contact holds, so the contact book is for people.
+        trailing={
+          person ? (
+            <ContactPickButton
+              onPicked={(c) => {
+                setRecipientText(c.number);
+                // The saved name fills in, and can still be changed before paying.
+                if (c.name) setName(c.name);
+                setSaveContact(false);
+                setMessage(null);
+              }}
+              onProblem={setMessage}
+            />
+          ) : undefined
+        }
       />
 
       <TextField
@@ -201,29 +217,17 @@ export default function PayNew() {
         onChangeText={setName}
         placeholder={person ? "Who is this?" : "Business name"}
         editable={!submitting}
-        leading={
-          <Pressable
-            accessibilityRole="switch"
-            accessibilityLabel="Save as contact"
-            accessibilityState={{ checked: saveContact }}
-            accessibilityHint="Keeps this number under People and merchants, ready for next time."
-            onPress={() => setSaveContact((v) => !v)}
-            hitSlop={8}
-            style={[styles.saveIcon, saveContact && { backgroundColor: colors.accent }]}
-          >
-            <Feather name={saveContact ? "user-check" : "user-plus"} size={16} color={saveContact ? colors.accentForeground : colors.accent} />
-          </Pressable>
-        }
+        leading={<SaveContactToggle value={saveContact} onChange={setSaveContact} />}
         help={saveContact ? "This contact will be saved under People and merchants." : undefined}
       />
 
-      {people && people.recent.length > 0 ? (
+      {people && recentsNotSaved(people.recent, people.saved).length > 0 ? (
         <View style={{ gap: space[1] }}>
           <Text variant="caption" color="textMuted">
             Recent
           </Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: space[2] }} keyboardShouldPersistTaps="handled">
-            {people.recent.map((r, i) => (
+            {recentsNotSaved(people.recent, people.saved).map((r, i) => (
               <Chip key={`${r.name}-${i}`} label={r.name} selected={name === r.name} onPress={() => setName(r.name)} />
             ))}
           </ScrollView>
@@ -275,15 +279,3 @@ export default function PayNew() {
     </Screen>
   );
 }
-
-const styles = StyleSheet.create({
-  saveIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: colors.accent,
-  },
-});

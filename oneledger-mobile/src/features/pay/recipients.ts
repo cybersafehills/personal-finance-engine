@@ -15,6 +15,8 @@ export type TrustedRecipient = {
   kind: string;
   msisdn: string | null;
   merchantCode: string | null;
+  /** A bank account number (or other ID) saved from the eKash page. */
+  accountReference: string | null;
   trusted: boolean;
   relationship: string | null;
 };
@@ -27,6 +29,7 @@ type Row = {
   kind: string;
   normalized_msisdn: string | null;
   merchant_code: string | null;
+  account_reference?: string | null;
   trust_status: string;
   relationship: string | null;
 };
@@ -38,6 +41,7 @@ export function toTrusted(row: Row): TrustedRecipient {
     kind: row.kind,
     msisdn: row.normalized_msisdn,
     merchantCode: row.merchant_code,
+    accountReference: row.account_reference ?? null,
     trusted: row.trust_status === "trusted_by_user",
     relationship: row.relationship,
   };
@@ -47,7 +51,7 @@ export async function getTrustedRecipients(): Promise<TrustedRecipient[]> {
   if (!supabase) throw new Error("not connected");
   const { data, error } = await supabase
     .from("trusted_recipients")
-    .select("id, display_name, kind, normalized_msisdn, merchant_code, trust_status, relationship")
+    .select("id, display_name, kind, normalized_msisdn, merchant_code, account_reference, trust_status, relationship")
     .order("display_name", { ascending: true });
   if (error) throw new Error(error.message);
   return ((data ?? []) as Row[]).map(toTrusted);
@@ -92,7 +96,23 @@ export function recentsFor(kind: PayKind, all: readonly RecentRecipient[]): Rece
   return all.filter((r) => r.kind === null || r.kind === want);
 }
 
-export type NewRecipient = { name: string; kind: "phone" | "merchant"; number: string; relationship?: string; trusted: boolean };
+/** Contacts the eKash page can pay: a mobile number (a wallet) or a saved account number (a bank). */
+export function ekashRecipients(all: readonly TrustedRecipient[]): (TrustedRecipient & { receiverId: string })[] {
+  const out: (TrustedRecipient & { receiverId: string })[] = [];
+  for (const r of all) {
+    if (r.kind === "phone" && r.msisdn) out.push({ ...r, receiverId: `0${r.msisdn.slice(3)}` });
+    else if (r.kind === "other" && r.accountReference) out.push({ ...r, receiverId: r.accountReference });
+  }
+  return out;
+}
+
+/** Recent payees that are not already saved under the same name (no "Mum" twice). */
+export function recentsNotSaved(recent: readonly RecentRecipient[], saved: readonly { name: string }[]): RecentRecipient[] {
+  const names = new Set(saved.map((s) => s.name.trim().toLowerCase()));
+  return recent.filter((r) => !names.has(r.name.trim().toLowerCase()));
+}
+
+export type NewRecipient = { name: string; kind: "phone" | "merchant" | "account"; number: string; relationship?: string; trusted: boolean };
 
 /** Same checks as the web's createTrustedRecipient. Returns the row to insert, or an error message. */
 export function validateNewRecipient(
@@ -103,6 +123,23 @@ export function validateNewRecipient(
   const number = input.number.trim();
   let normalized: string | null = null;
   let merchantCode: string | null = null;
+  if (input.kind === "account") {
+    const ref = number.replace(/\s/g, "");
+    if (!/^[A-Za-z0-9-]{3,34}$/.test(ref)) return { ok: false, message: "Enter the account number (letters, digits and dashes)." };
+    return {
+      ok: true,
+      row: {
+        display_name: name,
+        kind: "other",
+        normalized_msisdn: null,
+        msisdn_display: null,
+        merchant_code: null,
+        account_reference: ref,
+        relationship: input.relationship?.trim() || null,
+        trust_status: input.trusted ? "trusted_by_user" : "saved",
+      },
+    };
+  }
   if (input.kind === "phone") {
     normalized = normalizeRwandaMsisdn(number);
     if (!normalized) return { ok: false, message: "That doesn't look like a Rwandan mobile number." };

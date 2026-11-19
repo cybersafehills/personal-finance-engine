@@ -1,21 +1,31 @@
 import Feather from "@expo/vector-icons/Feather";
 import * as Linking from "expo-linking";
-import { useState } from "react";
-import { Share, View } from "react-native";
+import { useCallback, useState } from "react";
+import { ScrollView, Share, View } from "react-native";
 
-import { Button, Card, Screen, ScreenHeader, Text, TextField } from "@/components/ds";
+import { Button, Card, Chip, Screen, ScreenHeader, Text, TextField } from "@/components/ds";
+import { ContactPickButton, SaveContactToggle } from "@/features/pay/ContactControls";
+import { createTrustedRecipient, ekashRecipients, getTrustedRecipients } from "@/features/pay/recipients";
+import { normalizeRwandaMsisdn } from "@/features/pay/target";
 import { buildEkashCode, ekashShareText } from "@/features/ussd/ekash";
+import { useQuery } from "@/hooks/useQuery";
 import { colors, radii, space } from "@/theme/tokens";
 
 // "Use eKash": send money to a bank account or a Mobile Money wallet through the
 // eKash national network. Enter the receiver's ID (a phone number or an account
-// number) and the amount; the code is built for you and opens in your dialer.
-// It never dials by itself, and you approve it with your own PIN on your phone.
+// number) and the amount, or pick someone you saved; the code is built for you and
+// opens in your dialer. It never dials by itself, and you approve it with your own PIN.
 export default function Ekash() {
   const [receiver, setReceiver] = useState("");
   const [amount, setAmount] = useState("");
+  const [name, setName] = useState("");
   const [reference, setReference] = useState("");
+  const [saveContact, setSaveContact] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+
+  // Saved contacts are a convenience: if they can't be read the page still works by typing.
+  const loadContacts = useCallback(async () => ekashRecipients(await getTrustedRecipients().catch(() => [])), []);
+  const { data: contacts } = useQuery(loadContacts);
 
   const touched = receiver.trim() !== "" || amount.trim() !== "";
   const code = buildEkashCode(receiver, amount);
@@ -24,6 +34,11 @@ export default function Ekash() {
   async function onPay() {
     if (!ready) return;
     setNote(null);
+    if (saveContact) {
+      if (!name.trim()) return setNote("Add a name to save this receiver, or turn saving off.");
+      // Best effort: a duplicate, or a write that is switched off, never blocks the payment.
+      void createTrustedRecipient({ name, kind: normalizeRwandaMsisdn(receiver) ? "phone" : "account", number: receiver.trim(), trusted: false });
+    }
     try {
       await Linking.openURL(ready.telHref);
     } catch {
@@ -56,6 +71,28 @@ export default function Ekash() {
         </Text>
       </View>
 
+      {contacts && contacts.length > 0 ? (
+        <View style={{ gap: space[1] }}>
+          <Text variant="caption" color="textMuted">
+            Saved contacts
+          </Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: space[2] }} keyboardShouldPersistTaps="handled">
+            {contacts.map((r) => (
+              <Chip
+                key={r.id}
+                label={r.name}
+                selected={receiver === r.receiverId}
+                onPress={() => {
+                  setReceiver(r.receiverId);
+                  setName(r.name);
+                  setSaveContact(false);
+                }}
+              />
+            ))}
+          </ScrollView>
+        </View>
+      ) : null}
+
       <Card style={{ gap: space[3] }}>
         <TextField
           label="Receiver's ID"
@@ -65,8 +102,27 @@ export default function Ekash() {
           autoCapitalize="none"
           autoCorrect={false}
           keyboardType="default"
+          trailing={
+            <ContactPickButton
+              onPicked={(c) => {
+                setReceiver(c.number);
+                if (c.name) setName(c.name);
+                setSaveContact(false);
+                setNote(null);
+              }}
+              onProblem={setNote}
+            />
+          }
         />
         <TextField label="Amount (RWF)" value={amount} onChangeText={setAmount} placeholder="5000" keyboardType="number-pad" />
+        <TextField
+          label="Name (optional)"
+          value={name}
+          onChangeText={setName}
+          placeholder="Who is this?"
+          leading={<SaveContactToggle value={saveContact} onChange={setSaveContact} />}
+          help={saveContact ? "This receiver will be saved to your contacts." : undefined}
+        />
         <TextField
           label="Reference (optional)"
           value={reference}
@@ -80,10 +136,7 @@ export default function Ekash() {
       </Card>
 
       <Card style={{ gap: space[3] }}>
-        <Text
-          variant="label"
-          color="textMuted"
-        >
+        <Text variant="label" color="textMuted">
           Your code
         </Text>
         <Text
