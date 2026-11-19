@@ -209,3 +209,17 @@ describe("an unsupported type", () => {
     expect(await screen.findByText("Nothing to pay here")).toBeTruthy();
   });
 });
+
+describe("Opened from a person's page", () => {
+  it("fills the number and the name", async () => {
+    setParams({ type: "pay_person", to: "0781234567", name: "Amy" });
+    await render(<PayNew />);
+    expect((await screen.findByLabelText("Mobile number")).props.value).toBe("0781234567");
+    expect(screen.getByLabelText("Name (optional)").props.value).toBe("Amy");
+  });
+  it("fills a merchant code", async () => {
+    setParams({ type: "pay_merchant", to: "123456", name: "Kigali Shop" });
+    await render(<PayNew />);
+    expect((await screen.findByLabelText("Merchant code")).props.value).toBe("123456");
+  });
+});

@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react-native";
 
 import People from "@/app/(app)/people";
+import { sortTransactions } from "@/features/people/actions";
 import { resetRouterMock, router } from "@/test/router-mock";
 
 const mockFetchPeople = jest.fn();
@@ -18,7 +19,7 @@ beforeEach(() => {
   resetRouterMock();
   mockFetchPeople.mockReset();
   mockSaved.mockReset();
-  mockFetchPeople.mockResolvedValue({ ok: true, workspaceId: "w", unresolved: 0, total: 0, people: [] });
+  mockFetchPeople.mockResolvedValue({ ok: true, workspaceId: "w", unresolved: 0, sortable: 0, total: 0, people: [] });
   mockSaved.mockResolvedValue([amy, shop]);
 });
 
@@ -54,5 +55,42 @@ describe("People and merchants: saved contacts", () => {
     await render(<People />);
     await screen.findByText("No people or merchants yet");
     expect(screen.queryByText("Saved contacts")).toBeNull();
+  });
+});
+
+describe("People and merchants: sorting", () => {
+  const withUnresolved = (unresolved: number, sortable: number) =>
+    mockFetchPeople.mockResolvedValue({ ok: true, workspaceId: "w", unresolved, sortable, total: 0, people: [] });
+
+  it("offers Sort them now only for transactions that can be sorted", async () => {
+    withUnresolved(175, 0);
+    await render(<People />);
+    await screen.findByText(/175 transactions have no name or number/);
+    expect(screen.queryByRole("button", { name: "Sort them now" })).toBeNull();
+  });
+
+  it("counts only the sortable ones in the prompt, and mentions the rest", async () => {
+    withUnresolved(10, 7);
+    await render(<People />);
+    expect(await screen.findByText("7 transactions aren't sorted into people yet.")).toBeTruthy();
+    expect(screen.getByText(/3 transactions have no name or number/)).toBeTruthy();
+  });
+
+  it("says how many were sorted, and reloads", async () => {
+    withUnresolved(5, 5);
+    (sortTransactions as jest.Mock).mockResolvedValue({ ok: true, value: { linked: 5, created: 2 } });
+    await render(<People />);
+    await fireEvent.press(await screen.findByRole("button", { name: "Sort them now" }));
+    expect(await screen.findByText("Sorted 5 transactions into people and merchants.")).toBeTruthy();
+    expect(sortTransactions).toHaveBeenCalledWith("w");
+    expect(mockFetchPeople.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it("is honest when nothing could be sorted", async () => {
+    withUnresolved(5, 5);
+    (sortTransactions as jest.Mock).mockResolvedValue({ ok: true, value: { linked: 0, created: 0 } });
+    await render(<People />);
+    await fireEvent.press(await screen.findByRole("button", { name: "Sort them now" }));
+    expect(await screen.findByText("Nothing more could be sorted.")).toBeTruthy();
   });
 });

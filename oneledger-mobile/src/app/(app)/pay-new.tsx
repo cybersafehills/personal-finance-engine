@@ -35,7 +35,7 @@ function parseAmountRwf(text: string): number | null {
 // and nothing is charged or sent from here. The type is read from the route but
 // anything other than the two supported kinds shows nothing to pay.
 export default function PayNew() {
-  const params = useLocalSearchParams<{ type?: string; saved?: string; template?: string }>();
+  const params = useLocalSearchParams<{ type?: string; saved?: string; template?: string; to?: string; name?: string }>();
   const kind: PayKind | null =
     params.type === "pay_person" || params.type === "pay_merchant" ? params.type : null;
 
@@ -84,6 +84,14 @@ export default function PayNew() {
     if (number) setRecipientText(number);
     setName(contact?.name ?? template.recipientName ?? "");
     if (template.defaultAmountMinor) setAmountText(String(template.defaultAmountMinor));
+  }
+
+  // Opened from a person's page ("Pay this person"): their number or code and name, once.
+  const [linkApplied, setLinkApplied] = useState(false);
+  if (!linkApplied && (params.to || params.name) && !params.saved && !params.template) {
+    setLinkApplied(true);
+    if (params.to) setRecipientText(params.to);
+    if (params.name) setName(params.name);
   }
 
   // Opened from a saved contact: fill its number and name once.

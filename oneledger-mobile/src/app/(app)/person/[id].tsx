@@ -14,6 +14,8 @@ import {
   undoSeparate,
   type ActionResult,
 } from "@/features/people/actions";
+import { getPayConfigCache } from "@/features/pay/config-cache";
+import { getIdentifiers, personPayTarget } from "@/features/people/pay";
 import { KIND_LABEL, KIND_VARIANT, confidenceLabel, confidenceNote, flowText } from "@/features/people/display";
 import type { Person, PersonDetail, PersonKind } from "@/features/people/types";
 import { useQuery } from "@/hooks/useQuery";
@@ -95,6 +97,10 @@ function Detail({
   const [undoBusy, setUndoBusy] = useState(false);
   const [undoError, setUndoError] = useState<string | null>(null);
   const note = confidenceNote(p.confidence);
+  // The number or code they were matched by, so paying them is one tap. Only where paying is on.
+  const loadIds = useCallback(() => getIdentifiers(p.id), [p.id]);
+  const { data: identifiers } = useQuery(loadIds);
+  const payTarget = getPayConfigCache()?.assistedPay === true ? personPayTarget(p, identifiers ?? []) : null;
 
   async function doUndo() {
     if (!undo) return;
@@ -112,6 +118,29 @@ function Detail({
       <View style={{ flexDirection: "row", gap: space[2] }}>
         <Badge variant={KIND_VARIANT[p.kind]}>{KIND_LABEL[p.kind]}</Badge>
       </View>
+
+      {payTarget ? (
+        <View style={{ gap: space[1] }}>
+          <Button
+            label={payTarget.label}
+            variant="positive"
+            fullWidth
+            onPress={() =>
+              router.push({
+                pathname: "/pay-new",
+                params: { type: payTarget.type, name: payTarget.name, ...(payTarget.to ? { to: payTarget.to } : {}) },
+              })
+            }
+          />
+          <Text variant="caption" color="textMuted" style={{ textAlign: "center" }}>
+            {payTarget.to ? `To ${payTarget.to}. You review it before anything is dialled.` : "No number on record yet: you'll enter it on the next screen."}
+          </Text>
+        </View>
+      ) : p.kind === "unknown" ? (
+        <Text variant="caption" color="textMuted">
+          To pay them from here, first set whether this is a person or a merchant (Rename or change type).
+        </Text>
+      ) : null}
 
       {notice ? (
         <Card style={{ gap: space[2] }}>

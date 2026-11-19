@@ -34,6 +34,9 @@ export function GET(request: NextRequest) {
       offset: p.offset,
       // Transactions not yet resolved to a counterparty (run backfill_counterparties).
       unresolved_transactions: list.unresolvedTransactions,
+      // The subset that has a name or a number to group by. Only these can be sorted; the rest
+      // (fees, imported rows with no counterparty) stay unresolved however often it is run.
+      sortable_transactions: list.sortableTransactions,
       counterparties: list.counterparties.map((c) => ({ ...c, kind: kindForMobile(c.kind) })),
     };
   });
