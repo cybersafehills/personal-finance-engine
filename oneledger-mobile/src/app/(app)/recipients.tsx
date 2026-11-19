@@ -76,7 +76,7 @@ export default function Recipients() {
               {r.trusted ? <Badge variant="positive">Trusted by you</Badge> : null}
             </View>
             <Text variant="label" color="textSecondary" tabular>
-              {r.msisdn ? formatLocalMsisdn(r.msisdn) : r.merchantCode ? `Merchant code ${r.merchantCode}` : ""}
+              {r.msisdn ? formatLocalMsisdn(r.msisdn) : r.merchantCode ? `Merchant code ${r.merchantCode}` : r.accountReference ? `Account ${r.accountReference}` : ""}
             </Text>
             <View style={{ flexDirection: "row", gap: space[2] }}>
               <Button

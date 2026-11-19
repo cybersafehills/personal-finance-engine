@@ -33,7 +33,6 @@ describe("Pay launcher", () => {
   });
 
   it.each([
-    ["Pay a bill", "utilities"],
     ["Buy electricity", "utilities"],
     ["Buy airtime or data", "airtime_data"],
     ["Government services", "government"],
@@ -42,6 +41,21 @@ describe("Pay launcher", () => {
     await fireEvent.press(screen.getByRole("button", { name: label }));
     expect(router.push).toHaveBeenCalledWith({ pathname: "/ussd", params: { category, title: label } });
     expect(Linking.openURL).not.toHaveBeenCalled();
+  });
+
+  it("no longer offers Pay a bill, and lays the tiles out as person, merchant, electricity, airtime, government, eKash", async () => {
+    await render(<PayLauncher onClose={onClose} config={ON} />);
+    expect(screen.queryByRole("button", { name: "Pay a bill" })).toBeNull();
+    const order = ["Pay a person", "Pay a merchant", "Buy electricity", "Buy airtime or data", "Government services", "Use eKash"];
+    const labels = screen.getAllByRole("button").map((b) => b.props.accessibilityLabel).filter((l) => order.includes(l));
+    expect(labels).toEqual(order);
+  });
+
+  it("opens the eKash page from its own tile, even where assisted pay is off", async () => {
+    await render(<PayLauncher onClose={onClose} config={{ pay: true }} />);
+    await fireEvent.press(screen.getByRole("button", { name: "Use eKash" }));
+    expect(router.push).toHaveBeenCalledWith("/ekash");
+    expect(onClose).toHaveBeenCalled();
   });
 
   it("falls back to the web page for those tiles only where the directory is off", async () => {

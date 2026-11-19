@@ -5,6 +5,9 @@ export const FEATURED_SLUGS: readonly string[] = [
   // MTN eKash code with the receiver's ID and the amount (*182*1*2*{receiver}*{amount}#): send money to a bank
   // account or a Mobile Money wallet.
   "ekash-mtn-send",
+  // The menu-only eKash entry that is already published: it stands in at the top until the
+  // code above reaches the directory, and sits just under it afterwards.
+  "ekash-mtn-rwanda",
 ];
 
 /** The same list with the featured codes first (in their listed order); everything else keeps its order. */

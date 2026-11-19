@@ -12,8 +12,9 @@ import type { PayConfig } from "./types";
 
 export type LauncherAction =
   | { id: "pay_person" | "pay_merchant"; label: string; kind: "native" }
+  | { id: "ekash"; label: string; kind: "ekash" }
   | {
-      id: "pay_bill" | "buy_electricity" | "buy_airtime" | "government";
+      id: "buy_electricity" | "buy_airtime" | "government";
       label: string;
       kind: "directory";
       /** The directory category this opens on. */
@@ -25,10 +26,11 @@ export type LauncherAction =
 export const LAUNCHER_ACTIONS: readonly LauncherAction[] = [
   { id: "pay_person", label: "Pay a person", kind: "native" },
   { id: "pay_merchant", label: "Pay a merchant", kind: "native" },
-  { id: "pay_bill", label: "Pay a bill", kind: "directory", category: "utilities", webPath: "/pay/new/pay_bill" },
   { id: "buy_electricity", label: "Buy electricity", kind: "directory", category: "utilities", webPath: "/pay/new/buy_electricity" },
   { id: "buy_airtime", label: "Buy airtime or data", kind: "directory", category: "airtime_data", webPath: "/pay/new/buy_airtime" },
   { id: "government", label: "Government services", kind: "directory", category: "government", webPath: "/pay/new/government" },
+  // The eKash transfer (*182*1*2*<receiver>*<amount>#): built in the app and opened in the dialer, like the directory codes.
+  { id: "ekash", label: "Use eKash", kind: "ekash" },
 ];
 
 export const LAUNCHER_LINKS = {
@@ -40,9 +42,9 @@ export function showPayButton(config: { ok: boolean } & Partial<PayConfig>): boo
   return config.ok && config.pay === true;
 }
 
-/** The prepare-here actions work only where assisted pay is on; the directory tiles are always offered. */
+/** The prepare-here actions work only where assisted pay is on; the directory tiles and eKash (which only builds a code) are always offered. */
 export function actionAvailableHere(action: LauncherAction, config: Partial<PayConfig>): boolean {
-  return action.kind === "directory" || config.assistedPay === true;
+  return action.kind === "directory" || action.kind === "ekash" || config.assistedPay === true;
 }
 
 /** Whether a directory tile opens the in-app directory (true) or falls back to the web page (false). */
