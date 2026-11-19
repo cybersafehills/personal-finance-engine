@@ -22,3 +22,10 @@ test("timeAgo buckets", () => {
   assert.equal(timeAgo("2026-11-19T07:00:00Z", now), "5 h ago");
   assert.equal(timeAgo("not a date", now), "—");
 });
+
+import { humanizeAction } from "./format.ts";
+test("humanizeAction tidies machine names", () => {
+  assert.equal(humanizeAction("staff_directory.viewed"), "Staff directory viewed");
+  assert.equal(humanizeAction("permission.denied"), "Permission denied");
+  assert.equal(humanizeAction(""), "—");
+});
