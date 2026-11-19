@@ -18,6 +18,7 @@ import {
   FLOW_LABELS,
 } from "../../../../lib/directory/public-queries";
 import { trackDirectoryEvent } from "../../../../lib/directory/analytics";
+import { isOneLedger3FlagEnabled } from "../../../../lib/oneledger3-flags";
 
 export const dynamic = "force-dynamic";
 
@@ -102,7 +103,18 @@ export default async function PaymentNetworkPage({
         </span>
       </div>
 
-      <p className="mb-5 text-sm text-text-secondary">{t.summary}</p>
+      <p className="mb-3 text-sm text-text-secondary">{t.summary}</p>
+
+      {isOneLedger3FlagEnabled(process.env, "FEE_CALCULATOR", workspaceId) && (
+        <p className="mb-5 text-sm">
+          <Link
+            href={`/pay/fees?network=${encodeURIComponent(slug)}`}
+            className="font-medium text-accent hover:underline"
+          >
+            Estimate a fee for an amount
+          </Link>
+        </p>
+      )}
 
       <RouteFinder sources={options.sources} flows={options.destinationTypes} />
 
