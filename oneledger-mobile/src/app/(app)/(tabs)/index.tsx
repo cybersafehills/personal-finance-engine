@@ -5,7 +5,7 @@ import { useOffline } from "@/offline/offline-context";
 import { RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { Badge, Button, Card, EmptyState, MoneyAmount, Text } from "@/components/ds";
+import { Button, Card, EmptyState, ListGroup, ListRow, MoneyAmount, Text } from "@/components/ds";
 import { fetchBudgets } from "@/api/mobile-api";
 import { captureSupported, getCaptureHealth } from "@/features/capture/capture";
 import { BalanceCard } from "@/features/home/BalanceCard";
@@ -36,14 +36,15 @@ async function loadHome(accountId?: string) {
 }
 
 // Same order as the web's Home on a phone: balance, today's totals, budget
-// status, then recent transactions. The app adds two cards the web does not
-// have on Home (recording needs setup, transactions to review) below the budget.
+// status, then recent transactions. Mobile shows recording setup and review
+// actions below the budget when they are needed.
 export default function Home() {
   // `loadHome` is a module-level function, so its identity is stable.
   const [accountId, setAccountId] = useState<string | undefined>();
   const load = useCallback(() => loadHome(accountId), [accountId]);
   const { data, loading, refreshing, error, refresh } = useQuery(load, accountId ?? "all-wallets");
   const sync = useOffline();
+  const reviewCount = data?.reviewCount ?? 0;
   // Server-computed, so it loads on its own: a slow or unavailable budget
   // service never delays or breaks the rest of Home.
   const loadBudgets = useCallback(() => fetchBudgets(), []);
@@ -87,29 +88,34 @@ export default function Home() {
 
             {budget ? <BudgetStatusCard budget={budget} nowIso={data.nowIso} /> : null}
 
-            {recordingNeedsSetup ? (
-              <Card style={styles.stack}>
-                <Badge variant="attention">Automatic recording is off</Badge>
-                <Text variant="label" color="textSecondary">
-                  Let OneLedger record your MoMo transactions from this phone,
-                  so you don&apos;t have to type them in.
-                </Text>
-                <Button label="Set it up" fullWidth onPress={() => router.push("/connect")} />
-              </Card>
-            ) : null}
-
-            {data.reviewCount !== null && data.reviewCount > 0 ? (
-              <Card style={styles.stack}>
-                <Text variant="bodyStrong">
-                  {data.reviewCount} transaction{data.reviewCount === 1 ? "" : "s"} to review
-                </Text>
-                <Button
-                  label="Review now"
-                  variant="secondary"
-                  fullWidth
-                  onPress={() => router.push("/inbox")}
-                />
-              </Card>
+            {recordingNeedsSetup || reviewCount > 0 ? (
+              <ListGroup>
+                {recordingNeedsSetup ? (
+                  <ListRow
+                    icon="radio"
+                    label="Automatic recording is off"
+                    hint="Let OneLedger record your MoMo transactions from this phone."
+                    value={
+                      <Text variant="label" color="accent">
+                        Set it up
+                      </Text>
+                    }
+                    onPress={() => router.push("/connect")}
+                  />
+                ) : null}
+                {reviewCount > 0 ? (
+                  <ListRow
+                    icon="check-circle"
+                    label={`${reviewCount} transaction${reviewCount === 1 ? "" : "s"} to review`}
+                    value={
+                      <Text variant="label" color="accent">
+                        Review now
+                      </Text>
+                    }
+                    onPress={() => router.push("/inbox")}
+                  />
+                ) : null}
+              </ListGroup>
             ) : null}
 
             <Card style={{ paddingHorizontal: space[1], paddingVertical: space[2] }}>
@@ -156,16 +162,16 @@ function Tile({ label, amountRwf, currency }: { label: string; amountRwf: number
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   content: {
-    padding: space[4],
-    gap: space[4],
+    paddingHorizontal: space[4],
+    paddingVertical: space[3],
+    gap: space[3],
     width: "100%",
     maxWidth: 480,
     alignSelf: "center",
   },
-  row: { flexDirection: "row", gap: space[3] },
+  row: { flexDirection: "row", gap: space[2] },
   tile: { flex: 1, paddingVertical: space[3], gap: space[1] },
-  stack: { gap: space[3] },
-  cardHeader: {
+    cardHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",

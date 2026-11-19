@@ -3,7 +3,7 @@ import * as Linking from "expo-linking";
 import { router } from "expo-router";
 import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 
-import { Text } from "@/components/ds";
+import { ListGroup, ListRow, Text } from "@/components/ds";
 import {
   actionAvailableHere,
   LAUNCHER_ACTIONS,
@@ -162,13 +162,13 @@ export function PayLauncher({
           <Feather name="arrow-right" size={16} color={colors.accentForeground} />
         </Pressable>
 
-        <View style={styles.group}>
+        <ListGroup>
           {favourite ? (
-            <Row
+            <ListRow
               icon="star"
               label={favourite.name}
               hint={favourite.template}
-              a11y={`${favourite.name}, ${favourite.template}`}
+              a11yLabel={`${favourite.name}, ${favourite.template}`}
               onPress={() => {
                 onClose();
                 router.push({ pathname: "/ussd/[slug]", params: { slug: favourite.slug } });
@@ -176,7 +176,7 @@ export function PayLauncher({
             />
           ) : null}
           {config.trustedRecipients ? (
-            <Row
+            <ListRow
               icon="users"
               label="Saved recipients"
               hint="People and merchants you pay often"
@@ -186,51 +186,15 @@ export function PayLauncher({
               }}
             />
           ) : null}
-          <Row icon="activity" label={LAUNCHER_LINKS.activity.label} external onPress={() => web(LAUNCHER_LINKS.activity.path)} />
-          <Row icon="copy" label={LAUNCHER_LINKS.templates.label} external onPress={() => web(LAUNCHER_LINKS.templates.path)} />
-        </View>
+          <ListRow icon="activity" label={LAUNCHER_LINKS.activity.label} external onPress={() => web(LAUNCHER_LINKS.activity.path)} />
+          <ListRow icon="copy" label={LAUNCHER_LINKS.templates.label} external onPress={() => web(LAUNCHER_LINKS.templates.path)} />
+        </ListGroup>
 
         <Text variant="caption" color="textMuted" style={styles.note}>
           OneLedger never asks for your Mobile Money or banking PIN and can&apos;t send money for you.
         </Text>
       </ScrollView>
     </View>
-  );
-}
-
-function Row({
-  icon,
-  label,
-  hint,
-  a11y,
-  external = false,
-  onPress,
-}: {
-  icon: FeatherName;
-  label: string;
-  hint?: string;
-  a11y?: string;
-  external?: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={a11y ?? label}
-      onPress={onPress}
-      style={({ pressed }) => [styles.row, pressed && { backgroundColor: colors.background }]}
-    >
-      <Feather name={icon} size={16} color={colors.textSecondary} />
-      <View style={styles.flex}>
-        <Text variant="bodyStrong">{label}</Text>
-        {hint ? (
-          <Text variant="caption" color="textMuted" tabular>
-            {hint}
-          </Text>
-        ) : null}
-      </View>
-      <Feather name={external ? "external-link" : "chevron-right"} size={external ? 14 : 16} color={colors.textMuted} />
-    </Pressable>
   );
 }
 
@@ -307,22 +271,6 @@ const styles = StyleSheet.create({
     borderRadius: radii.control,
     borderCurve: "continuous",
     backgroundColor: colors.accent,
-  },
-  group: {
-    borderRadius: radii.control,
-    borderCurve: "continuous",
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderColor: colors.borderSubtle,
-    overflow: "hidden",
-  },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: space[3],
-    minHeight: 48,
-    paddingHorizontal: space[3],
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.borderSubtle,
   },
   note: { textAlign: "center" },
 });

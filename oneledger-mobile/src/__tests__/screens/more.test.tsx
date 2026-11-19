@@ -91,8 +91,8 @@ describe("More screen", () => {
     await render(<More />);
     await screen.findByText("Working");
     for (const [label, path] of [
-      ["Recording status", "/capture"],
-      ["See notifications", "/notifications"],
+      ["Automatic recording", "/capture"],
+      ["Notifications", "/notifications"],
       ["Statements", "/statements"],
       ["Goals", "/goals"],
       ["Payment requests", "/requests"],
@@ -141,20 +141,23 @@ describe("More screen", () => {
     expect(await screen.findByText("3 new")).toBeTruthy();
   });
 
-  it("turns phone alerts on, and shows why when that fails", async () => {
+  it("turns phone alerts on with the switch, and shows why when that fails", async () => {
     await render(<More />);
-    await fireEvent.press(await screen.findByText("Turn on phone alerts"));
+    const toggle = await screen.findByRole("switch", { name: "Phone alerts" });
+    await fireEvent(toggle, "valueChange", true);
     await waitFor(() => expect(mockEnablePush).toHaveBeenCalled());
 
     mockEnablePush.mockResolvedValue({ ok: false, message: "Phone alerts aren't set up in this version of the app yet." });
-    await fireEvent.press(await screen.findByText("Turn on phone alerts"));
+    await fireEvent(await screen.findByRole("switch", { name: "Phone alerts" }), "valueChange", true);
     expect(await screen.findByText("Phone alerts aren't set up in this version of the app yet.")).toBeTruthy();
   });
 
   it("turns phone alerts off when they are on", async () => {
     mockIsPushEnabled.mockResolvedValue(true);
     await render(<More />);
-    await fireEvent.press(await screen.findByText("Turn off phone alerts"));
+    const toggle = await screen.findByRole("switch", { name: "Phone alerts" });
+    await waitFor(() => expect(toggle.props.value).toBe(true));
+    await fireEvent(toggle, "valueChange", false);
     await waitFor(() => expect(mockDisablePush).toHaveBeenCalled());
     expect(mockEnablePush).not.toHaveBeenCalled();
   });
@@ -163,7 +166,7 @@ describe("More screen", () => {
     flags.pushSupported = false;
     await render(<More />);
     expect(await screen.findByText("Phone alerts need the app installed on a real phone.")).toBeTruthy();
-    expect(screen.queryByText("Turn on phone alerts")).toBeNull();
+    expect(screen.queryByRole("switch")).toBeNull();
   });
 
   it("signs out", async () => {

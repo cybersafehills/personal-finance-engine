@@ -90,3 +90,8 @@ scale is `display 30`, `title 22`, `heading 17`, `body 14`, `label 13`, `caption
   (`(app)/pay-sheet.tsx`: grabber, drag-to-dismiss, detents), not a custom modal.
   Group related rows in one bordered list rather than a box per row.
 - Shadows use `boxShadow`, never the legacy shadow/elevation props.
+- **Lists are grouped, not carded.** `ListGroup` + `ListRow` (components/ds) are the one row
+  design: optional icon, label with a one-line hint, a value or badge, then a chevron (or the
+  "opens outside the app" arrow); at least 48pt; hairlines between rows. More, Settings, the
+  Pay launcher and the account menu all use them. Settings that are on/off (phone alerts) are
+  a native `Switch` row, not a button that changes its own label.

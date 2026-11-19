@@ -59,7 +59,7 @@ export function TransactionItem({
 
 const styles = StyleSheet.create({
   row: {
-    minHeight: 56,
+    minHeight: 52,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
