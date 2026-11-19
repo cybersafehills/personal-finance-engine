@@ -36,6 +36,8 @@ export function Screen({
       >
         <ScrollView
           keyboardShouldPersistTaps="handled"
+          // Drag the form down to put the keyboard away (a number pad has no Return key).
+          keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
           contentContainerStyle={[styles.content, centered && styles.centered]}
         >
           {children}

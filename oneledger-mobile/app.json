@@ -26,7 +26,10 @@
       "predictiveBackGestureEnabled": false,
       "allowBackup": false,
       "versionCode": 10,
-      "icon": "./assets/branding/android-legacy-icon-1024.png"
+      "icon": "./assets/branding/android-legacy-icon-1024.png",
+      "blockedPermissions": [
+        "android.permission.WRITE_CONTACTS"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -75,6 +78,12 @@
           "imageWidth": 220,
           "resizeMode": "contain",
           "backgroundColor": "#FFFFFF"
+        }
+      ],
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "OneLedger opens your contacts only when you tap the contact button, so you can pick one person to pay. It does not read or keep your address book."
         }
       ]
     ],

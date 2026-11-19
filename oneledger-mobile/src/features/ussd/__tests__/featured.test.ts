@@ -18,4 +18,11 @@ describe("pinFeatured", () => {
   it("pins the MTN eKash code that carries the receiver's ID and the amount, *182*1*2*{receiver}*{amount}#", () => {
     expect(FEATURED_SLUGS[0]).toBe("ekash-mtn-send");
   });
+  it("shows the already-published eKash entry at the top until the new one exists, and just under it afterwards", () => {
+    expect(FEATURED_SLUGS).toContain("ekash-mtn-rwanda");
+    const published = [{ slug: "airtel" }, { slug: "ekash-mtn-rwanda" }, { slug: "bk" }];
+    expect(pinFeatured(published).map((c) => c.slug)).toEqual(["ekash-mtn-rwanda", "airtel", "bk"]);
+    const both = [{ slug: "airtel" }, { slug: "ekash-mtn-rwanda" }, { slug: "ekash-mtn-send" }];
+    expect(pinFeatured(both).map((c) => c.slug)).toEqual(["ekash-mtn-send", "ekash-mtn-rwanda", "airtel"]);
+  });
 });

@@ -34,10 +34,10 @@ type FeatherName = React.ComponentProps<typeof Feather>["name"];
 const TILE_ICONS: Record<LauncherAction["id"], FeatherName> = {
   pay_person: "user",
   pay_merchant: "shopping-bag",
-  pay_bill: "file-text",
   buy_electricity: "zap",
   buy_airtime: "smartphone",
   government: "flag",
+  ekash: "repeat",
 };
 
 const EASE_OUT = Easing.bezier(0.23, 1, 0.32, 1);
@@ -94,6 +94,8 @@ export function PayLauncher({
     onClose();
     if (action.kind === "native") {
       router.push({ pathname: "/pay-new", params: { type: action.id } });
+    } else if (action.kind === "ekash") {
+      router.push("/ekash");
     } else if (opensInApp(config)) {
       router.push({ pathname: "/ussd", params: { category: action.category, title: action.label } });
     } else {
@@ -161,6 +163,7 @@ export function PayLauncher({
         <Animated.View entering={rise(step++)} style={styles.grid}>
           {LAUNCHER_ACTIONS.map((action) => {
             const available = actionAvailableHere(action, config);
+            const brand = action.kind === "ekash";
             return (
               <PressableScale
                 key={action.id}
@@ -169,11 +172,16 @@ export function PayLauncher({
                 accessibilityState={{ disabled: !available }}
                 disabled={!available}
                 onPress={() => pick(action)}
-                style={(pressed) => [styles.tile, !available && styles.tileOff, pressed && { borderColor: colors.accent }]}
+                style={(pressed) => [
+                  styles.tile,
+                  brand && styles.tileEkash,
+                  !available && styles.tileOff,
+                  pressed && { borderColor: brand ? colors.ekashNavy : colors.accent },
+                ]}
               >
-                <Feather name={TILE_ICONS[action.id]} size={18} color={available ? colors.accent : colors.textMuted} />
+                <Feather name={TILE_ICONS[action.id]} size={18} color={!available ? colors.textMuted : brand ? colors.ekash : colors.accent} />
                 <View style={styles.flex}>
-                  <Text variant="bodyStrong" numberOfLines={2}>
+                  <Text variant="bodyStrong" numberOfLines={2} style={brand ? { color: colors.ekashNavy } : undefined}>
                     {action.label}
                   </Text>
                   {!available ? (
@@ -351,6 +359,8 @@ const styles = StyleSheet.create({
     borderColor: colors.borderSubtle,
     backgroundColor: colors.background,
   },
+  // The eKash shortcut wears eKash's own teal (from its logo) so it stands apart from the other tiles.
+  tileEkash: { borderColor: colors.ekash, backgroundColor: colors.ekashBg },
   tileOff: { opacity: 0.55 },
   primary: {
     flexDirection: "row",

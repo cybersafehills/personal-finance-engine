@@ -17,6 +17,8 @@ jest.mock("@/features/pay/recipients", () => ({
   getTrustedRecipients: () => mockSaved(),
   getRecentRecipients: () => mockRecent(),
 }));
+const mockPick = jest.fn();
+jest.mock("@/features/pay/phone-contacts", () => ({ pickPhoneContact: () => mockPick() }));
 const mockTemplate = jest.fn();
 jest.mock("@/features/pay/activity", () => ({ getPaymentTemplate: (id: string) => mockTemplate(id) }));
 jest.mock("@/features/pay/payment-accounts", () => ({ loadPayableAccounts: () => mockAccounts() }));
@@ -29,6 +31,7 @@ beforeEach(() => {
   mockAccounts.mockReset();
   mockSaved.mockReset();
   mockTemplate.mockReset();
+  mockPick.mockReset();
   mockTemplate.mockResolvedValue(null);
   mockSaveContact.mockReset();
   mockSaveContact.mockResolvedValue(null);
@@ -207,6 +210,29 @@ describe("an unsupported type", () => {
     setParams({ type: "buy_airtime" });
     await render(<PayNew />);
     expect(await screen.findByText("Nothing to pay here")).toBeTruthy();
+  });
+});
+
+describe("Choosing from the phone's contacts", () => {
+  it("fills the number and the name, and offers it for a person only", async () => {
+    mockPick.mockResolvedValue({ ok: true, contact: { name: "Joe Doe", number: "0788123456" } });
+    await render(<PayNew />);
+    await fireEvent.press(await screen.findByRole("button", { name: "Choose from my phone's contacts" }));
+    await waitFor(() => expect(screen.getByLabelText("Mobile number").props.value).toBe("0788123456"));
+    expect(screen.getByLabelText("Name (optional)").props.value).toBe("Joe Doe");
+  });
+  it("is not offered for a merchant code", async () => {
+    setParams({ type: "pay_merchant" });
+    await render(<PayNew />);
+    await screen.findByLabelText("Merchant code");
+    expect(screen.queryByRole("button", { name: "Choose from my phone's contacts" })).toBeNull();
+  });
+  it("lists a recent payee only when they are not already a saved contact", async () => {
+    mockSaved.mockResolvedValue([{ id: "1", name: "Mum", kind: "phone", msisdn: "250781234567", merchantCode: null, accountReference: null, trusted: false, relationship: null }]);
+    mockRecent.mockResolvedValue([{ name: "Mum", maskedMsisdn: null, kind: "phone" }, { name: "Joe", maskedMsisdn: null, kind: "phone" }]);
+    await render(<PayNew />);
+    await screen.findByText("Joe");
+    expect(screen.getAllByText("Mum")).toHaveLength(1);
   });
 });
 
