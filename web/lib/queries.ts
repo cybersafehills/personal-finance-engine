@@ -1,7 +1,6 @@
 import "server-only";
 import { cache } from "react";
 import { cookies } from "next/headers";
-import { cache } from "react";
 import { supabaseSession } from "./supabase-session-server";
 import {
   aggregateCategoryTotals,
