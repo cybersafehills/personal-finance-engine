@@ -95,4 +95,12 @@ scale is `display 30`, `title 22`, `heading 17`, `body 14`, `label 13`, `caption
   "opens outside the app" arrow); at least 48pt; hairlines between rows. More, Settings, the
   Pay launcher and the account menu all use them. Settings that are on/off (phone alerts) are
   a native `Switch` row, not a button that changes its own label.
-
+- **Motion** uses Reanimated (framer-motion is web-only). The Pay sheet's slide and
+  drag-to-dismiss are the native form sheet's own; inside it, blocks rise and fade in
+  with a 35ms stagger (`Keyframe`, 220ms, ease-out), buttons scale to 0.97 under the
+  finger (`PressableScale`, a CSS transition: UI thread, no re-render per frame), and
+  info dialogs fade and settle in (180ms) and fade out. Everything honours the system
+  reduce-motion setting. Full-width rows highlight their background instead of
+  scaling. Judge feel on a release build, not in Expo Go.
+- **Accents:** green (`moneyPositive`) marks Scan to pay, orange (`moneyRequest`) marks
+  Request payment; each shortcut has an (i) that explains it in plain words.

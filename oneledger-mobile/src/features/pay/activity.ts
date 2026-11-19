@@ -1,6 +1,7 @@
 import { supabase } from "@/api/supabase";
 
 import { stateLabel } from "./messages";
+import { formatLocalMsisdn } from "./target";
 
 // Payment activity and templates, read under RLS exactly as the web does
 // (web/lib/pay/intents.ts): payment_intents are read-only to members, and
@@ -34,6 +35,7 @@ type IntentRow = {
   currency: string | null;
   recipient_name: string | null;
   recipient_msisdn_masked: string | null;
+  recipient_msisdn_normalized?: string | null;
   merchant_code: string | null;
   created_at: string;
 };
@@ -45,7 +47,7 @@ export function toPaymentRow(r: IntentRow): PaymentRow {
     state: r.state,
     amountMinor: Number(r.amount_minor),
     currency: r.currency ?? "RWF",
-    recipient: r.recipient_name?.trim() || r.recipient_msisdn_masked || (r.merchant_code ? `Merchant ${r.merchant_code}` : TYPE_LABELS[r.payment_type] ?? "Payment"),
+    recipient: r.recipient_name?.trim() || (r.recipient_msisdn_normalized ? formatLocalMsisdn(r.recipient_msisdn_normalized) : null) || r.recipient_msisdn_masked || (r.merchant_code ? `Merchant ${r.merchant_code}` : TYPE_LABELS[r.payment_type] ?? "Payment"),
     createdAt: r.created_at,
   };
 }
@@ -59,7 +61,7 @@ export async function getPaymentActivity(limit = 50): Promise<PaymentRow[]> {
   if (!supabase) throw new Error("not connected");
   const { data, error } = await supabase
     .from("payment_intents")
-    .select("id, payment_type, state, amount_minor, currency, recipient_name, recipient_msisdn_masked, merchant_code, created_at")
+    .select("id, payment_type, state, amount_minor, currency, recipient_name, recipient_msisdn_masked, recipient_msisdn_normalized, merchant_code, created_at")
     .order("created_at", { ascending: false })
     .limit(limit);
   if (error) throw new Error(error.message);

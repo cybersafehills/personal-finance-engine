@@ -131,6 +131,8 @@ export type IntentInput = {
   amount_minor: number;
   recipient_name: string | null;
   recipient_msisdn_masked: string | null;
+  /** The full normalised number (2507XXXXXXXX): the payer's own payment, shown to the payer. */
+  recipient_msisdn_normalized?: string | null;
   merchant_code: string | null;
   billing_reference: string | null;
   expires_at: string | null;
@@ -155,6 +157,8 @@ export type MobileIntent = {
   amountMinor: number;
   recipientName: string | null;
   recipientMasked: string | null;
+  /** The whole number the payment goes to, so the payer can check who they are paying (null for a merchant payment). */
+  recipientMsisdn: string | null;
   merchantCode: string | null;
   billingReference: string | null;
   expiresAt: string | null;
@@ -180,6 +184,7 @@ export function toMobileIntent(
     amountMinor: intent.amount_minor,
     recipientName: intent.recipient_name,
     recipientMasked: intent.recipient_msisdn_masked,
+    recipientMsisdn: intent.recipient_msisdn_normalized ?? null,
     merchantCode: intent.merchant_code,
     billingReference: intent.billing_reference,
     expiresAt: intent.expires_at,

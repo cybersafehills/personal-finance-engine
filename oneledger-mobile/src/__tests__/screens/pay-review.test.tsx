@@ -26,6 +26,7 @@ const intent = (over: Record<string, unknown> = {}) => ({
   amountMinor: 5000,
   recipientName: "Jean",
   recipientMasked: "•••• ••• 3456",
+  recipientMsisdn: "250788123456",
   merchantCode: null,
   expiresAt: null,
   updatedAt: new Date(Date.now() - 5_000).toISOString(),
@@ -56,7 +57,8 @@ describe("Pay review screen", () => {
     await render(<PayReview />);
     expect(await screen.findByText("*182*1*1*0788123456*5000#")).toBeTruthy();
     expect(screen.getByText("5,000 RWF")).toBeTruthy();
-    expect(screen.getByText("Jean · •••• ••• 3456")).toBeTruthy();
+    // The whole number: the payer must be able to check who they are paying.
+    expect(screen.getByText("Jean · 078 812 3456")).toBeTruthy();
     expect(screen.getByText("Draft")).toBeTruthy();
     expect(screen.getByText(/never asks for your Mobile Money or banking PIN/)).toBeTruthy();
   });
@@ -133,6 +135,19 @@ describe("Pay review screen", () => {
 });
 
 describe("Payment status", () => {
+  it("shows the whole number on the status screen too, never masked", async () => {
+    mockFetch.mockResolvedValue(loaded({ state: "awaiting_verification" }));
+    await render(<PayReview />);
+    expect(await screen.findByText("Jean · 078 812 3456")).toBeTruthy();
+    expect(screen.queryByText(/••••/)).toBeNull();
+  });
+
+  it("falls back to the masked number from an older server that does not send it", async () => {
+    mockFetch.mockResolvedValue(loaded({ recipientMsisdn: null }));
+    await render(<PayReview />);
+    expect(await screen.findByText("Jean · •••• ••• 3456")).toBeTruthy();
+  });
+
   it("shows a spinner, and no tick, while a handed-off payment waits for the provider", async () => {
     mockFetch.mockResolvedValue(loaded({ state: "awaiting_verification" }));
     await render(<PayReview />);

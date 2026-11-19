@@ -23,6 +23,9 @@ export const colors = {
   needsMapBg: "#fdf1f0",
   needsMapBorder: "#ecd0cd",
   notificationBadge: "#c0392b",
+  // Mobile-only for now: the orange "Request payment" accent in the Pay sheet (the green twin is moneyPositive).
+  moneyRequest: "#c2610c",
+  moneyRequestBg: "#fdf0e2",
   lifetimeBadgeBg: "#f5c518",
   lifetimeBadgeText: "#1a1a1a",
 

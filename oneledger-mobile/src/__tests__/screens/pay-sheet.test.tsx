@@ -122,5 +122,36 @@ describe("Pay launcher", () => {
     expect(nodes[nodes.length - 1]).toBe("Close");
     expect(nodes.indexOf("Close")).toBeGreaterThan(nodes.indexOf("Open USSD directory"));
   });
+
+  describe("highlighted shortcuts", () => {
+    const BOTH = { ...ON, paymentRequests: true };
+
+    it("have no arrow: they are features, not links to follow", async () => {
+      await render(<PayLauncher onClose={onClose} config={BOTH} />);
+      expect(screen.queryByTestId("icon-chevron-right")).toBeNull();
+    });
+
+    it("Request payment has its own hand-and-coin icon, not the generic arrow", async () => {
+      await render(<PayLauncher onClose={onClose} config={BOTH} />);
+      expect(screen.getByTestId("icon-hand-coin")).toBeTruthy();
+    });
+
+    it("Scan to pay has an info button too, with its own plain-words explanation", async () => {
+      await render(<PayLauncher onClose={onClose} config={BOTH} />);
+      await fireEvent.press(screen.getByRole("button", { name: "About scan to pay" }));
+      expect(await screen.findByText("When to use Scan to pay")).toBeTruthy();
+      expect(screen.getByText(/no photo is taken or saved/)).toBeTruthy();
+      expect(router.push).not.toHaveBeenCalled();
+      await fireEvent.press(screen.getByRole("button", { name: "Got it" }));
+      expect(screen.queryByText("When to use Scan to pay")).toBeNull();
+    });
+
+    it("shows one explanation at a time", async () => {
+      await render(<PayLauncher onClose={onClose} config={BOTH} />);
+      await fireEvent.press(screen.getByRole("button", { name: "About requesting payment" }));
+      expect(await screen.findByText("Why request a payment?")).toBeTruthy();
+      expect(screen.queryByText("When to use Scan to pay")).toBeNull();
+    });
+  });
 });
 

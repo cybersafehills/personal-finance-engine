@@ -31,6 +31,7 @@ function parseIntent(raw: unknown): PayIntent | null {
     amountMinor: raw.amountMinor,
     recipientName: strOrNull(raw.recipientName),
     recipientMasked: strOrNull(raw.recipientMasked),
+    recipientMsisdn: strOrNull(raw.recipientMsisdn),
     merchantCode: strOrNull(raw.merchantCode),
     expiresAt: strOrNull(raw.expiresAt),
     updatedAt: str(raw.updatedAt) ? raw.updatedAt : new Date().toISOString(),

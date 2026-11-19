@@ -7,6 +7,7 @@ import { fetchPayIntent, recordPayHandoff, settlePayIntent } from "@/api/mobile-
 import { Badge, Button, Card, EmptyState, Screen, ScreenHeader, Text } from "@/components/ds";
 import { PAY_COPY, stateLabel } from "@/features/pay/messages";
 import { PaymentStatus } from "@/features/pay/PaymentStatus";
+import { formatLocalMsisdn } from "@/features/pay/target";
 import { isStale, payPhase, POLL_MS, STALE_AFTER_MS } from "@/features/pay/status";
 import type { PayIntent } from "@/features/pay/types";
 import { useQuery } from "@/hooks/useQuery";
@@ -14,6 +15,10 @@ import { formatMoney, formatRwf } from "@/lib/money";
 import { space } from "@/theme/tokens";
 
 type Handoff = Parameters<typeof recordPayHandoff>[1];
+
+/** The number the payment goes to, in full when the server sends it: the payer needs to see who they are paying. */
+const recipientNumber = (intent: PayIntent) =>
+  intent.recipientMsisdn ? formatLocalMsisdn(intent.recipientMsisdn) : intent.recipientMasked;
 
 const amountText = (intent: PayIntent) =>
   intent.currency === "RWF"
@@ -150,7 +155,7 @@ export default function PayReview() {
       </Text>
       <Text variant="label" color="textSecondary">
         {intent.recipientName ?? (intent.merchantCode ? "Merchant" : "Recipient")}
-        {intent.recipientMasked ? ` · ${intent.recipientMasked}` : ""}
+        {recipientNumber(intent) ? ` · ${recipientNumber(intent)}` : ""}
         {intent.merchantCode ? ` · code ${intent.merchantCode}` : ""}
       </Text>
     </Card>

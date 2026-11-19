@@ -11,6 +11,8 @@ export type PayIntent = {
   amountMinor: number;
   recipientName: string | null;
   recipientMasked: string | null;
+  /** The whole number it goes to (2507XXXXXXXX), so the payer can check who they are paying. null for a merchant payment, or from an older server. */
+  recipientMsisdn: string | null;
   merchantCode: string | null;
   expiresAt: string | null;
   /** When it last changed (the hand-off time while it waits). */
