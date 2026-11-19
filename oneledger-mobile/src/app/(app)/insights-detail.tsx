@@ -1,6 +1,7 @@
 import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useMemo } from "react";
-import { Pressable, View } from "react-native";
+import { View } from "react-native";
+import { PrivatePressable as Pressable } from "@/features/privacy/PrivatePressable";
 
 import { fetchDrilldown } from "@/api/mobile-api";
 import { Button, Card, EmptyState, Screen, ScreenHeader, Text } from "@/components/ds";

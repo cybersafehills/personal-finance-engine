@@ -57,6 +57,9 @@
       "^@expo/vector-icons/Feather$": "<rootDir>/src/test/feather-mock.tsx",
       "^@/(.*)$": "<rootDir>/src/$1"
     },
-    "testTimeout": 20000
+    "testTimeout": 20000,
+    "modulePaths": [
+      "<rootDir>/node_modules"
+    ]
   }
 }

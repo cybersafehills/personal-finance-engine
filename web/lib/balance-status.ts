@@ -55,6 +55,7 @@ export type DerivedBalance = {
 export const DEFAULT_STALE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 
 function big(v: number | string | bigint): bigint {
+  if (typeof v === "number" && !Number.isSafeInteger(v)) throw new RangeError("unsafe_money");
   return typeof v === "bigint" ? v : BigInt(v);
 }
 

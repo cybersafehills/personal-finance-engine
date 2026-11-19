@@ -1,3 +1,4 @@
+import { selectWorkspace } from "@/features/spaces/selected-space";
 import { getTransactions } from "../queries";
 
 const mockCalls: [string, ...unknown[]][] = [];
@@ -20,6 +21,7 @@ jest.mock("@/api/supabase", () => ({
 }));
 
 beforeEach(() => {
+  selectWorkspace("ws-1");
   mockCalls.length = 0;
 });
 

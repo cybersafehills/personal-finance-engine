@@ -7,7 +7,7 @@ import {
 } from "react-native";
 
 import { colors, radii, space } from "@/theme/tokens";
-import { fonts, MAX_FONT_SCALE } from "@/theme/typography";
+import { fonts } from "@/theme/typography";
 
 import { Text } from "./Text";
 
@@ -31,7 +31,6 @@ export function TextField({ label, help, error, ...input }: TextFieldProps) {
         {label}
       </Text>
       <TextInput
-        maxFontSizeMultiplier={MAX_FONT_SCALE}
         accessibilityLabel={label}
         accessibilityLabelledBy={`${id}-label`}
         accessibilityHint={error ?? help}

@@ -1,3 +1,4 @@
+import { formatAmount } from "../../../shared/financial";
 import { notFound } from "next/navigation";
 import {
   getActiveWorkspaceId,
@@ -149,7 +150,7 @@ export default async function TransactionDetailPage({
           {displayName(transaction)}
         </p>
         <div className="mt-2">
-          <MoneyAmount amountRwf={isFailed ? 0 : signedAmount} size="xl" />
+          <MoneyAmount amountRwf={isFailed ? 0 : signedAmount} currency={transaction.currency} size="xl" />
         </div>
         <p className="mt-2 text-sm text-text-muted">
           {formatFullDateTime(transaction.occurred_at)}
@@ -262,9 +263,9 @@ export default async function TransactionDetailPage({
         className="rounded-card border border-border-subtle bg-surface p-4"
       >
         <dl className="flex flex-col divide-y divide-border-subtle text-sm">
-          <Row label="Amount" value={formatRwf(transaction.amount_rwf)} />
+          <Row label="Amount" value={(transaction.currency === "RWF" ? formatRwf(transaction.amount_rwf) : formatAmount(transaction.amount_rwf, transaction.currency, false))} />
           {transaction.fee_rwf > 0 && (
-            <Row label="Fee" value={formatRwf(transaction.fee_rwf)} />
+            <Row label="Fee" value={(transaction.currency === "RWF" ? formatRwf(transaction.fee_rwf) : formatAmount(transaction.fee_rwf, transaction.currency, false))} />
           )}
           <Row
             label="Direction"
@@ -279,7 +280,7 @@ export default async function TransactionDetailPage({
           {transaction.balance_after_rwf !== null && (
             <Row
               label="Balance after"
-              value={formatRwf(transaction.balance_after_rwf)}
+              value={(transaction.currency === "RWF" ? formatRwf(transaction.balance_after_rwf) : formatAmount(transaction.balance_after_rwf, transaction.currency, false))}
             />
           )}
           <Row

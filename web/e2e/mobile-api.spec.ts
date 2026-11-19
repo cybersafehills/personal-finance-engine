@@ -188,6 +188,34 @@ test.describe("mobile API", () => {
     }
   });
 
+  test("wallet balances use the signed bearer and the requested Space", async () => {
+    const { workspaceId, accountId } = await ensureWorkspaceAndAccount();
+    const api = await playwrightRequest.newContext({ baseURL: BASE_URL });
+    const path = `/api/mobile/accounts?workspace_id=${workspaceId}`;
+    try {
+      expect((await api.get(path)).status()).toBe(401);
+      const signIn = await api.post("/api/mobile/auth/sign-in", {
+        data: { email: E2E_USER.email, password: E2E_USER.password },
+      });
+      expect(signIn.status()).toBe(200);
+      const { access_token: token } = await signIn.json();
+      const headers = { authorization: `Bearer ${token}` };
+
+      const wallets = await api.get(path, { headers });
+      expect(wallets.status()).toBe(200);
+      expect(wallets.headers()["cache-control"]).toContain("no-store");
+      expect(await wallets.json()).toMatchObject({
+        ok: true,
+        workspace_id: workspaceId,
+        accounts: expect.arrayContaining([expect.objectContaining({ id: accountId, currency: "RWF" })]),
+      });
+      const unavailable = await api.get("/api/mobile/accounts?workspace_id=00000000-0000-4000-8000-000000000001", { headers });
+      expect(unavailable.status()).toBe(404);
+    } finally {
+      await api.dispose();
+    }
+  });
+
   test("a signed-in user adds a transaction only through create_manual_transaction", async () => {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -333,13 +361,17 @@ test.describe("mobile API", () => {
         "businessSurfaces",
         "developer",
         "insights",
+        "insightsCenter",
         "integrations",
         "pay",
+        "paymentRequests",
+        "people",
         "scanToPay",
         "spaces",
         "statements",
         "trustedRecipients",
         "ussdDirectory",
+        "wallets",
       ]);
       for (const k of keys) expect(typeof body.config[k]).toBe("boolean");
       // FINANCIAL_STATEMENTS_ENABLED is on for this suite (playwright.config.ts).

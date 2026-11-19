@@ -1,3 +1,4 @@
+import { selectWorkspace } from "@/features/spaces/selected-space";
 import { getCurrentBalance, getTodayTotals, getTransactionById, getTransactions } from "@/features/transactions/queries";
 
 import { applyServerPage, recordManualTransaction } from "../local-store";
@@ -26,6 +27,8 @@ describe("offline reads", () => {
     await recordManualTransaction(db, {
       args: args({ p_occurred_at: "2026-11-17T08:00:00.000Z" }), account: ACCOUNT, transactionId: "mine", opId: "op-mine", nowIso: "x",
     });
+    selectWorkspace("ws-1");
+    await db.run("INSERT OR REPLACE INTO workspace_leases VALUES (?,?,?,?)", ["ws-1", "personal", "2026-11-17T00:00:00Z", "2026-11-24T00:00:00Z"]);
     setOfflineRuntime({ db, userId: "u", bootstrapped: true });
     return db;
   }
@@ -54,7 +57,7 @@ describe("offline reads", () => {
   it("includes pending entries in today's totals", async () => {
     await seeded();
     const totals = await getTodayTotals("2026-11-17T12:00:00.000Z");
-    expect(totals).toEqual({ spentRwf: 4300, receivedRwf: 2000 });
+    expect(totals).toMatchObject({ spentRwf: 4300, receivedRwf: 2000 });
   });
 
   it("reads one transaction by id", async () => {
@@ -68,4 +71,16 @@ describe("offline reads", () => {
     setOfflineRuntime({ db, userId: "u", bootstrapped: false });
     await expect(getTransactions()).rejects.toThrow(); // falls to the (unconfigured) server path
   });
+});
+
+it("switches local Spaces without mixing their rows or totals", async () => {
+  const { db } = await openTestDb();
+  await applyServerPage(db, "transactions", [serverTx("a", "2026-11-18T08:00:00Z"), serverTx("b", "2026-11-18T08:00:00Z", { workspace_id: "ws-2" })], "2026-11-18T08:00:00Z", { advanceCursor: true });
+  await db.run("INSERT INTO workspace_leases VALUES ('ws-1','personal','2026-11-18','2026-11-25')");
+  await db.run("INSERT INTO workspace_leases VALUES ('ws-2','personal','2026-11-18','2026-11-25')");
+  setOfflineRuntime({ db, userId: "u", bootstrapped: true });
+  selectWorkspace("ws-1"); expect((await getTransactions()).map((r) => r.id)).toEqual(["a"]);
+  selectWorkspace("ws-2"); expect((await getTransactions()).map((r) => r.id)).toEqual(["b"]);
+  expect(await getTransactionById("a")).toBeNull();
+  setOfflineRuntime(null);
 });

@@ -1,6 +1,7 @@
 import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
-import { Pressable, View } from "react-native";
+import { View } from "react-native";
+import { PrivatePressable as Pressable } from "@/features/privacy/PrivatePressable";
 
 import { fetchPeople, fetchPerson } from "@/api/mobile-api";
 import { Badge, Button, Card, Chip, EmptyState, Screen, ScreenHeader, Text, TextField } from "@/components/ds";
@@ -246,7 +247,7 @@ function Detail({
   );
 }
 
-const KINDS: PersonKind[] = ["person", "merchant", "unknown"];
+const KINDS: PersonKind[] = ["person", "merchant", "unknown", "self"];
 
 function RenameForm({ person, onCancel, onDone }: { person: Person; onCancel: () => void; onDone: () => void }) {
   const [name, setName] = useState(person.displayName);

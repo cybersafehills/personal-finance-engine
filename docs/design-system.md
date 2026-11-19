@@ -95,4 +95,3 @@ scale is `display 30`, `title 22`, `heading 17`, `body 14`, `label 13`, `caption
   "opens outside the app" arrow); at least 48pt; hairlines between rows. More, Settings, the
   Pay launcher and the account menu all use them. Settings that are on/off (phone alerts) are
   a native `Switch` row, not a button that changes its own label.
-

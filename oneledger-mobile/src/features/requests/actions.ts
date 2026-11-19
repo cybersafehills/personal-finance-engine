@@ -1,3 +1,4 @@
+import { selectedWorkspaceId } from "@/features/spaces/selected-space";
 import { bearerPost, failureForOutcome } from "@/api/bearer";
 import { supabase } from "@/api/supabase";
 
@@ -25,7 +26,7 @@ export async function listRequests(): Promise<{ ok: true; requests: PaymentReque
   if (!supabase) return { ok: false, message: "The app isn't connected yet." };
   const { data, error } = await supabase
     .from("payment_requests_v")
-    .select(COLUMNS)
+    .select(COLUMNS).eq("workspace_id", selectedWorkspaceId())
     .order("created_at", { ascending: false })
     .limit(100);
   if (error) return { ok: false, message: "Couldn't load your requests. Check your connection and try again." };
@@ -34,7 +35,7 @@ export async function listRequests(): Promise<{ ok: true; requests: PaymentReque
 
 export async function getRequest(id: string): Promise<{ ok: true; request: PaymentRequest; candidates: MatchCandidate[] } | { ok: false; message: string }> {
   if (!supabase) return { ok: false, message: "The app isn't connected yet." };
-  const { data, error } = await supabase.from("payment_requests_v").select(COLUMNS).eq("id", id).maybeSingle();
+  const { data, error } = await supabase.from("payment_requests_v").select(COLUMNS).eq("workspace_id", selectedWorkspaceId()).eq("id", id).maybeSingle();
   if (error) return { ok: false, message: "Couldn't load this request. Check your connection and try again." };
   const request = parseRequestRow(data);
   if (!request) return { ok: false, message: "That request couldn't be found." };

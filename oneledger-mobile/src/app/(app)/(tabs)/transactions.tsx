@@ -1,3 +1,5 @@
+import { subscribeRuntime } from "@/offline/runtime";
+import { useActiveSpace } from "@/features/spaces/ActiveSpaceProvider";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshControl, SectionList, View } from "react-native";
@@ -33,7 +35,7 @@ const SEARCH_DEBOUNCE_MS = 350;
 async function loadHeaderStats() {
   const [lifetime, reviewCount] = await Promise.all([
     getLifetimeFlowTotals(),
-    getReviewQueueCount().catch(() => 0),
+    getReviewQueueCount().catch(() => null),
   ]);
   return { lifetime, reviewCount };
 }
@@ -41,6 +43,10 @@ async function loadHeaderStats() {
 // The full ledger: newest first, grouped by day, searchable, loaded a page
 // at a time. Amounts here are never masked (a deliberate destination).
 export default function Transactions() {
+  const { activeId } = useActiveSpace();
+  return <TransactionLedger key={activeId ?? "no-space"} />;
+}
+function TransactionLedger() {
   // Set when opened from the Categories screen: show only that category (like the web's ?category=).
   const params = useLocalSearchParams<{ category?: string | string[] }>();
   const category = (Array.isArray(params.category) ? params.category[0] : params.category) || undefined;
@@ -77,6 +83,7 @@ export default function Transactions() {
         setError(null);
       } catch {
         if (id !== requestId.current) return;
+        setRows([]);
         setError("Couldn't load transactions. Check your connection and try again.");
       } finally {
         if (id === requestId.current) {
@@ -94,6 +101,9 @@ export default function Transactions() {
       loadFirstPage(false);
     }, [loadFirstPage]),
   );
+
+  useEffect(() => subscribeRuntime(() => { setRows([]); void loadFirstPage(false); }), [loadFirstPage]);
+  useEffect(() => () => { requestId.current++; }, []);
 
   async function loadMore() {
     if (loadingMore || !hasMore) return;
@@ -145,7 +155,7 @@ export default function Transactions() {
               <>
                 <View style={{ flexDirection: "row" }}>
                   <Button
-                    label={stats.reviewCount > 0 ? `Review queue (${stats.reviewCount})` : "Review queue"}
+                    label={stats.reviewCount !== null && stats.reviewCount > 0 ? `Review queue (${stats.reviewCount})` : "Review queue"}
                     variant="ghost"
                     onPress={() => router.push("/inbox")}
                   />

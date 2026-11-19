@@ -13,6 +13,7 @@ async function setup() {
   server.rows.push(serverTx("t1", "2026-11-16T00:00:00.000Z", { category: "Food", subcategory: null }));
   const sync = (over = {}) => runSync({ db, transport: server, now: () => NOW, random: () => 0.5, ...over });
   await sync(); // first download
+  await db.run("INSERT INTO workspace_leases VALUES (?,?,?,?)", ["ws-1", "personal", "2026-11-17T00:00:00Z", "2026-11-24T00:00:00Z"]);
   const edit = (n: string, category: string, sub: string | null = null) =>
     setCategoryLocally(db, { transactionId: "t1", category, subcategory: sub, opId: `e${n}`, nowIso: "x" });
   return { db, server, sync, edit };

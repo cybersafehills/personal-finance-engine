@@ -1,11 +1,8 @@
 // Spaces (personal, household, organization). Pure rules, kept apart from
 // React and native APIs so they are unit-testable.
 //
-// What switching does, as on the web: it changes the *active Space*. Only what
-// the web scopes by the active Space follows it (the server read models behind
-// /api/mobile/*, categories, policies). The transaction, balance and budget
-// list queries are deliberately NOT filtered by Space (RLS is the boundary),
-// so Home and Transactions look the same in every Space.
+// Selected Space scopes financial data. Database membership and source RLS
+// independently decide which records the user can access.
 
 export type SpaceKind = "personal" | "household" | "organization";
 

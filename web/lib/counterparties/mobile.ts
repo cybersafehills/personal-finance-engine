@@ -7,7 +7,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export type ListParams = {
   q: string | null;
-  kind: "person" | "merchant" | "unknown" | null;
+  kind: "person" | "merchant" | "unknown" | "self" | null;
   limit: number;
   offset: number;
   workspaceId: string | null;
@@ -45,7 +45,7 @@ export function parseCounterpartyListParams(
   const kind = sp.get("kind");
   if (
     kind !== null && kind !== "person" && kind !== "merchant" &&
-    kind !== "unknown"
+    kind !== "unknown" && !(kind === "self" && sp.get("contract") === "2")
   ) {
     return { ok: false, error: "invalid_kind" };
   }

@@ -4,7 +4,7 @@ import type { SupportedCurrency } from "@/lib/money";
 
 import type { Person, PersonConfidence, PersonCurrency, PersonDetail, PersonKind } from "./types";
 
-const KINDS: readonly PersonKind[] = ["person", "merchant", "unknown"];
+const KINDS: readonly PersonKind[] = ["person", "merchant", "unknown", "self"];
 const CONFIDENCES: readonly PersonConfidence[] = ["user_confirmed", "high", "low"];
 const CURRENCIES: readonly SupportedCurrency[] = ["RWF", "EUR", "USD"];
 

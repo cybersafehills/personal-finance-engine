@@ -4,6 +4,7 @@ import { Pressable, Share, View } from "react-native";
 
 import { inviteMember, removeMember, revokeInvite, setMemberRole } from "@/api/mobile-api";
 import { Badge, Button, Card, EmptyState, Screen, ScreenHeader, Text, TextField } from "@/components/ds";
+import { HouseholdSharing } from "@/features/spaces/HouseholdSharing";
 import { useActiveSpace } from "@/features/spaces/ActiveSpaceProvider";
 import {
   canEditRow,
@@ -48,7 +49,7 @@ export default function SpaceMembers() {
       </Screen>
     );
   }
-  return <SpaceMembersFor space={active} />;
+  return <SpaceMembersFor key={active.id} space={active} />;
 }
 
 async function loadAll(workspaceId: string) {
@@ -86,7 +87,12 @@ function SpaceMembersFor({ space: sp }: { space: Space }) {
     <Screen>
       <ScreenHeader title={sp.name} subtitle={`${kindLabel(sp.kind)} · members and invites`} />
 
-      {sp.kind === "household" ? <HowHouseholdsWork /> : null}
+      {sp.kind === "household" ? (
+        <>
+          <HowHouseholdsWork />
+          <HouseholdSharing space={{ ...sp, role: myRole }} />
+        </>
+      ) : null}
 
       {message ? (
         <Text variant="label" color="attention" accessibilityRole="alert">
@@ -159,7 +165,7 @@ function HowHouseholdsWork() {
             Everyone here keeps their own OneLedger account and their own private transactions. Nothing is shared automatically.
           </Text>
           <Text variant="label" color="textSecondary">
-            You choose, per account, what this household sees: nothing, transactions only, or the full balance.
+            You choose whether to share a wallet’s transactions and balance with this household.
           </Text>
           <Text variant="label" color="textSecondary">
             Every shared transaction can be marked as one person’s spending, split between people, or shared by the household. This only changes how the household’s reports count it; it never moves money.

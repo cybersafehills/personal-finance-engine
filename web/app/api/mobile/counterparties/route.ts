@@ -34,7 +34,7 @@ export function GET(request: NextRequest) {
       offset: p.offset,
       // Transactions not yet resolved to a counterparty (run backfill_counterparties).
       unresolved_transactions: list.unresolvedTransactions,
-      counterparties: list.counterparties.map((c) => ({ ...c, kind: kindForMobile(c.kind) })),
+      counterparties: list.counterparties.map((c) => ({ ...c, kind: kindForMobile(c.kind, request.nextUrl.searchParams.get("contract") === "2" ? 2 : 1) })),
     };
   });
 }

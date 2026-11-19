@@ -177,5 +177,6 @@ Deno.test("'self' is a kind, is labelled for people, and is reported to the mobi
   assertEquals(d.isPersonKind("self"), true);
   assertEquals(d.KIND_LABEL.self, "My account");
   assertEquals(d.kindForMobile("self"), "person");
+  assertEquals(d.kindForMobile("self", 2), "self");
   assertEquals(d.kindForMobile("merchant"), "merchant");
 });
