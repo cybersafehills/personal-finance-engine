@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { cache } from "react";
 import { supabaseSession } from "./supabase-session-server";
@@ -89,9 +90,11 @@ export type CurrentBalance = {
 
 export async function getCurrentBalance(): Promise<CurrentBalance | null> {
   const supabase = await supabaseSession();
+  const workspaceId = await activeWorkspaceIdOrNone();
   const { data, error } = await supabase
     .from("transactions")
     .select("balance_after_rwf, occurred_at, direction, principal_effect_rwf")
+    .eq("workspace_id", workspaceId)
     .not("balance_after_rwf", "is", null)
     // Phase U: a transaction merged into its canonical duplicate is kept
     // for evidence but is never a live transaction - here it must not be
@@ -135,16 +138,18 @@ export async function getCurrentBalance(): Promise<CurrentBalance | null> {
 export async function getLinkedTransferIds(
   supabase: Awaited<ReturnType<typeof supabaseSession>>,
 ): Promise<Set<string>> {
+  const workspaceId = await activeWorkspaceIdOrNone();
   const { data, error } = await supabase
     .from("transfer_links")
     .select("out_transaction_id, in_transaction_id")
+    .eq("workspace_id", workspaceId)
     .eq("status", "linked");
   if (error) {
     console.error("getLinkedTransferIds failed:", error.message);
     return new Set();
   }
   // Plus everything with a counterparty marked "my own account".
-  const own = await ownAccountTransactionIds(supabase, null);
+  const own = await ownAccountTransactionIds(supabase, workspaceId);
   return new Set([...linkedTransferIdSet(data ?? []), ...own]);
 }
 
@@ -155,12 +160,14 @@ export type TodayTotals = {
 
 export async function getTodayTotals(): Promise<TodayTotals> {
   const supabase = await supabaseSession();
+  const workspaceId = await activeWorkspaceIdOrNone();
   const todayKey = kigaliDateKey(new Date().toISOString());
   const { startUtc, endUtc } = kigaliDayBoundsUtc(todayKey);
 
   const { data, error } = await supabase
     .from("transactions")
     .select("id, direction, principal_effect_rwf, fee_effect_rwf")
+    .eq("workspace_id", workspaceId)
     .eq("settlement_state", "settled")
     // Phase U: exclude rows merged into a canonical duplicate (kept for
     // evidence, never counted).
@@ -215,11 +222,13 @@ export type LifetimeFlowTotals = {
  */
 export async function getLifetimeFlowTotals(): Promise<LifetimeFlowTotals> {
   const supabase = await supabaseSession();
+  const workspaceId = await activeWorkspaceIdOrNone();
 
   const [{ data, error }, { data: { user } }] = await Promise.all([
     supabase
       .from("transactions")
       .select("direction, principal_effect_rwf, fee_effect_rwf")
+    .eq("workspace_id", workspaceId)
       .eq("settlement_state", "settled")
       // Phase U: merged duplicates stay as evidence but are never counted.
       .neq("dedupe_state", "merged"),
@@ -257,9 +266,11 @@ export async function getRecentTransactions(
   limit = 8,
 ): Promise<TransactionRow[]> {
   const supabase = await supabaseSession();
+  const workspaceId = await activeWorkspaceIdOrNone();
   const { data, error } = await supabase
     .from("transactions")
     .select(TRANSACTION_COLUMNS)
+    .eq("workspace_id", workspaceId)
     // Phase U: merged duplicates stay in the DB as evidence but never in a
     // ledger listing.
     .neq("dedupe_state", "merged")
@@ -302,9 +313,11 @@ export async function getTransactions(
   }: TransactionListFilters = {},
 ): Promise<TransactionRow[]> {
   const supabase = await supabaseSession();
+  const workspaceId = await activeWorkspaceIdOrNone();
   let query = supabase
     .from("transactions")
     .select(TRANSACTION_COLUMNS)
+    .eq("workspace_id", workspaceId)
     // Phase U: merged duplicates stay in the DB as evidence but never in a
     // ledger listing.
     .neq("dedupe_state", "merged")
@@ -351,9 +364,11 @@ const REVIEW_QUEUE_LIMIT = 100;
 // per-row.
 export async function getReviewQueueTransactions(): Promise<TransactionRow[]> {
   const supabase = await supabaseSession();
+  const workspaceId = await activeWorkspaceIdOrNone();
   const { data, error } = await supabase
     .from("transactions")
     .select(TRANSACTION_COLUMNS)
+    .eq("workspace_id", workspaceId)
     .in("category_decision_status", REVIEW_QUEUE_STATUSES)
     .order("occurred_at", { ascending: false })
     .limit(REVIEW_QUEUE_LIMIT);
@@ -368,9 +383,11 @@ export async function getReviewQueueTransactions(): Promise<TransactionRow[]> {
 
 export async function getReviewQueueCount(): Promise<number> {
   const supabase = await supabaseSession();
+  const workspaceId = await activeWorkspaceIdOrNone();
   const { count, error } = await supabase
     .from("transactions")
     .select("id", { count: "exact", head: true })
+    .eq("workspace_id", workspaceId)
     .in("category_decision_status", REVIEW_QUEUE_STATUSES);
 
   if (error) {
@@ -812,10 +829,12 @@ export async function getCategoryTotalsComplete(): Promise<
   { totals: CategoryTotalRow[]; truncated: boolean }
 > {
   const supabase = await supabaseSession();
+  const workspaceId = await activeWorkspaceIdOrNone();
   const { rows, truncated } = await collectPages<TotalsRow & { id: string }>(async (from, to) => {
     const { data, error } = await supabase
       .from("transactions")
       .select("id, category, principal_effect_rwf, fee_effect_rwf")
+    .eq("workspace_id", workspaceId)
       .eq("direction", "out")
       .eq("settlement_state", "settled")
       // Phase U: exclude rows merged into a canonical duplicate.
@@ -843,9 +862,11 @@ export async function getCategoryTotalsComplete(): Promise<
  */
 export async function getCategoryTotals(): Promise<CategoryTotalRow[]> {
   const supabase = await supabaseSession();
+  const workspaceId = await activeWorkspaceIdOrNone();
   const { data, error } = await supabase
     .from("transactions")
     .select("id, category, principal_effect_rwf, fee_effect_rwf")
+    .eq("workspace_id", workspaceId)
     .eq("direction", "out")
     .eq("settlement_state", "settled")
     // Phase U: exclude rows merged into a canonical duplicate.
@@ -967,7 +988,7 @@ export async function getCategorySuggestions(): Promise<string[]> {
  * unlike the single-workspace assumption this replaced, "the caller's
  * workspace" is no longer unambiguous without this resolution.
  */
-export async function getActiveWorkspaceId(): Promise<string | null> {
+async function resolveActiveWorkspaceId(): Promise<string | null> {
   const cookieStore = await cookies();
   const supabase = await supabaseSession();
   // The web sends a cookie; the mobile app (no cookie) sends X-Workspace-Id.
@@ -1012,6 +1033,15 @@ export async function getActiveWorkspaceId(): Promise<string | null> {
   return data?.workspace_id ?? null;
 }
 
+/** Per-request memoised: many reads below scope themselves to it. */
+export const getActiveWorkspaceId: () => Promise<string | null> = cache(resolveActiveWorkspaceId);
+
+/** A workspace id that matches nothing: reads scoped to "no Space" come back empty. */
+const NO_WORKSPACE = "00000000-0000-0000-0000-000000000000";
+async function activeWorkspaceIdOrNone(): Promise<string> {
+  return (await getActiveWorkspaceId()) ?? NO_WORKSPACE;
+}
+
 /** The caller's active workspace's default_currency, or "RWF" if it can't be resolved - used to pre-select a currency in the budget/goal creation forms. */
 export async function getWorkspaceDefaultCurrency(): Promise<string> {
   const workspaceId = await getActiveWorkspaceId();
@@ -1042,9 +1072,11 @@ const ACCOUNT_COLUMNS =
 
 export async function getAccounts(): Promise<AccountRow[]> {
   const supabase = await supabaseSession();
+  const workspaceId = await activeWorkspaceIdOrNone();
   const { data, error } = await supabase
     .from("accounts")
     .select(ACCOUNT_COLUMNS)
+    .eq("workspace_id", workspaceId)
     .order("is_primary", { ascending: false })
     .order("created_at", { ascending: true });
 
@@ -1362,9 +1394,11 @@ const BUDGET_COLUMNS =
 
 export async function getBudgets(): Promise<BudgetRow[]> {
   const supabase = await supabaseSession();
+  const workspaceId = await activeWorkspaceIdOrNone();
   const { data, error } = await supabase
     .from("budgets")
     .select(BUDGET_COLUMNS)
+    .eq("workspace_id", workspaceId)
     .order("status", { ascending: true })
     .order("period_start", { ascending: false });
 
@@ -2032,9 +2066,11 @@ const GOAL_COLUMNS =
 
 export async function getGoals(): Promise<GoalRow[]> {
   const supabase = await supabaseSession();
+  const workspaceId = await activeWorkspaceIdOrNone();
   const { data, error } = await supabase
     .from("financial_goals")
     .select(GOAL_COLUMNS)
+    .eq("workspace_id", workspaceId)
     .order("status", { ascending: true })
     .order("created_at", { ascending: false });
 
@@ -2590,6 +2626,7 @@ export async function getCategorizationInsights(): Promise<
   CategorizationInsights
 > {
   const supabase = await supabaseSession();
+  const workspaceId = await activeWorkspaceIdOrNone();
 
   const [
     { data: transactions, error: txnError },
@@ -2599,7 +2636,8 @@ export async function getCategorizationInsights(): Promise<
       error: historyError,
     },
   ] = await Promise.all([
-    supabase.from("transactions").select("category_decision_status"),
+    supabase.from("transactions").select("category_decision_status")
+    .eq("workspace_id", workspaceId),
     supabase.from("categorization_policies").select(
       "id, name, category, is_active, usage_count",
     ).eq(

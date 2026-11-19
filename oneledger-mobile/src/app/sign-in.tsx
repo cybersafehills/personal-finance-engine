@@ -35,7 +35,7 @@ export default function SignIn() {
   }
 
   return (
-    <Screen centered>
+    <Screen centered edges={["top", "left", "right", "bottom"]}>
       <View style={{ gap: space[1] }}>
         <Text variant="title" color="brandNavy" accessibilityRole="header">
           OneLedger

@@ -70,6 +70,7 @@ export function ReviewList({
         ListHeaderComponent={
           <View style={{ paddingTop: space[4], gap: space[3], marginBottom: space[3] }}>
             <ScreenHeader
+              inline
               title="Inbox"
               subtitle={notice ?? "Transactions that need a category check"}
             />

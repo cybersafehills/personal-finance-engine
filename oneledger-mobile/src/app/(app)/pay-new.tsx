@@ -57,12 +57,10 @@ export default function PayNew() {
   // The first account that can do the job is preselected (like the web form).
   const chosenId = accounts?.find((a) => a.id === accountId)?.id ?? accounts?.[0]?.id ?? null;
 
-  const cancel = <Button label="Cancel" variant="ghost" onPress={() => router.back()} />;
 
   if (!kind) {
     return (
       <Screen>
-        {cancel}
         <EmptyState title="Nothing to pay here" description="Open Pay and choose a person or a merchant." />
       </Screen>
     );
@@ -99,7 +97,6 @@ export default function PayNew() {
 
   return (
     <Screen>
-      {cancel}
       <ScreenHeader title={person ? "Pay a person" : "Pay a merchant"} subtitle={PAY_COPY.feeNotice} />
 
       {people && people.saved.length > 0 ? (

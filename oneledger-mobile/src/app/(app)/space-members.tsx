@@ -38,7 +38,6 @@ export default function SpaceMembers() {
   if (!active || active.kind === "personal") {
     return (
       <Screen>
-        <Button label="Back" variant="ghost" onPress={() => router.back()} />
         <ScreenHeader title="Space & members" subtitle="Personal is yours alone. Create a shared Space to collaborate." />
         <EmptyState
           variant="setup"
@@ -85,7 +84,6 @@ function SpaceMembersFor({ space: sp }: { space: Space }) {
 
   return (
     <Screen>
-      <Button label="Back" variant="ghost" onPress={() => router.back()} />
       <ScreenHeader title={sp.name} subtitle={`${kindLabel(sp.kind)} · members and invites`} />
 
       {sp.kind === "household" ? <HowHouseholdsWork /> : null}

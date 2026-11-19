@@ -152,12 +152,6 @@ describe("Transaction detail screen", () => {
     expect(await screen.findByText("This transaction isn't available")).toBeTruthy();
   });
 
-  it("goes back", async () => {
-    mockGetTransaction.mockResolvedValue(txn());
-    await render(<TransactionDetail />);
-    await fireEvent.press(await screen.findByText("Back"));
-    expect(router.back).toHaveBeenCalled();
-  });
 
   describe("Pay again", () => {
     const person = { type: "pay_person", msisdn: "250788123456", name: "Jean" } as const;

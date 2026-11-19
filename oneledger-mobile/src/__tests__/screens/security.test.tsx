@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react-native";
 
 import Security from "@/app/(app)/security";
-import { resetRouterMock, router } from "@/test/router-mock";
+import { resetRouterMock } from "@/test/router-mock";
 
 const mockSetEnabled = jest.fn();
 const lockState = { available: true, enabled: false };
@@ -49,10 +49,8 @@ describe("Security screen", () => {
     expect(screen.getByText(/needs a fingerprint, face or passcode/)).toBeTruthy();
   });
 
-  it("reassures that recording continues while locked, and goes back", async () => {
+  it("reassures that recording continues while locked", async () => {
     await render(<Security />);
     expect(screen.getByText("Recording your MoMo messages keeps working while the app is locked.")).toBeTruthy();
-    await fireEvent.press(screen.getByText("Back"));
-    expect(router.back).toHaveBeenCalled();
   });
 });

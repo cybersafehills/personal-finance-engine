@@ -24,7 +24,6 @@ export default function Bills() {
 
   return (
     <Screen>
-      <Button label="Back" variant="ghost" onPress={() => router.back()} />
       <ScreenHeader title="Bills" subtitle="Invoices and receipts in this Space" />
 
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space[2] }}>

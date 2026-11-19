@@ -105,12 +105,6 @@ export default function ShortcutsGuide() {
 
   return (
     <Screen>
-      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-        <Text variant="label" color="textMuted">
-          Record MoMo on iPhone
-        </Text>
-        <Button label="Close" variant="ghost" onPress={() => router.back()} />
-      </View>
       {PREVIEW_ONLY ? (
         <Badge variant="attention">Walkthrough only: this isn&apos;t an iPhone</Badge>
       ) : null}

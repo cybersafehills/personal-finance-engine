@@ -1,4 +1,3 @@
-import { router } from "expo-router";
 import { useCallback, useState } from "react";
 import { Alert, View } from "react-native";
 
@@ -9,8 +8,7 @@ import {
   deleteTrustedRecipient,
   getTrustedRecipients,
   setRecipientTrust,
-  type TrustedRecipient,
-} from "@/features/pay/recipients";
+  type TrustedRecipient } from "@/features/pay/recipients";
 import { useQuery } from "@/hooks/useQuery";
 import { space } from "@/theme/tokens";
 
@@ -37,14 +35,12 @@ export default function Recipients() {
         onPress: async () => {
           setNote((await deleteTrustedRecipient(r.id)) ? null : "Could not remove the recipient.");
           refresh();
-        },
-      },
+        } },
     ]);
   }
 
   return (
     <Screen>
-      <Button label="Back" variant="ghost" onPress={() => router.back()} />
       <ScreenHeader title="Saved recipients" subtitle="People and merchants you pay often." />
 
       {adding ? (
