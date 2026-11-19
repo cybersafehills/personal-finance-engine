@@ -26,6 +26,10 @@ export const colors = {
   // Mobile-only for now: the orange "Request payment" accent in the Pay sheet (the green twin is moneyPositive).
   moneyRequest: "#c2610c",
   moneyRequestBg: "#fdf0e2",
+  // eKash brand colours (from its official logo): the teal "e" and the navy wordmark. Used for the eKash shortcut in the Pay sheet.
+  ekash: "#1a95a1",
+  ekashNavy: "#0e3d63",
+  ekashBg: "#e5f4f5",
   lifetimeBadgeBg: "#f5c518",
   lifetimeBadgeText: "#1a1a1a",
 
