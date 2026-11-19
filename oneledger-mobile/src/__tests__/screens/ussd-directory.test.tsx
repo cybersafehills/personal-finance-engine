@@ -49,11 +49,25 @@ beforeEach(() => {
 });
 
 describe("USSD directory", () => {
-  it("lists codes with their verification status", async () => {
+  it("lists the codes with no verification badges", async () => {
     await render(<UssdDirectory />);
     expect(await screen.findByText("Check balance")).toBeTruthy();
-    expect(screen.getByText("Verified")).toBeTruthy();
-    expect(screen.getByText("Unverified")).toBeTruthy();
+    expect(screen.getByText("Airtel balance")).toBeTruthy();
+    expect(screen.queryByText("Verified")).toBeNull();
+    expect(screen.queryByText("Unverified")).toBeNull();
+    expect(screen.queryByText("Not officially verified")).toBeNull();
+  });
+
+  it("puts the eKash code first, ahead of the alphabetical order", async () => {
+    mockDirectory.mockResolvedValue([
+      code({ id: "a", slug: "access-bank", name: "Access Bank Rwanda - eKash transfer" }),
+      code({ id: "b", slug: "bk", name: "Bank of Kigali - eKash transfer" }),
+      code({ id: "e", slug: "ekash-mtn-rwanda", name: "eKash - send money to a bank account or Mobile Money wallet", template: "*182*1*2#" }),
+    ]);
+    await render(<UssdDirectory />);
+    await screen.findByText("eKash - send money to a bank account or Mobile Money wallet");
+    const names = screen.getAllByRole("link").map((n) => n.props.accessibilityLabel);
+    expect(names[0]).toBe("eKash - send money to a bank account or Mobile Money wallet");
   });
 
   it("shows favourites first when nothing is filtered", async () => {
@@ -146,6 +160,9 @@ describe("USSD code page", () => {
   it("puts the code first: the name, a one-line summary, and details only below", async () => {
     await render(<UssdCode />);
     expect(await screen.findByText("Send money")).toBeTruthy();
+    // No verification badge either way: every listed code is simply offered.
+    expect(screen.queryByText("Verified")).toBeNull();
+    expect(screen.queryByText("Not officially verified")).toBeNull();
     expect(screen.getByText("Send to a number.")).toBeTruthy();
     // The long-form material is tucked away until asked for.
     expect(screen.queryByText("1. Enter your PIN when asked.")).toBeNull();

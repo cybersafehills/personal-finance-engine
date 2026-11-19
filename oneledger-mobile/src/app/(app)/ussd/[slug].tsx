@@ -4,7 +4,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
 import { Pressable, Share, View } from "react-native";
 
-import { Badge, Button, Card, EmptyState, Screen, ScreenHeader, Text, TextField } from "@/components/ds";
+import { Button, Card, EmptyState, Screen, ScreenHeader, Text, TextField } from "@/components/ds";
 import { buildTelHref, fillUssdTemplate, type ParamSpec } from "@/features/ussd/capability";
 import { getFavouriteIds, getServiceCodeBySlug, reportServiceCode, REPORT_TYPES, toggleFavourite, type ReportType } from "@/features/ussd/queries";
 import { firstSentence } from "@/features/ussd/text";
@@ -117,9 +117,6 @@ export default function UssdCode() {
           <Text variant="label" color="textMuted">
             {`${code.provider} · ${CATEGORY_LABELS[code.category] ?? ""}`}
           </Text>
-          <View style={{ flexDirection: "row", marginTop: space[1] }}>
-            <Badge variant={code.verified ? "positive" : "attention"}>{code.verified ? "Verified" : "Not officially verified"}</Badge>
-          </View>
         </View>
         <Pressable
           accessibilityRole="button"
