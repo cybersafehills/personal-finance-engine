@@ -44,7 +44,6 @@ export default function UssdDirectory() {
 
   return (
     <Screen>
-      <Button label="Back" variant="ghost" onPress={() => router.back()} />
       <ScreenHeader title="USSD directory" subtitle="Verified USSD codes for Mobile Money, banking and government services in Rwanda." />
 
       <TextField label="Search" value={query} onChangeText={setQuery} placeholder="Name, service or code" autoCapitalize="none" returnKeyType="search" />

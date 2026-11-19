@@ -16,12 +16,16 @@ import { colors, space } from "@/theme/tokens";
 export function Screen({
   children,
   centered = false,
-  edges,
+  edges = ["left", "right", "bottom"],
 }: {
   children: ReactNode;
   /** Vertically centre the content (sign-in style screens). */
   centered?: boolean;
-  /** Safe-area edges to pad; drop "top" under the app header. */
+  /**
+   * Safe-area edges to pad. Defaults to everything but the top: pushed screens sit
+   * under the native navigation header, which owns the top inset. Screens with no
+   * header (sign-in, the connect modal) pass `["top", ...]`.
+   */
   edges?: readonly Edge[];
 }) {
   return (

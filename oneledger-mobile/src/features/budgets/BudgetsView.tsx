@@ -53,10 +53,7 @@ export function BudgetsView({ embedded = false }: { embedded?: boolean }) {
 
   return (
     <Screen edges={embedded ? ["left", "right"] : undefined}>
-      {embedded ? null : (
-        <Button label="Back" variant="ghost" onPress={() => router.back()} />
-      )}
-      <ScreenHeader title={embedded ? "Plan" : "Budget"} subtitle="How this period is going" />
+      <ScreenHeader title={embedded ? "Plan" : "Budget"} subtitle="How this period is going" inline={embedded} />
       {showDrafts && activeId && session ? (
         <BudgetDrafts key={`${session.user.id}:${activeId}`} scope={{ userId: session.user.id, workspaceId: activeId }} onActivated={refresh} />
       ) : null}

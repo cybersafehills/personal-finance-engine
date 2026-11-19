@@ -1,4 +1,3 @@
-import { router } from "expo-router";
 import { useCallback, type ReactNode } from "react";
 import { Platform, View } from "react-native";
 
@@ -18,7 +17,7 @@ import { useActiveSpace } from "@/features/spaces/ActiveSpaceProvider";
 import { getGoals } from "@/features/goals/queries";
 import type { Goal } from "@/features/goals/types";
 import { useQuery } from "@/hooks/useQuery";
-import { formatAmount } from "../../../../shared/financial";
+import { formatAmount } from "../../../../web/shared/financial";
 import { space } from "@/theme/tokens";
 
 // Your savings goals and how each is going. Progress and the pace lines come
@@ -36,7 +35,6 @@ export default function Goals() {
 
   return (
     <Screen>
-      <Button label="Back" variant="ghost" onPress={() => router.back()} />
       <ScreenHeader title="Goals" subtitle="Emergency funds, investing, purchases and debt" />
       {scope && canManage ? (
         <NewGoalControl key={`${scope.userId}:${scope.workspaceId}`} scope={scope} onSaved={refresh} />

@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { Platform } from "react-native";
 
-import { CURRENCY_SCALE } from "../../../../shared/financial";
+import { CURRENCY_SCALE } from "../../../../web/shared/financial";
 import { supabase } from "@/api/supabase";
 import { selectedWorkspaceId } from "@/features/spaces/selected-space";
 import { config } from "@/lib/config";

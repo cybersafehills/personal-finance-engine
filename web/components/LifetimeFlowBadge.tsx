@@ -1,4 +1,4 @@
-import { formatAmount } from "../../shared/financial";
+import { formatAmount } from "../shared/financial";
 import { formatRwf } from "../lib/format";
 import type { LifetimeFlowTotals } from "../lib/queries";
 

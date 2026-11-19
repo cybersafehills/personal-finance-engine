@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 import { View } from "react-native";
 
-import { formatAmount } from "../../../../shared/financial";
+import { formatAmount } from "../../../../web/shared/financial";
 import { Button, Card, Chip, Text } from "@/components/ds";
 import { usePrivacy } from "@/features/privacy/PrivacyProvider";
 import { useQuery } from "@/hooks/useQuery";

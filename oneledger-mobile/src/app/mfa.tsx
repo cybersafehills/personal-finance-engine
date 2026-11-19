@@ -36,7 +36,7 @@ export default function Mfa() {
   }
 
   return (
-    <Screen centered>
+    <Screen centered edges={["top", "left", "right", "bottom"]}>
       <View style={{ gap: space[1] }}>
         <Text variant="title" accessibilityRole="header">
           Confirm it&apos;s you

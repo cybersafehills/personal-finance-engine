@@ -3,8 +3,8 @@ import {
   completePages,
   currencyFlows,
   formatAmount,
-} from "../../shared/financial.ts";
-import fixture from "../../shared/financial-fixtures.json" with {
+} from "../shared/financial.ts";
+import fixture from "../shared/financial-fixtures.json" with {
   type: "json",
 };
 Deno.test("golden currency and transfer contract", () => {
@@ -35,7 +35,7 @@ Deno.test("read failure and coverage ceiling are never financial zero", async ()
 
 Deno.test("disposable acceptance facts cover two Spaces and 20,001 household entries", async () => {
   const { goldenAcceptance } = await import(
-    "../../shared/golden-acceptance.ts"
+    "../shared/golden-acceptance.ts"
   );
   const fixture = goldenAcceptance();
   assertEquals(

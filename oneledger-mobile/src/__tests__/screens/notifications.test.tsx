@@ -112,11 +112,10 @@ describe("Notifications screen", () => {
     expect(await screen.findByText("Try again")).toBeTruthy();
   });
 
-  it("goes back", async () => {
+  it("puts its title in the navigation header (the back arrow is native)", async () => {
     mockGet.mockResolvedValue([]);
     await render(<NotificationsScreen />);
-    await fireEvent.press(await screen.findByText("Back"));
-    expect(router.back).toHaveBeenCalled();
+    expect(await screen.findByRole("header", { name: "Notifications" })).toBeTruthy();
   });
 
   it("shows how many are unread", async () => {

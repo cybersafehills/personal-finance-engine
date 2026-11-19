@@ -1,4 +1,4 @@
-import { completePages } from "../../../../shared/financial";
+import { completePages } from "../../../../web/shared/financial";
 import { supabase } from "@/api/supabase";
 
 export type ShareMode = "share_transactions" | "share_account";

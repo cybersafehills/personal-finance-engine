@@ -1,4 +1,4 @@
-import { currencyFlows, completePages, type FinancialRow, type CurrencyFlow } from "../../../../shared/financial";
+import { currencyFlows, completePages, type FinancialRow, type CurrencyFlow } from "../../../../web/shared/financial";
 import { selectedWorkspaceId } from "@/features/spaces/selected-space";
 import { assertCachedAccess } from "@/offline/visibility";
 import { supabase } from "@/api/supabase";

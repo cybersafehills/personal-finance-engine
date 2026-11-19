@@ -4,7 +4,7 @@ Implementation evidence: 2026-11-19, local branch `codex/phase1-foundation`, bas
 
 ## Amounts and currencies
 
-`shared/financial.ts` is framework-free and imported by web and native. Amounts are signed integer minor units. Legacy columns ending `_rwf` are interpreted with each row's currency, not implicitly converted to RWF. RWF has scale 0; USD and EUR have scale 2. The golden formatting vectors are RWF 1,234, USD 12.34, EUR 12.34 for 1,234 minor units. Arithmetic uses bigint, rejects unsafe numeric inputs, and rejects unsafe aggregate conversion to number. Unsupported currencies or missing authoritative effects are unavailable, never guessed zero. Existing database values are preserved.
+`web/shared/financial.ts` is framework-free and imported by web and native. Amounts are signed integer minor units. Legacy columns ending `_rwf` are interpreted with each row's currency, not implicitly converted to RWF. RWF has scale 0; USD and EUR have scale 2. The golden formatting vectors are RWF 1,234, USD 12.34, EUR 12.34 for 1,234 minor units. Arithmetic uses bigint, rejects unsafe numeric inputs, and rejects unsafe aggregate conversion to number. Unsupported currencies or missing authoritative effects are unavailable, never guessed zero. Existing database values are preserved.
 
 New Home/lifetime flows group by currency. Legacy RWF compatibility properties contain only RWF facts. Categories and existing generated RWF reports remain explicitly RWF-only. There is no FX model or invented exchange rate. Native wallet displays now name USD/EUR explicitly.
 
@@ -24,6 +24,6 @@ Primary affected financial failures throw to error boundaries/retry UI. Optional
 
 ## Golden facts and evidence limits
 
-`shared/financial-fixtures.json` supplies currency/transfer/state vectors. `shared/golden-acceptance.ts` supplies synthetic facts for two Spaces, five wallets, roles, shared/private sources, 20,001 household entries, category splits, budget/goal facts, revocation expectations and Kigali boundaries. Web Deno and native Jest both consume the shared contract; pagination tests cover 999/1,000/1,001/20,001 rows under an artificial 137-row server cap.
+`web/shared/financial-fixtures.json` supplies currency/transfer/state vectors. `web/shared/golden-acceptance.ts` supplies synthetic facts for two Spaces, five wallets, roles, shared/private sources, 20,001 household entries, category splits, budget/goal facts, revocation expectations and Kigali boundaries. Web Deno and native Jest both consume the shared contract; pagination tests cover 999/1,000/1,001/20,001 rows under an artificial 137-row server cap.
 
 These are domain and adapter-ready acceptance fixtures. They are not yet one fully seeded Supabase HTTP dataset comparing every wallet, budget, Insight and device screen. SQL fixtures independently exercise the actual migration/RLS boundaries. The complete cross-platform integration comparison remains a release gate. No shared TypeScript result proves Android or iOS device behavior.

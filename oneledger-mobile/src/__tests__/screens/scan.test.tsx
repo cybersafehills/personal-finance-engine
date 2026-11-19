@@ -3,7 +3,7 @@ import { Platform } from "react-native";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react-native";
 
 import Scan from "@/app/(app)/scan";
-import { resetRouterMock, router } from "@/test/router-mock";
+import { resetRouterMock } from "@/test/router-mock";
 
 const mockClassify = jest.fn();
 const mockPrepare = jest.fn();
@@ -170,9 +170,8 @@ describe("Scan to pay", () => {
     expect(screen.queryByRole("button", { name: "Open phone dialer" })).toBeNull();
   });
 
-  it("goes back", async () => {
+  it("puts its title in the navigation header (the back arrow is native)", async () => {
     await render(<Scan />);
-    await fireEvent.press(screen.getByRole("button", { name: "Back" }));
-    expect(router.back).toHaveBeenCalled();
+    expect(screen.getByRole("header", { name: "Scan to pay" })).toBeTruthy();
   });
 });

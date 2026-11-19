@@ -1,19 +1,23 @@
 -- Reconcile two counterparty migrations that were written in parallel.
 --
--- 20270104000000_counterparty_kind_self (#283) widened counterparties.kind to
+-- 20270104000001_counterparty_kind_self (#283; originally 20270104000000) widened counterparties.kind to
 -- allow 'self' ("my own account") and re-issued update_counterparty to accept it.
 -- 20270105000000_counterparty_source_visibility (#282) re-issued the same function
 -- to add the household source-visibility guard, but from the OLDER body, so on a
 -- fresh chain it silently took 'self' back out: the CHECK allowed 'self' while the
 -- function refused it.
 --
--- PRODUCTION is worse: two files carried the version 20270104000000 (this one and
--- 20270104000000_balance_observations_source_visibility), and `supabase db push`
--- keys on the version, so it applied balance_observations and never ran
--- kind_self. Production therefore has neither the widened CHECK nor the 'self'
--- branch. The files cannot be renamed now without making a later deploy report
--- an out-of-order migration, so this one, with a new unique version, restores the
--- intended end state everywhere:
+-- Two files carried the version 20270104000000 (this one's predecessor and
+-- 20270104000000_balance_observations_source_visibility). That broke fresh
+-- databases outright (`supabase start` aborts on the duplicate schema_migrations
+-- key, which turned the e2e job red for every PR) and, in production, `supabase db
+-- push` applied balance_observations and never ran kind_self. kind_self has been
+-- renamed to the unique version 20270104000001. That rename is safe only because
+-- production had applied nothing newer than 20270104000000 and the visibility
+-- migration (20270105000000) had not run yet; it is therefore pending in
+-- production and applies in order (04000001, then 05, then this one).
+-- Even so, kind_self's function body is overwritten by 20270105000000, so this
+-- migration, with its own unique version, restores the intended end state:
 --   * the kind CHECK allows 'self' (idempotent: identical to kind_self's), and
 --   * update_counterparty has BOTH the 'self' kind and the source-visibility guard.
 -- Safe to run on a database where kind_self already ran, and on one where it did

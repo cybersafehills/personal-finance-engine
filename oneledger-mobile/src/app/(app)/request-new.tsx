@@ -102,7 +102,6 @@ export default function RequestNew() {
 
   return (
     <Screen>
-      <Button label="Back" variant="ghost" onPress={() => router.back()} />
       <ScreenHeader title="New payment request" />
 
       <TextField label="Amount" value={input.amountText} onChangeText={(t) => set("amountText", t)} keyboardType="decimal-pad" autoComplete="off" error={errors.amount} />

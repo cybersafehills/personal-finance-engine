@@ -1,6 +1,6 @@
 import "server-only";
 
-import { completePages, minor } from "../../../shared/financial";
+import { completePages, minor } from "../../shared/financial";
 import { lastNCompleteMonthKeys } from "../budget-math";
 import { isBillsEnabled } from "../bills/gate";
 import { kigaliDateKey, kigaliDayBoundsUtc } from "../kigali-time";

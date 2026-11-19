@@ -1,4 +1,4 @@
-import { minor } from "../../shared/financial.ts";
+import { minor } from "../shared/financial.ts";
 // Category totals ("where your money has gone"), as pure functions so they can be
 // unit-tested with `deno test` (category_totals_test.ts).
 //

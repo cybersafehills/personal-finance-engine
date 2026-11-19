@@ -14,7 +14,7 @@
 // deno-lint-ignore no-explicit-any
 type Client = { from(table: string): any }; // eslint-disable-line @typescript-eslint/no-explicit-any
 
-import { completePages } from "../../shared/financial.ts";
+import { completePages } from "../shared/financial.ts";
 export async function ownAccountTransactionIds(
   supabase: Client,
   workspaceId: string | null,

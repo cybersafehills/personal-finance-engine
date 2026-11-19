@@ -141,6 +141,7 @@ function TransactionLedger() {
         ListHeaderComponent={
           <View style={{ paddingTop: space[4], gap: space[3] }}>
             <ScreenHeader
+              inline
               title="Transactions"
               action={
                 <Button

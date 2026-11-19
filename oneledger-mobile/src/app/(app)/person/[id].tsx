@@ -42,7 +42,6 @@ export default function PersonScreen() {
 
   return (
     <Screen>
-      <Button label="Back" variant="ghost" onPress={() => router.back()} />
       {loading && !data ? (
         <Text variant="label" color="textMuted">
           Loading…

@@ -1,4 +1,4 @@
-import { completePages } from "../../shared/financial";
+import { completePages } from "../shared/financial";
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { supabaseServer } from "./supabase-server";

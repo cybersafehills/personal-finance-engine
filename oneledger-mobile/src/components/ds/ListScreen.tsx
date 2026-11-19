@@ -11,10 +11,10 @@ import { colors, space } from "@/theme/tokens";
  */
 export function ListScreen({
   children,
-  edges = ["top", "left", "right"],
+  edges = ["left", "right"],
 }: {
   children: ReactNode;
-  /** Drop "top" on screens under the app header (it owns the inset). */
+  /** Defaults to no "top": the native header (or the tab app header) owns that inset. */
   edges?: readonly Edge[];
 }) {
   return (

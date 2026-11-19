@@ -1,4 +1,4 @@
-import { formatAmount, isCurrency } from "../../../../shared/financial";
+import { formatAmount, isCurrency } from "../../../../web/shared/financial";
 import { usePrivacy } from "@/features/privacy/PrivacyProvider";
 import { formatSignedRwf } from "@/lib/money";
 import type { ColorToken } from "@/theme/tokens";

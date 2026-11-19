@@ -1,6 +1,5 @@
 import { addWallet, makeDefaultWallet, manageWallet } from "@/features/wallets/actions";
 import { usePrivacy } from "@/features/privacy/PrivacyProvider";
-import { router } from "expo-router";
 import { useCallback, useState } from "react";
 import { View } from "react-native";
 
@@ -37,7 +36,6 @@ function WalletsInSpace({ workspaceId, role, kind }: { workspaceId?: string; rol
 
   return (
     <Screen>
-      <Button label="Back" variant="ghost" onPress={() => router.back()} />
       <ScreenHeader title="Wallets" subtitle="Your balances, and how sure we are" />
       {data?.ok && role === "owner" && kind !== "household" ? <AddWallet onSaved={onSaved} /> : null}
       {error ? <EmptyState title={error} action={<Button label="Try again" onPress={refresh} />} /> : null}

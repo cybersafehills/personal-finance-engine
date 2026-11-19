@@ -24,7 +24,6 @@ export default function Settings() {
 
   return (
     <Screen>
-      <Button label="Back" variant="ghost" onPress={() => router.back()} />
       <ScreenHeader title="Settings" />
       <Card>
         <Text variant="bodyStrong">Full financial privacy</Text>
@@ -52,8 +51,7 @@ export default function Settings() {
                   justifyContent: "center",
                   paddingVertical: space[3],
                   borderTopWidth: index === 0 ? 0 : 1,
-                  borderTopColor: colors.borderSubtle,
-                }}
+                  borderTopColor: colors.borderSubtle }}
               >
                 <Text variant="bodyStrong">{row.label}</Text>
                 <Text variant="caption" color="textMuted">

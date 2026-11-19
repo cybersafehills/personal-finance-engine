@@ -1,6 +1,6 @@
 import { Platform } from "react-native";
 
-import { completePages, CURRENCY_SCALE, isCurrency, type Currency } from "../../../../shared/financial";
+import { completePages, CURRENCY_SCALE, isCurrency, type Currency } from "../../../../web/shared/financial";
 import { deviceStore } from "@/lib/device-store";
 import { allocationPercentages, type AllocationFields, type Percentages } from "./allocation-editor";
 import { budgetSession, type BudgetScope } from "./budget-session";

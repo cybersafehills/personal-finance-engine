@@ -2,7 +2,7 @@ import { supabase } from "@/api/supabase";
 import { createClient } from "@supabase/supabase-js";
 import { config } from "@/lib/config";
 import type { ManualAccount } from "@/features/manual/input";
-import { isCurrency, completePages } from "../../../shared/financial";
+import { isCurrency, completePages } from "../../../web/shared/financial";
 import type { SnapshotPage } from "./visibility";
 
 import type { ServerTransaction, CreateManualPayload, SetCategoryPayload } from "./local-store";

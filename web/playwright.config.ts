@@ -93,6 +93,9 @@ export default defineConfig({
       // wallets.spec.ts. Also opens GET /api/mobile/accounts; adds no
       // navigation entry, only a link on /settings/accounts.
       BALANCE_PROVENANCE_ENABLED: "true",
+      // Fee calculator (/pay/fees, GET /api/mobile/fees/estimate) for fees.spec.ts.
+      // Adds only a link on the eKash network page.
+      FEE_CALCULATOR_ENABLED: "true",
       // Integrations: the base area + Import Studio + Export Center for
       // integrations-nav.spec.ts / integrations-import.spec.ts. These
       // default on ("on unless exactly false"); set explicitly so the

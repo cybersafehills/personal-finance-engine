@@ -1,4 +1,4 @@
-import { formatAmount, isCurrency } from "../../shared/financial";
+import { formatAmount, isCurrency } from "../shared/financial";
 import { formatSignedRwf } from "../lib/format";
 
 const SIZE_CLASSES = {

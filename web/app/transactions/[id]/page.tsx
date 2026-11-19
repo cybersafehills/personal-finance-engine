@@ -1,4 +1,4 @@
-import { formatAmount } from "../../../../shared/financial";
+import { formatAmount } from "../../../shared/financial";
 import { notFound } from "next/navigation";
 import {
   getActiveWorkspaceId,

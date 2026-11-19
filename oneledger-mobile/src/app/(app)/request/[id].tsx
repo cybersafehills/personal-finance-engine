@@ -1,4 +1,4 @@
-import { router, useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams } from "expo-router";
 import { useCallback, useState } from "react";
 import { View } from "react-native";
 
@@ -35,7 +35,6 @@ export default function RequestDetail() {
 
   return (
     <Screen>
-      <Button label="Back" variant="ghost" onPress={() => router.back()} />
       {loading && !data ? (
         <Text variant="label" color="textMuted">
           Loading…

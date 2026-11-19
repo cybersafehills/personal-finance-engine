@@ -1,0 +1,411 @@
+// Transfer-fee estimates (OneLedger 3.0, spec §9 "Transfer fee intelligence").
+// PURE: no I/O, no framework imports, deno-testable.
+//
+// Two independent kinds of evidence, never blended into one number:
+//
+//  1. PUBLISHED schedule - a source-attributed, dated route_fees row for a
+//     payment network. Turned into a number only when the row actually says
+//     how: a fixed amount, a percentage (with optional min/max), "none", or a
+//     published MAXIMUM (an upper bound, never a prediction). A "tiered",
+//     "unknown" or "varies by institution" fee yields NO number - the schema
+//     stores no tiers, so inventing one would be fabrication.
+//  2. HISTORY - the fees this Space actually paid on similar past payments of
+//     the same type, read from the user's own ledger. Reported as an observed
+//     range with how many payments it rests on; with too few, no estimate.
+//
+// Money is bigint minor units with an explicit currency. Percentages are
+// integer basis points. No floating point touches an amount.
+//
+// Out of scope BY DESIGN: comparing "one transfer vs several smaller ones".
+// The spec forbids automating splits to get around provider limits or rules,
+// so nothing here suggests or computes one (see limitWarnings).
+
+import { isSupportedCurrency, minorUnitsPerMajor } from "../money.ts";
+
+// ----------------------------- published schedule -------------------------
+
+export type FeeSchedule = {
+  fee_type: string;
+  fixed_fee_minor: number | string | null;
+  percentage_bps: number | string | null;
+  min_fee_minor: number | string | null;
+  max_fee_minor: number | string | null;
+  currency: string;
+  effective_from: string | null;
+  effective_to: string | null;
+  source_url: string | null;
+  source_label: string | null;
+  note_en: string | null;
+};
+
+export type NotComputableReason =
+  | "tiered"
+  | "unknown"
+  | "varies_by_institution"
+  | "incomplete"
+  | "currency_mismatch"
+  | "unrecognised";
+
+export type PublishedEstimate =
+  /** The schedule states exactly one amount (fixed fee, or no fee). */
+  | { status: "exact"; feeMinor: bigint }
+  /** A percentage: the whole-unit fee lies between floor and ceiling. */
+  | { status: "range"; minMinor: bigint; maxMinor: bigint }
+  /** A published MAXIMUM: the fee is at most this; the actual fee is not stated. */
+  | { status: "upper_bound"; maxMinor: bigint }
+  | { status: "not_computable"; reason: NotComputableReason }
+  /** The schedule is not in effect at `now`. */
+  | { status: "not_in_effect"; reason: "not_yet" | "expired" };
+
+function big(v: number | string | null | undefined): bigint | null {
+  if (v === null || v === undefined || v === "") return null;
+  try {
+    return typeof v === "string" ? BigInt(v) : BigInt(Math.trunc(v));
+  } catch {
+    return null;
+  }
+}
+
+/** Is `s` in effect at `now`? effective_from inclusive, effective_to exclusive. */
+export function inEffect(
+  s: { effective_from: string | null; effective_to: string | null },
+  now: Date,
+): "yes" | "not_yet" | "expired" {
+  const t = now.getTime();
+  if (s.effective_from && Date.parse(s.effective_from) > t) return "not_yet";
+  if (s.effective_to && Date.parse(s.effective_to) <= t) return "expired";
+  return "yes";
+}
+
+export function estimatePublishedFee(
+  fee: FeeSchedule,
+  amountMinor: bigint,
+  currency: string,
+  now: Date,
+): PublishedEstimate {
+  const eff = inEffect(fee, now);
+  if (eff !== "yes") return { status: "not_in_effect", reason: eff };
+  if (fee.currency !== currency) {
+    return { status: "not_computable", reason: "currency_mismatch" };
+  }
+
+  const fixed = big(fee.fixed_fee_minor);
+  const bps = big(fee.percentage_bps);
+  const min = big(fee.min_fee_minor);
+  const max = big(fee.max_fee_minor);
+
+  switch (fee.fee_type) {
+    case "none":
+      return { status: "exact", feeMinor: 0n };
+    case "fixed":
+      return fixed === null
+        ? { status: "not_computable", reason: "incomplete" }
+        : { status: "exact", feeMinor: fixed };
+    case "percentage": {
+      if (bps === null) {
+        return { status: "not_computable", reason: "incomplete" };
+      }
+      const num = amountMinor * bps;
+      let lo = num / 10000n; // floor
+      let hi = (num + 9999n) / 10000n; // ceiling
+      if (min !== null) {
+        if (lo < min) lo = min;
+        if (hi < min) hi = min;
+      }
+      if (max !== null) {
+        if (lo > max) lo = max;
+        if (hi > max) hi = max;
+      }
+      return lo === hi
+        ? { status: "exact", feeMinor: lo }
+        : { status: "range", minMinor: lo, maxMinor: hi };
+    }
+    case "published_maximum":
+      return max === null
+        ? { status: "not_computable", reason: "incomplete" }
+        : { status: "upper_bound", maxMinor: max };
+    case "tiered":
+    case "unknown":
+    case "varies_by_institution":
+      return { status: "not_computable", reason: fee.fee_type };
+    default:
+      return { status: "not_computable", reason: "unrecognised" };
+  }
+}
+
+/**
+ * Which schedule row applies now. Among rows in effect, the one that took
+ * effect most recently; otherwise the most recent expired / upcoming row so
+ * the page can say WHY nothing applies instead of silently showing nothing.
+ */
+export function pickSchedule(
+  rows: readonly FeeSchedule[],
+  now: Date,
+): { schedule: FeeSchedule; state: "yes" | "not_yet" | "expired" } | null {
+  const rank = (r: FeeSchedule) => Date.parse(r.effective_from ?? "") || 0;
+  const byRecent = [...rows].sort((a, b) => rank(b) - rank(a));
+  for (const state of ["yes", "expired", "not_yet"] as const) {
+    const hit = byRecent.find((r) => inEffect(r, now) === state);
+    if (hit) return { schedule: hit, state };
+  }
+  return null;
+}
+
+// --------------------------------- limits ---------------------------------
+
+export type LimitRow = {
+  min_txn_minor: number | string | null;
+  max_txn_minor: number | string | null;
+  daily_limit_minor: number | string | null;
+  currency: string;
+  is_published_maximum: boolean;
+  effective_from: string | null;
+  effective_to: string | null;
+  source_label: string | null;
+};
+
+export type LimitWarning = {
+  kind: "below_minimum" | "above_maximum" | "above_daily";
+  limitMinor: bigint;
+  /** The platform's published ceiling (institutions may enforce lower limits). */
+  publishedMaximum: boolean;
+};
+
+/**
+ * Warnings only. This deliberately never proposes splitting an amount to fit
+ * under a limit (spec §9): the page tells the user the limit and sends them to
+ * the provider's own rules.
+ */
+export function limitWarnings(
+  limits: readonly LimitRow[],
+  amountMinor: bigint,
+  currency: string,
+  now: Date,
+): LimitWarning[] {
+  const out: LimitWarning[] = [];
+  for (const l of limits) {
+    if (l.currency !== currency || inEffect(l, now) !== "yes") continue;
+    const min = big(l.min_txn_minor);
+    const max = big(l.max_txn_minor);
+    const daily = big(l.daily_limit_minor);
+    if (min !== null && amountMinor < min) {
+      out.push({
+        kind: "below_minimum",
+        limitMinor: min,
+        publishedMaximum: false,
+      });
+    }
+    if (max !== null && amountMinor > max) {
+      out.push({
+        kind: "above_maximum",
+        limitMinor: max,
+        publishedMaximum: l.is_published_maximum,
+      });
+    }
+    if (daily !== null && amountMinor > daily) {
+      out.push({
+        kind: "above_daily",
+        limitMinor: daily,
+        publishedMaximum: l.is_published_maximum,
+      });
+    }
+  }
+  return out;
+}
+
+// --------------------------------- history --------------------------------
+
+export type HistorySample = {
+  amountMinor: bigint;
+  feeMinor: bigint;
+  /** ISO instant the payment happened. */
+  at: string;
+};
+
+/** A past payment counts as "similar" within this share of the requested amount. */
+export const SIMILAR_WINDOW_PERCENT = 20n;
+/** Fewer similar payments than this is not enough to say anything. */
+export const MIN_SIMILAR_SAMPLES = 3;
+/** The usual fee is named only if at least this share (basis points) paid it. */
+export const TYPICAL_SHARE_BPS = 6000n;
+
+export type HistoryEstimate =
+  | {
+    status: "estimate";
+    minMinor: bigint;
+    maxMinor: bigint;
+    /** The fee most of them paid, when one fee covers >= TYPICAL_SHARE_BPS. */
+    typicalMinor: bigint | null;
+    count: number;
+    windowLowMinor: bigint;
+    windowHighMinor: bigint;
+    firstAt: string;
+    lastAt: string;
+    /** The similar payments, newest first (for transparency, capped). */
+    recent: HistorySample[];
+  }
+  | { status: "not_enough_history"; similarCount: number; totalCount: number }
+  | { status: "no_history" };
+
+export const RECENT_SHOWN = 5;
+
+export function estimateFromHistory(
+  samples: readonly HistorySample[],
+  amountMinor: bigint,
+): HistoryEstimate {
+  if (samples.length === 0) return { status: "no_history" };
+
+  // +-20% of the requested amount, in integer arithmetic (low rounds up).
+  const low = (amountMinor * (100n - SIMILAR_WINDOW_PERCENT) + 99n) / 100n;
+  const high = (amountMinor * (100n + SIMILAR_WINDOW_PERCENT)) / 100n;
+  const similar = samples
+    .filter((s) => s.amountMinor >= low && s.amountMinor <= high)
+    .sort((a, b) =>
+      a.at === b.at ? 0 : a.at < b.at ? 1 : -1 // newest first
+    );
+
+  if (similar.length < MIN_SIMILAR_SAMPLES) {
+    return {
+      status: "not_enough_history",
+      similarCount: similar.length,
+      totalCount: samples.length,
+    };
+  }
+
+  let min = similar[0].feeMinor, max = similar[0].feeMinor;
+  const tally = new Map<string, number>();
+  for (const s of similar) {
+    if (s.feeMinor < min) min = s.feeMinor;
+    if (s.feeMinor > max) max = s.feeMinor;
+    const k = s.feeMinor.toString();
+    tally.set(k, (tally.get(k) ?? 0) + 1);
+  }
+  let topFee = "", topCount = 0;
+  for (const [fee, n] of tally) {
+    // ties go to the larger fee: never understate
+    if (n > topCount || (n === topCount && BigInt(fee) > BigInt(topFee))) {
+      topFee = fee;
+      topCount = n;
+    }
+  }
+  const share = (BigInt(topCount) * 10000n) / BigInt(similar.length);
+
+  return {
+    status: "estimate",
+    minMinor: min,
+    maxMinor: max,
+    typicalMinor: share >= TYPICAL_SHARE_BPS ? BigInt(topFee) : null,
+    count: similar.length,
+    windowLowMinor: low,
+    windowHighMinor: high,
+    firstAt: similar[similar.length - 1].at,
+    lastAt: similar[0].at,
+    recent: similar.slice(0, RECENT_SHOWN),
+  };
+}
+
+// ---------------------------------- input ---------------------------------
+
+/** The outgoing transaction types a fee can be estimated for. */
+export const FEE_TRANSACTION_TYPES: readonly {
+  value: string;
+  label: string;
+}[] = [
+  { value: "send_money", label: "Send money to a person" },
+  { value: "merchant_payment", label: "Pay a merchant" },
+  { value: "cash_withdrawal", label: "Withdraw cash" },
+  { value: "bill_payment", label: "Pay a bill" },
+  { value: "airtime", label: "Buy airtime" },
+  { value: "bank_transfer", label: "Bank transfer" },
+];
+
+export function isFeeTransactionType(v: string): boolean {
+  return FEE_TRANSACTION_TYPES.some((t) => t.value === v);
+}
+
+const MAX_MINOR_DIGITS = 15;
+const NETWORK_SLUG = /^[a-z0-9][a-z0-9-]{0,60}$/;
+const UUID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export type FeeQuery = {
+  amountText: string;
+  amountMinor: bigint | null;
+  amountError: string | null;
+  currency: string;
+  type: string;
+  network: string | null;
+  workspaceId: string | null;
+};
+
+type Raw = Record<string, string | string[] | undefined>;
+function one(v: string | string[] | undefined): string | undefined {
+  const s = Array.isArray(v) ? v[0] : v;
+  const t = typeof s === "string" ? s.trim() : "";
+  return t ? t : undefined;
+}
+
+/**
+ * Exact amount parsing: text -> minor units of `currency`. A fraction the
+ * currency cannot hold is refused, not rounded; zero and negatives are refused
+ * (there is no fee to estimate on nothing); a currency whose decimal places
+ * are unknown is refused.
+ */
+export function parseFeeAmount(
+  text: string,
+  currency: string,
+): { ok: true; minor: bigint } | { ok: false; error: string } {
+  if (!isSupportedCurrency(currency)) {
+    return { ok: false, error: `Fees in ${currency} can't be estimated yet.` };
+  }
+  const decimals = minorUnitsPerMajor(currency).toString().length - 1;
+  const invalid = {
+    ok: false as const,
+    error: decimals === 0
+      ? "Enter a whole amount, like 25,000."
+      : "Enter an amount, like 25,000.50.",
+  };
+  const m = /^(\d+)(?:\.(\d+))?$/.exec(text.replace(/[,\s]/g, ""));
+  if (!m) return invalid;
+  const frac = m[2] ?? "";
+  if (frac.length > decimals && /[1-9]/.test(frac.slice(decimals))) {
+    return invalid;
+  }
+  const digits = m[1] + frac.padEnd(decimals, "0").slice(0, decimals);
+  if (digits.replace(/^0+/, "").length > MAX_MINOR_DIGITS) {
+    return { ok: false, error: "That amount is too large." };
+  }
+  const minor = BigInt(digits);
+  if (minor <= 0n) {
+    return { ok: false, error: "Enter an amount greater than zero." };
+  }
+  return { ok: true, minor };
+}
+
+export function parseFeeQuery(sp: Raw, defaultCurrency: string): FeeQuery {
+  const currencyRaw = one(sp.currency)?.toUpperCase();
+  const currency = currencyRaw && /^[A-Z]{3}$/.test(currencyRaw)
+    ? currencyRaw
+    : defaultCurrency;
+  const amountText = (one(sp.amount) ?? "").slice(0, 40);
+  const typeRaw = one(sp.type);
+  const netRaw = one(sp.network);
+  const wsRaw = one(sp.workspace_id);
+
+  let amountMinor: bigint | null = null;
+  let amountError: string | null = null;
+  if (amountText) {
+    const p = parseFeeAmount(amountText, currency);
+    if (p.ok) amountMinor = p.minor;
+    else amountError = p.error;
+  }
+  return {
+    amountText,
+    amountMinor,
+    amountError,
+    currency,
+    type: typeRaw && isFeeTransactionType(typeRaw) ? typeRaw : "send_money",
+    network: netRaw && NETWORK_SLUG.test(netRaw) ? netRaw : null,
+    workspaceId: wsRaw && UUID.test(wsRaw) ? wsRaw : null,
+  };
+}

@@ -1,6 +1,6 @@
-import { goldenAcceptance } from "../../../../../shared/golden-acceptance";
-import { currencyFlows, completePages, formatAmount } from "../../../../../shared/financial";
-import fixture from "../../../../../shared/financial-fixtures.json";
+import { goldenAcceptance } from "../../../../../web/shared/golden-acceptance";
+import { currencyFlows, completePages, formatAmount } from "../../../../../web/shared/financial";
+import fixture from "../../../../../web/shared/financial-fixtures.json";
 it("uses the same financial golden vectors as the web", () => {
   for (const f of fixture.format) expect(formatAmount(f.minor, f.currency, false)).toBe(f.display);
   expect(currencyFlows(fixture.rows)).toEqual(fixture.expected);

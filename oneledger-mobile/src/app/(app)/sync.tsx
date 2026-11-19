@@ -1,5 +1,4 @@
-import { formatAmount } from "../../../../shared/financial";
-import { router } from "expo-router";
+import { formatAmount } from "../../../../web/shared/financial";
 import { useCallback, useState } from "react";
 import { View } from "react-native";
 
@@ -57,7 +56,6 @@ export default function SyncDetails() {
 
   return (
     <Screen>
-      <Button label="Back" variant="ghost" onPress={() => router.back()} />
       <ScreenHeader title="Sync" subtitle={status.label} />
       <Card style={{ gap: space[1] }}>
         <Text variant="body">{status.detail}</Text>

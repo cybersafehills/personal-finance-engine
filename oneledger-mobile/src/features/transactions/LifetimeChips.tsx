@@ -1,4 +1,4 @@
-import { formatAmount, type CurrencyFlow } from "../../../../shared/financial";
+import { formatAmount, type CurrencyFlow } from "../../../../web/shared/financial";
 import { useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { PrivatePressable as Pressable } from "@/features/privacy/PrivatePressable";

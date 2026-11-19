@@ -19,7 +19,7 @@ export default function Categories() {
 
   return (
     <Screen>
-      <Button label="Back" variant="ghost" onPress={() => router.back()} />
+
       <ScreenHeader title="Categories" subtitle="RWF spending, all time. Other currencies are shown separately in Insights." />
       <Button label="Categorization rules" variant="secondary" onPress={() => router.push("/categorization-rules")} />
 

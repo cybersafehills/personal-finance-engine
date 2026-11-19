@@ -42,7 +42,6 @@ export default function InsightsDetail() {
 
   return (
     <Screen>
-      <Button label="Back" variant="ghost" onPress={() => router.back()} />
       <ScreenHeader title={p.title || "Transactions"} />
 
       {!d ? (

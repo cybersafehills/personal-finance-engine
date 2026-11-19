@@ -1,5 +1,5 @@
 import { formatDateTime } from "@/lib/kigali-time";
-import { formatAmount } from "../../../../shared/financial";
+import { formatAmount } from "../../../../web/shared/financial";
 
 import type { BalanceReason, BalanceStatus, Wallet } from "./types";
 

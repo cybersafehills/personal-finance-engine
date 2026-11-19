@@ -1,4 +1,4 @@
-import { isCurrency } from "../../../../shared/financial";
+import { isCurrency } from "../../../../web/shared/financial";
 import { supabase } from "@/api/supabase";
 import { budgetSession, type BudgetScope } from "./budget-session";
 

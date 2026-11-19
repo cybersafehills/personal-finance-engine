@@ -1,4 +1,4 @@
-import { completePages, currencyFlows, type FinancialRow, type CurrencyFlow } from "../../shared/financial";
+import { completePages, currencyFlows, type FinancialRow, type CurrencyFlow } from "../shared/financial";
 import "server-only";
 import { cache } from "react";
 import { cookies } from "next/headers";

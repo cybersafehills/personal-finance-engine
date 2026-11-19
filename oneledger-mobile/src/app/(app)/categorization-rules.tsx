@@ -1,4 +1,3 @@
-import { router } from "expo-router";
 import { useCallback, useRef, useState } from "react";
 import { View } from "react-native";
 
@@ -39,7 +38,6 @@ export default function CategorizationRules() {
 
   return (
     <Screen>
-      <Button label="Back" variant="ghost" onPress={() => router.back()} />
       <ScreenHeader title="Rules" subtitle="Automatic categorization, checked top to bottom" />
 
       {error ? (

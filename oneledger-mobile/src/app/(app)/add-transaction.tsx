@@ -55,12 +55,10 @@ export default function AddTransaction() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  const back = <Button label="Cancel" variant="ghost" onPress={() => router.back()} />;
 
   if (!accounts) {
     return (
       <Screen>
-        {back}
         {loading ? (
           <Text variant="label" color="textMuted">
             Loading…
@@ -77,7 +75,6 @@ export default function AddTransaction() {
   if (accounts.length === 0) {
     return (
       <Screen>
-        {back}
         <EmptyState
           variant="setup"
           title="Add an account first"
@@ -145,7 +142,6 @@ export default function AddTransaction() {
 
   return (
     <Screen>
-      {back}
       <ScreenHeader title="Add a transaction" subtitle="Record one by hand" />
 
       {accounts.length > 1 ? (

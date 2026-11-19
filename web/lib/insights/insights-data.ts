@@ -1,4 +1,4 @@
-import { completePages } from "../../../shared/financial";
+import { completePages } from "../../shared/financial";
 import "server-only";
 import { supabaseSession } from "../supabase-session-server";
 import { linkedTransferIdSet } from "../transfer-exclusion";

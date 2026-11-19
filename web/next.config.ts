@@ -1,4 +1,3 @@
-import path from "node:path";
 import type { NextConfig } from "next";
 
 // `api.oneledger.me` is added to this Vercel project (Domains → Production).
@@ -23,11 +22,7 @@ const SUPABASE_ORIGIN = (
 
 const API_HOST = "api.oneledger.me";
 
-const repoRoot = path.resolve(__dirname, "..");
 const nextConfig: NextConfig = {
-  // The web app imports the financial contract from the repository root.
-  turbopack: { root: repoRoot },
-  outputFileTracingRoot: repoRoot,
   // Payment-request links carry a secret token in the path: never cache the
   // page, never index it, and never send it as a Referer to another site.
   async headers() {
