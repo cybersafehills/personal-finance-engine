@@ -702,7 +702,7 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # write) - 139 tables, 138 with RLS.
 # Offline sync (20270102000000) adds client_operations (RLS enabled, no grant for
 # users; written only by the SECURITY DEFINER sync function) - 140 tables, 139 with RLS.
-# Platform Console foundation (20270107000000) adds 3 RPC-only tables (RLS on, no
+# Platform Console foundation (20270120000000) adds 3 RPC-only tables (RLS on, no
 # authenticated grants): console_staff, console_role_permissions,
 # console_audit_events. 140 + 3 = 143.
 if [ "$TABLE_COUNT" = "143" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
@@ -1074,9 +1074,9 @@ AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_p
 # Counterparty source visibility (20270105000000): can_view_counterparty, the
 # authorization primitive the four counterparty policies call (read-only,
 # returns a boolean, takes only an id). 139 + 1 = 140.
-# Platform Console foundation (20270107000000) adds 7 authenticated-callable
+# Platform Console foundation (20270120000000) adds 7 authenticated-callable
 # RPCs (console_my_access, _record_audit, _dashboard_summary, _activity_feed,
-# _audit_log, _staff_list, _health_snapshot) and 20270107000001 adds
+# _audit_log, _staff_list, _health_snapshot) and 20270120000001 adds
 # console_customer_directory. 140 + 8 = 148.
 if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "148" ]; then
   pass "authenticated holds EXECUTE on exactly the 148 functions expected, no more"
@@ -9672,7 +9672,7 @@ fi
 rm -f "$ARTIFACT_DIR/pfe_tt_stderr.log"
 
 # ===========================================================================
-# Platform Console foundation (20270107000000): staff gate, MFA, permission
+# Platform Console foundation (20270120000000): staff gate, MFA, permission
 # matrix, append-only audit, no direct table access. Reuses pfe_rls.
 # ===========================================================================
 echo "=== Platform Console: staff access, MFA, audit ==="
@@ -9768,7 +9768,7 @@ check_console "console_assert is not callable by clients" \
   "$(console_call "$CON_OWNER" aal2 "select public.console_assert('view_audit_logs');")" "permission denied"
 
 
-# --- customer directory (20270107000001) ---
+# --- customer directory (20270120000001) ---
 check_console "owner at aal2 can list the customer directory" \
   "$(console_call "$CON_OWNER" aal2 "select public.console_customer_directory(null, null, 5);")" "customer_ref"
 check_console "support agent (view_customer_metadata) can list the directory" \

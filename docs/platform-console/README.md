@@ -1,7 +1,7 @@
 # OneLedger Platform Console
 
 Operations console for OneLedger staff, destined for `https://platform.oneledger.me`.
-Code: [`platform/`](../../platform) · Database: [`supabase/migrations/20270107000000_platform_console_foundation.sql`](../../supabase/migrations/20270107000000_platform_console_foundation.sql)
+Code: [`platform/`](../../platform) · Database: [`supabase/migrations/20270120000000_platform_console_foundation.sql`](../../supabase/migrations/20270120000000_platform_console_foundation.sql)
 
 Status date: 2026-11-19. Branch: `claude/oneledger-platform-console-ca8ff5`. **Nothing here is deployed.**
 
@@ -20,7 +20,7 @@ small modules that fall out of the data already available.
 | System Health | `/platform/health` | The existing aggregate operational-health snapshot, behind a console permission. |
 | Audit Logs | `/security/audit-logs` | Paged, append-only audit trail. Opening it is itself audited. |
 | Access Management | `/security/access` | **Read-only** staff directory + your own permissions. |
-| Users | `/customers/users` | Customer directory, metadata only (masked ref, name, assigned plan, registered, last activity timestamp, status). Search, status filter, keyset paging; reads are audited. Needs `view_customer_metadata`. Migration `20270107000001`. |
+| Users | `/customers/users` | Customer directory, metadata only (masked ref, name, assigned plan, registered, last activity timestamp, status). Search, status filter, keyset paging; reads are audited. Needs `view_customer_metadata`. Migration `20270120000001`. |
 
 Everything else in the navigation is shown as a non-interactive **Soon** entry. No control in the console is decorative.
 
@@ -131,7 +131,7 @@ npm run typecheck && npm run lint && npm test
 
 ### Seeding the first Platform Owner (database operator only)
 
-Apply migration `20270107000000` through the normal pipeline (`deploy-supabase.yml` on a green `main`), then, in the SQL editor / with the service role:
+Apply migration `20270120000000` through the normal pipeline (`deploy-supabase.yml` on a green `main`), then, in the SQL editor / with the service role:
 
 ```sql
 insert into public.console_staff (user_id, role, notes)
@@ -145,7 +145,7 @@ The owner signs in at `/login`, enrols an authenticator at `/mfa`, and lands on 
 
 1. Create a **separate Vercel project** with root directory `platform/`; add the two env vars; keep preview deployments protected.
 2. Attach `platform.oneledger.me` and verify the Hostinger DNS record resolves to that project (currently unverified).
-3. Merge `fix/protect-platform-admin-flag`, then migration `20270107000000` (version is chosen to sort after `20270106000001`; re-run the harness on merged `main` first — see the migration-collision notes).
+3. Merge `fix/protect-platform-admin-flag`, then migration `20270120000000` (version chosen to sort after the Codex range `20270107`–`20270111` already applied to prod; re-run the harness on merged `main` first — see the migration-collision notes).
 4. Seed the owner, smoke-test: signed-out → `/login`; non-staff → `/no-access`; staff without MFA → `/mfa`; staff with MFA → dashboard.
 5. Rollback: re-point the domain / redeploy the previous Vercel deployment. The migration is additive; rollback is `drop` of the 3 tables and 7 functions (no customer data is touched).
 
@@ -198,7 +198,7 @@ Open before production:
 
 - Touched: `platform/**`, `docs/platform-console/**`, one new migration, `supabase/migrations/tests/run_migration_tests.sh` (tripwire counts + a new appended test block).
 - Not touched: `web/**`, `oneledger-mobile/**`, `android/**`, shared auth, `plans.ts`.
-- **Migration ordering:** `20270107000000` assumes `20270106000001` (platform-admin flag hardening) lands first or never; it does not depend on it.
+- **Migration ordering:** `20270120000000` assumes `20270106000001` (platform-admin flag hardening) lands first or never; it does not depend on it.
 - **Harness counts:** any concurrent migration that adds tables/authenticated functions must also bump the tripwires (`TABLE_COUNT` 143, authenticated EXECUTE 147 after this change) — expect a trivial merge conflict in those lines.
 - Shared backend asks for Codex/product: a subscription-billing data model (F2), support/ticket tables (F4), and a decision on the plan taxonomy (F3).
 

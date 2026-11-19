@@ -5,7 +5,7 @@ import { cookies } from "next/headers";
 // Session-authenticated Supabase client (anon key + the staff member's own
 // session cookie). The console deliberately has NO service-role client: every
 // read goes through permission-checked SECURITY DEFINER RPCs as the signed-in
-// staff member (see supabase/migrations/20270107000000_platform_console_foundation.sql).
+// staff member (see supabase/migrations/20270120000000_platform_console_foundation.sql).
 export async function supabaseSession() {
   const cookieStore = await cookies();
   return createServerClient(
