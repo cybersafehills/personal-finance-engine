@@ -1,0 +1,99 @@
+@import "tailwindcss";
+
+/*
+ * Platform Console design tokens. The palette is OneLedger's approved brand
+ * (same hex values as the customer app's tokens) - the console does not
+ * introduce a competing identity. Semantic colours (positive / attention /
+ * danger / info) are reserved for status; nothing is coloured decoratively.
+ */
+:root {
+  --canvas: #f2f3f5;
+  --surface: #ffffff;
+  --surface-muted: #f7f7f8;
+  --border: #e6e6e9;
+  --border-strong: #d4d4d8;
+
+  --text: #18181b;
+  --text-2: #52525b;
+  --text-3: #6b6b73;
+
+  --accent: #33509e;
+  --accent-soft: #e8edf8;
+  --accent-fg: #ffffff;
+  --brand-navy: #07143a;
+
+  --positive: #067a4d;
+  --positive-soft: #e9f7f0;
+  --attention: #92620a;
+  --attention-soft: #fdf3d9;
+  --danger: #b42318;
+  --danger-soft: #fdecea;
+  --info: #1d4ed8;
+  --info-soft: #e8efff;
+
+  --radius-card: 1rem;
+  --radius-control: 0.625rem;
+  --shadow-card: 0 1px 2px rgb(16 24 40 / 0.04);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --canvas: #0e0f12;
+    --surface: #16181d;
+    --surface-muted: #1c1f26;
+    --border: #262a33;
+    --border-strong: #353a45;
+    --text: #f4f4f5;
+    --text-2: #b4b4bc;
+    --text-3: #9a9aa4;
+    --accent: #8aa4ee;
+    --accent-soft: #1f2a4a;
+    --accent-fg: #0e0f12;
+    --positive: #4ade9f;
+    --positive-soft: #11291f;
+    --attention: #f2c15a;
+    --attention-soft: #2b2310;
+    --danger: #ff8a80;
+    --danger-soft: #2e1512;
+    --info: #8fb0ff;
+    --info-soft: #172240;
+  }
+}
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-text: var(--text);
+  --color-text-2: var(--text-2);
+  --color-text-3: var(--text-3);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-fg: var(--accent-fg);
+  --color-brand-navy: var(--brand-navy);
+  --color-positive: var(--positive);
+  --color-positive-soft: var(--positive-soft);
+  --color-attention: var(--attention);
+  --color-attention-soft: var(--attention-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --radius-card: var(--radius-card);
+  --radius-control: var(--radius-control);
+  --shadow-card: var(--shadow-card);
+  --font-sans: var(--font-geist-sans);
+}
+
+body {
+  background: var(--canvas);
+  color: var(--text);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
