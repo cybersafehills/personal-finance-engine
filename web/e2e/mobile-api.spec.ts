@@ -553,11 +553,11 @@ test.describe("mobile API", () => {
       expect(settledBody.intent.state).toBe("failed");
       expect(settledBody.intent.verified).toBe(false);
       // A payment that has already failed can't be settled again.
-      const again = await api.post(`/api/mobile/pay/intents/${created.intent.id}/settle`, {
+      const settleAgain = await api.post(`/api/mobile/pay/intents/${created.intent.id}/settle`, {
         headers,
         data: { outcome: "sent" },
       });
-      expect(again.status()).toBe(409);
+      expect(settleAgain.status()).toBe(409);
 
       // A paying account that is not this workspace's is refused.
       const foreign = await api.post("/api/mobile/pay/intents", {

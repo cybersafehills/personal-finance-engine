@@ -44,7 +44,13 @@ export function mobileConfig(workspaceId: string | null): MobileConfig {
     ussdDirectory: isUssdDirectoryEnabled(workspaceId),
     scanToPay: isScanToPayEnabled(workspaceId),
     trustedRecipients: isTrustedRecipientsEnabled(workspaceId),
-    paymentRequests: isPaymentRequestsEnabledForWorkspace(process.env, workspaceId),
+    paymentRequests: isPaymentRequestsEnabledForWorkspace(
+      {
+        PAYMENT_REQUESTS_ENABLED: process.env.PAYMENT_REQUESTS_ENABLED,
+        PAYMENT_REQUESTS_WORKSPACE_ALLOWLIST: process.env.PAYMENT_REQUESTS_WORKSPACE_ALLOWLIST,
+      },
+      workspaceId,
+    ),
     statements: isFinancialStatementsEnabled(),
     insights: isIntelligenceEnabled(workspaceId),
     bills: isBillsEnabled(workspaceId),
