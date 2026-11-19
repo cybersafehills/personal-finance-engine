@@ -69,7 +69,8 @@ export type MoreIconKey =
   | "wallets"
   | "insights"
   | "goals"
-  | "forecast";
+  | "forecast"
+  | "fees";
 
 export type MoreItem = {
   href: string;
@@ -85,7 +86,8 @@ export type MoreItem = {
     | "counterparties"
     | "wallets"
     | "insights"
-    | "forecast";
+    | "forecast"
+    | "feeCalculator";
 };
 
 export type MoreGroup = { title: string; items: readonly MoreItem[] };
@@ -184,6 +186,15 @@ export const MORE_GROUPS: readonly MoreGroup[] = [
         icon: "requests",
         surface: "pay",
         requires: "paymentRequests",
+      },
+      // Transfer fee estimate (OneLedger 3.0). Gated by FEE_CALCULATOR_ENABLED
+      // (+ allowlist) and the Pay & Services gate.
+      {
+        href: "/pay/fees",
+        label: "Estimate a fee",
+        icon: "fees",
+        surface: "pay",
+        requires: "feeCalculator",
       },
     ],
   },

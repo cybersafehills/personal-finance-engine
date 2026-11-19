@@ -44,7 +44,13 @@ export type NotComputableReason =
   | "varies_by_institution"
   | "incomplete"
   | "currency_mismatch"
-  | "unrecognised";
+  | "unrecognised"
+  /** A provider tariff with no amount bands recorded. */
+  | "no_tiers"
+  /** The amount falls in a gap between (or beyond) the published bands. */
+  | "amount_outside_bands"
+  /** Defence in depth: a tariff that has not been verified is never turned into a number. */
+  | "not_verified";
 
 export type PublishedEstimate =
   /** The schedule states exactly one amount (fixed fee, or no fee). */
@@ -138,17 +144,110 @@ export function estimatePublishedFee(
  * effect most recently; otherwise the most recent expired / upcoming row so
  * the page can say WHY nothing applies instead of silently showing nothing.
  */
-export function pickSchedule(
-  rows: readonly FeeSchedule[],
+export function pickSchedule<
+  T extends { effective_from: string | null; effective_to: string | null },
+>(
+  rows: readonly T[],
   now: Date,
-): { schedule: FeeSchedule; state: "yes" | "not_yet" | "expired" } | null {
-  const rank = (r: FeeSchedule) => Date.parse(r.effective_from ?? "") || 0;
+): { schedule: T; state: "yes" | "not_yet" | "expired" } | null {
+  const rank = (r: T) => Date.parse(r.effective_from ?? "") || 0;
   const byRecent = [...rows].sort((a, b) => rank(b) - rank(a));
   for (const state of ["yes", "expired", "not_yet"] as const) {
     const hit = byRecent.find((r) => inEffect(r, now) === state);
     if (hit) return { schedule: hit, state };
   }
   return null;
+}
+
+// ----------------------------- provider tariffs ---------------------------
+// A provider's own tariff (MTN, Airtel, a bank): amount bands, each with a
+// fixed fee, a percentage, or no fee. Read from provider_tariffs /
+// provider_tariff_tiers, which clients can only see once a human has verified
+// them against their cited source (20270107000000_provider_tariffs.sql).
+
+export const RECIPIENT_SCOPES = [
+  "any",
+  "same_network",
+  "other_network",
+  "unregistered",
+] as const;
+export type RecipientScope = typeof RECIPIENT_SCOPES[number];
+
+export const RECIPIENT_SCOPE_LABEL: Record<RecipientScope, string> = {
+  any: "To anyone",
+  same_network: "To a number on the same network",
+  other_network: "To a number on another network",
+  unregistered: "To a number that isn't registered",
+};
+
+export type TariffTier = {
+  min_amount_minor: number | string;
+  max_amount_minor: number | string | null;
+  fee_type: string;
+  fixed_fee_minor: number | string | null;
+  percentage_bps: number | string | null;
+  min_fee_minor: number | string | null;
+  max_fee_minor: number | string | null;
+};
+
+export type ProviderTariff = {
+  transaction_type: string;
+  recipient_scope: string;
+  currency: string;
+  effective_from: string | null;
+  effective_to: string | null;
+  source_label: string | null;
+  source_url: string | null;
+  note_en: string | null;
+  verified_at: string | null;
+  tiers: readonly TariffTier[];
+};
+
+/**
+ * The fee a tariff gives for `amountMinor`: the band that contains the amount
+ * (bands are inclusive), turned into a number by the same exact rules as a
+ * published schedule. An amount in a gap, or a tariff with no bands, gives NO
+ * number - the calculator never interpolates between bands.
+ */
+export function estimateFromTariff(
+  t: ProviderTariff,
+  amountMinor: bigint,
+  currency: string,
+  now: Date,
+): PublishedEstimate {
+  if (!t.verified_at) return { status: "not_computable", reason: "not_verified" };
+  const eff = inEffect(t, now);
+  if (eff !== "yes") return { status: "not_in_effect", reason: eff };
+  if (t.currency !== currency) {
+    return { status: "not_computable", reason: "currency_mismatch" };
+  }
+  if (t.tiers.length === 0) {
+    return { status: "not_computable", reason: "no_tiers" };
+  }
+  const tier = t.tiers.find((x) => {
+    const min = big(x.min_amount_minor);
+    const max = big(x.max_amount_minor);
+    return min !== null && amountMinor >= min && (max === null || amountMinor <= max);
+  });
+  if (!tier) return { status: "not_computable", reason: "amount_outside_bands" };
+  return estimatePublishedFee(
+    {
+      fee_type: tier.fee_type,
+      fixed_fee_minor: tier.fixed_fee_minor,
+      percentage_bps: tier.percentage_bps,
+      min_fee_minor: tier.min_fee_minor,
+      max_fee_minor: tier.max_fee_minor,
+      currency: t.currency,
+      effective_from: t.effective_from,
+      effective_to: t.effective_to,
+      source_url: t.source_url,
+      source_label: t.source_label,
+      note_en: t.note_en,
+    },
+    amountMinor,
+    currency,
+    now,
+  );
 }
 
 // --------------------------------- limits ---------------------------------
@@ -335,6 +434,8 @@ export type FeeQuery = {
   currency: string;
   type: string;
   network: string | null;
+  /** service_providers.slug whose own tariff to read (MTN, Airtel, ...). */
+  provider: string | null;
   workspaceId: string | null;
 };
 
@@ -390,6 +491,7 @@ export function parseFeeQuery(sp: Raw, defaultCurrency: string): FeeQuery {
   const amountText = (one(sp.amount) ?? "").slice(0, 40);
   const typeRaw = one(sp.type);
   const netRaw = one(sp.network);
+  const provRaw = one(sp.provider);
   const wsRaw = one(sp.workspace_id);
 
   let amountMinor: bigint | null = null;
@@ -406,6 +508,7 @@ export function parseFeeQuery(sp: Raw, defaultCurrency: string): FeeQuery {
     currency,
     type: typeRaw && isFeeTransactionType(typeRaw) ? typeRaw : "send_money",
     network: netRaw && NETWORK_SLUG.test(netRaw) ? netRaw : null,
+    provider: provRaw && NETWORK_SLUG.test(provRaw) ? provRaw : null,
     workspaceId: wsRaw && UUID.test(wsRaw) ? wsRaw : null,
   };
 }
