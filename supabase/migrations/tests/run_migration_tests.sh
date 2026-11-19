@@ -705,8 +705,9 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # users; written only by the SECURITY DEFINER sync function) - 140 tables, 139 with RLS.
 # Platform Console foundation (20270120000000) adds 3 RPC-only tables (RLS on, no
 # authenticated grants): console_staff, console_role_permissions,
-# console_audit_events. 140 + 3 = 143.
-if [ "$TABLE_COUNT" = "143" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# console_audit_events. 140 + 3 = 143; 20270123000000 adds 5 more (tickets, ticket events,
+# incidents, incident events, approval requests) = 148.
+if [ "$TABLE_COUNT" = "148" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -1080,11 +1081,12 @@ AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_p
 # _audit_log, _staff_list, _health_snapshot) and 20270120000001 adds
 # console_customer_directory; 20270121000000 adds 6 more (activity_page,
 # registrations, organizations, reports_overview, security_overview,
-# customer_detail). 140 + 14 = 154.
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "154" ]; then
-  pass "authenticated holds EXECUTE on exactly the 154 functions expected, no more"
+# customer_detail); 20270123000000 adds 18 (support x7, incidents x5,
+# approvals x4, integrations/communications x2). 140 + 32 = 172.
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "172" ]; then
+  pass "authenticated holds EXECUTE on exactly the 172 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 154 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 172 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -9802,6 +9804,94 @@ DETAIL="$(console_call "$CON_OWNER" aal2 "select public.console_customer_detail(
 if printf '%s' "$DETAIL" | grep -Eq 'a@example\.com|"email"'; then fail "Console: customer detail leaked an email"; else pass "Console: customer detail returns no email"; fi
 check_console "registrations rejects an invalid state" "$(console_call "$CON_OWNER" aal2 "select public.console_registrations('bogus', 5);")" "invalid_state"
 check_console "activity page rejects an invalid type" "$(console_call "$CON_OWNER" aal2 "select public.console_activity_page(5, null, 'bogus');")" "invalid_type"
+
+# --- console workflows (20270123000000) ---
+CON_ADMIN="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('console-admin@example.com') returning id;" | head -1)"
+CON_OWNER2="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('console-owner2@example.com') returning id;" | head -1)"
+CON_NEW="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('console-new@example.com') returning id;" | head -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.console_staff (user_id, role) values
+    ('$CON_ADMIN', 'platform_admin'), ('$CON_OWNER2', 'platform_owner');" >/dev/null
+uuid_of() { { grep -Eo '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' || true; } | tail -1; }
+check_console_ok() { # passes when a void RPC returned without any ERROR
+  if printf '%s' "$2" | grep -q "ERROR"; then fail "Console: $1 (got: $2)"; else pass "Console: $1"; fi
+}
+CON_NEW2="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('console-new2@example.com') returning id;" | head -1)"
+
+# Support
+TK="$(console_call "$CON_SUPPORT" aal2 "select public.console_support_create('Cannot import SMS', 'transaction_import', 'high', '$USER_A', 'zzSECRETNOTEzz first body');" | uuid_of)"
+if [ -n "$TK" ]; then pass "Console: support agent can create a ticket"; else fail "Console: ticket create failed"; fi
+check_console "non-staff cannot create a ticket" "$(console_call "$USER_A" aal2 "select public.console_support_create('Hello there', 'account_access');")" "not_authorized"
+check_console "staff at aal1 cannot create a ticket" "$(console_call "$CON_SUPPORT" aal1 "select public.console_support_create('Hello there', 'account_access');")" "mfa_required"
+check_console "analyst cannot list tickets" "$(console_call "$USER_B" aal2 "select public.console_support_list();")" "not_authorized"
+check_console "ticket list returns a T- reference" "$(console_call "$CON_SUPPORT" aal2 "select public.console_support_list('active', 10);")" "T-0"
+check_console "ticket subject too short is rejected" "$(console_call "$CON_SUPPORT" aal2 "select public.console_support_create('ab', 'account_access');")" "violates check"
+check_console_ok "note on a ticket is accepted" "$(console_call "$CON_SUPPORT" aal2 "select public.console_support_add_note('$TK', 'zzSECRETNOTEzz second');")"
+check_console "empty note is rejected" "$(console_call "$CON_SUPPORT" aal2 "select public.console_support_add_note('$TK', '   ');")" "empty_note"
+check_console "escalating without a note is rejected" "$(console_call "$CON_SUPPORT" aal2 "select public.console_support_set_status('$TK', 'escalated');")" "note_required"
+check_console "escalating with a note works" "$(console_call "$CON_SUPPORT" aal2 "select public.console_support_set_status('$TK', 'escalated', 'needs engineering');")" "escalated"
+check_console "repeating the same status is idempotent" "$(console_call "$CON_SUPPORT" aal2 "select public.console_support_set_status('$TK', 'escalated', 'again');")" "escalated"
+check_console "an invalid transition is rejected" "$(console_call "$CON_SUPPORT" aal2 "select public.console_support_set_status('$TK', 'waiting');")" "invalid_transition"
+check_console_ok "a ticket can be assigned to staff who hold manage_support_tickets" "$(console_call "$CON_SUPPORT" aal2 "select public.console_support_assign('$TK', '$CON_ADMIN'::uuid);")"
+check_console "assigning to someone without the permission is rejected" "$(console_call "$CON_SUPPORT" aal2 "select public.console_support_assign('$TK', '$CON_NEW');")" "invalid_assignee"
+check_console "ticket detail returns its timeline" "$(console_call "$CON_SUPPORT" aal2 "select public.console_support_get('$TK');")" "status_change"
+LEAK="$(psql -d pfe_rls -t -A -c "select count(*) from public.console_audit_events where metadata::text like '%zzSECRETNOTEzz%' or target_id like '%zzSECRETNOTEzz%' or reason like '%zzSECRETNOTEzz%';")"
+if [ "$LEAK" = "0" ]; then pass "Console: free-text note bodies never reach the audit trail"; else fail "Console: note text leaked into audit ($LEAK)"; fi
+AUD="$(psql -d pfe_rls -t -A -c "select count(*) from public.console_audit_events where action in ('support.ticket_created','support.note_added','support.ticket_escalated') ;")"
+if [ "$AUD" -ge 3 ]; then pass "Console: ticket actions are audited in the same transaction"; else fail "Console: ticket audit rows missing ($AUD)"; fi
+check_console "ticket events are append-only (superuser update)" "$(psql -d pfe_rls -t -A -c "update public.console_support_ticket_events set body = 'x';" 2>&1)" "append-only"
+check_console "ticket events cannot be deleted" "$(psql -d pfe_rls -t -A -c "delete from public.console_support_ticket_events;" 2>&1)" "append-only"
+check_console "service_role cannot update ticket events" "$(psql -d pfe_rls -t -A -c "set role service_role; update public.console_support_ticket_events set body = 'x';" 2>&1)" "permission denied"
+check_console "authenticated cannot read tickets directly" "$(console_call "$CON_SUPPORT" aal2 "select count(*) from public.console_support_tickets;")" "permission denied"
+
+# Incidents
+check_console "support agent cannot declare an incident" "$(console_call "$CON_SUPPORT" aal2 "select public.console_incident_declare('Outage', 'sev2', 'availability', 'manual');")" "not_authorized"
+INC="$(console_call "$CON_OWNER" aal2 "select public.console_incident_declare('Email delivery degraded', 'sev2', 'availability', 'health_check', 'summary');" | uuid_of)"
+if [ -n "$INC" ]; then pass "Console: owner can declare an incident"; else fail "Console: incident declare failed"; fi
+check_console "incident severity is validated" "$(console_call "$CON_OWNER" aal2 "select public.console_incident_declare('Outage', 'sev9', 'availability', 'manual');")" "violates check"
+check_console "resolving without a note is rejected" "$(console_call "$CON_OWNER" aal2 "select public.console_incident_set_status('$INC', 'resolved');")" "note_required"
+check_console "incident can move to investigating" "$(console_call "$CON_OWNER" aal2 "select public.console_incident_set_status('$INC', 'investigating');")" "investigating"
+check_console_ok "containment can be recorded" "$(console_call "$CON_OWNER" aal2 "select public.console_incident_add_update('$INC', 'containment', 'paused the sender');")"
+check_console "incident resolves with a note" "$(console_call "$CON_OWNER" aal2 "select public.console_incident_set_status('$INC', 'resolved', 'fixed');")" "resolved"
+check_console "a resolved incident cannot jump to contained" "$(console_call "$CON_OWNER" aal2 "select public.console_incident_set_status('$INC', 'contained');")" "invalid_transition"
+check_console "incident list is ordered and returns INC- refs" "$(console_call "$CON_OWNER" aal2 "select public.console_incident_list('active', 10);")" "counts"
+check_console "incident events are append-only" "$(psql -d pfe_rls -t -A -c "delete from public.console_incident_events;" 2>&1)" "append-only"
+
+# Approvals (four-eyes)
+check_console "support agent cannot request a staff change" "$(console_call "$CON_SUPPORT" aal2 "select public.console_approval_request('staff_grant', 'console-new@example.com', 'support_agent', 'onboarding a new agent');")" "not_authorized"
+check_console "a short reason is rejected" "$(console_call "$CON_ADMIN" aal2 "select public.console_approval_request('staff_grant', 'console-new@example.com', 'support_agent', 'short');")" "reason_required"
+check_console "cannot request a change to your own access" "$(console_call "$CON_ADMIN" aal2 "select public.console_approval_request('staff_suspend', 'console-admin@example.com', null, 'testing self targeting');")" "cannot_target_self"
+check_console "unknown target is rejected" "$(console_call "$CON_ADMIN" aal2 "select public.console_approval_request('staff_grant', 'nobody@example.com', 'support_agent', 'unknown person here');")" "target_not_found"
+AR="$(console_call "$CON_ADMIN" aal2 "select public.console_approval_request('staff_grant', 'console-new@example.com', 'support_agent', 'onboarding a new support agent');" | uuid_of)"
+if [ -n "$AR" ]; then pass "Console: admin can request a staff grant"; else fail "Console: approval request failed"; fi
+check_console "a duplicate pending request is rejected" "$(console_call "$CON_ADMIN" aal2 "select public.console_approval_request('staff_grant', 'console-new@example.com', 'support_agent', 'onboarding a new support agent');")" "already_pending"
+check_console "the requester cannot approve (admin lacks manage_staff)" "$(console_call "$CON_ADMIN" aal2 "select public.console_approval_decide('$AR', 'approve');")" "not_authorized"
+check_console "staff at aal1 cannot decide" "$(console_call "$CON_OWNER" aal1 "select public.console_approval_decide('$AR', 'approve');")" "mfa_required"
+check_console "a non-requester cannot cancel" "$(console_call "$CON_OWNER" aal2 "select public.console_approval_cancel('$AR');")" "not_requester"
+OWNER_REQ="$(console_call "$CON_OWNER" aal2 "select public.console_approval_request('staff_grant', 'console-new2@example.com', 'finance_admin', 'owner raised this request');" | uuid_of)"
+check_console "an owner cannot approve their own request" "$(console_call "$CON_OWNER" aal2 "select public.console_approval_decide('$OWNER_REQ', 'approve');")" "self_approval_forbidden"
+check_console "a second owner can decide (reject) the first owner's request" "$(console_call "$CON_OWNER2" aal2 "select public.console_approval_decide('$OWNER_REQ', 'reject', 'not needed');")" "rejected"
+check_console "owner approves the admin's grant" "$(console_call "$CON_OWNER" aal2 "select public.console_approval_decide('$AR', 'approve', 'verified identity');")" "approved"
+GRANTED="$(psql -d pfe_rls -t -A -c "select role || '|' || status || '|' || (granted_by = '$CON_OWNER')::text from public.console_staff where user_id = '$CON_NEW';")"
+if [ "$GRANTED" = "support_agent|active|true" ]; then pass "Console: approval executed the staff grant atomically"; else fail "Console: grant not applied correctly ($GRANTED)"; fi
+check_console "deciding again is rejected (double submit)" "$(console_call "$CON_OWNER" aal2 "select public.console_approval_decide('$AR', 'approve');")" "not_pending"
+APPROVED_AUDIT="$(psql -d pfe_rls -t -A -c "select actor_role || '|' || (actor_user_id = '$CON_OWNER')::text from public.console_audit_events where action = 'approval.approved' order by created_at desc limit 1;")"
+if [ "$APPROVED_AUDIT" = "platform_owner|true" ]; then pass "Console: approval is audited with the approver as actor"; else fail "Console: approval audit wrong ($APPROVED_AUDIT)"; fi
+SUS="$(console_call "$CON_ADMIN" aal2 "select public.console_approval_request('staff_suspend', 'console-new@example.com', null, 'access no longer needed');" | uuid_of)"
+check_console "owner suspends the new staff member" "$(console_call "$CON_OWNER2" aal2 "select public.console_approval_decide('$SUS', 'approve');")" "approved"
+check_console "a suspended staff member is denied immediately" "$(console_call "$CON_NEW" aal2 "select public.console_dashboard_summary(7);")" "not_authorized"
+check_console "approvals list is visible to view_staff holders" "$(console_call "$CON_ADMIN" aal2 "select public.console_approval_list(null, 20);")" "viewer_can_decide"
+check_console "support agent cannot list approvals" "$(console_call "$CON_SUPPORT" aal2 "select public.console_approval_list();")" "not_authorized"
+check_console "authenticated cannot read approval requests directly" "$(console_call "$CON_OWNER" aal2 "select count(*) from public.console_approval_requests;")" "permission denied"
+check_console "authenticated cannot insert a staff row directly" "$(console_call "$CON_OWNER" aal2 "insert into public.console_staff (user_id, role) values ('$USER_A', 'platform_owner');")" "permission denied"
+
+# Integrations + communications
+check_console "owner can read the integrations overview" "$(console_call "$CON_OWNER" aal2 "select public.console_integrations_overview();")" "ingestion_connections"
+check_console "support agent cannot read integrations" "$(console_call "$CON_SUPPORT" aal2 "select public.console_integrations_overview();")" "not_authorized"
+check_console "owner can read the communications overview" "$(console_call "$CON_OWNER" aal2 "select public.console_communications_overview();")" "notifications_7d"
+check_console "support agent cannot read communications" "$(console_call "$CON_SUPPORT" aal2 "select public.console_communications_overview();")" "not_authorized"
+IOUT="$(console_call "$CON_OWNER" aal2 "select public.console_integrations_overview();")"
+if printf '%s' "$IOUT" | grep -Eiq 'https?://|secret|token|endpoint'; then fail "Console: integrations overview leaked a URL or secret"; else pass "Console: integrations overview returns counts only"; fi
 
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="
