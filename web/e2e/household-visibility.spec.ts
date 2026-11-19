@@ -213,8 +213,15 @@ async function asHousehold(context: BrowserContext) {
 }
 
 async function memberPage(browser: Browser): Promise<{ page: Page; context: BrowserContext }> {
-  // A fresh context: no stored state, so only B's own login can authorise anything.
-  const context = await browser.newContext({ baseURL: BASE_URL });
+  // A genuinely empty context. In @playwright/test, browser.newContext() inherits the
+  // project's `use.storageState` (the signed-in e2e user A), so without this override
+  // the "member" browser is already logged in as A and /login redirects to Home - which
+  // is exactly what the first CI runs of this spec saw. Only B's own login may
+  // authorise anything here.
+  const context = await browser.newContext({
+    baseURL: BASE_URL,
+    storageState: { cookies: [], origins: [] },
+  });
   await asHousehold(context);
   const page = await context.newPage();
   // This context bypasses the shared `page` fixture, so surface the same browser
