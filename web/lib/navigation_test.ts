@@ -70,6 +70,17 @@ Deno.test("MORE_GROUPS: Payment requests is in Pay & Services, pay-surface and g
   assertEquals(item.icon, "requests");
 });
 
+Deno.test("MORE_GROUPS: Estimate a fee is in Pay & Services, pay-surface and gated only by its own flag", () => {
+  const pay = MORE_GROUPS.find((g) => g.title === "Pay & Services");
+  assert(pay);
+  const item = pay.items.find((i) => i.href === "/pay/fees");
+  assert(item);
+  assertEquals(item.label, "Estimate a fee");
+  assertEquals(item.surface, "pay");
+  assertEquals(item.requires, "feeCalculator");
+  assertEquals(item.icon, "fees");
+});
+
 Deno.test("MORE_GROUPS: People and merchants is in Manage money, ungated by mode and gated only by its own flag", () => {
   const group = MORE_GROUPS.find((g) => g.title === "Manage money");
   assert(group);

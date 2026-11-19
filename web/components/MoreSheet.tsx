@@ -51,6 +51,7 @@ const MORE_ICONS: Record<
   insights: PieIcon,
   goals: TargetIcon,
   forecast: ListIcon,
+  fees: ListIcon,
 };
 
 // The "More" panel - the structured home for everything that is not on the
@@ -85,6 +86,7 @@ export function MoreSheet({
   walletsEnabled,
   insightsEnabled,
   forecastEnabled,
+  feeCalculatorEnabled,
 }: {
   open: boolean;
   onClose: () => void;
@@ -98,6 +100,7 @@ export function MoreSheet({
   walletsEnabled: boolean;
   insightsEnabled: boolean;
   forecastEnabled: boolean;
+  feeCalculatorEnabled: boolean;
 }) {
   if (!open) return null;
   return (
@@ -113,6 +116,7 @@ export function MoreSheet({
       walletsEnabled={walletsEnabled}
       insightsEnabled={insightsEnabled}
       forecastEnabled={forecastEnabled}
+      feeCalculatorEnabled={feeCalculatorEnabled}
     />
   );
 }
@@ -129,6 +133,7 @@ function MorePanel({
   walletsEnabled,
   insightsEnabled,
   forecastEnabled,
+  feeCalculatorEnabled,
 }: {
   onClose: () => void;
   payEnabled: boolean;
@@ -141,6 +146,7 @@ function MorePanel({
   walletsEnabled: boolean;
   insightsEnabled: boolean;
   forecastEnabled: boolean;
+  feeCalculatorEnabled: boolean;
 }) {
   const router = useRouter();
   const panelRef = useRef<HTMLDivElement>(null);
@@ -217,6 +223,7 @@ function MorePanel({
     if (item.requires === "wallets" && !walletsEnabled) return false;
     if (item.requires === "insights" && !insightsEnabled) return false;
     if (item.requires === "forecast" && !forecastEnabled) return false;
+    if (item.requires === "feeCalculator" && !feeCalculatorEnabled) return false;
     return true;
   }
 
