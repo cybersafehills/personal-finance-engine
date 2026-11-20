@@ -1,13 +1,15 @@
 import { StyleSheet, View, type ViewProps } from "react-native";
 
-import { colors, radii, space } from "@/theme/tokens";
+import { radii, space } from "@/theme/tokens";
+import { makeStyles } from "@/theme/ThemeProvider";
 
 /** Surface container: white, subtle border, card radius. No shadow. */
 export function Card({ style, ...rest }: ViewProps) {
+  const styles = useStyles();
   return <View {...rest} style={[styles.card, style]} />;
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => StyleSheet.create({
   card: {
     backgroundColor: colors.surface,
     borderColor: colors.borderSubtle,
@@ -17,4 +19,4 @@ const styles = StyleSheet.create({
     paddingHorizontal: space[4],
     paddingVertical: space[3],
   },
-});
+}));

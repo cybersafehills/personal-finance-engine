@@ -3,9 +3,11 @@ import { Switch, View } from "react-native";
 
 import { Card, Screen, ScreenHeader, Text } from "@/components/ds";
 import { useLock } from "@/features/lock/LockProvider";
-import { colors, space } from "@/theme/tokens";
+import { space } from "@/theme/tokens";
+import { useTheme } from "@/theme/ThemeProvider";
 
 export default function Security() {
+  const { colors } = useTheme();
   const { available, enabled, setEnabled } = useLock();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -48,7 +50,7 @@ export default function Security() {
             value={enabled}
             disabled={!available || busy}
             onValueChange={toggle}
-            trackColor={{ true: colors.accent, false: colors.borderStrong }}
+            trackColor={{ true: colors.accentSolid, false: colors.borderStrong }}
           />
         </View>
 

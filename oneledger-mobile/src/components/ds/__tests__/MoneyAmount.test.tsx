@@ -1,7 +1,7 @@
 import { render } from "@testing-library/react-native";
 
 import { PrivacyProvider } from "@/features/privacy/PrivacyProvider";
-import { colors } from "@/theme/tokens";
+import { lightColors as colors } from "@/theme/colors";
 
 import { MoneyAmount } from "../MoneyAmount";
 

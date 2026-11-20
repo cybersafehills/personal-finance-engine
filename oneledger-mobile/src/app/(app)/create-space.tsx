@@ -14,12 +14,14 @@ import {
   type CreatableKind,
 } from "@/features/spaces/create";
 import { useQuery } from "@/hooks/useQuery";
-import { colors, MIN_TOUCH_TARGET, radii, space } from "@/theme/tokens";
+import { MIN_TOUCH_TARGET, radii, space } from "@/theme/tokens";
+import { useTheme } from "@/theme/ThemeProvider";
 
 // Start a household or an organization Space, then switch to it. Households
 // are offered only where the Spaces feature is on (as on the web); an
 // organization always is. The creator becomes the Space's only owner.
 export default function CreateSpace() {
+  const { colors } = useTheme();
   const { activateCreated } = useActiveSpace();
   const load = useCallback(() => fetchSpacesEnabled(), []);
   const { data: spacesEnabled, loading } = useQuery(load);

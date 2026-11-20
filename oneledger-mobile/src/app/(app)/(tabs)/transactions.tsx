@@ -25,7 +25,8 @@ import { FilterChips } from "@/features/transactions/FilterChips";
 import { activeFilterCount, NO_FILTERS, type TransactionFilters } from "@/features/transactions/filters";
 import { TransactionItem } from "@/features/transactions/TransactionItem";
 import { useQuery } from "@/hooks/useQuery";
-import { colors, space } from "@/theme/tokens";
+import { space } from "@/theme/tokens";
+import { useTheme } from "@/theme/ThemeProvider";
 
 const SEARCH_DEBOUNCE_MS = 350;
 
@@ -42,6 +43,7 @@ async function loadHeaderStats() {
 // The full ledger: newest first, grouped by day, searchable, loaded a page
 // at a time. Amounts here are never masked (a deliberate destination).
 export default function Transactions() {
+  const { colors } = useTheme();
   // Set when opened from the Categories screen: show only that category (like the web's ?category=).
   const params = useLocalSearchParams<{ category?: string | string[] }>();
   const category = (Array.isArray(params.category) ? params.category[0] : params.category) || undefined;

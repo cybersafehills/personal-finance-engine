@@ -2,9 +2,10 @@ import { router } from "expo-router";
 import { Pressable, StyleSheet, View } from "react-native";
 
 import { Text } from "@/components/ds";
-import { colors, MIN_TOUCH_TARGET, radii, space } from "@/theme/tokens";
+import { MIN_TOUCH_TARGET, radii, space } from "@/theme/tokens";
 
 import { useOffline } from "./offline-context";
+import { makeStyles } from "@/theme/ThemeProvider";
 
 /**
  * A small, quiet indicator in the header. Hidden when everything is synced (the
@@ -12,6 +13,7 @@ import { useOffline } from "./offline-context";
  * Opens the sync details screen.
  */
 export function SyncStatusChip() {
+  const styles = useStyles();
   const { status } = useOffline();
   if (status.kind === "synced" || status.kind === "unavailable") return null;
   const attention = status.kind === "attention";
@@ -32,7 +34,7 @@ export function SyncStatusChip() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => StyleSheet.create({
   hit: { minHeight: MIN_TOUCH_TARGET, justifyContent: "center" },
   chip: {
     flexDirection: "row",
@@ -47,7 +49,7 @@ const styles = StyleSheet.create({
   },
   chipAttention: { backgroundColor: colors.attentionBg, borderColor: colors.attention },
   dot: { width: 8, height: 8, borderRadius: 4 },
-  dotActive: { backgroundColor: colors.accent },
+  dotActive: { backgroundColor: colors.accentSolid },
   dotOffline: { backgroundColor: colors.textMuted },
   dotAttention: { backgroundColor: colors.attention },
-});
+}));

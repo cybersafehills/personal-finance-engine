@@ -2,7 +2,8 @@ import type { ReactNode } from "react";
 import { StyleSheet, View } from "react-native";
 import { SafeAreaView, type Edge } from "react-native-safe-area-context";
 
-import { colors, space } from "@/theme/tokens";
+import { space } from "@/theme/tokens";
+import { makeStyles } from "@/theme/ThemeProvider";
 
 /**
  * Frame for screens whose body is a virtualised list (which must own the
@@ -17,6 +18,7 @@ export function ListScreen({
   /** Defaults to no "top": the native header (or the tab app header) owns that inset. */
   edges?: readonly Edge[];
 }) {
+  const styles = useStyles();
   return (
     <SafeAreaView style={styles.safe} edges={edges}>
       <View style={styles.body}>{children}</View>
@@ -29,7 +31,7 @@ export const listContentStyle = {
   paddingBottom: space[6],
 } as const;
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   body: { flex: 1, width: "100%", maxWidth: 480, alignSelf: "center" },
-});
+}));

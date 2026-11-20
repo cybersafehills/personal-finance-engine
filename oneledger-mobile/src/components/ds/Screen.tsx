@@ -7,7 +7,8 @@ import {
 } from "react-native";
 import { SafeAreaView, type Edge } from "react-native-safe-area-context";
 
-import { colors, space } from "@/theme/tokens";
+import { space } from "@/theme/tokens";
+import { makeStyles } from "@/theme/ThemeProvider";
 
 /**
  * Standard screen frame: safe area, scrolling, keyboard avoidance, the
@@ -28,6 +29,7 @@ export function Screen({
    */
   edges?: readonly Edge[];
 }) {
+  const styles = useStyles();
   return (
     <SafeAreaView style={styles.safe} edges={edges}>
       <KeyboardAvoidingView
@@ -47,7 +49,7 @@ export function Screen({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   flex: { flex: 1 },
   content: {
@@ -59,4 +61,4 @@ const styles = StyleSheet.create({
     alignSelf: "center",
   },
   centered: { flexGrow: 1, justifyContent: "center" },
-});
+}));

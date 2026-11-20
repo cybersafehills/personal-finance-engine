@@ -7,13 +7,14 @@ import { PayLauncher } from "@/components/shell/PayLauncher";
 import { Text } from "@/components/ds";
 import { getPayConfigCache, setPayConfigCache } from "@/features/pay/config-cache";
 import type { PayConfig } from "@/features/pay/types";
-import { colors } from "@/theme/tokens";
+import { useTheme } from "@/theme/ThemeProvider";
 
 // The centre Pay button's sheet: a route presented as a native form sheet (see
 // (app)/_layout.tsx) with the platform's grabber and drag-to-dismiss. It draws at
 // once from the config the tab shell already read; a request only happens in the
 // unlikely case that cache is empty.
 export default function PaySheet() {
+  const { colors } = useTheme();
   const [config, setConfig] = useState<Partial<PayConfig> | null>(getPayConfigCache);
 
   useEffect(() => {

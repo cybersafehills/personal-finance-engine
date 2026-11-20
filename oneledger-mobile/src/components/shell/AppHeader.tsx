@@ -17,7 +17,8 @@ import {
 } from "@/features/shell/badge";
 import { getReviewQueueCount } from "@/features/transactions/queries";
 import { useQuery } from "@/hooks/useQuery";
-import { colors, CONTROL_HEIGHT, hitSlopFor, radii, space } from "@/theme/tokens";
+import { CONTROL_HEIGHT, hitSlopFor, radii, space } from "@/theme/tokens";
+import { makeStyles, useTheme } from "@/theme/ThemeProvider";
 
 // The signed-in header, as on the web: brand mark left; Inbox (with a count
 // badge), Statements and the profile menu right. Shown on the tab roots.
@@ -32,6 +33,8 @@ async function loadBadge() {
 }
 
 export function AppHeader() {
+  const styles = useStyles();
+  const { isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const { data: count } = useQuery(loadBadge);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -47,12 +50,15 @@ export function AppHeader() {
           onPress={() => router.navigate("/")}
           style={styles.logoHit}
         >
-          <Image
-            source={require("../../../assets/brand/oneledger-mark.png")}
-            style={styles.logo}
-            resizeMode="contain"
-            accessibilityIgnoresInvertColors
-          />
+          {/* The mark is dark on transparency: in the dark theme it sits on a light plate so it still reads. */}
+          <View style={isDark ? styles.logoPlate : undefined}>
+            <Image
+              source={require("../../../assets/brand/oneledger-mark.png")}
+              style={styles.logo}
+              resizeMode="contain"
+              accessibilityIgnoresInvertColors
+            />
+          </View>
         </Pressable>
 
         <View style={styles.actions}>
@@ -100,6 +106,8 @@ function IconButton({
   onPress(): void;
   badge?: string | null;
 }) {
+  const styles = useStyles();
+  const { colors } = useTheme();
   return (
     <Pressable
       accessibilityRole="button"
@@ -111,7 +119,7 @@ function IconButton({
       <Feather name={icon} size={20} color={colors.textSecondary} />
       {badge ? (
         <View style={styles.badge}>
-          <Text variant="caption" color="accentForeground" style={styles.badgeText}>
+          <Text variant="caption" color="onSolid" style={styles.badgeText}>
             {badge}
           </Text>
         </View>
@@ -121,6 +129,7 @@ function IconButton({
 }
 
 function ProfileMenu({ visible, onClose }: { visible: boolean; onClose(): void }) {
+  const styles = useStyles();
   const { session, signOut } = useSession();
   const { spaces, active, setActive } = useActiveSpace();
   const go = useCallback(
@@ -195,7 +204,7 @@ function ProfileMenu({ visible, onClose }: { visible: boolean; onClose(): void }
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => StyleSheet.create({
   bar: {
     backgroundColor: colors.surface,
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -213,6 +222,7 @@ const styles = StyleSheet.create({
   },
   logoHit: { minHeight: CONTROL_HEIGHT.md, justifyContent: "center", paddingRight: space[3] },
   logo: { width: 26, height: 26 },
+  logoPlate: { backgroundColor: colors.onSolid, borderRadius: 8, padding: 3 },
   actions: { flexDirection: "row", alignItems: "center", gap: space[1] },
   iconButton: {
     width: CONTROL_HEIGHT.md,
@@ -267,4 +277,4 @@ const styles = StyleSheet.create({
   },
   spaceRowSelected: { backgroundColor: colors.background },
   spaceName: { flex: 1 },
-});
+}));

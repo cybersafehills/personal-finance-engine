@@ -10,7 +10,7 @@ export type SettingsRow = {
   label: string;
   description: string;
   /** A screen in this app. */
-  route?: "/security" | "/notifications" | "/space-members" | "/pay-button";
+  route?: "/security" | "/notifications" | "/space-members" | "/pay-button" | "/appearance";
   /** A page on the web, opened in the browser (the user may need to sign in). */
   webPath?: string;
   /** Shown only when the server says this feature is on (an unknown answer hides it). */
@@ -28,6 +28,11 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
         label: "Profile & region",
         description: "Your name, country, language, primary currency and timezone.",
         webPath: "/settings/profile",
+      },
+      {
+        label: "Appearance",
+        description: "Light, dark, or automatic to match your phone.",
+        route: "/appearance",
       },
       {
         label: "Pay button",

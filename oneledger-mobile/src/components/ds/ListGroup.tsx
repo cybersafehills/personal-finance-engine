@@ -8,9 +8,10 @@ import {
 } from "react";
 import { Pressable, StyleSheet, Switch, View } from "react-native";
 
-import { colors, radii, space } from "@/theme/tokens";
+import { radii, space } from "@/theme/tokens";
 
 import { Text } from "./Text";
+import { makeStyles, useTheme } from "@/theme/ThemeProvider";
 
 type FeatherName = React.ComponentProps<typeof Feather>["name"];
 
@@ -27,6 +28,7 @@ export function ListGroup({
   footer?: string;
   children: ReactNode;
 }) {
+  const styles = useStyles();
   const rows = Children.toArray(children).filter(isValidElement) as ReactElement<{ divider?: boolean }>[];
   return (
     <View style={styles.group}>
@@ -87,12 +89,14 @@ export function ListRow({
   /** Set by ListGroup: draw a hairline under the row. */
   divider?: boolean;
 }) {
-  const tone = destructive ? colors.notificationBadge : colors.textSecondary;
+  const styles = useStyles();
+  const { colors } = useTheme();
+  const tone = destructive ? colors.danger : colors.textSecondary;
   const body = (
     <>
       {icon ? <Feather name={icon} size={16} color={tone} /> : null}
       <View style={styles.text}>
-        <Text variant="bodyStrong" numberOfLines={1} style={destructive ? { color: colors.notificationBadge } : undefined}>
+        <Text variant="bodyStrong" numberOfLines={1} style={destructive ? { color: colors.danger } : undefined}>
           {label}
         </Text>
         {hint ? (
@@ -114,7 +118,7 @@ export function ListRow({
           onValueChange={onToggle}
           disabled={toggleDisabled}
           accessibilityLabel={a11yLabel ?? label}
-          trackColor={{ true: colors.accent }}
+          trackColor={{ true: colors.accentSolid }}
         />
       ) : onPress && !destructive ? (
         <Feather name={external ? "external-link" : "chevron-right"} size={external ? 14 : 16} color={colors.textMuted} />
@@ -138,7 +142,7 @@ export function ListRow({
   return <View style={frame}>{body}</View>;
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => StyleSheet.create({
   group: { gap: space[1] },
   title: { textTransform: "uppercase", letterSpacing: 0.6, paddingHorizontal: space[1] },
   footer: { paddingHorizontal: space[1] },
@@ -161,4 +165,4 @@ const styles = StyleSheet.create({
   divider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.borderSubtle },
   pressed: { backgroundColor: colors.background },
   text: { flex: 1, gap: 1 },
-});
+}));

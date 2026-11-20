@@ -6,7 +6,7 @@
     "version": "2.0.0",
     "orientation": "portrait",
     "icon": "./assets/branding/ios-app-icon-1024.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "me.oneledger.app",
@@ -77,7 +77,11 @@
           "image": "./assets/branding/splash-logo-1024.png",
           "imageWidth": 220,
           "resizeMode": "contain",
-          "backgroundColor": "#FFFFFF"
+          "backgroundColor": "#FFFFFF",
+          "dark": {
+            "image": "./assets/branding/splash-logo-dark-1024.png",
+            "backgroundColor": "#0d0e11"
+          }
         }
       ],
       [

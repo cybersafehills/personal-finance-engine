@@ -6,9 +6,10 @@ import { totals, worstStatus } from "@/features/budgets/display";
 import type { Budget } from "@/features/budgets/types";
 import { usePrivacy } from "@/features/privacy/PrivacyProvider";
 import { formatMoney, formatRwf } from "@/lib/money";
-import { colors, radii, space } from "@/theme/tokens";
+import { radii, space } from "@/theme/tokens";
 
 import { daysLeftLabel, daysRemaining, homeStatus, usedFraction } from "./display";
+import { makeStyles } from "@/theme/ThemeProvider";
 
 const money = (minor: number, currency: Budget["currency"]) =>
   currency === "RWF" ? formatRwf(minor) : formatMoney(BigInt(Math.round(minor)), currency);
@@ -20,6 +21,7 @@ const money = (minor: number, currency: Budget["currency"]) =>
  * never turns red: spending is restrained text, not an alarm.
  */
 export function BudgetStatusCard({ budget, nowIso }: { budget: Budget; nowIso: string }) {
+  const styles = useStyles();
   const { amountsHidden } = usePrivacy();
   const sum = totals(budget.allocations);
   const status = homeStatus(worstStatus(budget.allocations));
@@ -76,7 +78,7 @@ export function BudgetStatusCard({ budget, nowIso }: { budget: Budget; nowIso: s
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => StyleSheet.create({
   card: {
     backgroundColor: colors.surface,
     borderColor: colors.borderSubtle,
@@ -89,4 +91,4 @@ const styles = StyleSheet.create({
   row: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: space[2] },
   bottom: { alignItems: "flex-end" },
   kicker: { letterSpacing: 0.6 },
-});
+}));

@@ -20,9 +20,11 @@ import { groupByTitle, type NotificationGroup } from "@/features/notifications/g
 import { pushTarget } from "@/features/push/push-routing";
 import { useQuery } from "@/hooks/useQuery";
 import { formatDateTime } from "@/lib/kigali-time";
-import { colors, radii, space } from "@/theme/tokens";
+import { radii, space } from "@/theme/tokens";
+import { useTheme } from "@/theme/ThemeProvider";
 
 export default function NotificationsScreen() {
+  const { colors } = useTheme();
   const load = useCallback(() => getNotifications(), []);
   const { data, loading, refreshing, error, refresh } = useQuery(load);
   const unreadCount = (data ?? []).filter((row) => row.readAt === null).length;
@@ -143,6 +145,7 @@ function Row({
   onOpen: (row: NotificationRow) => void;
   onMarkRead: (row: NotificationRow) => void;
 }) {
+  const { colors } = useTheme();
   const unread = row.readAt === null;
   return (
     <View

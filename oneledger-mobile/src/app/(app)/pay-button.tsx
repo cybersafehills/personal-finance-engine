@@ -4,13 +4,14 @@ import { ListGroup, ListRow, Screen, ScreenHeader } from "@/components/ds";
 import { getPayConfigCache } from "@/features/pay/config-cache";
 import { HOLD_ACTIONS, HOLD_DURATIONS, holdActionAvailable } from "@/features/pay/hold-action";
 import { setHoldPrefs, useHoldPrefs } from "@/features/pay/hold-store";
-import { colors } from "@/theme/tokens";
 import Feather from "@expo/vector-icons/Feather";
+import { useTheme } from "@/theme/ThemeProvider";
 
 // What holding the centre Pay button does, and for how long. A tap always opens
 // the Pay menu. Only actions this account can use can be picked; the choice is
 // kept on this phone.
 export default function PayButtonSettings() {
+  const { colors } = useTheme();
   const prefs = useHoldPrefs();
   const config = useMemo(() => getPayConfigCache(), []);
   const tick = <Feather name="check" size={16} color={colors.accent} />;

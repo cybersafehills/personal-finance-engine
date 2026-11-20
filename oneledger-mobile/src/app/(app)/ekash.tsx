@@ -9,13 +9,15 @@ import { createTrustedRecipient, ekashRecipients, getTrustedRecipients } from "@
 import { normalizeRwandaMsisdn } from "@/features/pay/target";
 import { buildEkashCode, ekashShareText } from "@/features/ussd/ekash";
 import { useQuery } from "@/hooks/useQuery";
-import { colors, radii, space } from "@/theme/tokens";
+import { radii, space } from "@/theme/tokens";
+import { useTheme } from "@/theme/ThemeProvider";
 
 // "Use eKash": send money to a bank account or a Mobile Money wallet through the
 // eKash national network. Enter the receiver's ID (a phone number or an account
 // number) and the amount, or pick someone you saved; the code is built for you and
 // opens in your dialer. It never dials by itself, and you approve it with your own PIN.
 export default function Ekash() {
+  const { colors } = useTheme();
   const [receiver, setReceiver] = useState("");
   const [amount, setAmount] = useState("");
   const [name, setName] = useState("");
@@ -65,8 +67,8 @@ export default function Ekash() {
         accessibilityRole="summary"
         style={{ flexDirection: "row", alignItems: "center", gap: space[3], padding: space[3], borderRadius: radii.control, backgroundColor: colors.ekashBg, borderWidth: 1, borderColor: colors.ekash }}
       >
-        <View style={{ width: 32, height: 32, borderRadius: radii.pill, backgroundColor: colors.ekash, alignItems: "center", justifyContent: "center" }}>
-          <Feather name="repeat" size={16} color={colors.accentForeground} />
+        <View style={{ width: 32, height: 32, borderRadius: radii.pill, backgroundColor: colors.ekashSolid, alignItems: "center", justifyContent: "center" }}>
+          <Feather name="repeat" size={16} color={colors.onSolid} />
         </View>
         <Text variant="label" style={{ flex: 1, color: colors.ekashNavy }}>
           eKash is the national network behind Mobile Money and bank transfers, so the same code works for a wallet or a bank account.

@@ -2,7 +2,7 @@ import { Pressable, View } from "react-native";
 
 import { Button, Card, Text } from "@/components/ds";
 import { formatDateTime } from "@/lib/kigali-time";
-import { colors, MIN_TOUCH_TARGET, space } from "@/theme/tokens";
+import { MIN_TOUCH_TARGET, space } from "@/theme/tokens";
 
 import {
   duplicateSourceLabel,
@@ -10,6 +10,7 @@ import {
   mergedCountSentence,
   type DuplicateContext,
 } from "./duplicates";
+import { useTheme } from "@/theme/ThemeProvider";
 
 // The duplicate-resolution trail, like the web's: whether this transaction is
 // flagged or was merged away, and which rows were merged into it. It shows the
@@ -30,6 +31,7 @@ export function DuplicatesCard({
   reviewAction: { label: string; onPress: () => void } | null;
   onOpen: (transactionId: string) => void;
 }) {
+  const { colors } = useTheme();
   if (!context || !hasDuplicateTrail(context)) return null;
   const { dedupeState, mergedInto, mergedDuplicates } = context;
 

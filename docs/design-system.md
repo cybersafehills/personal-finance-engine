@@ -104,3 +104,29 @@ scale is `display 30`, `title 22`, `heading 17`, `body 14`, `label 13`, `caption
   scaling. Judge feel on a release build, not in Expo Go.
 - **Accents:** green (`moneyPositive`) marks Scan to pay, orange (`moneyRequest`) marks
   Request payment; each shortcut has an (i) that explains it in plain words.
+
+## Mobile app: theming (light, dark, automatic)
+
+The app has a Light and a Dark appearance and an **Automatic** setting that follows the phone (including its automatic switch at night). The choice is in **Settings > Appearance** and is kept on that phone only (`ol.theme.v1`, device store).
+
+**Structure** (`oneledger-mobile/src/theme/`)
+
+| File | Role |
+| --- | --- |
+| `colors.ts` | The two palettes (`lightColors`, `darkColors`). `Palette` makes a missing or extra token in either a compile error. |
+| `preference.ts` | Pure rules: `ThemePreference` (`system` / `light` / `dark`), `normalizePreference`, `resolveScheme`, load/save. |
+| `ThemeProvider.tsx` | One provider at the root. `useTheme()` gives `{ preference, scheme, isDark, colors, setPreference }`; `makeStyles()` builds palette-dependent styles once per palette. Also sets the status bar and tells the phone (`Appearance.setColorScheme`) so keyboards, alerts and the share sheet match. |
+| `NavigationTheme.tsx` | Gives the palette to the navigator (native headers, back buttons, sheet backgrounds). |
+| `contrast.ts` | WCAG contrast, used by the palette tests. |
+
+**Rules for components**
+
+- Never import a palette. Inline colours: `const { colors } = useTheme();`. Style sheets that use colour: `const useStyles = makeStyles((colors) => StyleSheet.create({ ... }));` at module scope and `const styles = useStyles();` in the component. Styles with no colour stay a plain `StyleSheet.create`.
+- Without a provider (unit tests, previews) the light palette is used, so tests need no wrapper.
+- Tokens are named by **role**, not hue. Text and icons on a surface: `textPrimary/Secondary/Muted`, `accent`, `moneyPositive`, `attention`, `danger`. A strong fill that carries white content: `accentSolid`, `moneyPositiveSolid`, `moneyRequestSolid`, `ekashSolid`, `notificationBadge`, with content in `onSolid` (white in both themes). Quiet tints: `*Bg`. A colour that is text in one place and a fill in another must be split into two tokens, because a bright green that reads as text on dark is wrong behind a white icon.
+- A QR code is always black on white (a scanner needs it); that, scrims and one brand shadow are the only hard-coded colours.
+- Use `keyboardAppearance` (done in `TextField`) and the dark launch image (`splash-logo-dark-1024.png`) rather than leaving native parts light.
+
+**Guarded by tests** (`src/theme/__tests__/`): both palettes define the same tokens; every value is a hex colour; text tokens reach 4.5:1 on `surface` and `background` in both themes; white content reaches 4.5:1 on every fill that carries text (3:1 on the icon-only brand discs); and no component imports a palette, hard-codes a hex colour, or finds a static `colors` export.
+
+**Known limit:** the light palette keeps the web's brand values, so two icon-only brand fills (`moneyRequestSolid`, `ekashSolid`) sit at 3.6-4.2:1 against white; dark clears 4.5:1 everywhere.

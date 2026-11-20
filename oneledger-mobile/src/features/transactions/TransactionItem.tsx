@@ -3,10 +3,11 @@ import { Pressable, StyleSheet, View } from "react-native";
 
 import { Badge, MoneyAmount, Text } from "@/components/ds";
 import { formatDateTime, formatTime } from "@/lib/kigali-time";
-import { colors, radii, space } from "@/theme/tokens";
+import { radii, space } from "@/theme/tokens";
 
 import { displayName, isFailed, needsReview, signedAmountRwf } from "./display";
 import type { TransactionRow } from "./queries";
+import { makeStyles } from "@/theme/ThemeProvider";
 
 /** One transaction row; opens the detail screen. */
 export function TransactionItem({
@@ -21,6 +22,7 @@ export function TransactionItem({
    *  deliberate destination and is never masked); omit to follow privacy mode. */
   masked?: boolean;
 }) {
+  const styles = useStyles();
   const name = displayName(transaction);
   return (
     <Pressable
@@ -57,7 +59,7 @@ export function TransactionItem({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => StyleSheet.create({
   row: {
     minHeight: 52,
     flexDirection: "row",
@@ -71,4 +73,4 @@ const styles = StyleSheet.create({
   pressed: { backgroundColor: colors.background },
   text: { flex: 1, gap: 2 },
   meta: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: space[1] },
-});
+}));
