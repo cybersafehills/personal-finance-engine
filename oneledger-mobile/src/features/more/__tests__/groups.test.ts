@@ -17,7 +17,7 @@ describe("visibleGroups", () => {
 
   it("drops a group that ends up empty", () => {
     const titles = visibleGroups({ statements: false }).map((g) => g.title);
-    expect(titles).toContain("Reports and statements");
+    expect(titles).toContain("Documents");
     const all = visibleGroups({ statements: false, insights: false }).flatMap((g) => g.links);
     expect(all.every((l) => l.requires !== "statements")).toBe(true);
   });

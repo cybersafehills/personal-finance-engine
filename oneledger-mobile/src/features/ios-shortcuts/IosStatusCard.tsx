@@ -6,6 +6,7 @@ import { Badge, Button, Card, Text } from "@/components/ds";
 import { getDeviceStatus } from "@/features/pairing/pairing";
 import { useQuery } from "@/hooks/useQuery";
 import { space } from "@/theme/tokens";
+import { MenuRow } from "@/features/settings/MenuUI";
 
 import { iosHealthDisplay } from "./ios-health";
 import { loadIosDeviceCredentialId } from "./store";
@@ -16,12 +17,17 @@ import { loadIosDeviceCredentialId } from "./store";
  * last sent anything) for the connection remembered from the setup guide.
  * Refreshes whenever the screen comes back into focus.
  */
-export function IosStatusCard() {
+export function IosStatusCard({ compact = false }: { compact?: boolean }) {
   const load = useCallback(async () => {
     const id = await loadIosDeviceCredentialId();
     return { device: id ? await getDeviceStatus(id) : null, now: Date.now() };
   }, []);
-  const { data, loading } = useQuery(load);
+  const { data, loading, error } = useQuery(load);
+
+  if (compact) {
+    const display = data?.device ? iosHealthDisplay(data.device, data.now) : null;
+    return <MenuRow role="link" icon="smartphone" label="Automatic recording" value={loading ? "Checking…" : error ? "Check status" : display ? (display.label === "Waiting for the first message" ? "Waiting" : display.label === "Nothing received lately" ? "Check steps" : display.label) : "Set up"} hint={error ? "Status unavailable. Tap to check the steps." : !loading && !data?.device ? "Finish setup · About 5 minutes" : undefined} onPress={() => router.push("/shortcuts")} />;
+  }
 
   if (loading || !data) return null;
   const { device, now } = data;

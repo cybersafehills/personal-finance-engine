@@ -4,6 +4,8 @@ import {
   Platform,
   ScrollView,
   StyleSheet,
+  type StyleProp,
+  type ViewStyle,
 } from "react-native";
 import { SafeAreaView, type Edge } from "react-native-safe-area-context";
 
@@ -18,6 +20,7 @@ export function Screen({
   children,
   centered = false,
   edges = ["left", "right", "bottom"],
+  contentStyle,
 }: {
   children: ReactNode;
   /** Vertically centre the content (sign-in style screens). */
@@ -28,6 +31,7 @@ export function Screen({
    * header (sign-in, the connect modal) pass `["top", ...]`.
    */
   edges?: readonly Edge[];
+  contentStyle?: StyleProp<ViewStyle>;
 }) {
   const styles = useStyles();
   return (
@@ -40,7 +44,7 @@ export function Screen({
           keyboardShouldPersistTaps="handled"
           // Drag the form down to put the keyboard away (a number pad has no Return key).
           keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
-          contentContainerStyle={[styles.content, centered && styles.centered]}
+          contentContainerStyle={[styles.content, centered && styles.centered, contentStyle]}
         >
           {children}
         </ScrollView>

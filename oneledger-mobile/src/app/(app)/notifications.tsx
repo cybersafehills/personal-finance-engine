@@ -22,6 +22,7 @@ import { useQuery } from "@/hooks/useQuery";
 import { formatDateTime } from "@/lib/kigali-time";
 import { radii, space } from "@/theme/tokens";
 import { useTheme } from "@/theme/ThemeProvider";
+import { PhoneAlerts } from "@/features/push/PhoneAlerts";
 
 export default function NotificationsScreen() {
   const { colors } = useTheme();
@@ -62,6 +63,8 @@ export default function NotificationsScreen() {
             <ScreenHeader
               title="Notifications"
             />
+            <View style={{ marginBottom: space[5] }}><PhoneAlerts /></View>
+            <Text variant="heading" style={{ marginBottom: space[2] }}>Inbox</Text>
             {hasUnread ? (
               <Text variant="label" color="textMuted" style={{ marginBottom: space[2] }}>
                 {unreadCount} unread

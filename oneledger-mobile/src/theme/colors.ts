@@ -45,6 +45,7 @@ export const lightColors = {
 
   /** Interactive text, icons, links, selected borders. */
   accent: "#33509e",
+  accentBg: "#eaf0ff",
   /** A brand-blue fill (primary button, balance card, selected chip) that carries `onSolid`. */
   accentSolid: "#33509e",
   accentSolidPressed: "#263c76",
@@ -90,6 +91,7 @@ export const darkColors: Palette = {
   lifetimeBadgeText: "#1a1a1a",
 
   accent: "#8fa5f2",
+  accentBg: "#202b4a",
   accentSolid: "#3d5fc4",
   accentSolidPressed: "#334fa8",
   onSolid: "#ffffff",

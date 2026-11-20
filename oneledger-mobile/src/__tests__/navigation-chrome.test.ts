@@ -33,7 +33,7 @@ describe("navigation chrome", () => {
   it("tab screens draw their own title in the body", () => {
     for (const name of ["more", "inbox", "transactions"]) {
       const src = readFileSync(join(APP, "(tabs)", `${name}.tsx`), "utf8");
-      expect(src).toMatch(/<ScreenHeader[\s\S]*?inline/);
+      expect(src).toMatch(/<ScreenHeader[\s\S]*?inline|<MenuScreen[\s\S]*?root/);
     }
   });
 });

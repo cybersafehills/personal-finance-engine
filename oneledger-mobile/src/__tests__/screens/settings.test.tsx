@@ -11,15 +11,48 @@ jest.mock("@/api/mobile-api", () => ({ fetchMoreFlags: () => mockFlags() }));
 jest.mock("expo-linking", () => ({ openURL: jest.fn() }));
 jest.mock("@/lib/config", () => ({ config: { apiBaseUrl: "https://www.example.test" } }));
 
+const mockSignOut = jest.fn();
+const lockState = { loading: false, available: true, enabled: false };
+jest.mock("@/features/lock/LockProvider", () => ({ useLock: () => lockState }));
+jest.mock("@/features/auth/SessionProvider", () => ({ useSession: () => ({ session: { user: { email: "me@example.com" } }, signOut: () => mockSignOut() }) }));
+
 beforeEach(() => {
   resetRouterMock();
+  mockSignOut.mockReset();
+  lockState.enabled = false;
   (Linking.openURL as jest.Mock).mockReset();
   mockFlags.mockReset();
   mockFlags.mockResolvedValue({});
 });
 
 describe("Settings screen", () => {
-  it("shows the web's groups", async () => {
+  it("requires confirmation before signing out and lets the person cancel", async () => {
+    await render(<Settings />);
+    await fireEvent.press(screen.getByRole("button", { name: "Sign out" }));
+    expect(mockSignOut).not.toHaveBeenCalled();
+    await fireEvent.press(screen.getByRole("button", { name: "Cancel" }));
+    expect(mockSignOut).not.toHaveBeenCalled();
+    expect(screen.queryByText("Sign out?")).toBeNull();
+    await fireEvent.press(screen.getByRole("button", { name: "Sign out" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Sign out of OneLedger" }));
+    expect(mockSignOut).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the actual appearance and app-lock values", async () => {
+    lockState.enabled = true;
+    await render(<Settings />);
+    expect(screen.getByText("Automatic")).toBeTruthy();
+    expect(screen.getByText("On")).toBeTruthy();
+  });
+
+  it("explains a failed browser launch", async () => {
+    (Linking.openURL as jest.Mock).mockRejectedValueOnce(new Error("no browser"));
+    await render(<Settings />);
+    await fireEvent.press(screen.getByRole("link", { name: "Profile & region" }));
+    expect(await screen.findByText("Couldn't open your browser. Please try again.")).toBeTruthy();
+  });
+
+  it("shows compact mobile settings groups", async () => {
     await render(<Settings />);
     for (const g of visibleSettingsGroups(null)) expect(screen.getByText(g.title)).toBeTruthy();
   });

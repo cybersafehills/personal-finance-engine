@@ -1,4 +1,4 @@
-// The More screen's destinations, grouped with the web's headings
+// The More screen's directly accessible destinations, grouped for mobile
 // (web/lib/navigation.ts MORE_GROUPS). Only screens the app actually has
 // are listed; a feature the server says is off is hidden, but an unknown
 // answer (offline, older server) hides nothing, so nothing that worked
@@ -39,25 +39,25 @@ export type MoreGroup = { title: string; links: MoreLink[] };
 
 export const MORE_GROUPS: readonly MoreGroup[] = [
   {
-    title: "Manage money",
+    title: "Money",
     links: [
-      { route: "/categories", label: "Categories", hint: "See where your money has gone." },
       { route: "/wallets", label: "Wallets", hint: "Your balances, and how sure we are about each one." },
+      { route: "/categories", label: "Categories", hint: "See where your money has gone." },
       { route: "/goals", label: "Goals", hint: "See how your savings goals are going." },
-      { route: "/people", label: "People and merchants", hint: "Who you pay and who pays you." },
+      { route: "/people", label: "People & merchants", hint: "Who you pay and who pays you." },
       { route: "/insights", label: "Insights", hint: "Where your money went this month.", requires: "insights" },
       { route: "/bills", label: "Bills", hint: "Invoices and receipts in this Space.", requires: "bills", onlyWhenOn: true },
     ],
   },
   {
-    title: "Reports and statements",
+    title: "Documents",
     links: [
       { route: "/reports", label: "Reports", hint: "Your daily financial reports." },
       { route: "/statements", label: "Statements", hint: "Generated statements to view or download.", requires: "statements" },
     ],
   },
   {
-    title: "Pay & Services",
+    title: "Payments",
     links: [
       { route: "/requests", label: "Payment requests", hint: "Ask someone to pay you with a link." },
       { route: "/payment-activity", label: "Payment activity", hint: "Payments you prepared, and where each one stands.", requires: "assistedPay", onlyWhenOn: true },
@@ -69,7 +69,6 @@ export const MORE_GROUPS: readonly MoreGroup[] = [
     title: "Account",
     links: [
       { route: "/settings", label: "Settings", hint: "Profile, accounts, Spaces, security and plan." },
-      { route: "/security", label: "App lock", hint: "Ask for your fingerprint or face when the app opens." },
     ],
   },
 ];

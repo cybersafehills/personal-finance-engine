@@ -1,41 +1,43 @@
 import * as Linking from "expo-linking";
 import { router } from "expo-router";
-import { useCallback } from "react";
-
+import { useCallback, useState } from "react";
 import { fetchMoreFlags } from "@/api/mobile-api";
-import { ListGroup, ListRow, Screen, ScreenHeader } from "@/components/ds";
+import { Text } from "@/components/ds";
+import { useLock } from "@/features/lock/LockProvider";
+import { MenuGroup, MenuRow, MenuScreen, ProfileSummary, SignOutRow } from "@/features/settings/MenuUI";
 import { visibleSettingsGroups, type SettingsRow } from "@/features/settings/groups";
 import { useQuery } from "@/hooks/useQuery";
 import { config } from "@/lib/config";
+import { useTheme } from "@/theme/ThemeProvider";
 
-// Settings, grouped like the web's. Rows with a native screen open it; the
-// rest open the web page (marked with the "opens outside the app" arrow; the
-// browser may ask you to sign in once).
 export default function Settings() {
+  const { preference } = useTheme();
+  const { enabled, available, loading } = useLock();
   const load = useCallback(() => fetchMoreFlags(), []);
   const { data: flags } = useQuery(load);
-  function open(row: SettingsRow) {
+  const [message, setMessage] = useState<string | null>(null);
+  async function open(row: Pick<SettingsRow, "route" | "webPath">) {
+    setMessage(null);
     if (row.route) router.push(row.route);
-    else if (row.webPath) Linking.openURL(`${config.apiBaseUrl}${row.webPath}`);
+    else if (row.webPath) {
+      try { await Linking.openURL(`${config.apiBaseUrl}${row.webPath}`); }
+      catch { setMessage("Couldn't open your browser. Please try again."); }
+    }
   }
-
   return (
-    <Screen>
-      <ScreenHeader title="Settings" />
+    <MenuScreen title="Settings">
+      <ProfileSummary external onPress={() => void open({ webPath: "/settings/profile" })} />
+      {message ? <Text color="attention" accessibilityRole="alert">{message}</Text> : null}
       {visibleSettingsGroups(flags ?? null).map((group) => (
-        <ListGroup key={group.title} title={group.title} footer={group.description}>
+        <MenuGroup key={group.title} title={group.title}>
           {group.rows.map((row) => (
-            <ListRow
-              key={row.label}
-              role="link"
-              label={row.label}
-              hint={row.description}
-              external={!!row.webPath}
-              onPress={() => open(row)}
-            />
+            <MenuRow key={row.label} role="link" icon={row.icon} label={row.label}
+              value={row.route === "/appearance" ? (preference === "system" ? "Automatic" : preference === "dark" ? "Dark" : "Light") : row.route === "/security" ? (loading ? "Checking…" : !available ? "Unavailable" : enabled ? "On" : "Off") : undefined}
+              external={!!row.webPath} onPress={() => void open(row)} />
           ))}
-        </ListGroup>
+        </MenuGroup>
       ))}
-    </Screen>
+      <SignOutRow />
+    </MenuScreen>
   );
 }

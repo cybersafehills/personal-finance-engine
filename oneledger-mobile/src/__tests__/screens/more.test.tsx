@@ -1,177 +1,108 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react-native";
-
 import More from "@/app/(app)/(tabs)/more";
 import { resetRouterMock, router } from "@/test/router-mock";
-
-const mockSignOut = jest.fn();
 const mockHealth = jest.fn();
 const mockUnread = jest.fn();
-const mockIsPushEnabled = jest.fn();
-const mockEnablePush = jest.fn();
-const mockDisablePush = jest.fn();
 const mockFlags = jest.fn();
-const flags = { pushSupported: true, captureSupported: true };
-
+const flags = { captureSupported: true };
 jest.mock("expo-router", () => jest.requireActual("@/test/router-mock"));
 jest.mock("@/api/mobile-api", () => ({ fetchMoreFlags: () => mockFlags() }));
 jest.mock("@/features/auth/SessionProvider", () => ({
-  useSession: () => ({
-    session: { user: { email: "me@example.com" } },
-    signOut: () => mockSignOut(),
-  }),
+  useSession: () => ({ session: { user: { email: "me@example.com" } }, signOut: jest.fn() }),
 }));
-jest.mock("@/api/mobile-api", () => ({ fetchMoreFlags: () => mockFlags() }));
 jest.mock("@/features/capture/capture", () => ({
-  get captureSupported() {
-    return flags.captureSupported;
-  },
+  get captureSupported() { return flags.captureSupported; },
   getCaptureHealth: () => mockHealth(),
 }));
 jest.mock("@/features/ios-shortcuts/IosStatusCard", () => ({
-  IosStatusCard: () => {
+  IosStatusCard: ({ compact }: { compact?: boolean }) => {
     const { Text } = jest.requireActual("react-native");
-    return <Text>IPHONE STATUS CARD</Text>;
+    return <Text>{compact ? "IOS COMPACT STATUS" : "IOS STATUS CARD"}</Text>;
   },
 }));
-jest.mock("@/features/notifications/queries", () => ({
-  getUnreadNotificationCount: () => mockUnread(),
-}));
-jest.mock("@/features/push/push", () => ({
-  get pushSupported() {
-    return flags.pushSupported;
-  },
-  isPushEnabled: () => mockIsPushEnabled(),
-  enablePush: () => mockEnablePush(),
-  disablePush: () => mockDisablePush(),
-}));
-
+jest.mock("@/features/notifications/queries", () => ({ getUnreadNotificationCount: () => mockUnread() }));
 beforeEach(() => {
   resetRouterMock();
-  [mockFlags, mockSignOut, mockHealth, mockUnread, mockIsPushEnabled, mockEnablePush, mockDisablePush].forEach((m) => m.mockReset());
-  flags.pushSupported = true;
+  [mockFlags, mockHealth, mockUnread].forEach((m) => m.mockReset());
   flags.captureSupported = true;
   mockFlags.mockResolvedValue(null);
   mockHealth.mockResolvedValue({ state: "active" });
   mockUnread.mockResolvedValue(0);
-  mockIsPushEnabled.mockResolvedValue(false);
-  mockEnablePush.mockResolvedValue({ ok: true });
-  mockDisablePush.mockResolvedValue(undefined);
 });
-
-describe("More screen: Bills", () => {
-  it("offers Bills only where the server says it is on for this Space", async () => {
-    mockFlags.mockResolvedValue({ bills: true });
-    await render(<More />);
-    await fireEvent.press(await screen.findByText("Bills"));
-    expect(router.push).toHaveBeenCalledWith("/bills");
-  });
-
-  it("hides Bills when the server cannot say", async () => {
-    mockFlags.mockResolvedValue(null);
-    await render(<More />);
-    await waitFor(() => expect(mockFlags).toHaveBeenCalled());
-    expect(screen.queryByText("Bills")).toBeNull();
-  });
-
-  it("hides Bills when it is off", async () => {
-    await render(<More />);
-    await waitFor(() => expect(mockFlags).toHaveBeenCalled());
-    expect(screen.queryByText("Bills")).toBeNull();
-  });
-});
-
-describe("More screen", () => {
-  it("shows who is signed in and the recording status", async () => {
+describe("Option B More", () => {
+  it("shows the real account and compact recording status", async () => {
     await render(<More />);
     expect(screen.getByText("me@example.com")).toBeTruthy();
     expect(await screen.findByText("Working")).toBeTruthy();
+    expect(screen.queryByText("Sign out")).toBeNull();
   });
-
-  it("opens each area", async () => {
+  it("keeps tools directly accessible without a category hub", async () => {
     await render(<More />);
     await screen.findByText("Working");
-    for (const [label, path] of [
-      ["Automatic recording", "/capture"],
-      ["Notifications", "/notifications"],
-      ["Statements", "/statements"],
-      ["Goals", "/goals"],
-      ["Payment requests", "/requests"],
-      ["App lock", "/security"],
-    ] as const) {
-      await fireEvent.press(screen.getByText(label));
+    for (const [label, path] of [["Wallets", "/wallets"], ["Categories", "/categories"], ["Automatic recording", "/capture"], ["Statements", "/statements"], ["Goals", "/goals"], ["Payment requests", "/requests"], ["Settings", "/settings"]] as const) {
+      await fireEvent.press(screen.getByRole("link", { name: label }));
       expect(router.push).toHaveBeenLastCalledWith(path);
     }
+    expect(screen.queryByText("Money tools")).toBeNull();
   });
-
-  it("groups the destinations under the web's headings", async () => {
+  it("uses mobile group names", async () => {
     await render(<More />);
-    expect(await screen.findByText("Manage money")).toBeTruthy();
-    expect(screen.getByText("Pay & Services")).toBeTruthy();
-    expect(screen.getByText("Account")).toBeTruthy();
+    for (const label of ["Money", "Documents", "Payments", "Account"]) expect(screen.getByRole("header", { name: label })).toBeTruthy();
   });
-
-  it("hides a feature the server says is off", async () => {
-    mockFlags.mockResolvedValue({ statements: false, insights: true });
+  it("opens Settings from the profile card", async () => {
     await render(<More />);
-    await screen.findByText("Insights");
-    await waitFor(() => expect(screen.queryByText("Statements")).toBeNull());
+    await fireEvent.press(screen.getByRole("link", { name: "Your profile" }));
+    expect(router.push).toHaveBeenCalledWith("/settings");
   });
-
-  it("offers to set up recording only when it needs it", async () => {
-    mockHealth.mockResolvedValue({ state: "permission_required" });
-    await render(<More />);
-    await fireEvent.press(await screen.findByText("Set it up"));
-    expect(router.push).toHaveBeenCalledWith("/connect");
-  });
-
-  it("shows no setup button when recording is working", async () => {
-    await render(<More />);
-    await screen.findByText("Working");
-    expect(screen.queryByText("Set it up")).toBeNull();
-  });
-
-  it("shows the iPhone status card on iOS", async () => {
-    await render(<More />);
-    expect(await screen.findByText("IPHONE STATUS CARD")).toBeTruthy();
-  });
-
-  it("badges unread notifications", async () => {
+  it("announces unread notifications and opens the inbox", async () => {
     mockUnread.mockResolvedValue(3);
     await render(<More />);
-    expect(await screen.findByText("3 new")).toBeTruthy();
+    await fireEvent.press(await screen.findByRole("link", { name: "Notifications, 3 unread" }));
+    expect(router.push).toHaveBeenCalledWith("/notifications");
   });
-
-  it("turns phone alerts on with the switch, and shows why when that fails", async () => {
+  it("does not reveal disabled features, including through search", async () => {
+    mockFlags.mockResolvedValue({ bills: false, statements: false, insights: false });
     await render(<More />);
-    const toggle = await screen.findByRole("switch", { name: "Phone alerts" });
-    await fireEvent(toggle, "valueChange", true);
-    await waitFor(() => expect(mockEnablePush).toHaveBeenCalled());
-
-    mockEnablePush.mockResolvedValue({ ok: false, message: "Phone alerts aren't set up in this version of the app yet." });
-    await fireEvent(await screen.findByRole("switch", { name: "Phone alerts" }), "valueChange", true);
-    expect(await screen.findByText("Phone alerts aren't set up in this version of the app yet.")).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText("Statements")).toBeNull());
+    await fireEvent.changeText(screen.getByLabelText("Search tools"), "bills");
+    expect(screen.queryByRole("link", { name: "Bills" })).toBeNull();
+    expect(screen.getByText("No tools found")).toBeTruthy();
   });
-
-  it("turns phone alerts off when they are on", async () => {
-    mockIsPushEnabled.mockResolvedValue(true);
+  it("offers dark-by-default tools only when enabled", async () => {
+    mockFlags.mockResolvedValue({ bills: true, assistedPay: true, ussdDirectory: true });
     await render(<More />);
-    const toggle = await screen.findByRole("switch", { name: "Phone alerts" });
-    await waitFor(() => expect(toggle.props.value).toBe(true));
-    await fireEvent(toggle, "valueChange", false);
-    await waitFor(() => expect(mockDisablePush).toHaveBeenCalled());
-    expect(mockEnablePush).not.toHaveBeenCalled();
+    await fireEvent.press(await screen.findByRole("link", { name: "Bills" }));
+    expect(router.push).toHaveBeenCalledWith("/bills");
+    for (const label of ["Payment activity", "Payment templates", "USSD directory"]) expect(screen.getByRole("link", { name: label })).toBeTruthy();
   });
-
-  it("explains that alerts need a real phone when they are not supported", async () => {
-    flags.pushSupported = false;
+  it("searches existing tools and restores the list when cleared", async () => {
     await render(<More />);
-    expect(await screen.findByText("Phone alerts need the app installed on a real phone.")).toBeTruthy();
-    expect(screen.queryByRole("switch")).toBeNull();
+    await fireEvent.changeText(screen.getByLabelText("Search tools"), "  wAlLeT  ");
+    expect(screen.getByRole("link", { name: "Wallets" })).toBeTruthy();
+    expect(screen.queryByText("Categories")).toBeNull();
+    await fireEvent.press(screen.getByText("Wallets"));
+    expect(router.push).toHaveBeenCalledWith("/wallets");
+    await fireEvent.changeText(screen.getByLabelText("Search tools"), "");
+    expect(screen.getByText("Categories")).toBeTruthy();
   });
-
-  it("signs out", async () => {
+  it("keeps the recording setup route when searching for it", async () => {
+    mockHealth.mockResolvedValue({ state: "permission_required" });
     await render(<More />);
-    await fireEvent.press(screen.getByText("Sign out"));
-    expect(mockSignOut).toHaveBeenCalled();
+    await screen.findByText("Set it up");
+    await fireEvent.changeText(screen.getByLabelText("Search tools"), "recording");
+    await fireEvent.press(screen.getByRole("link", { name: "Automatic recording" }));
+    expect(router.push).toHaveBeenCalledWith("/connect");
+  });
+  it("shows the compact iPhone row instead of the large setup card", async () => {
+    flags.captureSupported = false;
+    await render(<More />);
+    expect(screen.getByText("IOS COMPACT STATUS")).toBeTruthy();
+    expect(screen.queryByText("IOS STATUS CARD")).toBeNull();
+  });
+  it("keeps the recording entry reachable when status cannot load", async () => {
+    mockHealth.mockRejectedValue(new Error("offline"));
+    await render(<More />);
+    await fireEvent.press(await screen.findByText("Check status"));
+    expect(router.push).toHaveBeenCalledWith("/capture");
   });
 });

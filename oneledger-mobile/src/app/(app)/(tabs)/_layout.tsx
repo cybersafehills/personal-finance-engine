@@ -89,7 +89,7 @@ export default function TabsLayout() {
       {/* Inbox is opened from the header icon (as on the web), not the bar. */}
       <Tabs.Screen name="inbox" options={{ title: "Inbox", href: null }} />
       <Tabs.Screen name="plan" options={{ title: "Plan", tabBarIcon: icon("target") }} />
-      <Tabs.Screen name="more" options={{ title: "More", tabBarIcon: icon("menu") }} />
+      <Tabs.Screen name="more" options={{ title: "More", headerShown: false, tabBarIcon: icon("grid") }} />
     </Tabs>
   );
 }

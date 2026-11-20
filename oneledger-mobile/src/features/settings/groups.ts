@@ -1,6 +1,7 @@
+import type Feather from "@expo/vector-icons/Feather";
 import type { MoreFlag, MoreFlags } from "@/features/more/groups";
 
-// Settings, grouped with the web's headings (web/lib/settings-navigation.ts).
+// Direct, mobile-sized settings groups. Browser destinations stay explicit.
 // The pages that have no native screen open on the web; screens the app
 // already has open natively. Rows for features that are dark by default
 // (Integrations, Developer platform, account sharing) show only when the server
@@ -8,6 +9,7 @@ import type { MoreFlag, MoreFlags } from "@/features/more/groups";
 
 export type SettingsRow = {
   label: string;
+  icon: React.ComponentProps<typeof Feather>["name"];
   description: string;
   /** A screen in this app. */
   route?: "/security" | "/notifications" | "/space-members" | "/pay-button" | "/appearance";
@@ -20,126 +22,31 @@ export type SettingsRow = {
 export type SettingsGroup = { title: string; description: string; rows: SettingsRow[] };
 
 export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
-  {
-    title: "Profile & Preferences",
-    description: "Your details and regional defaults.",
-    rows: [
-      {
-        label: "Profile & region",
-        description: "Your name, country, language, primary currency and timezone.",
-        webPath: "/settings/profile",
-      },
-      {
-        label: "Appearance",
-        description: "Light, dark, or automatic to match your phone.",
-        route: "/appearance",
-      },
-      {
-        label: "Pay button",
-        description: "What holding the centre Pay button does, and for how long.",
-        route: "/pay-button",
-      },
-    ],
-  },
-  {
-    title: "Accounts & Connections",
-    description: "The accounts your money lives in and how transactions reach OneLedger.",
-    rows: [
-      {
-        label: "Financial accounts",
-        description: "The MoMo, bank, cash and card accounts your transactions belong to.",
-        webPath: "/settings/accounts",
-      },
-      {
-        label: "Import a statement",
-        description: "Bring past transactions in from a bank or MoMo statement file.",
-        webPath: "/settings/sources/import",
-      },
-    ],
-  },
-  {
-    title: "Spaces & Members",
-    description: "Your Personal Space and any shared households or organizations.",
-    rows: [
-      {
-        label: "Spaces & members",
-        description: "Create or manage a shared Space, invite people and set roles.",
-        route: "/space-members",
-      },
-      {
-        label: "Account sharing",
-        description: "Choose what each shared Space sees of an account: nothing, transactions or the balance.",
-        webPath: "/settings/sources",
-        onlyWhenOn: "spaces",
-      },
-    ],
-  },
-  {
-    title: "Reports & Notifications",
-    description: "Scheduled summaries and what a shared Space alerts you about.",
-    rows: [
-      {
-        label: "Reports schedule",
-        description: "When your summary is generated and where it is sent.",
-        webPath: "/settings/reports",
-      },
-      {
-        label: "Notifications",
-        description: "Your alerts, in this app.",
-        route: "/notifications",
-      },
-    ],
-  },
-  {
-    title: "Data & Integrations",
-    description: "Move your data in and out, and connect external services.",
-    rows: [
-      {
-        label: "Integrations",
-        description: "Imports, exports, connected workbooks, reconciliation and external services.",
-        webPath: "/integrations",
-        onlyWhenOn: "integrations",
-      },
-      {
-        label: "Developer platform",
-        description: "API keys, webhooks and the marketplace.",
-        webPath: "/integrations/developer",
-        onlyWhenOn: "developer",
-      },
-    ],
-  },
-  {
-    title: "Security & Privacy",
-    description: "Sign-in protection and on-screen privacy.",
-    rows: [
-      {
-        label: "App lock",
-        description: "Ask for your fingerprint or face when the app opens.",
-        route: "/security",
-      },
-      {
-        label: "Sign-in & security",
-        description: "Password, two-step verification and active sessions.",
-        webPath: "/settings/security",
-      },
-      {
-        label: "Privacy",
-        description: "On-screen balance visibility and full privacy mode.",
-        webPath: "/settings/privacy",
-      },
-    ],
-  },
-  {
-    title: "Billing & Plan",
-    description: "Your plan and what it includes.",
-    rows: [
-      {
-        label: "Plan",
-        description: "See your current plan and what each plan includes.",
-        webPath: "/settings/billing",
-      },
-    ],
-  },
+  { title: "Preferences", description: "Personalize OneLedger.", rows: [
+    { label: "Profile & region", icon: "globe", description: "Your personal details and regional defaults.", webPath: "/settings/profile" },
+    { label: "Appearance", icon: "sun", description: "Light, dark, or automatic.", route: "/appearance" },
+    { label: "Notifications", icon: "bell", description: "Phone alerts and your in-app inbox.", route: "/notifications" },
+    { label: "Pay button", icon: "send", description: "Choose a hold action and duration.", route: "/pay-button" },
+  ] },
+  { title: "Accounts & data", description: "Accounts and connections.", rows: [
+    { label: "Financial accounts", icon: "credit-card", description: "Manage your MoMo, bank, cash and card accounts.", webPath: "/settings/accounts" },
+    { label: "Import a statement", icon: "download", description: "Import past transactions.", webPath: "/settings/sources/import" },
+    { label: "Integrations", icon: "link", description: "Connect services and move your data.", webPath: "/integrations", onlyWhenOn: "integrations" },
+    { label: "Developer platform", icon: "code", description: "API keys, webhooks and the marketplace.", webPath: "/integrations/developer", onlyWhenOn: "developer" },
+  ] },
+  { title: "Spaces", description: "Shared workspaces and account visibility.", rows: [
+    { label: "Spaces & members", icon: "users", description: "Manage Spaces, members and roles.", route: "/space-members" },
+    { label: "Account sharing", icon: "eye", description: "Choose what each Space can see.", webPath: "/settings/sources", onlyWhenOn: "spaces" },
+  ] },
+  { title: "Security & privacy", description: "Protect your account and this phone.", rows: [
+    { label: "App lock", icon: "lock", description: "Require your fingerprint, face or phone passcode.", route: "/security" },
+    { label: "Sign-in & security", icon: "shield", description: "Password, two-step verification and sessions.", webPath: "/settings/security" },
+    { label: "Privacy", icon: "eye", description: "Balance visibility and privacy mode.", webPath: "/settings/privacy" },
+  ] },
+  { title: "Reports & plan", description: "Summary preferences and your subscription.", rows: [
+    { label: "Report schedule", icon: "calendar", description: "Choose when and where summaries arrive.", webPath: "/settings/reports" },
+    { label: "Plan & billing", icon: "file-text", description: "Your plan and what it includes.", webPath: "/settings/billing" },
+  ] },
 ];
 
 /** Groups with the rows the server hasn't switched on removed; empty groups are dropped. */
