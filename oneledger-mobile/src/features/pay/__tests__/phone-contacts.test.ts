@@ -1,4 +1,4 @@
-import { chooseRwandanNumber, pickPhoneContact } from "../phone-contacts";
+import { chooseRwandanNumber, numberShape, pickPhoneContact } from "../phone-contacts";
 
 const contact = (name: string, numbers: string[]) => ({
   getFullName: async () => name,
@@ -51,5 +51,13 @@ describe("picking from the phone's contacts", () => {
       throw new Error("native module missing");
     });
     expect(result).toMatchObject({ ok: false, cancelled: false });
+  });
+});
+
+describe("numberShape", () => {
+  it("keeps the format and hides every digit", () => {
+    expect(numberShape("+250 788 123 456")).toBe("+### ### ### ###");
+    expect(numberShape("(0) 788-123456")).toBe("(#) ###-######");
+    expect(numberShape("")).toBe("");
   });
 });
