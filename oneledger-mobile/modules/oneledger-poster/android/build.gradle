@@ -1,0 +1,17 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'me.oneledger.poster'
+version = '0.1.0'
+
+android {
+  namespace 'me.oneledger.poster'
+  defaultConfig { versionCode 1; versionName '0.1.0' }
+}
+
+dependencies {
+  // Bundled model: works offline, including the first scan after installation.
+  implementation 'com.google.mlkit:text-recognition:16.0.1'
+}

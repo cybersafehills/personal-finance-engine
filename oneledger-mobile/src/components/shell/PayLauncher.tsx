@@ -134,7 +134,7 @@ export function PayLauncher({
             <FeatureRow
               tone="scan"
               label="Scan to pay"
-              caption="Scan a merchant payment QR code."
+              caption="Scan a payment QR code or merchant poster."
               icon={<Feather name="maximize" size={16} color={colors.onSolid} />}
               infoLabel="About scan to pay"
               onInfo={() => setInfo("scan")}

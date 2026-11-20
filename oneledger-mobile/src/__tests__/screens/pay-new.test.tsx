@@ -249,3 +249,14 @@ describe("Opened from a person's page", () => {
     expect((await screen.findByLabelText("Merchant code")).props.value).toBe("123456");
   });
 });
+
+it("prefills a scanned merchant without creating a payment until an amount is entered and submitted", async () => {
+  setParams({ type: "pay_merchant", merchantCode: "025406", merchantName: "AIMEE" });
+  await render(<PayNew />);
+  expect(await screen.findByLabelText("Merchant code")).toHaveProp("value", "025406");
+  expect(screen.getByLabelText("Name (optional)")).toHaveProp("value", "AIMEE");
+  expect(mockCreate).not.toHaveBeenCalled();
+  await fireEvent.changeText(screen.getByLabelText("Amount (RWF)"), "2000");
+  await fireEvent.press(screen.getByRole("button", { name: "Prepare payment" }));
+  await waitFor(() => expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ paymentType: "pay_merchant", merchantCode: "025406", recipientName: "AIMEE", amountMinor: 2000 })));
+});
