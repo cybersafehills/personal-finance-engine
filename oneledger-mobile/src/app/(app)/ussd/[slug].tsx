@@ -10,7 +10,8 @@ import { getFavouriteIds, getServiceCodeBySlug, reportServiceCode, REPORT_TYPES,
 import { firstSentence } from "@/features/ussd/text";
 import { CATEGORY_LABELS } from "@/features/ussd/types";
 import { useQuery } from "@/hooks/useQuery";
-import { colors, hitSlopFor, radii, space } from "@/theme/tokens";
+import { hitSlopFor, radii, space } from "@/theme/tokens";
+import { useTheme } from "@/theme/ThemeProvider";
 
 // One service code, built around using it: what it is, the code (filled in when it
 // needs your details) and a button that opens your dialer with it. Everything else
@@ -18,6 +19,7 @@ import { colors, hitSlopFor, radii, space } from "@/theme/tokens";
 // It never dials by itself: only your tap opens the dialer, and you approve the
 // request with your provider on your own phone.
 export default function UssdCode() {
+  const { colors } = useTheme();
   const { slug } = useLocalSearchParams<{ slug?: string }>();
   const load = useCallback(async () => {
     if (!slug) return null;

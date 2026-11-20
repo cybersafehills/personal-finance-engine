@@ -2,11 +2,12 @@ import { Stack } from "expo-router";
 import { Platform } from "react-native";
 
 import { PushBridge } from "@/features/push/PushBridge";
-import { colors } from "@/theme/tokens";
 import { fonts } from "@/theme/typography";
+import { useTheme } from "@/theme/ThemeProvider";
 
 // Signed-in area: the tab shell, with detail and setup screens pushed on top.
 export default function AppLayout() {
+  const { colors } = useTheme();
   return (
     <>
       <PushBridge />

@@ -1,9 +1,10 @@
 import { Pressable, StyleSheet } from "react-native";
 
-import { colors, CONTROL_HEIGHT, hitSlopFor, radii, space } from "@/theme/tokens";
+import { CONTROL_HEIGHT, hitSlopFor, radii, space } from "@/theme/tokens";
 import { fonts } from "@/theme/typography";
 
 import { Text } from "./Text";
+import { makeStyles } from "@/theme/ThemeProvider";
 
 const CHIP_COMPACT_HEIGHT = 28;
 
@@ -24,6 +25,7 @@ export function Chip({
   /** 28pt with 12px text, for dense filter rows (the hit area stays 44pt). */
   compact?: boolean;
 }) {
+  const styles = useStyles();
   return (
     <Pressable
       accessibilityRole="button"
@@ -40,7 +42,7 @@ export function Chip({
     >
       <Text
         variant={compact ? "caption" : selected ? "bodyStrong" : "label"}
-        color={selected ? "accentForeground" : "textSecondary"}
+        color={selected ? "onSolid" : "textSecondary"}
         style={compact && selected ? { fontFamily: fonts.semibold } : undefined}
       >
         {label}
@@ -49,7 +51,7 @@ export function Chip({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => StyleSheet.create({
   chip: {
     minHeight: CONTROL_HEIGHT.sm,
     justifyContent: "center",
@@ -60,6 +62,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   compact: { minHeight: CHIP_COMPACT_HEIGHT, paddingHorizontal: space[2] },
-  selected: { backgroundColor: colors.accent, borderColor: colors.accent },
+  selected: { backgroundColor: colors.accentSolid, borderColor: colors.accentSolid },
   pressed: { backgroundColor: colors.background },
-});
+}));

@@ -24,7 +24,8 @@ import { getMemberNames, getMembers, getPendingInvites } from "@/features/spaces
 import { kindLabel, type Space } from "@/features/spaces/spaces";
 import { useQuery } from "@/hooks/useQuery";
 import { formatDateTime } from "@/lib/kigali-time";
-import { colors, MIN_TOUCH_TARGET, radii, space } from "@/theme/tokens";
+import { MIN_TOUCH_TARGET, radii, space } from "@/theme/tokens";
+import { useTheme } from "@/theme/ThemeProvider";
 
 // Space & members for the Space you are viewing (web: Settings > Spaces &
 // members). Reads are plain RLS reads; every write goes through the server
@@ -181,6 +182,7 @@ function RoleChips<R extends string>({
   onPick(role: R): void;
   disabled?: boolean;
 }) {
+  const { colors } = useTheme();
   return (
     <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space[2] }} accessibilityRole="radiogroup">
       {options.map((o) => {

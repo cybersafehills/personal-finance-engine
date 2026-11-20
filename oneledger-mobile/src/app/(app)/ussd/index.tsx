@@ -8,7 +8,8 @@ import { pinFeatured } from "@/features/ussd/featured";
 import { getFavouriteIds, getFavourites, getServiceDirectory, toggleFavourite } from "@/features/ussd/queries";
 import { CATEGORY_LABELS, DIRECTORY_CATEGORIES, type DirectoryCategory, type ServiceCodeListItem } from "@/features/ussd/types";
 import { useQuery } from "@/hooks/useQuery";
-import { colors, MIN_TOUCH_TARGET, space } from "@/theme/tokens";
+import { MIN_TOUCH_TARGET, space } from "@/theme/tokens";
+import { useTheme } from "@/theme/ThemeProvider";
 
 // The USSD directory, as on the web's /pay/ussd: codes for Mobile
 // Money, banking and government services, searchable, with starred favourites.
@@ -102,6 +103,7 @@ function Section({
   favouriteIds: Set<string>;
   onStar: (code: ServiceCodeListItem, isFavourite: boolean) => void;
 }) {
+  const { colors } = useTheme();
   return (
     <View style={{ gap: space[2] }}>
       {title ? (

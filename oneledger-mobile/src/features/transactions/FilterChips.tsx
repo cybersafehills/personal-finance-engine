@@ -1,7 +1,7 @@
 import { ScrollView, View } from "react-native";
 
 import { Chip } from "@/components/ds";
-import { colors, space } from "@/theme/tokens";
+import { space } from "@/theme/tokens";
 
 import {
   activeFilterCount,
@@ -10,6 +10,7 @@ import {
   PERIOD_OPTIONS,
   type TransactionFilters,
 } from "./filters";
+import { useTheme } from "@/theme/ThemeProvider";
 
 // Direction, period and "needs review" for the ledger on ONE compact row (28pt
 // chips, 12px text) that scrolls sideways if it must, instead of two tall rows.
@@ -22,6 +23,7 @@ export function FilterChips({
   value: TransactionFilters;
   onChange: (next: TransactionFilters) => void;
 }) {
+  const { colors } = useTheme();
   const active = activeFilterCount(value);
   return (
     <ScrollView

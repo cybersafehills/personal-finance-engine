@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { Pressable, View } from "react-native";
 
 import { Badge, Button, Card, Text, TextField } from "@/components/ds";
-import { colors, MIN_TOUCH_TARGET, radii, space } from "@/theme/tokens";
+import { MIN_TOUCH_TARGET, radii, space } from "@/theme/tokens";
 
 import {
   type Attribution,
@@ -18,6 +18,7 @@ import {
   totalLabel,
 } from "./attribution";
 import type { Member } from "./detailDisplay";
+import { useTheme } from "@/theme/ThemeProvider";
 
 // "Whose spending?" on a household transaction: shared, one member, a percentage
 // split, or not sure yet. It only changes how the expense is COUNTED in household
@@ -38,6 +39,7 @@ export function AttributionPanel({
   /** Called after a successful save, so the screen can refresh what depends on it. */
   onSaved?: () => void;
 }) {
+  const { colors } = useTheme();
   // What was saved here, remembered together with the `current` it was saved
   // against. It only wins while that `current` is still the screen's data: once
   // fresh data arrives (a reload after the save, or a change made elsewhere, by

@@ -1,6 +1,7 @@
 import { Text as RNText, type TextProps as RNTextProps } from "react-native";
 
-import { colors, type ColorToken } from "@/theme/tokens";
+import { useTheme } from "@/theme/ThemeProvider";
+import { type ColorToken } from "@/theme/tokens";
 import { MAX_FONT_SCALE, textVariants, type TextVariant } from "@/theme/typography";
 
 export type TextProps = RNTextProps & {
@@ -18,6 +19,7 @@ export function Text({
   style,
   ...rest
 }: TextProps) {
+  const { colors } = useTheme();
   return (
     <RNText
       maxFontSizeMultiplier={MAX_FONT_SCALE}

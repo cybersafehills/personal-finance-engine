@@ -1,12 +1,14 @@
 import Feather from "@expo/vector-icons/Feather";
 import { Pressable, StyleSheet } from "react-native";
 
-import { colors } from "@/theme/tokens";
 
 import { pickPhoneContact, type PickedContact } from "./phone-contacts";
+import { makeStyles, useTheme } from "@/theme/ThemeProvider";
 
 /** The small "save as contact" switch drawn inside the Name field. */
 export function SaveContactToggle({ value, onChange }: { value: boolean; onChange: (next: boolean) => void }) {
+  const styles = useStyles();
+  const { colors } = useTheme();
   return (
     <Pressable
       accessibilityRole="switch"
@@ -15,9 +17,9 @@ export function SaveContactToggle({ value, onChange }: { value: boolean; onChang
       accessibilityHint="Keeps this receiver in your OneLedger contacts, ready for next time."
       onPress={() => onChange(!value)}
       hitSlop={8}
-      style={[styles.round, value && { backgroundColor: colors.accent }]}
+      style={[styles.round, value && { backgroundColor: colors.accentSolid }]}
     >
-      <Feather name={value ? "user-check" : "user-plus"} size={16} color={value ? colors.accentForeground : colors.accent} />
+      <Feather name={value ? "user-check" : "user-plus"} size={16} color={value ? colors.onSolid : colors.accent} />
     </Pressable>
   );
 }
@@ -35,6 +37,8 @@ export function ContactPickButton({
   onProblem: (message: string) => void;
   pick?: typeof pickPhoneContact;
 }) {
+  const styles = useStyles();
+  const { colors } = useTheme();
   return (
     <Pressable
       accessibilityRole="button"
@@ -52,7 +56,7 @@ export function ContactPickButton({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => StyleSheet.create({
   round: {
     width: 28,
     height: 28,
@@ -62,4 +66,4 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.accent,
   },
-});
+}));

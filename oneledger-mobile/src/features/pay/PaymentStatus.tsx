@@ -3,9 +3,10 @@ import { useEffect, useState } from "react";
 import { Animated, Easing, StyleSheet, View } from "react-native";
 
 import { Text } from "@/components/ds";
-import { colors, space } from "@/theme/tokens";
+import { space } from "@/theme/tokens";
 
 import { phaseCopy, type PayPhase } from "./status";
+import { makeStyles, useTheme } from "@/theme/ThemeProvider";
 
 const SIZE = 72;
 
@@ -25,6 +26,7 @@ export function PaymentStatus({
   amountLabel: string;
   recipient: string | null;
 }) {
+  const styles = useStyles();
   const copy = phaseCopy(phase, intent, amountLabel, recipient);
   return (
     <View accessibilityRole="summary" accessibilityLiveRegion="polite" style={styles.wrap}>
@@ -40,6 +42,8 @@ export function PaymentStatus({
 }
 
 function Mark({ phase }: { phase: PayPhase }) {
+  const styles = useStyles();
+  const { colors } = useTheme();
   // Created once per mark (the mark is re-keyed per phase), never read from a ref in render.
   const [spin] = useState(() => new Animated.Value(0));
   const [pop] = useState(() => new Animated.Value(phase === "waiting" ? 1 : 0.5));
@@ -65,12 +69,12 @@ function Mark({ phase }: { phase: PayPhase }) {
       testID={success ? "status-tick" : "status-cross"}
       style={[styles.disc, { backgroundColor: success ? colors.accent : colors.notificationBadge, transform: [{ scale: pop }] }]}
     >
-      <Feather name={success ? "check" : "x"} size={40} color={colors.accentForeground} />
+      <Feather name={success ? "check" : "x"} size={40} color={colors.onSolid} />
     </Animated.View>
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => StyleSheet.create({
   wrap: { alignItems: "center", gap: space[2], paddingVertical: space[4] },
   body: { textAlign: "center" },
   ring: {
@@ -82,4 +86,4 @@ const styles = StyleSheet.create({
     borderTopColor: colors.accent,
   },
   disc: { width: SIZE, height: SIZE, borderRadius: SIZE / 2, alignItems: "center", justifyContent: "center" },
-});
+}));

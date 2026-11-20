@@ -13,7 +13,8 @@ import { correctCategory, ReviewActionError } from "@/features/review/actions";
 import { displayName } from "@/features/transactions/display";
 import { getTransactionById } from "@/features/transactions/queries";
 import { useQuery } from "@/hooks/useQuery";
-import { colors, MIN_TOUCH_TARGET, radii, space } from "@/theme/tokens";
+import { MIN_TOUCH_TARGET, radii, space } from "@/theme/tokens";
+import { makeStyles, useTheme } from "@/theme/ThemeProvider";
 
 const MAX_SHOWN = 40;
 
@@ -21,6 +22,8 @@ const MAX_SHOWN = 40;
 // "Correct category": the choice becomes a manual decision, and optionally a
 // rule so future payments to the same merchant file themselves.
 export default function CategoryPicker() {
+  const styles = useStyles();
+  const { colors } = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
   const loadTransaction = useCallback(() => getTransactionById(id), [id]);
   const loadOptions = useCallback(() => getCategoryOptions(), []);
@@ -150,7 +153,7 @@ export default function CategoryPicker() {
           <Switch
             value={saveAsRule}
             onValueChange={setSaveAsRule}
-            trackColor={{ true: colors.accent }}
+            trackColor={{ true: colors.accentSolid }}
             accessibilityLabel={`Remember this category for ${counterparty}`}
           />
         </View>
@@ -182,6 +185,8 @@ function Option({
   selected: boolean;
   onPress(): void;
 }) {
+  const styles = useStyles();
+  const { colors } = useTheme();
   return (
     <Pressable
       accessibilityRole="radio"
@@ -201,7 +206,7 @@ function Option({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => StyleSheet.create({
   option: {
     minHeight: MIN_TOUCH_TARGET,
     flexDirection: "row",
@@ -219,4 +224,4 @@ const styles = StyleSheet.create({
     borderRadius: radii.card,
     backgroundColor: colors.surface,
   },
-});
+}));

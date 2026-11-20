@@ -10,8 +10,8 @@ import { useHoldPrefs } from "@/features/pay/hold-store";
 import { showPayButton } from "@/features/pay/launcher";
 import { useQuery } from "@/hooks/useQuery";
 import { AppHeader } from "@/components/shell/AppHeader";
-import { colors } from "@/theme/tokens";
 import { fonts } from "@/theme/typography";
+import { useTheme } from "@/theme/ThemeProvider";
 
 type IconName = React.ComponentProps<typeof Feather>["name"];
 
@@ -19,6 +19,7 @@ const icon = (name: IconName) => {
   // Coloured from our own tokens (matching the tab bar's tint settings)
   // rather than the navigator's loosely-typed colour value.
   function TabIcon({ focused }: { focused: boolean }) {
+    const { colors } = useTheme();
     return (
       <Feather
         name={name}
@@ -31,6 +32,7 @@ const icon = (name: IconName) => {
 };
 
 export default function TabsLayout() {
+  const { colors } = useTheme();
   const loadPay = useCallback(async () => {
     const result = await fetchPayConfig();
     // The sheet reads this so it can open instantly.

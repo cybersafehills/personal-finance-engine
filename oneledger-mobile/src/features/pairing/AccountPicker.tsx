@@ -1,9 +1,10 @@
 import { Pressable, View } from "react-native";
 
 import { Text } from "@/components/ds";
-import { colors, MIN_TOUCH_TARGET, radii, space } from "@/theme/tokens";
+import { MIN_TOUCH_TARGET, radii, space } from "@/theme/tokens";
 
 import type { PairableAccount } from "./pairing";
+import { useTheme } from "@/theme/ThemeProvider";
 
 /** Single-choice list of MoMo accounts (a radio group). */
 export function AccountPicker({
@@ -15,6 +16,7 @@ export function AccountPicker({
   selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
+  const { colors } = useTheme();
   return (
     <View accessibilityRole="radiogroup" style={{ gap: space[2] }}>
       {accounts.map((account) => {

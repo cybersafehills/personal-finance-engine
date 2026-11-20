@@ -5,7 +5,8 @@ import { Button, Text } from "@/components/ds";
 import { reviewPrompt } from "@/features/transactions/display";
 import type { TransactionRow } from "@/features/transactions/queries";
 import { TransactionItem } from "@/features/transactions/TransactionItem";
-import { colors, space } from "@/theme/tokens";
+import { space } from "@/theme/tokens";
+import { makeStyles } from "@/theme/ThemeProvider";
 
 /** A review-queue transaction with its one-tap decisions underneath. */
 export function ReviewCard({
@@ -21,6 +22,7 @@ export function ReviewCard({
   onConfirm(): void;
   onDismiss(): void;
 }) {
+  const styles = useStyles();
   const prompt = reviewPrompt(transaction);
   return (
     <View style={styles.card}>
@@ -53,8 +55,8 @@ export function ReviewCard({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => StyleSheet.create({
   card: { backgroundColor: colors.surface, paddingBottom: space[3] },
   body: { paddingHorizontal: space[3], gap: space[2] },
   actions: { flexDirection: "row", gap: space[2], flexWrap: "wrap" },
-});
+}));

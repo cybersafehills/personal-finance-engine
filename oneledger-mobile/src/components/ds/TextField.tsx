@@ -10,10 +10,11 @@ import {
   type TextInputProps,
 } from "react-native";
 
-import { colors, radii, space } from "@/theme/tokens";
+import { radii, space } from "@/theme/tokens";
 import { fonts, MAX_FONT_SCALE } from "@/theme/typography";
 
 import { Text } from "./Text";
+import { makeStyles, useTheme } from "@/theme/ThemeProvider";
 
 export type TextFieldProps = Omit<TextInputProps, "style"> & {
   label: string;
@@ -32,6 +33,8 @@ export type TextFieldProps = Omit<TextInputProps, "style"> & {
  * tech once. 44pt tall; text is 15pt, one step above body so what you type stays readable.
  */
 export function TextField({ label, help, error, leading, trailing, compact = false, ...input }: TextFieldProps) {
+  const styles = useStyles();
+  const { colors, isDark } = useTheme();
   const id = useId();
   const [focused, setFocused] = useState(false);
   // iPhone number pads have no Return key, so they get a "Done" bar above the keys.
@@ -61,6 +64,7 @@ export function TextField({ label, help, error, leading, trailing, compact = fal
           accessibilityHint={error ?? help}
           aria-invalid={!!error}
           placeholderTextColor={colors.textMuted}
+          keyboardAppearance={isDark ? "dark" : "light"}
           returnKeyType="done"
           inputAccessoryViewID={doneBar ? `${id}-done` : undefined}
           {...input}
@@ -100,7 +104,7 @@ export function TextField({ label, help, error, leading, trailing, compact = fal
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => StyleSheet.create({
   field: { gap: space[1] },
   box: {
     minHeight: 44,
@@ -134,4 +138,4 @@ const styles = StyleSheet.create({
   },
   focused: { borderColor: colors.accent, borderWidth: 2 },
   invalid: { borderColor: colors.attention },
-});
+}));

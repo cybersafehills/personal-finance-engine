@@ -3,9 +3,10 @@ import { Pressable, StyleSheet, View } from "react-native";
 
 import { Text } from "@/components/ds";
 import { formatRwf } from "@/lib/money";
-import { colors, hitSlopFor, radii, space } from "@/theme/tokens";
+import { hitSlopFor, radii, space } from "@/theme/tokens";
 
 import { lifetimeInfo, type LifetimeFlow } from "./lifetime";
+import { makeStyles } from "@/theme/ThemeProvider";
 
 type Kind = "sent" | "received";
 
@@ -24,6 +25,7 @@ export function LifetimeChips({
   totals: LifetimeFlow;
   accountCreatedIso: string | null;
 }) {
+  const styles = useStyles();
   const [open, setOpen] = useState<Kind | null>(null);
   if (totals.count === 0) return null;
 
@@ -66,7 +68,7 @@ export function LifetimeChips({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => StyleSheet.create({
   wrap: { gap: space[2] },
   row: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: space[1] },
   // Small visual chip; hitSlop brings the tap area up to 44pt.
@@ -99,4 +101,4 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth * 2,
     borderColor: colors.borderSubtle,
   },
-});
+}));

@@ -16,7 +16,8 @@ import {
 } from "@/features/pay/launcher";
 import type { PayConfig } from "@/features/pay/types";
 import { config as appConfig } from "@/lib/config";
-import { colors, CONTROL_HEIGHT, hitSlopFor, radii, space } from "@/theme/tokens";
+import { CONTROL_HEIGHT, hitSlopFor, radii, space } from "@/theme/tokens";
+import { makeStyles, useTheme } from "@/theme/ThemeProvider";
 
 // The Pay & Services launcher, shown in a native form sheet (see
 // (app)/pay-sheet.tsx), mirroring the web's launcher. It holds only what you need
@@ -87,6 +88,8 @@ export function PayLauncher({
   /** Called before navigating, so the sheet can be dismissed first. */
   onClose: () => void;
 }) {
+  const styles = useStyles();
+  const { colors } = useTheme();
   const [info, setInfo] = useState<Info | null>(null);
 
   function pick(action: LauncherAction) {
@@ -132,7 +135,7 @@ export function PayLauncher({
               tone="scan"
               label="Scan to pay"
               caption="Scan a merchant payment QR code."
-              icon={<Feather name="maximize" size={16} color={colors.accentForeground} />}
+              icon={<Feather name="maximize" size={16} color={colors.onSolid} />}
               infoLabel="About scan to pay"
               onInfo={() => setInfo("scan")}
               onPress={() => {
@@ -149,7 +152,7 @@ export function PayLauncher({
               tone="request"
               label="Request payment"
               caption="Ask someone to pay you with a link."
-              icon={<MaterialCommunityIcons name="hand-coin" size={18} color={colors.accentForeground} />}
+              icon={<MaterialCommunityIcons name="hand-coin" size={18} color={colors.onSolid} />}
               infoLabel="About requesting payment"
               onInfo={() => setInfo("request")}
               onPress={() => {
@@ -200,12 +203,12 @@ export function PayLauncher({
             accessibilityRole="button"
             accessibilityLabel={LAUNCHER_LINKS.ussd.label}
             onPress={openDirectory}
-            style={(pressed) => [styles.primary, pressed && { backgroundColor: colors.accentPressed }]}
+            style={(pressed) => [styles.primary, pressed && { backgroundColor: colors.accentSolidPressed }]}
           >
-            <Text variant="bodyStrong" color="accentForeground" style={styles.flex}>
+            <Text variant="bodyStrong" color="onSolid" style={styles.flex}>
               {LAUNCHER_LINKS.ussd.label}
             </Text>
-            <Feather name="arrow-right" size={16} color={colors.accentForeground} />
+            <Feather name="arrow-right" size={16} color={colors.onSolid} />
           </PressableScale>
         </Animated.View>
 
@@ -275,7 +278,10 @@ function FeatureRow({
   onInfo: () => void;
   onPress: () => void;
 }) {
+  const styles = useStyles();
+  const { colors } = useTheme();
   const accent = tone === "scan" ? colors.moneyPositive : colors.moneyRequest;
+  const solid = tone === "scan" ? colors.moneyPositiveSolid : colors.moneyRequestSolid;
   const highlight = tone === "scan" ? colors.moneyPositiveBg : colors.moneyRequestBg;
   return (
     <View style={[styles.feature, { borderColor: accent }]}>
@@ -285,7 +291,7 @@ function FeatureRow({
         onPress={onPress}
         style={({ pressed }) => [styles.featureMain, pressed && { backgroundColor: highlight }]}
       >
-        <View style={[styles.featureIcon, { backgroundColor: accent }]}>{icon}</View>
+        <View style={[styles.featureIcon, { backgroundColor: solid }]}>{icon}</View>
         <View style={styles.flex}>
           <Text variant="bodyStrong">{label}</Text>
           <Text variant="caption" color="textMuted" numberOfLines={1}>
@@ -306,7 +312,7 @@ function FeatureRow({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => StyleSheet.create({
   root: { backgroundColor: colors.surface },
   flex: { flex: 1 },
   header: {
@@ -370,7 +376,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: space[4],
     borderRadius: radii.control,
     borderCurve: "continuous",
-    backgroundColor: colors.accent,
+    backgroundColor: colors.accentSolid,
   },
   footer: { gap: space[2] },
   note: { textAlign: "center" },
@@ -400,4 +406,4 @@ const styles = StyleSheet.create({
     borderCurve: "continuous",
     backgroundColor: colors.surface,
   },
-});
+}));

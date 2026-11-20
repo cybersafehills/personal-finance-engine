@@ -2,9 +2,10 @@ import { useRef, useState } from "react";
 import { Pressable, View } from "react-native";
 
 import { Button, Card, Text, TextField } from "@/components/ds";
-import { colors, MIN_TOUCH_TARGET, radii, space } from "@/theme/tokens";
+import { MIN_TOUCH_TARGET, radii, space } from "@/theme/tokens";
 
 import { addTag, MAX_TAG_LENGTH, removeTag, TagError, unusedSuggestions } from "./tags";
+import { useTheme } from "@/theme/ThemeProvider";
 
 // Free-form labels on a transaction: add, remove, and one-tap suggestions from
 // tags already used in the Space. Writes go straight to the database under the
@@ -21,6 +22,7 @@ export function TransactionTags({
   initialTags: string[];
   suggestions: string[];
 }) {
+  const { colors } = useTheme();
   // Local list once the user changes something; until then, what was loaded.
   const [override, setOverride] = useState<string[] | null>(null);
   const tags = override ?? initialTags;

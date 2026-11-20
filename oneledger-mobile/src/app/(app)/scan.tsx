@@ -16,7 +16,8 @@ import {
   REASON_MESSAGES,
 } from "@/features/scan/review";
 import type { ClassifyResult, ScanModel } from "@/features/scan/types";
-import { colors, radii, space } from "@/theme/tokens";
+import { radii, space } from "@/theme/tokens";
+import { useTheme } from "@/theme/ThemeProvider";
 
 type Phase =
   | { step: "scanning" }
@@ -33,6 +34,7 @@ type Phase =
 // dialed on detection, one tap prepares a draft, and the app never claims the
 // payment settled. The camera only reads the code; nothing is photographed or kept.
 export default function Scan() {
+  const { colors } = useTheme();
   const [permission, requestPermission] = useCameraPermissions();
   const [phase, setPhase] = useState<Phase>({ step: "scanning" });
   const [torch, setTorch] = useState(false);

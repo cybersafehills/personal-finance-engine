@@ -20,7 +20,8 @@ import { listLocalAccounts, recordManualTransaction } from "@/offline/local-stor
 import { useOffline } from "@/offline/offline-context";
 import { readableDb } from "@/offline/runtime";
 import { kigaliDateKey } from "@/lib/kigali-time";
-import { colors, MIN_TOUCH_TARGET, radii, space } from "@/theme/tokens";
+import { MIN_TOUCH_TARGET, radii, space } from "@/theme/tokens";
+import { makeStyles } from "@/theme/ThemeProvider";
 
 // Record a transaction by hand: for money that moved outside MoMo, or when
 // automatic recording missed something. It becomes an ordinary transaction
@@ -242,10 +243,12 @@ export default function AddTransaction() {
 }
 
 function Chips({ children }: { children: React.ReactNode }) {
+  const styles = useStyles();
   return <View style={styles.chips}>{children}</View>;
 }
 
 function Chip({ label, selected, onPress }: { label: string; selected: boolean; onPress(): void }) {
+  const styles = useStyles();
   return (
     <Pressable
       accessibilityRole="radio"
@@ -253,14 +256,14 @@ function Chip({ label, selected, onPress }: { label: string; selected: boolean; 
       onPress={onPress}
       style={[styles.chip, selected && styles.chipSelected]}
     >
-      <Text variant="label" color={selected ? "accentForeground" : "textPrimary"}>
+      <Text variant="label" color={selected ? "onSolid" : "textPrimary"}>
         {label}
       </Text>
     </Pressable>
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => StyleSheet.create({
   chips: { flexDirection: "row", flexWrap: "wrap", gap: space[2] },
   chip: {
     minHeight: MIN_TOUCH_TARGET,
@@ -271,5 +274,5 @@ const styles = StyleSheet.create({
     borderColor: colors.borderStrong,
     backgroundColor: colors.surface,
   },
-  chipSelected: { backgroundColor: colors.accent, borderColor: colors.accent },
-});
+  chipSelected: { backgroundColor: colors.accentSolid, borderColor: colors.accentSolid },
+}));
