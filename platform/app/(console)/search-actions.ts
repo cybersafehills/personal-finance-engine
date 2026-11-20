@@ -1,6 +1,6 @@
 "use server";
 
-import { consoleRpc, requireSession } from "../../lib/console/access";
+import { auditView, consoleRpc, requireSession } from "../../lib/console/access";
 import { can } from "../../lib/console/permissions";
 
 export type CustomerHit = { ref: string; id: string; name: string | null; status: string };
@@ -13,6 +13,8 @@ export async function searchCustomers(query: string): Promise<CustomerHit[]> {
   if (q.length < 3) return [];
   const session = await requireSession();
   if (!can(session.access, "view_customer_metadata")) return [];
+  // Same audited read as the Users page (one entry per lookup, no query text).
+  await auditView(session, "customer_directory.viewed", "palette-search");
   const res = await consoleRpc<
     { id: string; customer_ref: string; display_name: string | null; status: string }[]
   >(session, "console_customer_directory", { p_search: q, p_limit: 5 });

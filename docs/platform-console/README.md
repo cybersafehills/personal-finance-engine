@@ -33,6 +33,21 @@ Migration `20270121000000` (6 more read RPCs; harness tripwires now 143 tables /
 - **New pages**: Activity Center (`/overview/activity`), Reports & Intelligence (`/overview/reports`: monthly registrations, activation funnel, workspace types, plan mix), Registrations (`/customers/registrations`: derived state pending verification / incomplete / verified / restricted), Organizations (`/customers/organizations`), Security Center (`/security`: staff MFA coverage, denials, audited actions, customer sign-in ledger), Customer detail (`/customers/users/[id]`: metadata only).
 - Still **Soon** (need a data source or product decision): Customer Support, all Revenue pages, Incidents, Integrations, Communications, Feature Management, Configuration, Approvals, Administrative Actions.
 
+## 1b. v3 (2026-11-20): workflows
+
+Migration `20270123000000` (18 functions, 5 tables; harness tripwires now 148 tables / 172 authenticated functions, 1097 checks):
+
+- **Customer Support** (`/customers/support`): staff-logged tickets (no customer intake exists), categories, priority, status machine, assignment, escalation (note required), append-only timeline, internal notes.
+- **Incidents** (`/security/incidents`): declare, severity, honest detection source, status machine (resolve needs a note), containment entries, append-only timeline.
+- **Approvals** (`/administration/approvals`) and **Administrative Actions** (`/administration/actions`): four-eyes staff access changes (grant, suspend, reactivate, role change). Requester != approver, nobody decides a request about their own access, one pending request per change, approval applies the change and writes the audit row in the same transaction, a failed re-validation is recorded as `failed`, the last active Platform Owner cannot be suspended or demoted.
+- **Integrations** and **Communications**: read-only counts. No endpoints, secrets, recipients or message text.
+
+Write rules: one SECURITY DEFINER function per command, `console_assert` first, rows locked (`FOR UPDATE`) so a double submit is a no-op or a clear error, free-text bodies never copied into audit metadata, append-only tables immutable even for `service_role`.
+
+**Bootstrap note:** with one Platform Owner nobody can approve the owner's own requests, so the second `manage_staff` holder must be seeded by SQL once. After that, access changes go through Approvals.
+
+**Finding F6 (not fixed here):** customers have table-level UPDATE on `profiles` with an own-row policy, and only `is_platform_admin` is guarded. `profiles.status` (`active`/`suspended`) is therefore customer-writable, so a customer-suspend action in the console would not be enforceable. Customer suspend/restore is deliberately not built until `status` is protected the same way.
+
 ## 2. Repository audit (Part III)
 
 | # | Question | Finding |

@@ -28,7 +28,7 @@ export const NAV: NavGroup[] = [
       { label: "Users", icon: "users", href: "/customers/users", permission: "view_customer_metadata", description: "Customer accounts (metadata only)" },
       { label: "Registrations", icon: "userplus", href: "/customers/registrations", permission: "view_customer_metadata", description: "Sign-up and verification state" },
       { label: "Organizations", icon: "building", href: "/customers/organizations", permission: "view_customer_metadata", description: "Business workspaces" },
-      { label: "Customer Support", icon: "lifebuoy" },
+      { label: "Customer Support", icon: "lifebuoy", href: "/customers/support", permission: "manage_support_tickets", description: "Staff-logged tickets and escalations" },
     ],
   },
   {
@@ -46,15 +46,15 @@ export const NAV: NavGroup[] = [
       { label: "Security Center", icon: "shield", href: "/security", permission: "view_audit_logs", description: "Privileged activity and access posture" },
       { label: "Access Management", icon: "key", href: "/security/access", permission: "view_staff", description: "Staff, roles and permissions" },
       { label: "Audit Logs", icon: "scroll", href: "/security/audit-logs", permission: "view_audit_logs", description: "Append-only audit trail" },
-      { label: "Incidents", icon: "siren" },
+      { label: "Incidents", icon: "siren", href: "/security/incidents", permission: "review_security_incidents", description: "Declare, track and resolve incidents" },
     ],
   },
   {
     label: "Platform",
     items: [
       { label: "System Health", icon: "heart", href: "/platform/health", permission: "view_system_health", description: "Pipeline and job health" },
-      { label: "Integrations", icon: "plug" },
-      { label: "Communications", icon: "mail" },
+      { label: "Integrations", icon: "plug", href: "/platform/integrations", permission: "view_integrations", description: "Connection and sync status" },
+      { label: "Communications", icon: "mail", href: "/platform/communications", permission: "view_system_health", description: "Notification and email delivery" },
       { label: "Feature Management", icon: "flag" },
       { label: "Configuration", icon: "sliders" },
     ],
@@ -62,8 +62,8 @@ export const NAV: NavGroup[] = [
   {
     label: "Administration",
     items: [
-      { label: "Approvals", icon: "check" },
-      { label: "Administrative Actions", icon: "gavel" },
+      { label: "Approvals", icon: "check", href: "/administration/approvals", permission: "view_staff", description: "Four-eyes staff access requests" },
+      { label: "Administrative Actions", icon: "gavel", href: "/administration/actions", permission: "view_staff", description: "History of access decisions" },
     ],
   },
 ];
