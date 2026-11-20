@@ -7,8 +7,8 @@
 >
 > The native APK and iOS simulator build recorded below were built earlier from
 > `codex/phase1-foundation` at `89597db`. They do not include the newer preview
-> changes and are historical verification only. Native artifacts must be rebuilt
-> from `preview/live` before testing the combined version outside Expo Go.
+> changes and are historical verification only. The corrected replacement
+> artifacts and validation results are recorded at the end of this document.
 
 Pay & services → Scan to pay → Merchant poster → Read merchant poster.
 The user frames the merchant name and the complete MTN MoMoPay
@@ -102,3 +102,31 @@ finished successfully and produced a downloadable simulator artifact. This
 verifies the Swift poster module and complete iOS app compile and link. A
 simulator artifact cannot be installed on an iPhone; a signed device build and
 real-camera testing remain separate release checks.
+
+## Corrected preview/live artifacts
+
+Source: `preview/live`, feature commit `432f9cb`, preserving the existing theme,
+contact picker, templates, saved contacts, and contact-number shape logging.
+The working tree was restored to `/private/tmp/claude-501/ol-work/pay2`.
+
+- Expo Go preview: `exp://192.168.1.4:8082`; the older 8081 server was stopped.
+  The iOS manifest and bundle return HTTP 200 and contain both Appearance and
+  the merchant poster UI. Expo Go still cannot execute the custom OCR module.
+- Mobile tests: 1,202 passed across 118 suites; TypeScript and lint pass.
+- Android: `:app:assembleDebug :oneledger-capture:testDebugUnitTest` succeeds;
+  all 45 native tests pass. The APK signature verifies, and the debug APK is
+  saved as `oneledger-mobile/dist/native/oneledger-preview-live-debug.apk` in
+  both the active checkout and the primary workspace. The primary workspace's
+  older `oneledger-poster-debug.apk` download path now points to this corrected
+  APK as well. Debug builds require the development server.
+- Android SHA-256: `d79132512c39c9fd95da63f51b29269eef1a28d2050428f10c0a37d4f0cf8615`.
+- iOS simulator: build `86ba2eb4-eab7-4931-be3a-490133daa925` finished
+  successfully and produced a downloadable artifact:
+  https://expo.dev/accounts/dolyindesign/projects/oneledger/builds/86ba2eb4-eab7-4931-be3a-490133daa925
+  This replaces the earlier simulator artifact for testing the combined
+  version. It cannot be installed on an iPhone; a signed device build and
+  real-camera testing remain separate checks.
+
+Temporary local C++ and app intermediates were removed after preserving the
+verified APK, test results, and build logs to recover disk space. Source files
+and installed SDK dependencies remain in place.
