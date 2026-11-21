@@ -1,4 +1,4 @@
-import { changeBps, compactMoney, fillTrend, greeting, homePeriods, retainedPercent, walletTotal } from "../live-data";
+import { changeBps, compactMoney, fillTrend, homePeriods, retainedPercent, walletTotal } from "../live-data";
 import type { Wallet } from "@/features/wallets/types";
 
 const wallet = (over: Partial<Wallet> = {}): Wallet => ({ id: "a", name: "MoMo", provider: "mtn_momo", currency: "RWF", isPrimary: true, latestTxnAt: null, balance: { status: "confirmed", amountMinor: 14416n, asOf: "2026-11-19T06:47:00Z", basis: "provider_reported", reasons: [] }, ...over });
@@ -26,9 +26,6 @@ describe("live Home accounting", () => {
   });
 });
 describe("time boundaries", () => {
-  it("uses the supplied device hour for greetings", () => {
-    expect([greeting(0), greeting(11), greeting(12), greeting(17), greeting(18), greeting(23)]).toEqual(["Good morning", "Good morning", "Good afternoon", "Good afternoon", "Good evening", "Good evening"]);
-  });
   it("compares month to date with the same point in the prior calendar month", () => {
     expect(homePeriods(new Date("2026-11-20T10:30:00Z"))).toMatchObject({ from: "2026-10-31T22:00:00.000Z", to: "2026-11-20T10:30:00.000Z", previousFrom: "2026-09-30T22:00:00.000Z", previousTo: "2026-10-20T10:30:00.000Z", trendFrom: "2026-05-31T22:00:00.000Z" });
   });

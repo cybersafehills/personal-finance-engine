@@ -246,3 +246,18 @@ it("keeps the selected wallet filter when opened from wallet detail", async () =
  await fireEvent.press(screen.getByText("All wallets"));
  expect(router.setParams).toHaveBeenCalledWith({accountId:undefined,walletName:undefined});
 });
+
+
+it("focuses search only when explicitly opened by the Home search action",async()=>{
+ setParams({focusSearch:"request-1",reset:"request-1"});
+ mockGetTransactions.mockResolvedValue([]);
+ await render(<Transactions />);
+ expect(screen.getByLabelText("Search").props.autoFocus).toBe(true);
+ await act(async()=>{jest.advanceTimersByTime(200);});
+ expect(router.setParams).toHaveBeenCalledWith({focusSearch:undefined});
+});
+it("keeps the keyboard closed for ordinary Transactions navigation",async()=>{
+ mockGetTransactions.mockResolvedValue([]);
+ await render(<Transactions />);
+ expect(screen.getByLabelText("Search").props.autoFocus).toBe(false);
+});

@@ -38,7 +38,7 @@ const renderHome=()=>render(<PrivacyProvider><Home /></PrivacyProvider>);
 describe("live Home", () => {
   it("uses real wallet, profile and analytics values instead of sample figures",async()=>{
     await renderHome();
-    expect(await screen.findByText(/Verified/)).toBeTruthy();
+    expect(await screen.findByText("V")).toBeTruthy();
     expect((await screen.findAllByText("Real MoMo wallet")).length).toBeGreaterThan(0);
     expect(screen.getAllByText("RWF 14,416").length).toBeGreaterThanOrEqual(2);
     expect(screen.queryByText(/2,485,750/)).toBeNull();
@@ -200,4 +200,37 @@ it("opens the Space picker beside the wallet dots rather than in the greeting",a
  await fireEvent.press(within(screen.getByTestId("wallet-controls")).getByRole("button",{name:"Change Space, Personal"}));
  await fireEvent.press(await screen.findByText("Household"));
  expect(mockSpace.setActive).toHaveBeenCalledWith("w2");
+});
+
+
+it("replaces the salutation with a branded header and opens a fresh focused search",async()=>{
+ await renderHome();await screen.findByText("OneLedger");
+ expect(screen.queryByText(/Good morning|Good afternoon|Good evening/)).toBeNull();
+ expect(screen.getByText("Money overview")).toBeTruthy();
+ await fireEvent.press(screen.getByRole("button",{name:"Search transactions"}));
+ expect(router.navigate).toHaveBeenLastCalledWith(expect.objectContaining({pathname:"/transactions",params:expect.objectContaining({focusSearch:expect.any(String),reset:expect.any(String),accountId:"",category:"",period:"all"})}));
+});
+it("restores real month-to-date comparisons and retention without sample percentages",async()=>{
+ await renderHome();
+ expect(await screen.findByText("+20.0% vs last month")).toBeTruthy();
+ expect(screen.getByText("75% of income retained this month")).toBeTruthy();
+ expect(screen.queryByText(/8.4%/)).toBeNull();
+});
+it("does not invent trends when the previous period is unavailable or zero",async()=>{
+ mockInsights.mockImplementation((p:{from:string,to:string})=>({ok:true,workspaceId:"w1",overview:{from:p.from,to:p.to,latestTxnAt:null,skippedCurrencies:0,currencies:[block(p.from===homePeriods(new Date()).previousFrom?0n:120000n,p.from===homePeriods(new Date()).previousFrom?0n:30000n)]}}));
+ await renderHome();
+ expect((await screen.findAllByText("No comparison yet")).length).toBe(2);
+ expect(screen.queryByText(/Infinity|NaN/)).toBeNull();
+ expect(screen.getByText("75% of income retained this month")).toBeTruthy();
+});
+
+it("keeps current trends visible when the prior-period API fails",async()=>{
+ mockInsights.mockImplementation((p:{from:string,to:string})=>p.from===homePeriods(new Date()).previousFrom ? {ok:false,reason:"error",message:"Prior period unavailable"} : {ok:true,workspaceId:"w1",overview:{currencies:[block(120000n,30000n)]}});
+ await renderHome();expect(await screen.findByText("75% of income retained this month")).toBeTruthy();
+ expect(screen.getAllByText("No comparison yet")).toHaveLength(2);
+});
+it("does not report positive retention when spending exceeds income",async()=>{
+ mockInsights.mockResolvedValue({ok:true,workspaceId:"w1",overview:{currencies:[block(100n,125n)]}});
+ await renderHome();expect(await screen.findByText("Expenses exceed income by RWF 25")).toBeTruthy();
+ expect(screen.queryByText(/% of income retained/)).toBeNull();
 });

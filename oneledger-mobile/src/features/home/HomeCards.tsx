@@ -9,20 +9,20 @@ import { STATUS_LABEL, PROVIDER_LABEL } from "@/features/wallets/display";
 import { usePrivacy } from "@/features/privacy/PrivacyProvider";
 import { formatMoney, type SupportedCurrency } from "@/lib/money";
 import { makeStyles, useTheme } from "@/theme/ThemeProvider";
-import { compactMoney, greeting } from "./live-data";
+import { compactMoney, changeBps, percentText, retainedPercent } from "./live-data";
 import { Donut } from "./Charts";
 
-export function HomeHeader({ name, now, unread }: { name: string; now: Date; unread: number }) {
+export function HomeHeader({ name, unread }: { name: string; unread: number }) {
   const { colors } = useTheme();
   const styles = useStyles();
   return <View testID="home-header">
     <View style={styles.header}>
       <View style={{flex:1,minHeight:44,justifyContent:"center",gap:2}}>
-        <Text variant="caption" color="textMuted" style={styles.salutation}>{greeting(now.getHours())}</Text>
-        <Text variant="bodyStrong" accessibilityRole="header" style={styles.greeting} numberOfLines={1}>{name.split(/\s+/)[0]}</Text>
+        <Text variant="heading" style={styles.brand}>OneLedger</Text>
+        <Text variant="caption" color="textMuted">Money overview</Text>
       </View>
       <View style={{ flexDirection: "row", gap: 2 }}>
-        <Pressable accessibilityRole="button" accessibilityLabel="Search transactions" onPress={() => router.navigate("/transactions")} style={styles.iconButton}><Feather name="search" size={17} color={colors.textPrimary} /></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel="Search transactions" onPress={() => { const request=String(Date.now()); router.navigate({pathname:"/transactions",params:{focusSearch:request,reset:request,accountId:"",walletName:"",category:"",period:"all"}}); }} style={styles.iconButton}><Feather name="search" size={17} color={colors.textPrimary} /></Pressable>
         <Pressable accessibilityRole="button" accessibilityLabel={`Notifications, ${unread} unread`} onPress={() => router.push("/notifications")} style={styles.iconButton}><Feather name="bell" size={17} color={colors.textPrimary} />{unread > 0 ? <View style={styles.notificationDot} /> : null}</Pressable>
         <Pressable accessibilityRole="button" accessibilityLabel="Your profile" onPress={() => router.push("/settings")} style={styles.avatar}><Text variant="bodyStrong" color="accent">{name.slice(0, 1).toUpperCase()}</Text></Pressable>
       </View>
@@ -48,15 +48,26 @@ export function HomeLink({ label, onPress }: { label: string; onPress(): void })
 
 export { WalletCarousel as HeroBalance } from "./WalletCarousel";
 
-export function CashFlow({ currency, current, today, todayAvailable, available, message }: { today: CurrencyOverview | null; todayAvailable: boolean; currency: SupportedCurrency; current: CurrencyOverview | null; available: boolean; message: string }) {
+export function CashFlow({ currency, current, previous, previousAvailable = false, today, todayAvailable, available, message }: { previous?: CurrencyOverview | null; previousAvailable?: boolean; today: CurrencyOverview | null; todayAvailable: boolean; currency: SupportedCurrency; current: CurrencyOverview | null; available: boolean; message: string }) {
   const { amountsHidden } = usePrivacy();
   const styles = useStyles();
   const money = (amount: bigint, ready: boolean) => amountsHidden ? "••••••" : ready ? compactMoney(amount,currency) : "—";
+  const income=current?.moneyInMinor ?? 0n, expense=current?.moneyOutMinor ?? 0n;
+  const retained=retainedPercent(income,expense);
   return <HomeSection title="Cash flow" dense action={<Text variant="caption" color="textMuted">{currency}</Text>}>
     <View style={styles.dailyPrimary}>{[{label:"Received today",amount:today?.moneyInMinor ?? 0n,positive:true},{label:"Spent today",amount:today?.moneyOutMinor ?? 0n,positive:false}].map(item => <View key={item.label} style={{flex:1,gap:5}}><Text variant="caption" color="textMuted">{item.label}</Text><Text variant="title" style={styles.dailyAmount} color={item.positive ? "moneyPositive" : "moneyRequest"} tabular adjustsFontSizeToFit numberOfLines={1}>{money(item.amount,todayAvailable)}</Text></View>)}</View>
     {!todayAvailable ? <Text variant="caption" color="textMuted">Today’s activity is unavailable.</Text> : null}
     <View style={styles.monthlyFooter}><Text variant="caption" color="textMuted" style={styles.small}>This month · Settled activity</Text>
-      {available ? <View style={styles.cashColumns}>{[{label:"Income",amount:current?.moneyInMinor ?? 0n},{label:"Expenses",amount:current?.moneyOutMinor ?? 0n}].map(item => <View key={item.label} style={{flex:1,flexDirection:"row",flexWrap:"wrap",alignItems:"baseline",gap:5}}><Text variant="caption" color="textMuted" style={styles.small}>{item.label}</Text><Text variant="bodyStrong" style={styles.monthlyAmount} tabular>{money(item.amount,true)}</Text></View>)}</View> : <Text variant="caption" color="textMuted">{message}</Text>}
+      {available ? <>
+        <View style={styles.cashColumns}>{[{label:"Income",amount:income,prior:previous?.moneyInMinor ?? 0n,income:true},{label:"Expenses",amount:expense,prior:previous?.moneyOutMinor ?? 0n,income:false}].map(item => {
+          const delta=previousAvailable ? changeBps(item.amount,item.prior) : null;
+          const favorable=delta !== null && (item.income ? delta>0 : delta<0);
+          return <View key={item.label} style={{flex:1,gap:3}}><View style={{flexDirection:"row",flexWrap:"wrap",alignItems:"baseline",gap:5}}><Text variant="caption" color="textMuted" style={styles.small}>{item.label}</Text><Text variant="bodyStrong" style={styles.monthlyAmount} tabular>{money(item.amount,true)}</Text></View><Text variant="caption" style={styles.small} color={delta === null || delta===0 ? "textMuted" : favorable ? "moneyPositive" : "danger"}>{amountsHidden ? "Comparison hidden" : delta===null ? "No comparison yet" : `${percentText(delta)} vs last month`}</Text></View>;
+        })}</View>
+        <View style={styles.retentionTrack} accessibilityRole="progressbar" accessibilityLabel="Income retained this month" accessibilityValue={!amountsHidden && retained !== null ? {min:0,max:100,now:Math.round(Math.max(0,Math.min(100,retained)))} : undefined}><View style={[styles.retentionFill,{width:`${amountsHidden || retained===null ? 0 : Math.max(0,Math.min(100,retained))}%`}]}/></View>
+        <Text variant="caption" color="textMuted" style={styles.small}>{amountsHidden ? "Amounts hidden" : retained===null ? "No income to calculate retention" : retained<0 ? `Expenses exceed income by ${compactMoney(expense-income,currency)}` : `${Math.round(retained)}% of income retained this month`}</Text>
+        <Text variant="caption" color="textMuted" style={styles.comparisonNote}>Same point in the previous month · Internal transfers excluded</Text>
+      </> : <Text variant="caption" color="textMuted">{message}</Text>}
     </View>
   </HomeSection>;
 }
@@ -74,7 +85,7 @@ export function Spending({ current, available, message }: { current: CurrencyOve
   return <HomeSection title="Spending breakdown" subtitle="Where your money goes" collapsible>
     {!available ? <Text color="textMuted">{message}</Text> : !rows.length ? <Text color="textMuted">Your spending categories appear after your first settled expense.</Text> : negative ? <><Text color="textMuted">Net spending includes refunds.</Text>{rows.map((r) => <View key={r.category} style={styles.walletRow}><Text>{r.category}</Text><Text>{amountsHidden ? "••••••" : formatMoney(r.amountMinor, currency)}</Text></View>)}</> : <View style={styles.breakdown}>
       <Donut slices={slices.map((s, i) => ({ ...s, color: palette[i] }))} total={<><Text variant="heading" tabular>{amountsHidden ? "••••" : compactMoney(current?.moneyOutMinor ?? sum, currency).replace(currency + " ", "")}</Text><Text variant="caption" color="textMuted">Total spent</Text></>} />
-      <View style={{ flex: 1, gap: 6 }}>{slices.map((s, i) => <Pressable key={s.label} accessibilityRole="button" accessibilityLabel={`${s.label}, ${amountsHidden ? "amount hidden" : formatMoney(s.amount, currency)}`} onPress={() => router.navigate({ pathname: "/transactions", params: { category: s.category ?? "", accountId:"", walletName:"", period: "month", reset: String(Date.now()) } })} style={styles.category}>
+      <View style={{ flex: 1, gap: 6 }}>{slices.map((s, i) => <Pressable key={s.label} accessibilityRole="button" accessibilityLabel={`${s.label}, ${amountsHidden ? "amount hidden" : formatMoney(s.amount, currency)}`} onPress={() => router.navigate({ pathname: "/transactions", params: { focusSearch:"", category: s.category ?? "", accountId:"", walletName:"", period: "month", reset: String(Date.now()) } })} style={styles.category}>
         <View style={[styles.dot, { backgroundColor: palette[i] }]} /><Text variant="caption" color="textMuted" style={{ flex: 1 }}>{s.label}</Text><Text variant="caption">{sum > 0n ? (Number(s.amount * 10000n / sum) / 100).toFixed(1) : "0"}%</Text>
       </Pressable>)}</View>
     </View>}
@@ -95,6 +106,9 @@ export function WalletPanel({ wallets, message, manage = true }: { wallets: Wall
 }
 
 const useStyles = makeStyles((c) => StyleSheet.create({
+  retentionTrack:{height:4,borderRadius:2,backgroundColor:c.borderSubtle,overflow:"hidden",marginTop:4},
+  retentionFill:{height:4,borderRadius:2,backgroundColor:c.chartIncome},
+  comparisonNote:{fontSize:10,lineHeight:14},
   denseSection: { padding:14,gap:6 },
   dailyPrimary: { flexDirection:"row",gap:12,paddingVertical:4 },
   dailyAmount: { fontSize:22,lineHeight:28 },
@@ -107,8 +121,7 @@ const useStyles = makeStyles((c) => StyleSheet.create({
   walletName: { flexGrow:1, flexBasis:110, fontSize:13, lineHeight:18 },
   walletAmount: { fontSize:13, lineHeight:18, flexShrink:1 },
   header: { flexDirection: "row", alignItems: "center", gap: 8 },
-  greeting: { fontSize:17, lineHeight:22 },
-  salutation: { fontSize:12, lineHeight:16 },
+  brand: { fontSize:18, lineHeight:23 },
   iconButton: { minHeight: 44, minWidth: 44, paddingHorizontal: 4, justifyContent: "center", alignItems: "center", borderRadius: 12 },
   avatar: { minWidth: 44, minHeight: 44, borderRadius: 22, backgroundColor: c.accentBg, alignItems: "center", justifyContent: "center" },
   notificationDot: { position: "absolute", width: 5, height: 5, right: 8, top: 8, backgroundColor: c.accent, borderRadius: 3 },

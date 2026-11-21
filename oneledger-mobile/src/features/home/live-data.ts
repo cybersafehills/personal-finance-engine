@@ -6,8 +6,6 @@ import type { InsightsResult } from "@/features/insights/parse";
 import type { CurrencyOverview } from "@/features/insights/types";
 import type { Wallet } from "@/features/wallets/types";
 
-export function greeting(hour: number) { return hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening"; }
-
 export async function profileName(): Promise<string | null> {
   if (!supabase) return null;
   const { data } = await supabase.auth.getSession();
@@ -31,12 +29,13 @@ export async function loadHomeInsights(now: Date) {
     try { return await request; } catch { return { ok: false, reason: "error", message: "Couldn't load this summary. Check your connection and try again." }; }
   };
   const todayFrom = new Date(Date.parse(kigaliDateKey(now.toISOString()) + "T00:00:00+02:00")).toISOString();
-  const [current, history, today] = await Promise.all([
+  const [current, previous, history, today] = await Promise.all([
     safe(fetchInsights({ from: p.from, to: p.to })),
+    safe(fetchInsights({ from: p.previousFrom, to: p.previousTo })),
     safe(fetchInsights({ from: p.trendFrom, to: p.to, granularity: "month" })),
     safe(fetchInsights({ from: todayFrom, to: p.to })),
   ]);
-  return { current, history, today, periods: p, fetchedAt: now.toISOString() };
+  return { current, previous, history, today, periods: p, fetchedAt: now.toISOString() };
 }
 export function currencyBlock(result: InsightsResult | undefined, currency: SupportedCurrency): CurrencyOverview | null {
   return result?.ok ? result.overview.currencies.find((c) => c.currency === currency) ?? null : null;

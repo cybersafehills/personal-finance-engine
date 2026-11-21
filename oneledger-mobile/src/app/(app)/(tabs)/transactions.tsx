@@ -1,7 +1,7 @@
 import Feather from "@expo/vector-icons/Feather";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AppState, RefreshControl, SectionList, View } from "react-native";
+import { AppState, RefreshControl, SectionList, View, type TextInputInstance } from "react-native";
 
 import {
   Button,
@@ -47,15 +47,21 @@ async function loadHeaderStats(workspaceId: string | null) {
 // at a time. Amounts here are never masked (a deliberate destination).
 export default function Transactions() {
   const { activeId } = useActiveSpace();
-  const params = useLocalSearchParams<{ category?: string | string[]; period?: string; reset?: string; accountId?: string; walletName?: string }>();
+  const params = useLocalSearchParams<{ category?: string | string[]; period?: string; reset?: string; accountId?: string; walletName?: string; focusSearch?:string }>();
   const category = (Array.isArray(params.category) ? params.category[0] : params.category) || undefined;
-  return <TransactionsList key={`${activeId ?? "pending"}:${params.reset ?? ""}:${params.accountId ?? ""}`} category={category} initialPeriod={params.period} accountId={params.accountId} walletName={params.walletName} />;
+  return <TransactionsList key={`${activeId ?? "pending"}:${params.reset ?? ""}:${params.accountId ?? ""}`} category={category} initialPeriod={params.period} accountId={params.accountId} walletName={params.walletName} focusSearch={params.focusSearch} />;
 }
 
-function TransactionsList({ category, initialPeriod, accountId, walletName }: { category?: string; initialPeriod?: string; accountId?: string; walletName?: string }) {
+function TransactionsList({ category, initialPeriod, accountId, walletName, focusSearch }: { category?: string; initialPeriod?: string; accountId?: string; walletName?: string; focusSearch?:string }) {
   const { colors } = useTheme();
   const { activeId } = useActiveSpace();
   const { syncNow } = useOffline();
+  const searchRef=useRef<TextInputInstance>(null);
+  useFocusEffect(useCallback(()=>{
+    if (!focusSearch) return;
+    const timer=setTimeout(()=>{searchRef.current?.focus();router.setParams({focusSearch:undefined});},150);
+    return ()=>clearTimeout(timer);
+  },[focusSearch]));
   const [input, setInput] = useState("");
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState<TransactionFilters>({ ...NO_FILTERS, period: initialPeriod === "month" ? "month" : "all" });
@@ -150,6 +156,8 @@ function TransactionsList({ category, initialPeriod, accountId, walletName }: { 
         <TextField
           compact
           label="Search"
+          inputRef={searchRef}
+          autoFocus={!!focusSearch}
           value={input}
           onChangeText={setInput}
           placeholder="Search name, reference or category"
