@@ -50,16 +50,16 @@ export function TransactionItem({
           {name}
         </Text>
         <View style={styles.meta}>
-          <Text variant="caption" color="textMuted">
+          <Text variant="caption" color="textMuted" style={compact ? styles.compactMeta : undefined}>
             {showDate
               ? formatDateTime(transaction.occurred_at)
               : formatTime(transaction.occurred_at)}
-            {transaction.category ? ` · ${transaction.category}` : ""}
+            {transaction.category ? ` · ${transaction.category}` : compact ? " · Uncategorized" : ""}
           </Text>
-          {!transaction.category ? <Badge variant="attention">Uncategorized</Badge> : null}
+          {!transaction.category && !compact ? <Badge variant="attention">Uncategorized</Badge> : null}
           {failed ? <Badge variant="attention">{transaction.settlement_state === "reversed" || transaction.status === "reversed" ? "Reversed" : transaction.status === "cancelled" ? "Cancelled" : "Failed"}</Badge> : null}
           {pending ? <Badge variant="neutral">{transaction.status === "unknown" || transaction.settlement_state === "unknown" ? "Unconfirmed" : "Pending"}</Badge> : null}
-          {!hidden && transaction.fee_rwf > 0 ? <Text variant="caption" color="textMuted">{`Fee ${supported ? formatMoney(BigInt(transaction.fee_rwf), currency as SupportedCurrency) : `${currency} ${transaction.fee_rwf}`}`}</Text> : null}
+          {!hidden && transaction.fee_rwf > 0 ? <Text variant="caption" color="textMuted" style={compact ? styles.compactMeta : undefined}>{`${compact ? " · " : ""}Fee ${supported ? formatMoney(BigInt(transaction.fee_rwf), currency as SupportedCurrency) : `${currency} ${transaction.fee_rwf}`}`}</Text> : null}
           {needsReview(transaction) ? <Badge variant="attention">Review</Badge> : null}
           {transaction.sync_state === "failed" ? (
             <Badge variant="attention">Not sent</Badge>
@@ -68,7 +68,7 @@ export function TransactionItem({
           ) : null}
         </View>
       </View>
-      <Text variant="bodyStrong" tabular color={!pending && !failed && transaction.direction === "in" ? "moneyPositive" : "textPrimary"} accessibilityLabel={hidden ? "Amount hidden" : undefined} style={styles.amount}>{hidden ? "••••••" : `${sign}${formatted}`}</Text>
+      <Text variant="bodyStrong" tabular color={!pending && !failed && transaction.direction === "in" ? "moneyPositive" : "textPrimary"} accessibilityLabel={hidden ? "Amount hidden" : undefined} style={[styles.amount, compact && styles.compactAmount]}>{hidden ? "••••••" : `${sign}${formatted}`}</Text>
     </Pressable>
   );
 }
@@ -87,7 +87,9 @@ const useStyles = makeStyles((colors) => StyleSheet.create({
   pressed: { backgroundColor: colors.background },
   text: { flex: 1, gap: 2 },
   meta: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: space[1] },
-  compact: { paddingHorizontal: 0, paddingVertical: 15, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.borderSubtle },
-  compactName: { fontSize: 14, lineHeight: 20 },
+  compact: { paddingHorizontal: 0, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.borderSubtle },
+  compactName: { fontSize: 13, lineHeight: 18 },
+  compactMeta: { fontSize:11, lineHeight:15 },
+  compactAmount: { fontSize:13, lineHeight:18, maxWidth:"39%" },
   amount: { flexShrink: 1, maxWidth: "48%", textAlign: "right" },
 }));

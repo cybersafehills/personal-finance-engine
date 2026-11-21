@@ -36,6 +36,11 @@ describe("getTransactions category filter", () => {
     await expect(getTransactions({ workspaceId: null })).rejects.toThrow("Select a Space");
     expect(mockCalls).toEqual([]);
   });
+  it("filters wallet activity by account as well as Space", async () => {
+    await getTransactions({workspaceId:"w1",accountId:"a1"});
+    expect(calls("eq")).toContainEqual(["workspace_id","w1"]);
+    expect(calls("eq")).toContainEqual(["account_id","a1"]);
+  });
   it("matches a category exactly", async () => {
     await getTransactions({ category: "Food" });
     expect(calls("eq")).toContainEqual(["category", "Food"]);

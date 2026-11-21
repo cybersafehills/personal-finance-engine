@@ -47,12 +47,12 @@ async function loadHeaderStats(workspaceId: string | null) {
 // at a time. Amounts here are never masked (a deliberate destination).
 export default function Transactions() {
   const { activeId } = useActiveSpace();
-  const params = useLocalSearchParams<{ category?: string | string[]; period?: string; reset?: string }>();
+  const params = useLocalSearchParams<{ category?: string | string[]; period?: string; reset?: string; accountId?: string; walletName?: string }>();
   const category = (Array.isArray(params.category) ? params.category[0] : params.category) || undefined;
-  return <TransactionsList key={`${activeId ?? "pending"}:${params.reset ?? ""}`} category={category} initialPeriod={params.period} />;
+  return <TransactionsList key={`${activeId ?? "pending"}:${params.reset ?? ""}:${params.accountId ?? ""}`} category={category} initialPeriod={params.period} accountId={params.accountId} walletName={params.walletName} />;
 }
 
-function TransactionsList({ category, initialPeriod }: { category?: string; initialPeriod?: string }) {
+function TransactionsList({ category, initialPeriod, accountId, walletName }: { category?: string; initialPeriod?: string; accountId?: string; walletName?: string }) {
   const { colors } = useTheme();
   const { activeId } = useActiveSpace();
   const { syncNow } = useOffline();
@@ -68,7 +68,7 @@ function TransactionsList({ category, initialPeriod }: { category?: string; init
   const [loadedAt, setLoadedAt] = useState(() => new Date().toISOString());
   const requestId = useRef(0);
   const moreInFlight = useRef(false);
-  const viewKey = JSON.stringify([activeId, query, filters, category]);
+  const viewKey = JSON.stringify([activeId, query, filters, category, accountId]);
   const [pageKey, setPageKey] = useState(viewKey);
   const displayedRows = pageKey === viewKey ? rows : [];
   const pageKeyRef = useRef(pageKey);
@@ -87,7 +87,7 @@ function TransactionsList({ category, initialPeriod }: { category?: string; init
       setError(null);
       try {
         if (userInitiated) await syncNow().catch(() => {});
-        const page = await getTransactions({ q: query, filters, category, workspaceId: activeId });
+        const page = await getTransactions({ q: query, filters, category, accountId, workspaceId: activeId });
         if (id !== requestId.current) return;
         setRows(page);
         pageKeyRef.current = viewKey;
@@ -108,7 +108,7 @@ function TransactionsList({ category, initialPeriod }: { category?: string; init
         }
       }
     },
-    [query, filters, category, activeId, viewKey, syncNow],
+    [query, filters, category, accountId, activeId, viewKey, syncNow],
   );
 
   // Reloads on focus and whenever the applied search changes.
@@ -129,7 +129,7 @@ function TransactionsList({ category, initialPeriod }: { category?: string; init
     const id = requestId.current;
     setLoadingMore(true);
     try {
-      const page = await getTransactions({ q: query, filters, category, offset: rows.length, workspaceId: activeId });
+      const page = await getTransactions({ q: query, filters, category, accountId, offset: rows.length, workspaceId: activeId });
       // A refresh or new search started meanwhile: this page is stale.
       if (id !== requestId.current) return;
       const seen = new Set(rows.map((row) => row.id));
@@ -159,6 +159,7 @@ function TransactionsList({ category, initialPeriod }: { category?: string; init
           clearButtonMode="while-editing"
           leading={<Feather name="search" size={16} color={colors.textMuted} />}
         />
+        {accountId ? <View style={{flexDirection:"row",alignItems:"center",gap:8}}><Text variant="label" style={{flex:1}}>{walletName || "Selected wallet"}</Text><Button label="All wallets" size="sm" variant="ghost" onPress={() => router.setParams({accountId:undefined,walletName:undefined})} /></View> : null}
         {category ? (
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: space[2] }}>
             <Text variant="label" color="textSecondary" style={{ flex: 1 }}>
@@ -198,7 +199,7 @@ function TransactionsList({ category, initialPeriod }: { category?: string; init
               }
             />
             {error && displayedRows.length > 0 ? <View style={{ gap: 8 }}><Text color="attention">{error} Showing previously loaded transactions.</Text><Button label="Try again" onPress={() => void loadFirstPage(true)} variant="secondary" /></View> : null}
-            {stats ? (
+            {stats && !accountId ? (
               <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: space[2] }}>
                 <LifetimeChips totals={stats.lifetime} accountCreatedIso={stats.lifetime.accountCreatedIso} />
                 <Button

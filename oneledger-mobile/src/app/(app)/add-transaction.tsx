@@ -1,4 +1,4 @@
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 
@@ -40,7 +40,8 @@ export default function AddTransaction() {
   const offline = useOffline();
   const { data: accounts, loading, error, refresh } = useQuery(loadAccounts);
 
-  const [accountId, setAccountId] = useState<string | null>(null);
+  const params = useLocalSearchParams<{accountId?:string}>();
+  const [accountId, setAccountId] = useState<string | null>(typeof params.accountId === "string" ? params.accountId : null);
   const [type, setType] = useState<ManualTransactionType>("merchant_payment");
   const [direction, setDirection] = useState<"in" | "out">("out");
   const [amountText, setAmountText] = useState("");

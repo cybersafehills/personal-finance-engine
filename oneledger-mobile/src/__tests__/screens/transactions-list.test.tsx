@@ -234,3 +234,15 @@ describe("live ledger accuracy", () => {
     expect(screen.getByText("Fee $1.00")).toBeTruthy();
   });
 });
+
+
+it("keeps the selected wallet filter when opened from wallet detail", async () => {
+ setParams({accountId:"wallet-1",walletName:"My wallet",period:"all",reset:"wallet"});
+ mockGetTransactions.mockResolvedValue([row("t1","Wallet merchant")]);
+ await render(<Transactions />);await screen.findByText("Wallet merchant");
+ expect(mockGetTransactions).toHaveBeenCalledWith(expect.objectContaining({workspaceId:"w1",accountId:"wallet-1"}));
+ expect(screen.getByText("My wallet")).toBeTruthy();
+ expect(screen.queryByLabelText(/through OneLedger/)).toBeNull();
+ await fireEvent.press(screen.getByText("All wallets"));
+ expect(router.setParams).toHaveBeenCalledWith({accountId:undefined,walletName:undefined});
+});

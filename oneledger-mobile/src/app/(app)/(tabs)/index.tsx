@@ -3,9 +3,10 @@ import { useCallback, useEffect, useState } from "react";
 import { AppState, Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Button, Chip, EmptyState, Text } from "@/components/ds";
-import { fetchWallets } from "@/api/mobile-api";
+import { fetchWallets, fetchBudgets } from "@/api/mobile-api";
 import { useSession } from "@/features/auth/SessionProvider";
 import { HomeHeader, HeroBalance, CashFlow, Spending, WalletPanel, HomeSection, HomeLink } from "@/features/home/HomeCards";
+import { BudgetOutlook } from "@/features/home/BudgetOutlook";
 import { TrendChart } from "@/features/home/Charts";
 import { currencyBlock, fillTrend, loadHomeInsights, profileName } from "@/features/home/live-data";
 import { getCurrentBalance, getTransactions } from "@/features/transactions/queries";
@@ -49,6 +50,8 @@ export default function Home() {
   const recentQuery = useQuery(loadRecent, { refreshIntervalMs: 60000 });
   const loadAnalytics = useCallback(() => { if (!activeId || !day) throw new Error("Space is loading"); return loadHomeInsights(new Date()); }, [activeId, day]);
   const analytics = useQuery(loadAnalytics, { refreshIntervalMs: 60000 });
+  const loadBudget = useCallback(() => { if (!activeId) throw new Error("Space is loading"); return fetchBudgets(); }, [activeId]);
+  const budget = useQuery(loadBudget, { refreshIntervalMs: 60000 });
   const profile = useQuery(profileName);
   const unread = useQuery(getUnreadNotificationCount);
   const meta = session?.user.user_metadata;
@@ -69,7 +72,7 @@ export default function Home() {
   async function refresh() {
     setPulling(true);
     try { await offline.syncNow(); } catch { /* Query errors below keep saved data visible. */ }
-    finally { setNow(new Date()); walletsQuery.refresh(); recentQuery.refresh(); analytics.refresh(); profile.refresh(); unread.refresh(); setPulling(false); }
+    finally { setNow(new Date()); walletsQuery.refresh(); recentQuery.refresh(); analytics.refresh(); budget.refresh(); profile.refresh(); unread.refresh(); setPulling(false); }
   }
   if (!activeId) return <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}><View style={styles.content}><Text color="textMuted">Loading your workspace. Connect to load your Spaces if this is your first launch.</Text></View></SafeAreaView>;
   return <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
@@ -80,22 +83,23 @@ export default function Home() {
       {analytics.error && analytics.data ? <Text variant="caption" color="attention">Couldn&apos;t refresh analytics. Showing the last fetched summary.</Text> : null}
       {currencyOptions.length > 1 ? <View style={styles.currencies}>{currencyOptions.map((c) => <Chip key={c} label={c} selected={currency === c} onPress={() => setChoice({ space: activeId, currency: c })} />)}</View> : null}
       <HeroBalance wallets={wallets} currency={currency} fallback={recentQuery.data?.balance ?? null} loading={walletsQuery.loading || recentQuery.loading} />
-      <CashFlow currency={currency} current={current} previous={previous} available={currentResult?.ok === true} message={analyticsMessage} />
-      <HomeSection title="Cash flow trends" subtitle={`Income and expenses · ${currency}`} action={<Pressable accessibilityRole="button" accessibilityLabel={`Show last ${months === 6 ? 3 : 6} months`} onPress={() => setMonths(months === 6 ? 3 : 6)} style={styles.period}><Text variant="caption" color="textMuted">Last {months} months ⌄</Text></Pressable>}>
-        {historyResult?.ok ? <TrendChart points={points} currency={currency} /> : <Text color="textMuted">{historyResult && !historyResult.ok ? historyResult.message : analytics.loading ? "Loading your trend…" : analyticsMessage}</Text>}
-      </HomeSection>
-      <Spending current={current} available={currentResult?.ok === true} message={analyticsMessage} />
-      <HomeSection title="Recent transactions" action={<HomeLink label="View all" onPress={() => router.navigate({ pathname: "/transactions", params: { category: "", period: "all", reset: String(Date.now()) } })} />}>
+      <CashFlow currency={currency} current={current} previous={previous} today={currencyBlock(analytics.data?.today,currency)} todayAvailable={analytics.data?.today.ok === true} available={currentResult?.ok === true} message={analyticsMessage} />
+      <HomeSection title="Recent transactions" action={<HomeLink label="View all" onPress={() => router.navigate({ pathname: "/transactions", params: { category: "", accountId:"", walletName:"", period: "all", reset: String(Date.now()) } })} />}>
         {recentQuery.error ? <View style={{ gap: 8 }}><Text color="attention">Couldn&apos;t refresh transactions.</Text><Button label="Try again" variant="secondary" onPress={recentQuery.refresh} /></View> : null}
         {recentQuery.loading ? <Text color="textMuted">Loading transactions…</Text> : !recentQuery.data?.recent.length && !recentQuery.error ? <EmptyState title="No transactions yet" description="New transactions will appear here as they are recorded." /> : recentQuery.data?.recent.slice(0, 3).map((t) => <TransactionItem key={t.id} transaction={t} showDate compact />)}
       </HomeSection>
+      <BudgetOutlook result={budget.data} currency={currency} now={now} error={budget.error} />
+      <HomeSection title="Cash flow trends" collapsible subtitle={`Income and expenses · ${currency}`} action={<Pressable accessibilityRole="button" accessibilityLabel={`Show last ${months === 6 ? 3 : 6} months`} onPress={() => setMonths(months === 6 ? 3 : 6)} style={styles.period}><Text variant="caption" color="textMuted">Last {months} months ⌄</Text></Pressable>}>
+        {historyResult?.ok ? <TrendChart points={points} currency={currency} /> : <Text color="textMuted">{historyResult && !historyResult.ok ? historyResult.message : analytics.loading ? "Loading your trend…" : analyticsMessage}</Text>}
+      </HomeSection>
+      <Spending current={current} available={currentResult?.ok === true} message={analyticsMessage} />
       <WalletPanel wallets={wallets} message={walletsMessage} />
     </ScrollView>
   </SafeAreaView>;
 }
 const useStyles = makeStyles((c) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: c.background },
-  content: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 24, gap: 16, maxWidth: 480, width: "100%", alignSelf: "center" },
+  content: { paddingHorizontal: 16, paddingTop: 0, paddingBottom: 24, gap: 12, maxWidth: 480, width: "100%", alignSelf: "center" },
   currencies: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   period: { minHeight: 44, padding: 8, borderWidth: 1, borderColor: c.borderSubtle, borderRadius: 10, justifyContent: "center" },
 }));

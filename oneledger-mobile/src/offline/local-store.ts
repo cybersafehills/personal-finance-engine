@@ -105,11 +105,12 @@ const COLUMNS =
 
 export async function listLocalTransactions(
   db: SqlDb,
-  opts: { limit?: number; offset?: number; direction?: "in" | "out"; sinceIso?: string; needsReview?: boolean; q?: string; category?: string; workspaceId?: string } = {},
+  opts: { limit?: number; offset?: number; direction?: "in" | "out"; sinceIso?: string; needsReview?: boolean; q?: string; category?: string; workspaceId?: string; accountId?: string } = {},
 ): Promise<LocalTransaction[]> {
   const where = ["dedupe_state <> 'merged'"];
   const params: (string | number)[] = [];
   if (opts.workspaceId) { where.push("workspace_id = ?"); params.push(opts.workspaceId); }
+  if (opts.accountId) { where.push("account_id = ?"); params.push(opts.accountId); }
   if (opts.direction) {
     where.push("direction = ?");
     params.push(opts.direction);

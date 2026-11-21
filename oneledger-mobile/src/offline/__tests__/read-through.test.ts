@@ -51,6 +51,12 @@ describe("offline reads", () => {
     expect(await getTransactions({ workspaceId: "another-space" })).toEqual([]);
   });
 
+  it("does not include another wallet’s entries", async () => {
+    await seeded();
+    expect(await getTransactions({workspaceId:"ws-1",accountId:"missing-wallet"})).toEqual([]);
+    expect((await getTransactions({workspaceId:"ws-1",accountId:ACCOUNT.id})).length).toBe(3);
+  });
+
   it("keeps the confirmed balance separate from the unsynced effect", async () => {
     await seeded();
     const balance = await getCurrentBalance();

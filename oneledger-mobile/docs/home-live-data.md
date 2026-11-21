@@ -11,3 +11,11 @@ Recent activity is limited to three entries. View all clears previous search, ca
 Focus, foreground, sync notifications and 60-second refreshes update the screens. Pull to refresh attempts a sync before reading transactions. Offline transactions retain their Space and sync status. Network errors retain same-Space cached figures with a warning, or show an unavailable state. This is recorded account data, not a direct query to a bank or MoMo balance service.
 
 Validation covers scope changes, stale responses, filter reset, privacy, mixed currencies, partial balances, calendar boundaries, exact bigint parsing and transaction states. Expo Go includes the added SVG module; previously compiled custom clients need rebuilding to include that native dependency. Native bundle compilation and automated screen tests do not replace a signed-in physical-device visual test.
+
+## Compact overview and wallet details
+
+Recent transactions now appear immediately after monthly cash flow. Cash flow includes separate received/spent-today figures from a Kigali-day Insights request; its API failure is shown as unavailable, not zero. Income uses a green tint and spending an amber tint. Chart and category breakdown headers expand independently and start collapsed. Card typography, gutters and wallet rows use a smaller scale while retaining the shared accessibility font scaling and 44-point controls. The balance gradient uses measured native dimensions so it fills the card.
+
+Budget forecast selects an active budget in the displayed currency and reports canonical allocation totals, remaining amount, period-end projection and data-quality warnings. It never mixes budgets or currencies or invents a projection where the server provides none.
+
+Each wallet opens `/wallet/[id]`. That page validates the wallet against the current Space's wallet list, shows balance provenance and freshness, supports recording a checked balance, loads account-filtered monthly Insights and the latest ten wallet transactions, and links to the complete wallet-filtered Transactions list. The Add transaction form selects the wallet by account ID. The full list suppresses whole-Space lifetime totals while viewing a single wallet. Both online and SQLite reads apply the account filter alongside the Space filter.

@@ -155,6 +155,7 @@ export async function getTransactions({
   category,
   nowIso = new Date().toISOString(),
   workspaceId,
+  accountId,
 }: {
   offset?: number;
   limit?: number;
@@ -164,6 +165,7 @@ export async function getTransactions({
   category?: string;
   nowIso?: string;
   workspaceId?: string | null;
+  accountId?: string;
 } = {}): Promise<TransactionRow[]> {
   if (workspaceId === null) throw new QueryError("Select a Space to see its transactions.");
   const local = readableDb();
@@ -179,6 +181,7 @@ export async function getTransactions({
       needsReview: filters.needsReview || undefined,
       sinceIso: since ?? undefined,
       workspaceId,
+      accountId,
     });
     return rows.map(fromLocal);
   }
@@ -191,6 +194,7 @@ export async function getTransactions({
     .range(offset, offset + limit - 1);
 
   if (workspaceId) query = query.eq("workspace_id", workspaceId);
+  if (accountId) query = query.eq("account_id", accountId);
   if (category) {
     query = category === "Uncategorized" ? query.is("category", null) : query.eq("category", category);
   }
