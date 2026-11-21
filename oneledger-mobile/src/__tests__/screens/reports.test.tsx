@@ -44,12 +44,12 @@ describe("Reports screen", () => {
     expect(router.push).toHaveBeenCalledWith({ pathname: "/report/[id]", params: { id: "r1" } });
   });
 
-  it("explains an empty list and points to the web settings", async () => {
+  it("explains an empty list and opens native schedule settings", async () => {
     mockFetch.mockResolvedValue({ ok: true, reports: [] });
     await render(<Reports />);
     expect(await screen.findByText("No reports yet")).toBeTruthy();
-    await fireEvent.press(screen.getByText("Open report settings on the web"));
-    expect(mockOpenUrl).toHaveBeenCalledWith("https://app.example.test/settings/reports");
+    await fireEvent.press(screen.getAllByText("Manage daily reports")[0]);
+    expect(router.push).toHaveBeenCalledWith("/report-settings");
   });
 
   it("offers a retry on a failure, and none when the feature isn't available", async () => {

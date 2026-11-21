@@ -12,7 +12,7 @@ export type SettingsRow = {
   icon: React.ComponentProps<typeof Feather>["name"];
   description: string;
   /** A screen in this app. */
-  route?: "/security" | "/notifications" | "/space-members" | "/pay-button" | "/appearance";
+  route?: "/report-settings" | "/security" | "/notifications" | "/space-members" | "/pay-button" | "/appearance";
   /** A page on the web, opened in the browser (the user may need to sign in). */
   webPath?: string;
   /** Shown only when the server says this feature is on (an unknown answer hides it). */
@@ -44,7 +44,7 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
     { label: "Privacy", icon: "eye", description: "Balance visibility and privacy mode.", webPath: "/settings/privacy" },
   ] },
   { title: "Reports & plan", description: "Summary preferences and your subscription.", rows: [
-    { label: "Report schedule", icon: "calendar", description: "Choose when and where summaries arrive.", webPath: "/settings/reports" },
+    { label: "Report schedule", icon: "calendar", description: "Choose when and where summaries arrive.", route: "/report-settings" },
     { label: "Plan & billing", icon: "file-text", description: "Your plan and what it includes.", webPath: "/settings/billing" },
   ] },
 ];

@@ -1,12 +1,11 @@
-import * as Linking from "expo-linking";
 import { router } from "expo-router";
 import { useCallback } from "react";
 import { Pressable, View } from "react-native";
 
 import { fetchReports } from "@/api/mobile-api";
-import { Badge, Button, Card, EmptyState, Screen, ScreenHeader, Text } from "@/components/ds";
+import { Badge, Button, Card, EmptyState, Screen, Text } from "@/components/ds";
 import { useQuery } from "@/hooks/useQuery";
-import { config } from "@/lib/config";
+import {DocumentsHeader,DocumentHero} from "@/features/documents/DocumentUI";
 import { space } from "@/theme/tokens";
 
 // Your daily financial reports, newest first. Each is an immutable snapshot the
@@ -17,7 +16,9 @@ export default function Reports() {
 
   return (
     <Screen>
-      <ScreenHeader title="Reports" subtitle="Your daily financial reports" />
+      <DocumentsHeader tab="reports" />
+      <DocumentHero title="Your money, reviewed daily" detail="Read a saved report or manage the next scheduled summary." action={data?.ok&&data.reports.length ? "Open latest report" : "Manage daily reports"} onPress={()=>data?.ok&&data.reports.length?router.push({pathname:"/report/[id]",params:{id:data.reports[0].id}}):router.push("/report-settings")} />
+      <Text variant="bodyStrong">Recent reports</Text>
 
       {loading && !data ? (
         <Text variant="label" color="textMuted">
@@ -37,15 +38,7 @@ export default function Reports() {
           variant="setup"
           title="No reports yet"
           description="Turn on daily reports in Settings to start receiving a financial summary each morning."
-          action={
-            config.apiBaseUrl ? (
-              <Button
-                label="Open report settings on the web"
-                variant="secondary"
-                onPress={() => Linking.openURL(`${config.apiBaseUrl}/settings/reports`)}
-              />
-            ) : undefined
-          }
+          action={<Button label="Manage daily reports" variant="secondary" onPress={()=>router.push('/report-settings')}/>}
         />
       ) : data ? (
         data.reports.map((report) => (
@@ -55,9 +48,9 @@ export default function Reports() {
             accessibilityLabel={`${report.dateLabel}, ${report.statusLabel}`}
             onPress={() => router.push({ pathname: "/report/[id]", params: { id: report.id } })}
           >
-            <Card style={{ gap: space[1] }}>
+            <Card style={{ gap: space[1],padding:14 }}>
               <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: space[2] }}>
-                <Text variant="bodyStrong">{report.dateLabel}</Text>
+                <Text variant="bodyStrong" style={{fontSize:14}}>{report.dateLabel}</Text>
                 <Badge variant={report.status === "generation_failed" || report.status === "delivery_failed" ? "attention" : "neutral"}>
                   {report.statusLabel}
                 </Badge>

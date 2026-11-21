@@ -446,3 +446,16 @@ The pay intent payload now also carries `updatedAt` (when it last changed) and
 `verified` (true only when the provider's message confirmed it). `GET
 /api/mobile/config` gains `paymentRequests`.
 
+
+## Documents creation and report schedules
+
+The native Documents console uses the existing bearer/MFA/Space guard for these endpoints:
+
+- `GET /api/mobile/statements/generate`: authorized financial-source options and the profile timezone. Requires the Statements feature flag and the same `statement.generate` capability as the web form.
+- `POST /api/mobile/statements/generate`: `{ action: "preview" | "generate", request: StatementRequest }`. The bounded transport parser delegates to the canonical web preview/generator. Preserve `clientToken` across generation retries. Currency totals, coverage warnings, account authorization and immutable storage remain server responsibilities. Large requests use the existing statement worker.
+- `GET /api/mobile/reports/preferences`: saved settings for the caller and selected Space. A failed read is an error, never a default form that can overwrite existing settings.
+- `POST /api/mobile/reports/preferences`: explicit schedule/email edits. The handler reloads and preserves the current AI and alert preferences before calling the web preference validator and save action.
+
+Both POST routes use the existing rate limit, bounded JSON body, no-store responses and second-factor checks. No privileged key is embedded in the app. PDF/CSV downloads continue to use fresh short-lived links on each tap. Report lists are scoped to the selected Space; the web's cross-Space history remains unchanged.
+
+Native statements show compact summaries with expandable details and poll while queued documents prepare. The create flow separates editable criteria from an authoritative preview, then requires explicit Generate. Unknown opening/closing balances are shown as unavailable. Account/Space changes discard the old form and preview. Read requests have a 30-second network deadline; generation allows 75 seconds and retries use the same idempotency token.

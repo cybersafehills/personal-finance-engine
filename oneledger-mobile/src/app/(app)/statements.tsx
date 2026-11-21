@@ -1,34 +1,35 @@
 import * as Linking from "expo-linking";
+import {router} from "expo-router";
 import { useCallback, useState } from "react";
 import { View } from "react-native";
 
 import { fetchStatementDownload, fetchStatements } from "@/api/mobile-api";
-import { Badge, Button, Card, EmptyState, Screen, ScreenHeader, Text } from "@/components/ds";
+import { Badge, Button, Card, EmptyState, Screen, Text } from "@/components/ds";
 import type { DownloadFormat, Statement } from "@/features/statements/types";
+import {usePrivacy} from "@/features/privacy/PrivacyProvider";
 import { useQuery } from "@/hooks/useQuery";
-import { config } from "@/lib/config";
+import {DocumentsHeader,DocumentHero} from "@/features/documents/DocumentUI";
 import { formatMoney } from "@/lib/money";
 import { space } from "@/theme/tokens";
 
-const money = (minor: number | null, currency: Statement["totals"][number]["currency"]) =>
+const formatStatementMoney = (minor: number | null, currency: Statement["totals"][number]["currency"]) =>
   minor === null ? "—" : formatMoney(BigInt(Math.round(minor)), currency);
 
 // Your generated statements. Totals are the stored figures from the statement
-// itself (the app does no statement maths); generating, packs and schedules
-// stay on the web. Downloads ask the server for a fresh five-minute link.
+// itself (the app does no statement maths). Creation uses the canonical server
+// generator. Downloads ask the server for a fresh five-minute link.
 export default function Statements() {
   const load = useCallback(() => fetchStatements(), []);
-  const { data, loading, refresh } = useQuery(load);
+  const { data, loading, refresh } = useQuery(load,{refreshIntervalMs:15000});
 
   return (
     <Screen>
-      <ScreenHeader
-        title="Statements"
-        subtitle="Records generated from your OneLedger activity. Not an official statement from your provider."
-      />
+      <DocumentsHeader tab="statements" />
+      {data?.ok&&data.enabled ? <DocumentHero title="A statement for any period" detail="Choose accounts and dates. Review totals and coverage before creating a document." action="+ Create statement" onPress={()=>router.push('/statement-create')}/> : null}
+      <Text variant="bodyStrong">Your statements</Text>
 
       {loading && !data ? (
-        <Text variant="label" color="textMuted">
+        <Text variant="caption" color="textMuted">
           Loading…
         </Text>
       ) : data && !data.ok ? (
@@ -46,25 +47,21 @@ export default function Statements() {
         <EmptyState
           variant="setup"
           title="No statements yet"
-          description="Generate one on the web and it appears here."
-          action={
-            config.apiBaseUrl ? (
-              <Button
-                label="Generate on the web"
-                variant="secondary"
-                onPress={() => Linking.openURL(`${config.apiBaseUrl}/reports/statements/new`)}
-              />
-            ) : undefined
-          }
+          description="Choose your accounts and a date range to create your first statement."
+          action={<Button label="Create statement" onPress={()=>router.push('/statement-create')}/>}
         />
       ) : data ? (
         data.statements.map((s) => <StatementCard key={s.id} statement={s} />)
       ) : null}
+      <Text variant="caption" color="textMuted">OneLedger activity records, not official provider statements.</Text>
     </Screen>
   );
 }
 
 function StatementCard({ statement: s }: { statement: Statement }) {
+  const {amountsHidden}=usePrivacy();
+  const money=(minor:number|null,currency:Statement["totals"][number]["currency"])=>amountsHidden?"••••••":formatStatementMoney(minor,currency);
+  const [expanded,setExpanded]=useState(false);
   const [busy, setBusy] = useState<DownloadFormat | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const mixed = s.totals.length > 1;
@@ -87,10 +84,10 @@ function StatementCard({ statement: s }: { statement: Statement }) {
   }
 
   return (
-    <Card style={{ gap: space[3] }}>
+    <Card style={{ gap: 10,padding:14 }}>
       <View style={{ gap: 2 }}>
-        <Text variant="heading">{s.periodLabel}</Text>
-        <Text variant="label" color="textMuted">
+        <Text variant="bodyStrong" style={{fontSize:14,lineHeight:20}}>{s.periodLabel}</Text>
+        <Text variant="caption" color="textMuted">
           {s.scopeLabel} · {s.typeLabel} · {s.transactionCount}{" "}
           {s.transactionCount === 1 ? "transaction" : "transactions"}
         </Text>
@@ -113,7 +110,8 @@ function StatementCard({ statement: s }: { statement: Statement }) {
         ) : null}
       </View>
 
-      {s.status === "ready"
+      {s.status === "ready"&&!expanded ? s.totals.map(t=><View key={t.currency} style={{flexDirection:"row",gap:12}}><View style={{flex:1,gap:3}}><Text variant="caption" color="textMuted">Money in</Text><Text variant="bodyStrong" color="moneyPositive" style={{fontSize:13}}>{money(t.creditsMinor,t.currency)}</Text></View><View style={{flex:1,gap:3}}><Text variant="caption" color="textMuted">Money out</Text><Text variant="bodyStrong" color="danger" style={{fontSize:13}}>{money(t.debitsMinor,t.currency)}</Text></View></View>) : null}
+      {s.status === "ready"&&expanded
         ? s.totals.map((t) => (
             <View key={t.currency} style={{ gap: 2 }}>
               {mixed ? (
@@ -137,7 +135,9 @@ function StatementCard({ statement: s }: { statement: Statement }) {
           ))
         : null}
 
-      {s.status === "ready" ? (
+      <Button label={expanded ? "Hide details" : "View details"} variant="ghost" size="sm" onPress={()=>setExpanded(!expanded)}/>
+      {s.status === "failed" ? <Button label="Review a new statement" size="sm" variant="secondary" onPress={()=>router.push("/statement-create")}/> : null}
+      {s.status === "ready"&&expanded ? (
         <View style={{ flexDirection: "row", gap: space[2] }}>
           <View style={{ flex: 1 }}>
             <Button
