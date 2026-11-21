@@ -135,7 +135,7 @@ function StatementCard({ statement: s }: { statement: Statement }) {
           ))
         : null}
 
-      <Button label={expanded ? "Hide details" : "View details"} variant="ghost" size="sm" onPress={()=>setExpanded(!expanded)}/>
+      {s.status === "ready" ? <Button label={expanded ? "Hide details" : "View details"} variant="ghost" size="sm" onPress={()=>setExpanded(!expanded)}/> : null}
       {s.status === "failed" ? <Button label="Review a new statement" size="sm" variant="secondary" onPress={()=>router.push("/statement-create")}/> : null}
       {s.status === "ready"&&expanded ? (
         <View style={{ flexDirection: "row", gap: space[2] }}>
