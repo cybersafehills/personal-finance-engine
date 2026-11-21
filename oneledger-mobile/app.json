@@ -94,7 +94,7 @@
         "expo-image-picker",
         {
           "photosPermission": "Choose a profile picture for your OneLedger account.",
-          "cameraPermission": false,
+          "cameraPermission": "Allow OneLedger to read payment QR codes and merchant posters.",
           "microphonePermission": false
         }
       ]
