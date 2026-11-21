@@ -19,9 +19,9 @@ export function NavigationChromeProvider({children}:{children:ReactNode}){
  const [scrollState,setScrollState]=useState({path,compact:false}),[keyboardHeight,setKeyboardHeight]=useState(0);
  const compact=scrollState.path===path&&scrollState.compact;
  const setCompact=useCallback((value:boolean)=>setScrollState(old=>old.path===path&&old.compact===value?old:{path,compact:value}),[path]);
- const compactProgress=useSharedValue(0),awayProgress=useSharedValue(home?0:1);
+ const compactProgress=useSharedValue(0),awayProgress=useSharedValue(onTabs?0:1);
  useEffect(()=>{compactProgress.set(withTiming(compact?1:0,{duration:180,reduceMotion:ReduceMotion.System}));},[compact,compactProgress]);
- useEffect(()=>{awayProgress.set(withTiming(home?0:1,{duration:280,reduceMotion:ReduceMotion.System}));},[home,awayProgress]);
+ useEffect(()=>{awayProgress.set(withTiming(onTabs?0:1,{duration:280,reduceMotion:ReduceMotion.System}));},[onTabs,awayProgress]);
  useEffect(()=>{const show=Keyboard.addListener(Platform.OS==="ios"?"keyboardWillShow":"keyboardDidShow",e=>setKeyboardHeight(e.endCoordinates.height));const hide=Keyboard.addListener(Platform.OS==="ios"?"keyboardWillHide":"keyboardDidHide",()=>setKeyboardHeight(0));return()=>{show.remove();hide.remove();};},[]);
  const load=useCallback(async()=>{const result=await fetchPayConfig();setPayConfigCache(result.ok?result:null);return result;},[]);
  const {data}=useQuery(load,{refreshIntervalMs:60000});const payOn=data?showPayButton(data):false;
@@ -34,10 +34,10 @@ function GlobalPayButton({config}:{config:Awaited<ReturnType<typeof fetchPayConf
  const prefs=useHoldPrefs();const ready=config?.ok?config:null;const target=resolveHoldTarget(prefs,ready);
  const keyboard=useSharedValue(0);
  useEffect(()=>{keyboard.set(withTiming(keyboardHeight,{duration:180,reduceMotion:ReduceMotion.System}));},[keyboard,keyboardHeight]);
- const animated=useAnimatedStyle(()=>{const away=awayProgress?.get()??0,c=compactProgress?.get()??0;return {left:(width-48)/2+(16-(width-48)/2)*away,bottom:Math.max(keyboard.get()+18,insets.bottom+(onTabs?18-16*c:16)),transform:[{scale:1-0.06*c}]};});
+ const animated=useAnimatedStyle(()=>{const away=awayProgress?.get()??0,c=compactProgress?.get()??0;return {left:(width-48)/2+(width-insets.right-16-48-(width-48)/2)*away,bottom:Math.max(keyboard.get()+18,insets.bottom+(onTabs?18-16*c:16)),transform:[{scale:1-0.06*c}]};});
  const labelStyle=useAnimatedStyle(()=>({opacity:1-(compactProgress?.get()??0)}));
  const hidden=["/pay-sheet","/scan","/connect"].includes(path)||path.startsWith("/pay-new")||path.startsWith("/pay-again");
  if(!payOn||hidden)return null;
- return <View pointerEvents="box-none" style={StyleSheet.absoluteFill}><Animated.View style={[styles.floating,animated]}><PayTabButton floating onPress={()=>{Keyboard.dismiss();router.push("/pay-sheet");}} onHold={target?()=>{Keyboard.dismiss();router.push(target);}:undefined} holdMs={prefs.durationMs} hint={holdHint(prefs,ready)}/><Animated.View accessibilityElementsHidden style={[{position:"absolute",top:49,width:48,alignItems:"center"},labelStyle]}><Text variant="caption" color="textMuted" style={{fontSize:10,lineHeight:12}}>Pay</Text></Animated.View></Animated.View></View>;
+ return <View pointerEvents="box-none" style={StyleSheet.absoluteFill}><Animated.View testID="global-pay-position" style={[styles.floating,animated]}><PayTabButton floating onPress={()=>{Keyboard.dismiss();router.push("/pay-sheet");}} onHold={target?()=>{Keyboard.dismiss();router.push(target);}:undefined} holdMs={prefs.durationMs} hint={holdHint(prefs,ready)}/>{onTabs?<Animated.View accessibilityElementsHidden style={[{position:"absolute",top:49,width:48,alignItems:"center"},labelStyle]}><Text variant="caption" color="textMuted" style={{fontSize:10,lineHeight:12}}>Pay</Text></Animated.View>:null}</Animated.View></View>;
 }
 const styles=StyleSheet.create({floating:{position:"absolute",width:48,height:48,zIndex:100,elevation:20}});

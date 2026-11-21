@@ -72,8 +72,8 @@ export default function Home() {
   }
   if (!activeId) return <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}><View style={styles.content}><Text color="textMuted">Loading your workspace. Connect to load your Spaces if this is your first launch.</Text></View></SafeAreaView>;
   return <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
-    <ScrollView onScroll={onScroll} scrollEventThrottle={32} contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={pulling || walletsQuery.refreshing || recentQuery.refreshing || analytics.refreshing} onRefresh={() => void refresh()} tintColor={colors.accent} />}>
-      <HomeHeader name={name} unread={unread.data ?? 0} />
+    <View testID="home-fixed-toolbar" style={styles.toolbar}><HomeHeader name={name} unread={unread.data ?? 0} /></View>
+    <ScrollView testID="home-content-scroll" style={{flex:1}} onScroll={onScroll} scrollEventThrottle={32} contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={pulling || walletsQuery.refreshing || recentQuery.refreshing || analytics.refreshing} onRefresh={() => void refresh()} tintColor={colors.accent} />}>
       {offline.status.kind === "offline" ? <Text variant="caption" color="attention">Offline · Showing saved transactions. Wallet and analytics updates need a connection.</Text> : null}
       {walletsQuery.error && wallets ? <Text variant="caption" color="attention">Couldn&apos;t refresh wallet balances. Showing the last fetched figures.</Text> : null}
       {analytics.error && analytics.data ? <Text variant="caption" color="attention">Couldn&apos;t refresh analytics. Showing the last fetched summary.</Text> : null}
@@ -93,6 +93,7 @@ export default function Home() {
 }
 const useStyles = makeStyles((c) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: c.background },
+  toolbar: { paddingHorizontal:16,paddingBottom:8,maxWidth:480,width:"100%",alignSelf:"center",backgroundColor:c.background },
   content: { paddingHorizontal: 16, paddingTop: 0, paddingBottom: 24, gap: 12, maxWidth: 480, width: "100%", alignSelf: "center" },
   currencies: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   period: { minHeight: 44, padding: 8, borderWidth: 1, borderColor: c.borderSubtle, borderRadius: 10, justifyContent: "center" },

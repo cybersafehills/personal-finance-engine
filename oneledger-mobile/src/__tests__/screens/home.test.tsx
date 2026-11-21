@@ -237,3 +237,15 @@ it("applies an inclusive custom trend range to the API instead of slicing six mo
  await fireEvent.press(screen.getByText("Apply dates"));
  await waitFor(()=>expect(mockInsights).toHaveBeenCalledWith(expect.objectContaining({from:"2026-09-30T22:00:00.000Z",to:"2026-11-15T22:00:00.000Z",granularity:"week"})));
 });
+
+ it("keeps the Home toolbar outside scrolling content and its actions accessible",async()=>{
+  await renderHome();await screen.findByText("Live merchant 1");
+  const toolbar=within(screen.getByTestId("home-fixed-toolbar"));
+  const content=within(screen.getByTestId("home-content-scroll"));
+  expect(content.queryByTestId("home-header")).toBeNull();
+  await fireEvent(screen.getByTestId("home-content-scroll"),"scroll",{nativeEvent:{contentOffset:{y:650}}});
+  expect(toolbar.getByRole("button",{name:/Change Space/})).toBeTruthy();
+  expect(toolbar.getByRole("button",{name:/Notifications/})).toBeTruthy();
+  await fireEvent.press(toolbar.getByRole("button",{name:"Search transactions"}));
+  expect(router.navigate).toHaveBeenLastCalledWith(expect.objectContaining({pathname:"/transactions",params:expect.objectContaining({focusSearch:expect.any(String)})}));
+ });

@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react-native";
-import { ScrollView } from "react-native";
+import { Dimensions,ScrollView,StyleSheet } from "react-native";
 import { NavigationChromeProvider } from "@/components/shell/NavigationChrome";
 import { useNavigationChrome } from "@/components/shell/NavigationChromeContext";
 import { isHomePath,isTabPath,scrollChromeMode,useChromeScroll } from "@/components/shell/useChromeScroll";
@@ -30,6 +30,24 @@ it("compacts on downward travel, restores on upward travel and resets on pushed 
  await fireEvent(screen.getByRole("button",{name:"Pay"}),"longPress");expect(router.push).toHaveBeenLastCalledWith({pathname:"/scan"});
  mockPath="/";await tree.rerender(<NavigationChromeProvider><Probe/></NavigationChromeProvider>);
  expect(screen.getByText("true:true:false")).toBeTruthy();
+});
+it("keeps Pay centred on every tab and docks it at the right without a caption on detail pages",async()=>{
+ const tree=await render(<NavigationChromeProvider><Probe/></NavigationChromeProvider>);
+ await screen.findByRole("button",{name:"Pay"});
+ const left=()=>StyleSheet.flatten(screen.getByTestId("global-pay-position").props.style).left;
+ const width=Dimensions.get("window").width;
+ expect(left()).toBe((width-48)/2);
+ for(const path of ["/transactions","/plan","/more"]){
+  mockPath=path;await tree.rerender(<NavigationChromeProvider><Probe/></NavigationChromeProvider>);
+  expect(left()).toBe((width-48)/2);expect(screen.getByText("Pay",{includeHiddenElements:true})).toBeTruthy();
+ }
+ for(const path of ["/settings","/wallet/a"]){
+  mockPath=path;await tree.rerender(<NavigationChromeProvider><Probe/></NavigationChromeProvider>);
+  expect(left()).toBe(width-16-48);expect(screen.queryByText("Pay",{includeHiddenElements:true})).toBeNull();
+  expect(screen.getByRole("button",{name:"Pay"})).toBeTruthy();
+ }
+ mockPath="/more";await tree.rerender(<NavigationChromeProvider><Probe/></NavigationChromeProvider>);
+ expect(left()).toBe((width-48)/2);expect(screen.getByText("Pay",{includeHiddenElements:true})).toBeTruthy();
 });
 it("respects payment gates and hides the redundant launcher inside a payment sheet",async()=>{
  mockConfig.mockResolvedValue({...all,pay:false});
