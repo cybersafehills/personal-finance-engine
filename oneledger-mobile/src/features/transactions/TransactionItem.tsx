@@ -36,20 +36,10 @@ export function TransactionItem({
   const amount = Number(transaction.amount_rwf);
   const formatted = !Number.isSafeInteger(amount) ? "Amount unavailable" : supported ? formatMoney(BigInt(Math.abs(amount)), currency as SupportedCurrency) : `${currency} ${Math.abs(amount).toLocaleString("en-US")}`;
   const sign = pending || failed || transaction.direction === "neutral" ? "" : transaction.direction === "in" ? "+" : "−";
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`${name}, open details`}
-      onPress={() =>
-        router.push({ pathname: "/transaction/[id]", params: { id: transaction.id } })
-      }
-      style={({ pressed }) => [styles.row, compact && styles.compact, pressed && styles.pressed]}
-    >
-      <View style={styles.text}>
-        <Text variant="bodyStrong" numberOfLines={1} style={compact ? styles.compactName : undefined}>
+  const heading = <Text variant="bodyStrong" numberOfLines={1} style={compact ? styles.compactName : undefined}>
           {name}
-        </Text>
-        <View style={styles.meta}>
+        </Text>;
+  const metadata = <View style={styles.meta}>
           <Text variant="caption" color="textMuted" style={compact ? styles.compactMeta : undefined}>
             {showDate
               ? formatDateTime(transaction.occurred_at)
@@ -66,9 +56,19 @@ export function TransactionItem({
           ) : transaction.sync_state && transaction.sync_state !== "synced" ? (
             <Badge variant="neutral">Saved on this phone</Badge>
           ) : null}
-        </View>
-      </View>
-      <Text variant="bodyStrong" tabular color={!pending && !failed && transaction.direction === "in" ? "moneyPositive" : "textPrimary"} accessibilityLabel={hidden ? "Amount hidden" : undefined} style={[styles.amount, compact && styles.compactAmount]}>{hidden ? "••••••" : `${sign}${formatted}`}</Text>
+        </View>;
+  const amountText = <Text variant="bodyStrong" tabular color={pending || failed ? "textMuted" : transaction.direction === "in" ? "moneyPositive" : compact && transaction.direction === "out" ? "danger" : "textPrimary"} accessibilityLabel={hidden ? "Amount hidden" : undefined} style={[styles.amount, compact && styles.compactAmount]}>{hidden ? "••••••" : `${sign}${formatted}`}</Text>;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${name}, open details`}
+      onPress={() =>
+        router.push({ pathname: "/transaction/[id]", params: { id: transaction.id } })
+      }
+      style={({ pressed }) => [styles.row, compact && styles.compact, pressed && styles.pressed]}
+    >
+      {compact ? <><View style={styles.compactTop}>{heading}{amountText}</View>{metadata}</> : <><View style={styles.text}>{heading}{metadata}</View>{amountText}</>}
+
     </Pressable>
   );
 }
@@ -87,8 +87,9 @@ const useStyles = makeStyles((colors) => StyleSheet.create({
   pressed: { backgroundColor: colors.background },
   text: { flex: 1, gap: 2 },
   meta: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: space[1] },
-  compact: { paddingHorizontal: 0, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.borderSubtle },
-  compactName: { fontSize: 13, lineHeight: 18 },
+  compact: { flexDirection:"column", alignItems:"stretch", paddingHorizontal: 0, paddingVertical: 8, minHeight:48, gap:3, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.borderSubtle },
+  compactName: { flex:1,minWidth:0,fontSize: 13, lineHeight: 18 },
+  compactTop: {flexDirection:"row",alignItems:"center",justifyContent:"space-between",gap:8},
   compactMeta: { fontSize:11, lineHeight:15 },
   compactAmount: { fontSize:13, lineHeight:18, maxWidth:"39%" },
   amount: { flexShrink: 1, maxWidth: "48%", textAlign: "right" },

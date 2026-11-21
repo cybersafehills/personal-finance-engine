@@ -12,6 +12,7 @@ import { deviceStore } from "@/lib/device-store";
 import { formatMoney, type SupportedCurrency } from "@/lib/money";
 import { formatDateTime } from "@/lib/kigali-time";
 import { makeStyles, useTheme } from "@/theme/ThemeProvider";
+import { HomeSpaceSwitcher } from "./HomeSpaceSwitcher";
 import { landingWalletKey, landingWallets } from "./wallet-order";
 
 type Props = { wallets: Wallet[] | null; currency: SupportedCurrency; fallback: CurrentBalance | null; loading: boolean; preferenceScope?: string };
@@ -57,10 +58,13 @@ export function WalletCarousel({ wallets, fallback, loading, preferenceScope }: 
     finally { setSaving(false); }
   }
   return <View style={{gap:4}} onLayout={({nativeEvent:{layout}}) => setWidth(Math.max(1,layout.width))}>
-    {ordered.length > 0 ? <View style={styles.controls}>
-      <View style={styles.dots}>{ordered.map((w,i) => <Pressable key={w.id} accessibilityRole="button" accessibilityLabel={`Show ${w.name}`} accessibilityState={{selected:i===selectedIndex}} onPress={() => choose(i)} hitSlop={{top:8,bottom:8}} style={styles.dotTarget}><View style={[styles.dot,i===selectedIndex && styles.activeDot]} /></Pressable>)}</View>
-      <Pressable accessibilityRole="button" accessibilityLabel={isDefault ? `${selected.name} is the default landing wallet` : `Use ${selected.name} on launch`} disabled={isDefault || saving || !preferenceScope} onPress={() => void saveDefault()} hitSlop={{top:8,bottom:8}} style={styles.defaultButton}><Feather name="star" size={13} color={colors.accent} /><Text variant="caption" color="accent">{saving ? "Saving…" : isDefault ? "Default" : "Make default"}</Text></Pressable>
-    </View> : null}
+    <View testID="wallet-controls" style={styles.controls}>
+      <View style={styles.controlLeft}><HomeSpaceSwitcher/>
+      {ordered.length > 1 ? <Pressable accessibilityRole="button" accessibilityLabel="Next wallet" accessibilityHint="Swipe the card or tap to switch wallets" accessibilityValue={{text:`${selectedIndex+1} of ${ordered.length}: ${selected.name}`}} onPress={()=>choose((selectedIndex+1)%ordered.length)} style={styles.dots}>
+        {ordered.map((w,i)=><View key={w.id} style={[styles.dot,i===selectedIndex && styles.activeDot]}/>)}
+      </Pressable> : null}</View>
+      {selected ? <Pressable accessibilityRole="button" accessibilityLabel={isDefault ? `${selected.name} is the default landing wallet` : `Use ${selected.name} on launch`} disabled={isDefault || saving || !preferenceScope} onPress={() => void saveDefault()} hitSlop={{top:8,bottom:8}} style={styles.defaultButton}><Feather name="star" size={13} color={colors.accent} /><Text variant="caption" color="accent">{saving ? "Saving…" : isDefault ? "Default" : "Make default"}</Text></Pressable> : null}
+    </View>
     {ordered.length ? <ScrollView testID="wallet-carousel" ref={pager} horizontal pagingEnabled directionalLockEnabled showsHorizontalScrollIndicator={false} onScrollBeginDrag={() => {interacted.current=true;}} contentOffset={{x:selectedIndex*width,y:0}} onMomentumScrollEnd={({nativeEvent}) => {interacted.current=true;const index=Math.max(0,Math.min(ordered.length-1,Math.round(nativeEvent.contentOffset.x/width)));setSelectedId(ordered[index].id);}}>
       {ordered.map((wallet,i) => <View key={wallet.id} style={{width}} accessibilityElementsHidden={i!==selectedIndex} importantForAccessibility={i===selectedIndex ? "auto" : "no-hide-descendants"}><WalletBalanceCard wallet={wallet} loading={loading} /></View>)}
     </ScrollView> : <WalletBalanceCard fallback={wallets === null ? fallback : null} loading={loading} />}
@@ -85,13 +89,15 @@ function WalletBalanceCard({wallet,fallback,loading}:{wallet?:Wallet;fallback?:C
       <Text variant="caption" color="onSolid">{wallet ? STATUS_LABEL[wallet.balance.status] : fallback ? "Single provider snapshot" : "No wallet balance available"}</Text>
       <View style={styles.actions}><Pressable accessibilityRole="button" accessibilityLabel={wallet ? `Add transaction to ${wallet.name}` : "Add transaction"} onPress={()=>router.push(wallet ? {pathname:"/add-transaction",params:{accountId:wallet.id}} : "/add-transaction")} style={styles.add}><Text variant="label" style={{color:colors.homeGradientStart}}>+ Add transaction</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel={wallet ? `View ${wallet.name}` : "View wallets"} onPress={()=>router.push(wallet ? {pathname:"/wallet/[id]",params:{id:wallet.id}} : "/wallets")} style={styles.details}><Text variant="label" color="onSolid">{wallet ? "View wallet ↗" : "View wallets ↗"}</Text></Pressable></View>
     </View>
-    <Text variant="caption" color="textMuted">{asOf ? `As of ${formatDateTime(asOf)}` : "Balance freshness unavailable"}</Text>
+    <Text variant="caption" color="textMuted" style={styles.updatedAt}>{asOf ? `As of ${formatDateTime(asOf)}` : "Balance freshness unavailable"}</Text>
     {!wallet && fallback?.pendingCount ? <Text variant="caption" color="attention">{fallback.pendingCount} local changes not yet confirmed</Text> : null}
   </View>;
 }
 const useStyles=makeStyles(c=>StyleSheet.create({
   controls:{flexDirection:"row",alignItems:"center",justifyContent:"space-between",minHeight:28},
-  dots:{flexDirection:"row",alignItems:"center"},dotTarget:{width:44,minHeight:28,alignItems:"center",justifyContent:"center"},dot:{width:6,height:6,borderRadius:3,backgroundColor:c.borderStrong},activeDot:{width:18,backgroundColor:c.accent},
+  controlLeft:{flex:1,flexDirection:"row",alignItems:"center",gap:8,minWidth:0},
+  updatedAt:{paddingHorizontal:16,fontSize:11,lineHeight:15},
+  dots:{flexDirection:"row",alignItems:"center",justifyContent:"center",gap:5,minWidth:44,minHeight:44,paddingHorizontal:4,flexWrap:"wrap"},dot:{width:6,height:6,borderRadius:3,backgroundColor:c.borderStrong},activeDot:{width:18,backgroundColor:c.accent},
   defaultButton:{flexDirection:"row",alignItems:"center",gap:5,minHeight:28,paddingHorizontal:4},
   card:{padding:16,borderRadius:22,overflow:"hidden",gap:7,backgroundColor:c.homeGradientStart},cardTop:{flexDirection:"row",alignItems:"center",gap:8},eye:{width:44,height:36,alignItems:"center",justifyContent:"center",marginRight:-8,marginTop:-4,marginBottom:-4},
   amount:{fontSize:29,lineHeight:36,letterSpacing:-0.8},actions:{flexDirection:"row",gap:8,marginTop:8},add:{flex:1.2,minHeight:44,alignItems:"center",justifyContent:"center",padding:6,borderRadius:12,backgroundColor:c.onSolid},details:{flex:1,minHeight:44,alignItems:"center",justifyContent:"center",padding:6,borderRadius:12,backgroundColor:"rgba(255,255,255,0.16)"}

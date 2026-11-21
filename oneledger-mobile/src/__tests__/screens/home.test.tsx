@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react-native";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react-native";
 import Home from "@/app/(app)/(tabs)/index";
 import { PrivacyProvider } from "@/features/privacy/PrivacyProvider";
 import type { CurrencyOverview } from "@/features/insights/types";
@@ -8,7 +8,7 @@ import { router, resetRouterMock } from "@/test/router-mock";
 const mockWallets = jest.fn(), mockInsights = jest.fn(), mockRecent = jest.fn(), mockBalance = jest.fn(), mockBudget = jest.fn();
 const mockStoreGet=jest.fn(),mockStoreSet=jest.fn();
 jest.mock("@/lib/device-store",()=>({deviceStore:{get:(key:string)=>mockStoreGet(key),set:(key:string,value:string)=>mockStoreSet(key,value)}}));
-const mockSpace = { activeId: "w1", active: { id: "w1", name: "Personal", kind: "personal" }, spaces: [], setActive: jest.fn() };
+const mockSpace = { activeId: "w1", active: { id: "w1", name: "Personal", kind: "personal" }, spaces: [] as {id:string;name:string;kind:string}[], setActive: jest.fn() };
 jest.mock("expo-router", () => jest.requireActual("@/test/router-mock"));
 jest.mock("@/features/spaces/ActiveSpaceProvider", () => ({ useActiveSpace: () => mockSpace }));
 jest.mock("@/features/auth/SessionProvider", () => ({ useSession: () => ({ session: { user: { id: "u1", user_metadata: { full_name: "Fallback Name" } } } }) }));
@@ -25,7 +25,7 @@ const block = (income: bigint, expense: bigint): CurrencyOverview => ({
   trend: [{ bucketStart: new Date().toISOString().slice(0,7)+"-01", moneyInMinor: income, moneyOutMinor: expense, netMinor: income-expense }],
 });
 beforeEach(() => {
-  resetRouterMock(); mockSpace.activeId="w1";
+  resetRouterMock(); mockSpace.activeId="w1"; mockSpace.spaces=[];mockSpace.setActive.mockClear();
   mockStoreGet.mockReset().mockResolvedValue(null);mockStoreSet.mockReset().mockResolvedValue(undefined);
   [mockWallets,mockInsights,mockRecent,mockBalance].forEach(m=>m.mockReset());
   mockWallets.mockResolvedValue({ok:true,workspaceId:"w1",wallets:[wallet]});
@@ -80,7 +80,7 @@ describe("live Home", () => {
     await renderHome(); await screen.findByText("Unknown bank");
     expect(screen.queryByText(/Total available balance/)).toBeNull();
     expect(screen.queryByText(/Partial balance/)).toBeNull();
-    await fireEvent.press(screen.getByRole("button",{name:"Show Unknown bank"}));
+    await fireEvent.press(screen.getByRole("button",{name:"Next wallet"}));
     expect(screen.getByText("Not available")).toBeTruthy();
   });
   it("does not substitute zeroes or sample charts when analytics are unavailable",async()=>{
@@ -152,19 +152,19 @@ describe("individual wallet landing cards", () => {
  const bank={...wallet,id:"bank",name:"Equity Bank",provider:"bank",isPrimary:false,balance:{...wallet.balance,amountMinor:32900n}};
  it("swipes between separate wallet amounts and never combines them",async()=>{
   mockWallets.mockResolvedValue({ok:true,workspaceId:"w1",wallets:[wallet,bank]});
-  await renderHome();await screen.findByRole("button",{name:"Show Equity Bank"});
-  expect(screen.getByRole("button",{name:"Show Real MoMo wallet"}).props.accessibilityState.selected).toBe(true);
+  await renderHome();await screen.findByRole("button",{name:"Next wallet"});
+  expect(screen.getByRole("button",{name:"Next wallet"}).props.accessibilityValue.text).toBe("1 of 2: Real MoMo wallet");
   expect(screen.queryByText("RWF 47,316")).toBeNull();
   expect(screen.queryByText(/2 wallets/)).toBeNull();
   const pager=screen.getByTestId("wallet-carousel");
   await fireEvent(pager,"momentumScrollEnd",{nativeEvent:{contentOffset:{x:pager.props.contentOffset.x+358,y:0}}});
-  expect(screen.getByRole("button",{name:"Show Equity Bank"}).props.accessibilityState.selected).toBe(true);
+  expect(screen.getByRole("button",{name:"Next wallet"}).props.accessibilityValue.text).toBe("2 of 2: Equity Bank");
   expect(screen.getByRole("button",{name:"View Equity Bank"})).toBeTruthy();
  });
  it("saves a chosen landing wallet and restores it at the front on next launch",async()=>{
   mockWallets.mockResolvedValue({ok:true,workspaceId:"w1",wallets:[wallet,bank]});
-  const view=await renderHome();await screen.findByRole("button",{name:"Show Equity Bank"});
-  await fireEvent.press(screen.getByRole("button",{name:"Show Equity Bank"}));
+  const view=await renderHome();await screen.findByRole("button",{name:"Next wallet"});
+  await fireEvent.press(screen.getByRole("button",{name:"Next wallet"}));
   await fireEvent.press(screen.getByRole("button",{name:"Use Equity Bank on launch"}));
   await waitFor(()=>expect(mockStoreSet).toHaveBeenCalledWith("ol.home.wallet.v1.u1.w1","bank"));
   await screen.findByRole("button",{name:"Equity Bank is the default landing wallet"});
@@ -176,8 +176,8 @@ describe("individual wallet landing cards", () => {
  it("keeps the previous default when saving the new preference fails",async()=>{
   mockStoreSet.mockRejectedValue(new Error("storage unavailable"));
   mockWallets.mockResolvedValue({ok:true,workspaceId:"w1",wallets:[wallet,bank]});
-  await renderHome();await screen.findByRole("button",{name:"Show Equity Bank"});
-  await fireEvent.press(screen.getByRole("button",{name:"Show Equity Bank"}));
+  await renderHome();await screen.findByRole("button",{name:"Next wallet"});
+  await fireEvent.press(screen.getByRole("button",{name:"Next wallet"}));
   await fireEvent.press(screen.getByRole("button",{name:"Use Equity Bank on launch"}));
   expect(await screen.findByText("Couldn’t save your default wallet. Try again.")).toBeTruthy();
   expect(screen.getByRole("button",{name:"Use Equity Bank on launch"})).toBeTruthy();
@@ -190,4 +190,14 @@ it("falls back to an available wallet when the saved landing wallet was removed"
  await renderHome();await screen.findByRole("button",{name:"Real MoMo wallet is the default landing wallet"});
  expect(screen.getByRole("button",{name:"View Real MoMo wallet"})).toBeTruthy();
  expect(screen.queryByText("removed-wallet")).toBeNull();
+});
+
+
+it("opens the Space picker beside the wallet dots rather than in the greeting",async()=>{
+ mockSpace.spaces=[{id:"w1",name:"Personal",kind:"personal"},{id:"w2",name:"Household",kind:"household"}];
+ await renderHome();await screen.findAllByText("Real MoMo wallet");
+ expect(within(screen.getByTestId("home-header")).queryByRole("button",{name:/Change Space/})).toBeNull();
+ await fireEvent.press(within(screen.getByTestId("wallet-controls")).getByRole("button",{name:"Change Space, Personal"}));
+ await fireEvent.press(await screen.findByText("Household"));
+ expect(mockSpace.setActive).toHaveBeenCalledWith("w2");
 });
