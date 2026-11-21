@@ -11,7 +11,7 @@ import type { SupportedCurrency } from "@/lib/money";
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 export type TrendPoint = NonNullable<CurrencyOverview["trend"]>[number];
 
-export function TrendChart({ points, currency }: { points: TrendPoint[]; currency: SupportedCurrency }) {
+export function TrendChart({ points, currency, granularity="month" }: { points: TrendPoint[]; currency: SupportedCurrency; granularity?:"day"|"week"|"month" }) {
   const { colors } = useTheme();
   const { amountsHidden } = usePrivacy();
   const id = useId().replace(/[^a-zA-Z0-9]/g, "");
@@ -23,16 +23,16 @@ export function TrendChart({ points, currency }: { points: TrendPoint[]; currenc
   const y = (v: number) => 16 + (hi - v) * 115 / (hi - lo);
   const line = (key: "moneyInMinor" | "moneyOutMinor") => points.map((p, i) => `${i ? "L" : "M"}${x(i)},${y(Number(p[key]))}`).join(" ");
   return <View>
-    <Svg viewBox="0 0 316 162" width="100%" height={166} accessibilityRole="image" accessibilityLabel={points.map((p) => `${p.bucketStart}: income ${compactMoney(p.moneyInMinor, currency)}, expenses ${compactMoney(p.moneyOutMinor, currency)}`).join("; ")}>
+    <Svg viewBox="0 0 316 162" width="100%" height={148} accessibilityRole="image" accessibilityLabel={points.map((p) => `${p.bucketStart}: income ${compactMoney(p.moneyInMinor, currency)}, expenses ${compactMoney(p.moneyOutMinor, currency)}`).join("; ")}>
       <Defs><LinearGradient id={id} x1="0" y1="0" x2="0" y2="1"><Stop offset="0" stopColor={colors.chartIncome} stopOpacity={0.18} /><Stop offset="1" stopColor={colors.chartIncome} stopOpacity={0} /></LinearGradient></Defs>
       {[lo, (lo + hi) / 2, hi].map((v, i) => <ViewlessGrid key={i} value={v} y={y(v)} currency={currency} />)}
       <Path d={`${line("moneyInMinor")} L${x(points.length - 1)},${y(0)} L${x(0)},${y(0)} Z`} fill={`url(#${id})`} />
       <Path d={line("moneyInMinor")} stroke={colors.chartIncome} strokeWidth={2.6} fill="none" />
       <Path d={line("moneyOutMinor")} stroke={colors.chartExpense} strokeWidth={2.6} fill="none" />
-      {points.map((p, i) => <SvgText key={p.bucketStart} x={x(i)} y={153} textAnchor={i === 0 ? "start" : i === points.length - 1 ? "end" : "middle"} fontSize={10} fill={colors.textMuted}>{MONTHS[Number(p.bucketStart.slice(5, 7)) - 1]}</SvgText>)}
+      {points.map((p, i) => i===0||i===points.length-1||i%Math.ceil(points.length/5)===0 ? <SvgText key={p.bucketStart} x={x(i)} y={153} textAnchor={i === 0 ? "start" : i === points.length - 1 ? "end" : "middle"} fontSize={10} fill={colors.textMuted}>{MONTHS[Number(p.bucketStart.slice(5, 7)) - 1]}{granularity!=="month"?` ${Number(p.bucketStart.slice(8,10))}`:""}</SvgText>:null)}
       {points.length === 1 ? <><Circle cx={x(0)} cy={y(Number(points[0].moneyInMinor))} r={3} fill={colors.chartIncome} /><Circle cx={x(0)} cy={y(Number(points[0].moneyOutMinor))} r={3} fill={colors.chartExpense} /></> : null}
     </Svg>
-    <View style={{ flexDirection: "row", gap: 20, marginTop: 10 }}>
+    <View style={{ flexDirection: "row", gap: 20, marginTop: 6 }}>
       <Text variant="caption" color="textMuted"><Text style={{ color: colors.chartIncome }}>● </Text>Income</Text>
       <Text variant="caption" color="textMuted"><Text style={{ color: colors.chartExpense }}>● </Text>Expenses</Text>
     </View>

@@ -1,14 +1,7 @@
 import Feather from "@expo/vector-icons/Feather";
-import { router, Tabs } from "expo-router";
-import { useCallback } from "react";
+import { Tabs } from "expo-router";
 
-import { fetchPayConfig } from "@/api/mobile-api";
-import { PayTabButton } from "@/components/shell/PayTabButton";
-import { setPayConfigCache } from "@/features/pay/config-cache";
-import { holdHint, resolveHoldTarget } from "@/features/pay/hold-action";
-import { useHoldPrefs } from "@/features/pay/hold-store";
-import { showPayButton } from "@/features/pay/launcher";
-import { useQuery } from "@/hooks/useQuery";
+import { MotionTabBar } from "@/components/shell/MotionTabBar";
 import { AppHeader } from "@/components/shell/AppHeader";
 import { fonts } from "@/theme/typography";
 import { useTheme } from "@/theme/ThemeProvider";
@@ -33,22 +26,9 @@ const icon = (name: IconName) => {
 
 export default function TabsLayout() {
   const { colors } = useTheme();
-  const loadPay = useCallback(async () => {
-    const result = await fetchPayConfig();
-    // The sheet reads this so it can open instantly.
-    setPayConfigCache(result.ok ? result : null);
-    return result;
-  }, []);
-  const { data: payConfig } = useQuery(loadPay);
-  // Shown only where Pay is on; while that is unknown, or if it can't be read, there is no button.
-  const payOn = payConfig ? showPayButton(payConfig) : false;
-  // What holding the button does (Scan to pay unless the user chose otherwise).
-  const holdPrefs = useHoldPrefs();
-  const readyConfig = payConfig?.ok ? payConfig : null;
-  const holdTarget = resolveHoldTarget(holdPrefs, readyConfig);
-
   return (
     <Tabs
+      tabBar={(props)=><MotionTabBar {...props}/>}
       screenOptions={{
         headerShown: true,
         header: () => <AppHeader />,
@@ -67,25 +47,7 @@ export default function TabsLayout() {
         name="transactions"
         options={{ title: "Transactions", tabBarIcon: icon("list") }}
       />
-      <Tabs.Screen
-        name="pay"
-        // expo-router throws if `href` and `tabBarButton` are both set, so a
-        // hidden Pay tab (Pay off, or its config still loading) gets only
-        // `href: null`, and a visible one only the custom centre button.
-        options={
-          payOn
-            ? { title: "Pay", tabBarButton: () => (
-                <PayTabButton
-                  onPress={() => router.push("/pay-sheet")}
-                  onHold={holdTarget ? () => router.push(holdTarget) : undefined}
-                  holdMs={holdPrefs.durationMs}
-                  hint={holdHint(holdPrefs, readyConfig)}
-                />
-              ),
-            }
-            : { title: "Pay", href: null }
-        }
-      />
+      <Tabs.Screen name="pay" options={{title:"Pay",href:null}}/>
       {/* Inbox is opened from the header icon (as on the web), not the bar. */}
       <Tabs.Screen name="inbox" options={{ title: "Inbox", href: null }} />
       <Tabs.Screen name="plan" options={{ title: "Plan", tabBarIcon: icon("target") }} />

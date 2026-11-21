@@ -169,7 +169,7 @@ export async function fetchInsights(params: {
   to: string;
   accountIds?: string[];
   compare?: boolean;
-  granularity?: "month";
+  granularity?: "day" | "week" | "month";
 }): Promise<InsightsResult> {
   const q = new URLSearchParams({ from: params.from, to: params.to, tz: "Africa/Kigali" });
   for (const id of params.accountIds ?? []) q.append("account_id", id);

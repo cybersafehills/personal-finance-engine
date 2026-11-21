@@ -12,6 +12,7 @@ import {
   Text,
   TextField,
 } from "@/components/ds";
+import { useChromeScroll } from "@/components/shell/useChromeScroll";
 import { groupByDay } from "@/features/transactions/display";
 import { LifetimeChips } from "@/features/transactions/LifetimeChips";
 import {
@@ -54,6 +55,7 @@ export default function Transactions() {
 
 function TransactionsList({ category, initialPeriod, accountId, walletName, focusSearch }: { category?: string; initialPeriod?: string; accountId?: string; walletName?: string; focusSearch?:string }) {
   const { colors } = useTheme();
+  const onScroll=useChromeScroll();
   const { activeId } = useActiveSpace();
   const { syncNow } = useOffline();
   const searchRef=useRef<TextInputInstance>(null);
@@ -179,6 +181,8 @@ function TransactionsList({ category, initialPeriod, accountId, walletName, focu
         <FilterChips value={filters} onChange={setFilters} />
       </View>
       <SectionList
+        onScroll={onScroll}
+        scrollEventThrottle={32}
         sections={groupByDay(displayedRows, loadedAt)}
         keyExtractor={(row) => row.id}
         contentContainerStyle={listContentStyle}

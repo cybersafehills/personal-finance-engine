@@ -1,3 +1,4 @@
+import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import Feather from "@expo/vector-icons/Feather";
 import { router } from "expo-router";
 import { useState, type ReactNode } from "react";
@@ -10,6 +11,8 @@ import { usePrivacy } from "@/features/privacy/PrivacyProvider";
 import { formatMoney, type SupportedCurrency } from "@/lib/money";
 import { makeStyles, useTheme } from "@/theme/ThemeProvider";
 import { compactMoney, changeBps, percentText, retainedPercent } from "./live-data";
+import { usePinnedSection } from "./usePinnedSection";
+import { HomeSpaceSwitcher } from "./HomeSpaceSwitcher";
 import { Donut } from "./Charts";
 
 export function HomeHeader({ name, unread }: { name: string; unread: number }) {
@@ -17,10 +20,7 @@ export function HomeHeader({ name, unread }: { name: string; unread: number }) {
   const styles = useStyles();
   return <View testID="home-header">
     <View style={styles.header}>
-      <View style={{flex:1,minHeight:44,justifyContent:"center",gap:2}}>
-        <Text variant="heading" style={styles.brand}>OneLedger</Text>
-        <Text variant="caption" color="textMuted">Money overview</Text>
-      </View>
+      <View style={{flex:1}}><HomeSpaceSwitcher/></View>
       <View style={{ flexDirection: "row", gap: 2 }}>
         <Pressable accessibilityRole="button" accessibilityLabel="Search transactions" onPress={() => { const request=String(Date.now()); router.navigate({pathname:"/transactions",params:{focusSearch:request,reset:request,accountId:"",walletName:"",category:"",period:"all"}}); }} style={styles.iconButton}><Feather name="search" size={17} color={colors.textPrimary} /></Pressable>
         <Pressable accessibilityRole="button" accessibilityLabel={`Notifications, ${unread} unread`} onPress={() => router.push("/notifications")} style={styles.iconButton}><Feather name="bell" size={17} color={colors.textPrimary} />{unread > 0 ? <View style={styles.notificationDot} /> : null}</Pressable>
@@ -31,14 +31,17 @@ export function HomeHeader({ name, unread }: { name: string; unread: number }) {
   </View>;
 }
 
-export function HomeSection({ title, subtitle, action, children, collapsible = false, dense = false }: { title: string; subtitle?: string; action?: ReactNode; children: ReactNode; collapsible?: boolean; dense?: boolean }) {
-  const styles = useStyles();
-  const { colors } = useTheme();
-  const [expanded, setExpanded] = useState(false);
-  const heading = <View style={{ flex: 1, gap: 3 }}><Text variant="heading" style={styles.sectionTitle}>{title}</Text>{subtitle ? <Text variant="caption" color="textMuted" style={styles.small}>{subtitle}</Text> : null}</View>;
-  return <Card style={[styles.section,dense && styles.denseSection]}>
-    {collapsible ? <Pressable accessibilityRole="button" accessibilityLabel={title} accessibilityState={{ expanded }} onPress={() => setExpanded(!expanded)} style={styles.collapseHeader}>{heading}<Feather name={expanded ? "chevron-up" : "chevron-down"} size={18} color={colors.textMuted} /></Pressable> : <View style={styles.sectionHeading}>{heading}{action}</View>}
-    {!collapsible || expanded ? <>{collapsible && action ? <View style={{ alignItems: "flex-end" }}>{action}</View> : null}{children}</> : null}
+export function HomeSection({ title, subtitle, action, children, collapsible = false, dense = false, pinScope, sectionId }: { title: string; subtitle?: string; action?: ReactNode; children: ReactNode; collapsible?: boolean; dense?: boolean; pinScope?:string; sectionId?:string }) {
+  const styles=useStyles();const {colors}=useTheme();
+  const [localExpanded,setLocalExpanded]=useState(false);
+  const pin=usePinnedSection(pinScope,sectionId);
+  const expanded=pinScope ? pin.expanded : localExpanded;
+  const toggle=()=>pinScope ? pin.toggle() : setLocalExpanded(!localExpanded);
+  const heading=<View style={{flex:1,gap:3}}><Text variant="heading" style={styles.sectionTitle}>{title}</Text>{subtitle?<Text variant="caption" color="textMuted" style={styles.small}>{subtitle}</Text>:null}</View>;
+  return <Card style={[styles.section,dense&&styles.denseSection]}>
+    {collapsible ? <View style={styles.sectionHeading}><Pressable accessibilityRole="button" accessibilityLabel={title} accessibilityState={{expanded}} onPress={toggle} style={styles.collapseTitle}>{heading}</Pressable>{action}{pinScope?<Pressable accessibilityRole="button" accessibilityLabel={`${pin.pinned?"Unpin":"Pin"} ${title}`} accessibilityState={{selected:pin.pinned}} onPress={()=>pin.pin(!pin.pinned)} hitSlop={{left:4,right:4}} style={styles.sectionControl}><MaterialCommunityIcons name={pin.pinned?"pin":"pin-off"} size={17} color={colors.accent}/></Pressable>:null}<Pressable accessibilityRole="button" accessibilityLabel={`${expanded?"Collapse":"Expand"} ${title}`} onPress={toggle} hitSlop={{left:4,right:4}} style={styles.sectionControl}><Feather name={expanded?"chevron-up":"chevron-down"} size={17} color={colors.textMuted}/></Pressable></View>:<View style={styles.sectionHeading}>{heading}{action}</View>}
+    {pinScope&&pin.error?<Text variant="caption" color="attention">{pin.error}</Text>:null}
+    {!collapsible||expanded?children:null}
   </Card>;
 }
 export function HomeLink({ label, onPress }: { label: string; onPress(): void }) {
@@ -72,7 +75,7 @@ export function CashFlow({ currency, current, previous, previousAvailable = fals
   </HomeSection>;
 }
 
-export function Spending({ current, available, message }: { current: CurrencyOverview | null; available: boolean; message: string }) {
+export function Spending({ current, available, message, scope }: { current: CurrencyOverview | null; available: boolean; message: string; scope?:string }) {
   const { colors } = useTheme();
   const { amountsHidden } = usePrivacy();
   const styles = useStyles();
@@ -82,11 +85,11 @@ export function Spending({ current, available, message }: { current: CurrencyOve
   const slices = rows.length > 4 ? [...rows.slice(0, 3).map((r) => ({ label: r.category, amount: r.amountMinor, category: r.category })), { label: "Other", amount: rows.slice(3).reduce((s, r) => s + r.amountMinor, 0n), category: null }] : rows.map((r) => ({ label: r.category, amount: r.amountMinor, category: r.category }));
   const palette = [colors.chartIncome, colors.chartExpense, colors.chartFood, colors.chartOther];
   const sum = slices.reduce((s, p) => s + p.amount, 0n);
-  return <HomeSection title="Spending breakdown" subtitle="Where your money goes" collapsible>
+  return <HomeSection title="Spending breakdown" subtitle="Where your money goes" collapsible pinScope={scope} sectionId="spending" dense>
     {!available ? <Text color="textMuted">{message}</Text> : !rows.length ? <Text color="textMuted">Your spending categories appear after your first settled expense.</Text> : negative ? <><Text color="textMuted">Net spending includes refunds.</Text>{rows.map((r) => <View key={r.category} style={styles.walletRow}><Text>{r.category}</Text><Text>{amountsHidden ? "••••••" : formatMoney(r.amountMinor, currency)}</Text></View>)}</> : <View style={styles.breakdown}>
       <Donut slices={slices.map((s, i) => ({ ...s, color: palette[i] }))} total={<><Text variant="heading" tabular>{amountsHidden ? "••••" : compactMoney(current?.moneyOutMinor ?? sum, currency).replace(currency + " ", "")}</Text><Text variant="caption" color="textMuted">Total spent</Text></>} />
-      <View style={{ flex: 1, gap: 6 }}>{slices.map((s, i) => <Pressable key={s.label} accessibilityRole="button" accessibilityLabel={`${s.label}, ${amountsHidden ? "amount hidden" : formatMoney(s.amount, currency)}`} onPress={() => router.navigate({ pathname: "/transactions", params: { focusSearch:"", category: s.category ?? "", accountId:"", walletName:"", period: "month", reset: String(Date.now()) } })} style={styles.category}>
-        <View style={[styles.dot, { backgroundColor: palette[i] }]} /><Text variant="caption" color="textMuted" style={{ flex: 1 }}>{s.label}</Text><Text variant="caption">{sum > 0n ? (Number(s.amount * 10000n / sum) / 100).toFixed(1) : "0"}%</Text>
+      <View style={styles.categoryGrid}>{slices.map((s, i) => <Pressable key={s.label} accessibilityRole="button" accessibilityLabel={`${s.label}, ${amountsHidden ? "amount hidden" : formatMoney(s.amount, currency)}`} onPress={() => router.navigate({ pathname: "/transactions", params: { focusSearch:"", category: s.category ?? "", accountId:"", walletName:"", period: "month", reset: String(Date.now()) } })} style={styles.category}>
+        <View style={{flexDirection:"row",alignItems:"center",gap:4}}><View style={[styles.dot, { backgroundColor: palette[i] }]} /><Text variant="caption" numberOfLines={2} color="textMuted" style={{ flex: 1,fontSize:11,lineHeight:15 }}>{s.label}</Text></View><Text variant="caption">{sum > 0n ? (Number(s.amount * 10000n / sum) / 100).toFixed(1) : "0"}%</Text>
       </Pressable>)}</View>
     </View>}
   </HomeSection>;
@@ -112,11 +115,12 @@ const useStyles = makeStyles((c) => StyleSheet.create({
   denseSection: { padding:14,gap:6 },
   dailyPrimary: { flexDirection:"row",gap:12,paddingVertical:4 },
   dailyAmount: { fontSize:22,lineHeight:28 },
-  monthlyFooter: { borderTopWidth:StyleSheet.hairlineWidth,borderTopColor:c.borderSubtle,paddingTop:8,gap:4 },
+  monthlyFooter: { backgroundColor:c.background,padding:10,borderRadius:10,gap:4 },
   monthlyAmount: { fontSize:13,lineHeight:18 },
   sectionTitle: { fontSize: 15, lineHeight: 20 },
   small: { fontSize: 11, lineHeight: 15 },
-  collapseHeader: { flexDirection:"row", alignItems:"center", gap:8, minHeight:44 },
+  collapseTitle:{flex:1,minWidth:0,minHeight:44,justifyContent:"center"},
+  sectionControl:{width:36,minHeight:44,alignItems:"center",justifyContent:"center"},
   walletTop: { flexDirection:"row", flexWrap:"wrap", alignItems:"baseline", gap:6 },
   walletName: { flexGrow:1, flexBasis:110, fontSize:13, lineHeight:18 },
   walletAmount: { fontSize:13, lineHeight:18, flexShrink:1 },
@@ -126,12 +130,13 @@ const useStyles = makeStyles((c) => StyleSheet.create({
   avatar: { minWidth: 44, minHeight: 44, borderRadius: 22, backgroundColor: c.accentBg, alignItems: "center", justifyContent: "center" },
   notificationDot: { position: "absolute", width: 5, height: 5, right: 8, top: 8, backgroundColor: c.accent, borderRadius: 3 },
   section: { padding: 16, gap: 12, borderRadius: 18 },
-  sectionHeading: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
+  sectionHeading: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 2 },
   linkButton: { minHeight: 44, paddingHorizontal: 4, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   pressed: { backgroundColor: c.background },
   cashColumns: { flexDirection: "row", gap: 12 },
   breakdown: { flexDirection: "row", alignItems: "center", gap: 10, flexWrap: "wrap" },
-  category: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: 6 },
+  categoryGrid:{flex:1,flexDirection:"row",flexWrap:"wrap",gap:6},
+  category: { minHeight: 52,flexBasis:"46%",flexGrow:1,justifyContent:"center",gap:3,paddingVertical:4 },
   dot: { width: 8, height: 8, borderRadius: 4 },
   walletRow: { flexDirection: "row", gap: 10, alignItems: "center", justifyContent: "space-between", padding: 12, minHeight: 68, borderRadius: 13, borderWidth: 1, borderColor: c.borderSubtle },
   walletIcon: { width: 34, height: 38, borderRadius: 10, backgroundColor: c.accentBg, alignItems: "center", justifyContent: "center" },

@@ -107,20 +107,17 @@ describe("live Home", () => {
 
 
 describe("compact Home navigation and sections", () => {
-  it("starts charts collapsed and opens each section independently", async () => {
-    await renderHome(); await screen.findAllByText("Real MoMo wallet");
-    const trend=screen.getByRole("button",{name:"Cash flow trends"});
-    expect(trend.props.accessibilityState).toEqual({expanded:false});
-    expect(screen.queryByText("Last 6 months ⌄")).toBeNull();
-    const spending=screen.getByRole("button",{name:"Spending breakdown"});
-    expect(spending.props.accessibilityState).toEqual({expanded:false});
-    await fireEvent.press(trend);
-    expect(screen.getByText("Last 6 months ⌄")).toBeTruthy();
-    expect(spending.props.accessibilityState).toEqual({expanded:false});
-    await fireEvent.press(spending);
+  it("starts analysis cards pinned and expanded and saves an unpin choice", async () => {
+    await renderHome();await screen.findAllByText("Real MoMo wallet");
+    expect(screen.getByRole("button",{name:"Cash flow trends"}).props.accessibilityState.expanded).toBe(true);
+    expect(screen.getByRole("button",{name:"Spending breakdown"}).props.accessibilityState.expanded).toBe(true);
     expect(screen.getByText("Total spent")).toBeTruthy();
-    await fireEvent.press(trend);
-    expect(screen.queryByText("Last 6 months ⌄")).toBeNull();
+    await fireEvent.press(screen.getByRole("button",{name:"Unpin Cash flow trends"}));
+    expect(screen.getByRole("button",{name:"Cash flow trends"}).props.accessibilityState.expanded).toBe(false);
+    expect(mockStoreSet).toHaveBeenCalledWith("ol.home.pin.v1.u1.w1.trends","false");
+    expect(screen.getByRole("button",{name:"Spending breakdown"}).props.accessibilityState.expanded).toBe(true);
+    await fireEvent.press(screen.getByRole("button",{name:"Pin Cash flow trends"}));
+    expect(screen.getByRole("button",{name:"Cash flow trends"}).props.accessibilityState.expanded).toBe(true);
   });
   it("sizes the gradient to the entire native balance card", async () => {
     await renderHome(); await screen.findAllByText("Real MoMo wallet");
@@ -193,23 +190,20 @@ it("falls back to an available wallet when the saved landing wallet was removed"
 });
 
 
-it("opens the Space picker beside the wallet dots rather than in the greeting",async()=>{
+it("opens the Space picker from the compact top row",async()=>{
  mockSpace.spaces=[{id:"w1",name:"Personal",kind:"personal"},{id:"w2",name:"Household",kind:"household"}];
  await renderHome();await screen.findAllByText("Real MoMo wallet");
- expect(within(screen.getByTestId("home-header")).queryByRole("button",{name:/Change Space/})).toBeNull();
- await fireEvent.press(within(screen.getByTestId("wallet-controls")).getByRole("button",{name:"Change Space, Personal"}));
- await fireEvent.press(await screen.findByText("Household"));
- expect(mockSpace.setActive).toHaveBeenCalledWith("w2");
+ await fireEvent.press(within(screen.getByTestId("home-header")).getByRole("button",{name:"Change Space, Personal"}));
+ await fireEvent.press(await screen.findByText("Household"));expect(mockSpace.setActive).toHaveBeenCalledWith("w2");
 });
-
-
-it("replaces the salutation with a branded header and opens a fresh focused search",async()=>{
- await renderHome();await screen.findByText("OneLedger");
+it("removes the banner and opens a fresh focused search",async()=>{
+ await renderHome();await screen.findAllByText("Real MoMo wallet");
+ expect(screen.queryByText("OneLedger")).toBeNull();expect(screen.queryByText("Money overview")).toBeNull();
  expect(screen.queryByText(/Good morning|Good afternoon|Good evening/)).toBeNull();
- expect(screen.getByText("Money overview")).toBeTruthy();
  await fireEvent.press(screen.getByRole("button",{name:"Search transactions"}));
  expect(router.navigate).toHaveBeenLastCalledWith(expect.objectContaining({pathname:"/transactions",params:expect.objectContaining({focusSearch:expect.any(String),reset:expect.any(String),accountId:"",category:"",period:"all"})}));
 });
+
 it("restores real month-to-date comparisons and retention without sample percentages",async()=>{
  await renderHome();
  expect(await screen.findByText("+20.0% vs last month")).toBeTruthy();
@@ -233,4 +227,13 @@ it("does not report positive retention when spending exceeds income",async()=>{
  mockInsights.mockResolvedValue({ok:true,workspaceId:"w1",overview:{currencies:[block(100n,125n)]}});
  await renderHome();expect(await screen.findByText("Expenses exceed income by RWF 25")).toBeTruthy();
  expect(screen.queryByText(/% of income retained/)).toBeNull();
+});
+
+it("applies an inclusive custom trend range to the API instead of slicing six months",async()=>{
+ await renderHome();await screen.findAllByText("Real MoMo wallet");
+ await fireEvent.press(screen.getByRole("button",{name:"Choose trend date range"}));
+ await fireEvent.changeText(screen.getByLabelText("From date"),"2026-10-01");
+ await fireEvent.changeText(screen.getByLabelText("To date"),"2026-11-15");
+ await fireEvent.press(screen.getByText("Apply dates"));
+ await waitFor(()=>expect(mockInsights).toHaveBeenCalledWith(expect.objectContaining({from:"2026-09-30T22:00:00.000Z",to:"2026-11-15T22:00:00.000Z",granularity:"week"})));
 });
