@@ -45,6 +45,12 @@ describe("offline reads", () => {
     expect((await getTransactions({ filters: { direction: "in", period: "all", needsReview: false } as never })).map((r) => r.id)).toEqual(["in"]);
   });
 
+  it("keeps offline transactions within the selected Space", async () => {
+    await seeded();
+    expect((await getTransactions({ workspaceId: "ws-1" })).length).toBe(3);
+    expect(await getTransactions({ workspaceId: "another-space" })).toEqual([]);
+  });
+
   it("keeps the confirmed balance separate from the unsynced effect", async () => {
     await seeded();
     const balance = await getCurrentBalance();

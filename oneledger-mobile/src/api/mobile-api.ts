@@ -169,10 +169,12 @@ export async function fetchInsights(params: {
   to: string;
   accountIds?: string[];
   compare?: boolean;
+  granularity?: "month";
 }): Promise<InsightsResult> {
   const q = new URLSearchParams({ from: params.from, to: params.to, tz: "Africa/Kigali" });
   for (const id of params.accountIds ?? []) q.append("account_id", id);
   if (params.compare) q.set("compare", "previous");
+  if (params.granularity) q.set("granularity", params.granularity);
   const result = await bearerGet(`/api/mobile/insights/overview?${q.toString()}`);
   if (result.kind !== "response") {
     return { ok: false, ...failureForOutcome(result, "Insights") };

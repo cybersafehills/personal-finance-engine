@@ -46,6 +46,12 @@ export const lightColors = {
   /** Interactive text, icons, links, selected borders. */
   accent: "#33509e",
   accentBg: "#eaf0ff",
+  homeGradientStart: "#312b64",
+  homeGradientEnd: "#7b6bf0",
+  chartIncome: "#6956ee",
+  chartExpense: "#149d99",
+  chartFood: "#f7ad66",
+  chartOther: "#e1e6f0",
   /** A brand-blue fill (primary button, balance card, selected chip) that carries `onSolid`. */
   accentSolid: "#33509e",
   accentSolidPressed: "#263c76",
@@ -92,6 +98,12 @@ export const darkColors: Palette = {
 
   accent: "#8fa5f2",
   accentBg: "#202b4a",
+  homeGradientStart: "#312b64",
+  homeGradientEnd: "#7b6bf0",
+  chartIncome: "#a395ff",
+  chartExpense: "#47d0c4",
+  chartFood: "#f7ad66",
+  chartOther: "#586277",
   accentSolid: "#3d5fc4",
   accentSolidPressed: "#334fa8",
   onSolid: "#ffffff",

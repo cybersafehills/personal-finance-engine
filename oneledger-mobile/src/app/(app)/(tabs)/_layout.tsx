@@ -62,7 +62,7 @@ export default function TabsLayout() {
         sceneStyle: { backgroundColor: colors.background },
       }}
     >
-      <Tabs.Screen name="index" options={{ title: "Home", tabBarIcon: icon("home") }} />
+      <Tabs.Screen name="index" options={{ title: "Home", headerShown: false, tabBarIcon: icon("home") }} />
       <Tabs.Screen
         name="transactions"
         options={{ title: "Transactions", tabBarIcon: icon("list") }}

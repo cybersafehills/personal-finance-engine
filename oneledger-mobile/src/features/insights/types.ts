@@ -51,6 +51,7 @@ export type Comparison = {
 };
 
 export type CurrencyOverview = {
+  trend?: { bucketStart: string; moneyInMinor: bigint; moneyOutMinor: bigint; netMinor: bigint }[] | null;
   currency: SupportedCurrency;
   moneyInMinor: bigint;
   moneyOutMinor: bigint;

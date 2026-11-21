@@ -9,8 +9,8 @@ import { getLocalTransaction, listLocalTransactions, type LocalTransaction } fro
 import { readableDb } from "@/offline/runtime";
 
 // Read queries, ported from web/lib/queries.ts. Like the web, every query
-// runs as the signed-in user and relies on Row Level Security for scoping:
-// there is deliberately no manual workspace filter here. Rows merged into a
+// runs as the signed-in user under Row Level Security. Home and Transactions
+// additionally filter to the selected Space. Rows merged into a
 // canonical duplicate (`dedupe_state = 'merged'`) are evidence, never live
 // transactions, and are excluded everywhere.
 
@@ -30,6 +30,9 @@ export type TransactionRow = {
   subcategory: string | null;
   category_decision_status: string;
   suggested_category: string | null;
+  settlement_state?: string | null;
+  principal_effect_rwf?: number | null;
+  fee_effect_rwf?: number | null;
   /** Present for rows read from this device: whether the server has this change yet. */
   sync_state?: "local_only" | "pending" | "syncing" | "synced" | "conflict" | "failed";
   sync_error?: string | null;
@@ -52,13 +55,16 @@ function fromLocal(row: LocalTransaction): TransactionRow {
     subcategory: row.subcategory,
     category_decision_status: row.category_decision_status,
     suggested_category: row.suggested_category,
+    settlement_state: row.settlement_state,
+    principal_effect_rwf: row.principal_effect_rwf,
+    fee_effect_rwf: row.fee_effect_rwf,
     sync_state: row.sync_state,
     sync_error: row.sync_error,
   };
 }
 
 const COLUMNS =
-  "id, transaction_type, direction, status, currency, amount_rwf, fee_rwf, balance_after_rwf, counterparty_name, counterparty_reference, occurred_at, category, subcategory, category_decision_status, suggested_category";
+  "id, transaction_type, direction, status, currency, amount_rwf, fee_rwf, balance_after_rwf, counterparty_name, counterparty_reference, occurred_at, category, subcategory, category_decision_status, suggested_category, settlement_state, principal_effect_rwf, fee_effect_rwf";
 
 const REVIEW_STATUSES = ["provisional", "suggested", "conflict"];
 
@@ -81,14 +87,16 @@ export type CurrentBalance = {
   pendingCount?: number;
 };
 
-export async function getCurrentBalance(): Promise<CurrentBalance | null> {
+export async function getCurrentBalance(workspaceId?: string | null): Promise<CurrentBalance | null> {
+  if (workspaceId === null) throw new QueryError("Select a Space to see its balance.");
   const local = readableDb();
   if (local) {
     const rows = await local.all<{
       id: string; occurred_at: string; balance_after_rwf: number | null; principal_effect_rwf: number | null;
       fee_effect_rwf: number | null; settlement_state: string | null; sync_state: string; direction: string; dedupe_state: string;
     }>(
-      "SELECT id, occurred_at, balance_after_rwf, principal_effect_rwf, fee_effect_rwf, settlement_state, sync_state, direction, dedupe_state FROM transactions WHERE dedupe_state <> 'merged' ORDER BY occurred_at DESC",
+      `SELECT id, occurred_at, balance_after_rwf, principal_effect_rwf, fee_effect_rwf, settlement_state, sync_state, direction, dedupe_state FROM transactions WHERE dedupe_state <> 'merged' AND currency = 'RWF' ${workspaceId ? "AND workspace_id = ?" : ""} ORDER BY occurred_at DESC, id DESC`,
+      workspaceId ? [workspaceId] : [],
     );
     const confirmedRows = rows
       .filter((r) => r.sync_state === "synced" && r.balance_after_rwf !== null)
@@ -99,7 +107,7 @@ export async function getCurrentBalance(): Promise<CurrentBalance | null> {
     const { pendingEffectRwf, pendingCount } = computeLocalBalance(rows);
     return { ...confirmed, pendingEffectRwf, pendingCount };
   }
-  const { data, error } = await client()
+  let query = client()
     .from("transactions")
     .select("balance_after_rwf, occurred_at, direction, principal_effect_rwf")
     .not("balance_after_rwf", "is", null)
@@ -107,7 +115,10 @@ export async function getCurrentBalance(): Promise<CurrentBalance | null> {
     .order("occurred_at", { ascending: false })
     .order("created_at", { ascending: false })
     // A handful, not just the newest: see pickPlausibleBalance.
-    .limit(5);
+    .limit(5)
+    .eq("currency", "RWF");
+  if (workspaceId) query = query.eq("workspace_id", workspaceId);
+  const { data, error } = await query;
   if (error) throw new QueryError(error.message);
   return pickPlausibleBalance(data ?? []);
 }
@@ -143,6 +154,7 @@ export async function getTransactions({
   filters = NO_FILTERS,
   category,
   nowIso = new Date().toISOString(),
+  workspaceId,
 }: {
   offset?: number;
   limit?: number;
@@ -151,7 +163,9 @@ export async function getTransactions({
   /** Exactly this category; "Uncategorized" means none, like the web's ?category=. */
   category?: string;
   nowIso?: string;
+  workspaceId?: string | null;
 } = {}): Promise<TransactionRow[]> {
+  if (workspaceId === null) throw new QueryError("Select a Space to see its transactions.");
   const local = readableDb();
   if (local) {
     const term = q ? safeSearchTerm(q) : "";
@@ -164,6 +178,7 @@ export async function getTransactions({
       direction: filters.direction !== "all" ? filters.direction : undefined,
       needsReview: filters.needsReview || undefined,
       sinceIso: since ?? undefined,
+      workspaceId,
     });
     return rows.map(fromLocal);
   }
@@ -172,8 +187,10 @@ export async function getTransactions({
     .select(COLUMNS)
     .neq("dedupe_state", "merged")
     .order("occurred_at", { ascending: false })
+    .order("id", { ascending: false })
     .range(offset, offset + limit - 1);
 
+  if (workspaceId) query = query.eq("workspace_id", workspaceId);
   if (category) {
     query = category === "Uncategorized" ? query.is("category", null) : query.eq("category", category);
   }
@@ -220,11 +237,15 @@ export async function getReviewQueue(): Promise<TransactionRow[]> {
   return (data ?? []) as TransactionRow[];
 }
 
-export async function getReviewQueueCount(): Promise<number> {
-  const { count, error } = await client()
+export async function getReviewQueueCount(workspaceId?: string | null): Promise<number> {
+  if (workspaceId === null) throw new QueryError("Select a Space to see its review queue.");
+  let query = client()
     .from("transactions")
     .select("id", { count: "exact", head: true })
-    .in("category_decision_status", REVIEW_STATUSES);
+    .in("category_decision_status", REVIEW_STATUSES)
+    .neq("dedupe_state", "merged");
+  if (workspaceId) query = query.eq("workspace_id", workspaceId);
+  const { count, error } = await query;
   if (error) throw new QueryError(error.message);
   return count ?? 0;
 }
@@ -241,21 +262,26 @@ const LIFETIME_MAX_PAGES = 50;
  * API returns at most 1,000 rows per request; summing one request would
  * silently stop at 1,000 transactions.
  */
-export async function getLifetimeFlowTotals(): Promise<LifetimeTotals> {
+export async function getLifetimeFlowTotals(workspaceId?: string | null): Promise<LifetimeTotals> {
+  if (workspaceId === null) throw new QueryError("Select a Space to see its totals.");
   const db = client();
   const rows: LifetimeRow[] = [];
   for (let page = 0; page < LIFETIME_MAX_PAGES; page++) {
-    const { data, error } = await db
+    let query = db
       .from("transactions")
       .select("direction, principal_effect_rwf, fee_effect_rwf")
       .eq("settlement_state", "settled")
+      .eq("currency", "RWF")
       .neq("dedupe_state", "merged")
       // A stable order, or pages can overlap or skip rows.
       .order("id", { ascending: true })
       .range(page * LIFETIME_PAGE, (page + 1) * LIFETIME_PAGE - 1);
+    if (workspaceId) query = query.eq("workspace_id", workspaceId);
+    const { data, error } = await query;
     if (error) throw new QueryError(error.message);
     rows.push(...((data ?? []) as LifetimeRow[]));
     if (!data || data.length < LIFETIME_PAGE) break;
+    if (page === LIFETIME_MAX_PAGES - 1) throw new QueryError("This Space has too many transactions to total on this device.");
   }
   const { data: userData } = await db.auth.getUser();
   return { ...sumLifetimeFlow(rows), accountCreatedIso: userData.user?.created_at ?? null };

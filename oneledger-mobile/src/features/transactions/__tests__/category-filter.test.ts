@@ -26,6 +26,16 @@ beforeEach(() => {
 const calls = (name: string) => mockCalls.filter(([n]) => n === name).map(([, ...args]) => args);
 
 describe("getTransactions category filter", () => {
+  it("scopes the ledger to the selected Space and uses a stable tie-break order", async () => {
+    await getTransactions({ workspaceId: "workspace-a" });
+    expect(calls("eq")).toContainEqual(["workspace_id", "workspace-a"]);
+    expect(calls("order")).toContainEqual(["id", { ascending: false }]);
+  });
+
+  it("does not read all accessible Spaces while the selected one is unknown", async () => {
+    await expect(getTransactions({ workspaceId: null })).rejects.toThrow("Select a Space");
+    expect(mockCalls).toEqual([]);
+  });
   it("matches a category exactly", async () => {
     await getTransactions({ category: "Food" });
     expect(calls("eq")).toContainEqual(["category", "Food"]);

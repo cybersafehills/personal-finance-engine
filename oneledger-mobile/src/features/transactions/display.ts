@@ -22,8 +22,12 @@ export function displayName(
   return raw;
 }
 
-export function isFailed(transaction: Pick<TransactionRow, "status">): boolean {
-  return transaction.status !== "success";
+export function isFailed(transaction: Pick<TransactionRow, "status" | "settlement_state">): boolean {
+  return ["failed", "reversed", "cancelled"].includes(transaction.settlement_state ?? transaction.status);
+}
+
+export function isPending(transaction: Pick<TransactionRow, "status" | "settlement_state">): boolean {
+  return !isFailed(transaction) && (transaction.settlement_state != null ? transaction.settlement_state !== "settled" : transaction.status !== "success");
 }
 
 const REVIEW_STATUSES = ["provisional", "suggested", "conflict"];
@@ -83,7 +87,7 @@ export function reviewPrompt(
 export function signedAmountRwf(
   transaction: Pick<TransactionRow, "direction" | "amount_rwf" | "status">,
 ): number {
-  if (isFailed(transaction)) return 0;
+  if (isFailed(transaction) || isPending(transaction)) return 0;
   if (transaction.direction === "in") return transaction.amount_rwf;
   if (transaction.direction === "out") return -transaction.amount_rwf;
   return 0;

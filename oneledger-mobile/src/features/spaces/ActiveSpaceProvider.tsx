@@ -13,7 +13,7 @@ import { deviceStore } from "@/lib/device-store";
 
 import { getSpaces } from "./queries";
 import { setRequestedWorkspace } from "./request-space";
-import { requestedWorkspaceId, resolveActiveSpace, storageKey, type Space } from "./spaces";
+import { isSpaceKind, requestedWorkspaceId, resolveActiveSpace, storageKey, type Space } from "./spaces";
 
 type ActiveSpaceValue = {
   spaces: readonly Space[];
@@ -37,7 +37,7 @@ const Context = createContext<ActiveSpaceValue>({
  * Which Space the user is viewing. The choice is remembered per user on the
  * device, validated against current memberships (a revoked Space falls back to
  * Personal), and cleared on sign-out. Failing to load the list is not fatal:
- * with no Space the requests simply use the server's default (Personal).
+ * the saved membership list preserves the selected Space for offline reads.
  */
 const NO_SPACES: readonly Space[] = [];
 
@@ -67,14 +67,23 @@ export function ActiveSpaceProvider({ children }: { children: ReactNode }) {
           deviceStore.get(storageKey(userId)),
         ]);
         if (cancelled) return;
+        void deviceStore.set(`ol.spaces.v1.${userId}`, JSON.stringify(list)).catch(() => {});
         const next = resolveActiveSpace(list, stored);
         setRequestedWorkspace(requestedWorkspaceId(next));
         setLoaded({ userId, spaces: list, active: next });
       } catch {
-        // Not fatal: no Space means the server default (Personal).
+        // Restore the last known scope for offline reads; online RLS still applies.
         if (cancelled) return;
-        setRequestedWorkspace(null);
-        setLoaded({ userId, spaces: [], active: null });
+        const [saved, selected] = await Promise.all([deviceStore.get(`ol.spaces.v1.${userId}`), deviceStore.get(storageKey(userId))]).catch(() => [null, null]);
+        if (cancelled) return;
+        let cached: Space[] = [];
+        try {
+          const parsed: unknown = saved ? JSON.parse(saved) : [];
+          if (Array.isArray(parsed)) cached = parsed.filter((s): s is Space => !!s && typeof s.id === "string" && typeof s.name === "string" && isSpaceKind(s.kind) && typeof s.role === "string");
+        } catch { /* A missing cache cannot authorize any online read. */ }
+        const next = resolveActiveSpace(cached, selected);
+        setRequestedWorkspace(requestedWorkspaceId(next));
+        setLoaded({ userId, spaces: cached, active: next });
       }
     })();
     return () => {

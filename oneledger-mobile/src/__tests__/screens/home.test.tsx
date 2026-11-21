@@ -1,191 +1,98 @@
-import { fireEvent, render, screen } from "@testing-library/react-native";
-
+import { fireEvent, render, screen, waitFor } from "@testing-library/react-native";
 import Home from "@/app/(app)/(tabs)/index";
-import type { Budget } from "@/features/budgets/types";
 import { PrivacyProvider } from "@/features/privacy/PrivacyProvider";
-import type { TransactionRow } from "@/features/transactions/queries";
-import { resetRouterMock, router } from "@/test/router-mock";
+import type { CurrencyOverview } from "@/features/insights/types";
+import { homePeriods } from "@/features/home/live-data";
+import { router, resetRouterMock } from "@/test/router-mock";
 
-const mockBalance = jest.fn();
-const mockToday = jest.fn();
-const mockRecent = jest.fn();
-const mockReviewCount = jest.fn();
-const mockHealth = jest.fn();
-const mockFetchBudgets = jest.fn();
-
+const mockWallets = jest.fn(), mockInsights = jest.fn(), mockRecent = jest.fn(), mockBalance = jest.fn();
+const mockSpace = { activeId: "w1", active: { id: "w1", name: "Personal", kind: "personal" }, spaces: [], setActive: jest.fn() };
 jest.mock("expo-router", () => jest.requireActual("@/test/router-mock"));
-jest.mock("@/api/mobile-api", () => ({ fetchBudgets: () => mockFetchBudgets() }));
-jest.mock("@/features/capture/capture", () => ({
-  captureSupported: true,
-  getCaptureHealth: () => mockHealth(),
-}));
-jest.mock("@/features/transactions/queries", () => ({
-  getCurrentBalance: () => mockBalance(),
-  getTodayTotals: () => mockToday(),
-  getTransactions: (options: unknown) => mockRecent(options),
-  getReviewQueueCount: () => mockReviewCount(),
-}));
-
-const txn: TransactionRow = {
-  id: "t1",
-  transaction_type: "merchant_payment",
-  direction: "out",
-  status: "success",
-  currency: "RWF",
-  amount_rwf: 4200,
-  fee_rwf: 0,
-  balance_after_rwf: null,
-  counterparty_name: "Kigali Fresh",
-  counterparty_reference: null,
-  occurred_at: "2026-11-14T10:00:00Z",
-  category: "Food",
-  subcategory: null,
-  category_decision_status: "confirmed",
-  suggested_category: null,
-};
-
-const budget: Budget = {
-  id: "b1",
-  name: "November",
-  currency: "RWF",
-  periodStart: "2026-11-01",
-  periodEnd: "2026-11-30",
-  elapsedFraction: 0.5,
-  actualIncomeMinor: 0,
-  allocations: [
-    {
-      type: "WANTS",
-      label: "Wants",
-      targetMinor: 100000,
-      actualMinor: 40000,
-      remainingMinor: 60000,
-      percentConsumed: 40,
-      projectedMinor: 80000,
-      status: "healthy",
-    },
-  ],
-  alerts: [],
-  uncategorizedCount: 0,
-  uncategorizedMinor: 0,
-  unmappedCount: 0,
-  unmappedMinor: 0,
-};
-
-function renderHome() {
-  return render(
-    <PrivacyProvider>
-      <Home />
-    </PrivacyProvider>,
-  );
-}
-
-beforeEach(() => {
-  resetRouterMock();
-  mockBalance.mockResolvedValue({ amountRwf: 250000, asOfIso: "2026-11-14T12:00:00Z" });
-  mockToday.mockResolvedValue({ receivedRwf: 5000, spentRwf: 4200 });
-  mockRecent.mockResolvedValue([txn]);
-  mockReviewCount.mockResolvedValue(0);
-  mockHealth.mockResolvedValue({ state: "healthy" });
-  mockFetchBudgets.mockResolvedValue({ ok: true, budgets: [] });
+jest.mock("@/features/spaces/ActiveSpaceProvider", () => ({ useActiveSpace: () => mockSpace }));
+jest.mock("@/features/auth/SessionProvider", () => ({ useSession: () => ({ session: { user: { id: "u1", user_metadata: { full_name: "Fallback Name" } } } }) }));
+jest.mock("@/api/mobile-api", () => ({ fetchWallets: () => mockWallets(), fetchInsights: (p: unknown) => mockInsights(p) }));
+jest.mock("@/features/home/live-data", () => ({ ...jest.requireActual("@/features/home/live-data"), profileName: async () => "Verified Person" }));
+jest.mock("@/features/transactions/queries", () => ({ getCurrentBalance: () => mockBalance(), getTransactions: (p: unknown) => mockRecent(p) }));
+jest.mock("@/features/notifications/queries", () => ({ getUnreadNotificationCount: async () => 2 }));
+const wallet = { id: "a", name: "Real MoMo wallet", provider: "mtn_momo", currency: "RWF", isPrimary: true, latestTxnAt: null, balance: { status: "confirmed", amountMinor: 14416n, asOf: "2026-11-19T06:47:00Z", basis: "provider_reported", reasons: [] } };
+const txn = (id: string) => ({ id, transaction_type: "merchant_payment", direction: "out", status: "success", settlement_state: "settled", currency: "RWF", amount_rwf: 1000, fee_rwf: 0, counterparty_name: "Live merchant " + id, occurred_at: "2026-11-19T06:47:00Z", category: "Food", category_decision_status: "confirmed" });
+const block = (income: bigint, expense: bigint): CurrencyOverview => ({
+  currency: "RWF", moneyInMinor: income, moneyOutMinor: expense, netMinor: income-expense,
+  cashOutMinor: 0n, countIn: 2, countOut: 3, transfersExcluded: {amountMinor: 200n,count: 1}, pending: {amountMinor: 0n,count: 0},
+  byCategory: [{ category: "Food", amountMinor: expense, count: 3, percentBps: 10000, drilldown: {} as never }], topPeople: [], compare: null, drilldowns: {} as never,
+  trend: [{ bucketStart: new Date().toISOString().slice(0,7)+"-01", moneyInMinor: income, moneyOutMinor: expense, netMinor: income-expense }],
 });
-
-describe("Home screen", () => {
-  it("shows the balance, today's totals and recent transactions", async () => {
+beforeEach(() => {
+  resetRouterMock(); mockSpace.activeId="w1";
+  [mockWallets,mockInsights,mockRecent,mockBalance].forEach(m=>m.mockReset());
+  mockWallets.mockResolvedValue({ok:true,workspaceId:"w1",wallets:[wallet]});
+  mockBalance.mockResolvedValue(null);
+  mockRecent.mockResolvedValue([txn("1"),txn("2"),txn("3"),txn("4")]);
+  mockInsights.mockImplementation((p:{from:string,to:string}) => ({ok:true,workspaceId:"w1",overview:{from:p.from,to:p.to,latestTxnAt:null,skippedCurrencies:0,currencies:[block(p.from===homePeriods(new Date()).previousFrom?100000n:120000n,30000n)]}}));
+});
+const renderHome=()=>render(<PrivacyProvider><Home /></PrivacyProvider>);
+describe("live Home", () => {
+  it("uses real wallet, profile and analytics values instead of sample figures",async()=>{
     await renderHome();
-    expect(await screen.findByText("Current balance")).toBeTruthy();
-    expect(screen.getByText("250,000 RWF")).toBeTruthy();
-    expect(screen.getByText("MTN Mobile Money")).toBeTruthy();
-    expect(screen.getByText("Received today")).toBeTruthy();
-    expect(screen.getByText("+5,000 RWF")).toBeTruthy();
-    expect(screen.getByText("Spent today")).toBeTruthy();
-    // The tile, and the same payment in the list below.
-    expect(screen.getAllByText("−4,200 RWF").length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText("RECENT TRANSACTIONS")).toBeTruthy();
-    expect(screen.getByText("Kigali Fresh")).toBeTruthy();
+    expect(await screen.findByText(/Verified/)).toBeTruthy();
+    expect(await screen.findByText("Real MoMo wallet")).toBeTruthy();
+    expect(screen.getAllByText("RWF 14,416").length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByText(/2,485,750/)).toBeNull();
+    expect(screen.getByText("RWF 120K")).toBeTruthy();
+    expect(screen.getByText("75% of income retained this month")).toBeTruthy();
   });
-
-  it("asks for six recent transactions, like the web", async () => {
-    await renderHome();
-    await screen.findByText("Kigali Fresh");
-    expect(mockRecent).toHaveBeenCalledWith({ limit: 6 });
+  it("shows only three recent entries and scopes the read to the active Space",async()=>{
+    await renderHome(); await screen.findByText("Live merchant 1");
+    expect(mockRecent).toHaveBeenCalledWith({limit:3,workspaceId:"w1"});
+    expect(screen.getByText("Live merchant 3")).toBeTruthy();
+    expect(screen.queryByText("Live merchant 4")).toBeNull();
   });
-
-  it("hides every amount with the eye on the balance card", async () => {
-    await renderHome();
-    await screen.findByText("250,000 RWF");
-    await fireEvent.press(screen.getByLabelText("Hide current balance"));
-    expect(screen.queryByText("250,000 RWF")).toBeNull();
-    expect(screen.queryByText("+5,000 RWF")).toBeNull();
-    expect(screen.queryByText("−4,200 RWF")).toBeNull();
-    expect(screen.getByLabelText("Show current balance")).toBeTruthy();
+  it("opens the add form, wallets and the unfiltered Transactions tab",async()=>{
+    await renderHome(); await screen.findByText("Real MoMo wallet");
+    await fireEvent.press(screen.getByRole("button",{name:"Add transaction"}));
+    expect(router.push).toHaveBeenLastCalledWith("/add-transaction");
+    await fireEvent.press(screen.getByRole("button",{name:"View wallets"}));
+    expect(router.push).toHaveBeenLastCalledWith("/wallets");
+    await fireEvent.press(screen.getByRole("button",{name:"View all"}));
+    expect(router.navigate).toHaveBeenCalledWith(expect.objectContaining({pathname:"/transactions",params:expect.objectContaining({category:"",period:"all"})}));
   });
-
-  it("shows the budget status card, and opens the budget", async () => {
-    mockFetchBudgets.mockResolvedValue({ ok: true, budgets: [budget] });
-    await renderHome();
-
-    expect(await screen.findByText("BUDGET STATUS")).toBeTruthy();
-    expect(screen.getByText("On track")).toBeTruthy();
-    expect(screen.getByText("40,000 RWF of 100,000 RWF used")).toBeTruthy();
-    expect(screen.getByText("Remaining")).toBeTruthy();
-    expect(screen.getByText("60,000 RWF")).toBeTruthy();
-
-    await fireEvent.press(screen.getByLabelText(/Open budget/));
-    expect(router.push).toHaveBeenCalledWith("/budgets");
+  it("masks balances, recent entries, summaries and chart values",async()=>{
+    await renderHome(); await screen.findByText("RWF 120K");
+    await fireEvent.press(screen.getByRole("button",{name:"Hide balances"}));
+    expect(screen.queryByText("RWF 14,416")).toBeNull();
+    expect(screen.queryByText("RWF 120K")).toBeNull();
+    expect(screen.queryByText("−RWF 1,000")).toBeNull();
+    expect(screen.getByRole("button",{name:"Show balances"})).toBeTruthy();
+    expect(screen.getAllByText("Amounts hidden").length).toBeGreaterThan(0);
   });
-
-  it("masks the budget amounts in privacy mode, but not the status", async () => {
-    mockFetchBudgets.mockResolvedValue({ ok: true, budgets: [budget] });
+  it("keeps recent transactions working when the fallback snapshot fails",async()=>{
+    mockBalance.mockRejectedValue(new Error("balance unavailable"));
     await renderHome();
-    await screen.findByText("60,000 RWF");
-    await fireEvent.press(screen.getByLabelText("Hide current balance"));
-    expect(screen.queryByText(/60,000/)).toBeNull();
-    expect(screen.getByText("••••• of ••••• used")).toBeTruthy();
-    expect(screen.getByText("On track")).toBeTruthy();
+    expect(await screen.findByText("Live merchant 1")).toBeTruthy();
   });
-
-  it("says over, not a negative amount, when the budget is exceeded", async () => {
-    mockFetchBudgets.mockResolvedValue({
-      ok: true,
-      budgets: [
-        {
-          ...budget,
-          allocations: [{ ...budget.allocations[0], actualMinor: 120000, remainingMinor: -20000, status: "exceeded" }],
-        },
-      ],
-    });
-    await renderHome();
-    expect(await screen.findByText("Over by")).toBeTruthy();
-    expect(screen.getByText("20,000 RWF")).toBeTruthy();
-    expect(screen.getByText("Over budget")).toBeTruthy();
+  it("does not label incomplete balances as total available balance",async()=>{
+    mockWallets.mockResolvedValue({ok:true,workspaceId:"w1",wallets:[wallet,{...wallet,id:"b",name:"Unknown bank",balance:{...wallet.balance,status:"unavailable",amountMinor:null,asOf:null}}]});
+    await renderHome(); await screen.findByText("Unknown bank");
+    expect(screen.queryByText(/Total available balance/)).toBeNull();
+    expect(screen.getByText(/Partial balance/)).toBeTruthy();
   });
-
-  it("hides the budget card when budgets are unavailable, without breaking Home", async () => {
-    mockFetchBudgets.mockResolvedValue({ ok: false, reason: "unavailable", message: "Your budget isn't available yet." });
+  it("does not substitute zeroes or sample charts when analytics are unavailable",async()=>{
+    mockInsights.mockResolvedValue({ok:false,reason:"unavailable",message:"Insights is unavailable for this Space."});
     await renderHome();
-    expect(await screen.findByText("250,000 RWF")).toBeTruthy();
-    expect(screen.queryByText("BUDGET STATUS")).toBeNull();
+    expect((await screen.findAllByText("Insights is unavailable for this Space.")).length).toBeGreaterThan(0);
+    expect(screen.queryByText("RWF 120K")).toBeNull();
+    expect(screen.queryByText(/8.4%/)).toBeNull();
   });
-
-  it("offers a way to review transactions when some need it", async () => {
-    mockReviewCount.mockResolvedValue(3);
-    await renderHome();
-    expect(await screen.findByText("3 transactions to review")).toBeTruthy();
-    await fireEvent.press(screen.getByText("Review now"));
-    expect(router.push).toHaveBeenCalledWith("/inbox");
-  });
-
-  it("prompts to set up automatic recording when it is not working", async () => {
-    mockHealth.mockResolvedValue({ state: "permission_required" });
-    await renderHome();
-    expect(await screen.findByText("Automatic recording is off")).toBeTruthy();
-    await fireEvent.press(screen.getByText("Set it up"));
-    expect(router.push).toHaveBeenCalledWith("/connect");
-  });
-
-  it("shows a retry when Home cannot load", async () => {
-    mockBalance.mockRejectedValue(new Error("network"));
-    await renderHome();
-    expect(await screen.findByText("Try again")).toBeTruthy();
+  it("hides the previous Space's data while the new Space is loading",async()=>{
+    const view=await renderHome(); await screen.findByText("Live merchant 1");
+    let resolveRecent:(v:unknown)=>void=()=>{}, resolveWallets:(v:unknown)=>void=()=>{};
+    mockRecent.mockImplementation(()=>new Promise(resolve=>{resolveRecent=resolve;}));
+    mockWallets.mockImplementation(()=>new Promise(resolve=>{resolveWallets=resolve;}));
+    mockSpace.activeId="w2";
+    await view.rerender(<PrivacyProvider><Home /></PrivacyProvider>);
+    expect(screen.queryByText("Live merchant 1")).toBeNull();
+    expect(screen.queryByText("Real MoMo wallet")).toBeNull();
+    resolveRecent([]);resolveWallets({ok:true,workspaceId:"w2",wallets:[]});
+    await waitFor(()=>expect(mockRecent).toHaveBeenLastCalledWith({limit:3,workspaceId:"w2"}));
   });
 });

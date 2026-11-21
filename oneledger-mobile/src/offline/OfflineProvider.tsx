@@ -136,6 +136,7 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(timer);
   }, [available, waiting, syncNow]);
 
+  const syncOnDemand = useCallback(() => syncNow(true), [syncNow]);
   const value = useMemo<OfflineValue>(
     () => ({
       status: deriveSyncStatus({ available, online, syncing, summary, authNeeded }),
@@ -147,13 +148,13 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
         void refreshCounts();
         void syncNow(false);
       },
-      syncNow: () => syncNow(true),
+      syncNow: syncOnDemand,
       retryHeldOps: async () => {
         if (opened.current) await retryHeld(opened.current.db);
         await syncNow(true);
       },
     }),
-    [available, online, syncing, summary, authNeeded, lastSyncedAt, refreshCounts, syncNow],
+    [available, online, syncing, summary, authNeeded, lastSyncedAt, refreshCounts, syncNow, syncOnDemand],
   );
 
   return <OfflineContext.Provider value={value}>{children}</OfflineContext.Provider>;

@@ -7,6 +7,8 @@ import { resetRouterMock, router, setParams } from "@/test/router-mock";
 const mockGetTransactions = jest.fn();
 const mockLifetime = jest.fn();
 const mockReviewCount = jest.fn();
+const mockSpace = { activeId: "w1" };
+jest.mock("@/features/spaces/ActiveSpaceProvider", () => ({ useActiveSpace: () => mockSpace }));
 
 jest.mock("expo-router", () => jest.requireActual("@/test/router-mock"));
 jest.mock("@/features/transactions/queries", () => {
@@ -14,8 +16,8 @@ jest.mock("@/features/transactions/queries", () => {
   return {
     ...actual,
     getTransactions: (args: unknown) => mockGetTransactions(args),
-    getLifetimeFlowTotals: () => mockLifetime(),
-    getReviewQueueCount: () => mockReviewCount(),
+    getLifetimeFlowTotals: (space: string) => mockLifetime(space),
+    getReviewQueueCount: (space: string) => mockReviewCount(space),
   };
 });
 
@@ -40,6 +42,7 @@ const row = (id: string, name: string): TransactionRow => ({
 beforeEach(() => {
   jest.useFakeTimers();
   resetRouterMock();
+  mockSpace.activeId = "w1";
   mockGetTransactions.mockReset();
   mockLifetime.mockResolvedValue({
     sentRwf: 3830678,
@@ -183,5 +186,51 @@ describe("Transactions screen", () => {
     for (const label of ["All", "In", "Out", "All time", "7 days", "30 days", "This month", "To review"]) {
       expect(screen.getAllByRole("button", { name: new RegExp(`^${label}(, selected)?$`) }).length).toBeGreaterThan(0);
     }
+  });
+});
+
+
+describe("live ledger accuracy", () => {
+  it("scopes list and totals to the selected Space and clears old rows immediately", async () => {
+    mockGetTransactions.mockResolvedValue([row("old", "Previous Space merchant")]);
+    const view = await render(<Transactions />);
+    await screen.findByText("Previous Space merchant");
+    expect(mockGetTransactions).toHaveBeenLastCalledWith(expect.objectContaining({ workspaceId: "w1" }));
+    expect(mockLifetime).toHaveBeenCalledWith("w1");
+    let resolveNew: (rows: TransactionRow[]) => void = () => {};
+    mockGetTransactions.mockImplementation(() => new Promise(resolve => { resolveNew = resolve; }));
+    mockSpace.activeId = "w2";
+    await view.rerender(<Transactions />);
+    expect(screen.queryByText("Previous Space merchant")).toBeNull();
+    expect(mockGetTransactions).toHaveBeenLastCalledWith(expect.objectContaining({ workspaceId: "w2" }));
+    await act(async () => { resolveNew([row("new", "Current Space merchant")]); });
+    expect(await screen.findByText("Current Space merchant")).toBeTruthy();
+  });
+  it("clears a previous search and category when Home opens View all", async () => {
+    setParams({ category: "Food", period: "month" });
+    mockGetTransactions.mockResolvedValue([row("1", "Merchant")]);
+    const view = await render(<Transactions />);
+    await screen.findByText("Merchant");
+    await fireEvent.changeText(screen.getByLabelText("Search"), "old search");
+    await act(async () => { jest.advanceTimersByTime(400); });
+    setParams({ category: "", period: "all", reset: "new" });
+    await view.rerender(<Transactions />);
+    expect(screen.queryByText("Category: Food")).toBeNull();
+    expect(mockGetTransactions).toHaveBeenLastCalledWith(expect.objectContaining({ q: "", category: undefined, filters: expect.objectContaining({period:"all"}) }));
+  });
+  it("distinguishes pending, failed and reversed attempts and preserves currency and fees", async () => {
+    mockGetTransactions.mockResolvedValue([
+      {...row("1", "Pending merchant"), status: "pending", settlement_state: "pending"},
+      {...row("2", "Failed merchant"), status: "failed", settlement_state: "failed"},
+      {...row("3", "Reversed merchant"), status: "success", settlement_state: "reversed"},
+      {...row("4", "Dollar merchant"), currency: "USD", amount_rwf: 12345, fee_rwf: 100},
+    ]);
+    await render(<Transactions />);
+    expect(await screen.findByText("Pending")).toBeTruthy();
+    expect(screen.getByText("Failed")).toBeTruthy();
+    expect(screen.getByText("Reversed")).toBeTruthy();
+    expect(screen.getAllByText("RWF 1,000")).toHaveLength(3);
+    expect(screen.getByText("−$123.45")).toBeTruthy();
+    expect(screen.getByText("Fee $1.00")).toBeTruthy();
   });
 });
