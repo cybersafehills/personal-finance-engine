@@ -5,8 +5,8 @@ import { Pressable, ScrollView, StyleSheet, useWindowDimensions, View, type Scro
 import Svg, { Circle, Defs, LinearGradient, Rect, Stop } from "react-native-svg";
 import { Text } from "@/components/ds";
 import { usePrivacy } from "@/features/privacy/PrivacyProvider";
-import type { Wallet } from "@/features/wallets/types";
 import { STATUS_LABEL } from "@/features/wallets/display";
+import type { Wallet } from "@/features/wallets/types";
 import type { CurrentBalance } from "@/features/transactions/queries";
 import { deviceStore } from "@/lib/device-store";
 import { formatMoney, type SupportedCurrency } from "@/lib/money";
@@ -80,7 +80,7 @@ function WalletBalanceCard({wallet,fallback,loading,defaultOnLaunch=false,saving
       <Svg testID="balance-card-background" width={size.width} height={size.height} viewBox="0 0 360 190" preserveAspectRatio="none" style={StyleSheet.absoluteFill} accessible={false} pointerEvents="none"><Defs><LinearGradient id={id} x1="0" y1="0" x2="1" y2="1"><Stop offset="0" stopColor={colors.homeGradientStart}/><Stop offset="1" stopColor={colors.homeGradientEnd}/></LinearGradient></Defs><Rect width={360} height={190} fill={`url(#${id})`}/><Circle cx={300} cy={-30} r={210} fill="none" stroke={colors.onSolid} strokeOpacity={0.07} strokeWidth={40}/><Circle cx={300} cy={-30} r={180} fill="none" stroke={colors.onSolid} strokeOpacity={0.12}/></Svg>
       <View style={styles.cardTop}><Text variant="bodyStrong" color="onSolid" numberOfLines={2} style={{flex:1,fontSize:13,lineHeight:18}}>{label}</Text><Pressable accessibilityRole="button" accessibilityLabel={amountsHidden ? "Show balances" : "Hide balances"} onPress={toggleAmountsHidden} style={styles.eye}><Feather name={amountsHidden ? "eye-off" : "eye"} size={18} color={colors.onSolid}/></Pressable>{wallet?<Pressable accessibilityRole="button" accessibilityLabel={defaultOnLaunch?`${wallet.name} is the default landing wallet`:`Use ${wallet.name} on launch`} disabled={defaultOnLaunch||saving||!onMakeDefault} onPress={onMakeDefault} style={styles.defaultButton}><Feather name="star" size={13} color={colors.onSolid}/><Text variant="caption" color="onSolid" style={{fontSize:10,lineHeight:14}}>{saving?"Saving…":defaultOnLaunch?"Default":"Set default"}</Text></Pressable>:null}</View>
       <Text variant="display" color="onSolid" tabular adjustsFontSizeToFit numberOfLines={1} style={styles.amount}>{amountsHidden ? "••••••" : amount !== null ? formatMoney(amount,wallet?.currency ?? "RWF") : loading ? "Loading…" : "—"}</Text>
-      <Text variant="caption" color="onSolid">{wallet ? STATUS_LABEL[wallet.balance.status] : fallback ? "Single provider snapshot" : "No wallet balance available"}</Text>
+      {wallet?.balance.status === "confirmed" ? null : <Text variant="caption" color="onSolid">{wallet ? STATUS_LABEL[wallet.balance.status] : fallback ? "Single provider snapshot" : "No wallet balance available"}</Text>}
       {wallet ? <BalanceTrend wallet={wallet} hidden={amountsHidden}/> : null}
       <View style={styles.actions}><Pressable accessibilityRole="button" accessibilityLabel={wallet ? `Add transaction to ${wallet.name}` : "Add transaction"} onPress={()=>router.push(wallet ? {pathname:"/add-transaction",params:{accountId:wallet.id}} : "/add-transaction")} style={styles.add}><Text variant="label" style={{color:colors.homeGradientStart}}>+ Add transaction</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel={wallet ? `View ${wallet.name}` : "View wallets"} onPress={()=>router.push(wallet ? {pathname:"/wallet/[id]",params:{id:wallet.id}} : "/wallets")} style={styles.details}><Text variant="label" color="onSolid">{wallet ? "View wallet ↗" : "View wallets ↗"}</Text></Pressable></View>
     </View>

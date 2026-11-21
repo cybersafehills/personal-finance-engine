@@ -249,3 +249,10 @@ it("applies an inclusive custom trend range to the API instead of slicing six mo
   await fireEvent.press(toolbar.getByRole("button",{name:"Search transactions"}));
   expect(router.navigate).toHaveBeenLastCalledWith(expect.objectContaining({pathname:"/transactions",params:expect.objectContaining({focusSearch:expect.any(String)})}));
  });
+
+it("omits balance status and empty comparison messages from the Home hero",async()=>{
+ await renderHome();await screen.findAllByText("Real MoMo wallet");
+ const hero=within(screen.getByTestId("balance-card"));
+ expect(hero.queryByText("Confirmed")).toBeNull();
+ expect(hero.queryByText(/No comparable balance|Loading balance trend|Balance comparison unavailable|Balance trend unavailable/)).toBeNull();
+});
