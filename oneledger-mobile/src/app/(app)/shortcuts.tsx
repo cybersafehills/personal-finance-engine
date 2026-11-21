@@ -7,8 +7,6 @@ import {
   Button,
   Card,
   EmptyState,
-  ListGroup,
-  ListRow,
   Screen,
   StepWizard,
   Text,
@@ -30,7 +28,6 @@ import {
   expiryLabel,
   IOS_GUIDE_STEPS,
   iosGuideStepNumber,
-  MANUAL_BUILD,
   SHORTCUTS_APP_URL,
   type IosGuideStep,
   type PairingStatus,
@@ -49,7 +46,7 @@ import { formatDateTime } from "@/lib/kigali-time";
 import { space } from "@/theme/tokens";
 
 // Anywhere but a real iPhone this screen is a walkthrough only: it creates
-// no pairing session on the server and simulates the Shortcut's part.
+// no pairing session on the server and cannot claim a connected device.
 const PREVIEW_ONLY = Platform.OS !== "ios";
 
 const STATUS_POLL_MS = 3_000;
@@ -89,7 +86,7 @@ export default function ShortcutsGuide() {
     (async () => {
       const id = await loadIosDeviceCredentialId();
       if (!id) return;
-      const status = await getDeviceStatus(id);
+      const status = await getDeviceStatus(id).catch(() => null);
       if (!active || status?.status !== "active") return;
       setDeviceCredentialId(id);
       setStep((current) => (current === "install" ? "verify" : current));
@@ -171,12 +168,9 @@ function Install({ onNext }: { onNext: () => void }) {
         ) : (
           <>
             <Text variant="label" color="textSecondary">
-              One-tap setup isn&apos;t published yet, so you build the two
-              Shortcuts yourself once (about 10 minutes). Open the Shortcuts app,
-              create each one with the exact name below, add the actions in
-              order, then come back and continue.
+              Shortcut installation is unavailable in this build. Use the published web setup instead.
             </Text>
-            <Button label="Open the Shortcuts app" variant="secondary" fullWidth onPress={() => open(SHORTCUTS_APP_URL)} />
+            <Button label="Open device setup on the web" variant="secondary" fullWidth onPress={() => open(`${config.apiBaseUrl}/integrations/connections/pair`)} />
           </>
         )}
         {failed ? (
@@ -186,20 +180,11 @@ function Install({ onNext }: { onNext: () => void }) {
           </Text>
         ) : null}
       </Card>
-      {hasLinks ? null : (
-        <>
-          {MANUAL_BUILD.map((shortcut, index) => (
-            <ListGroup key={shortcut.name} title={`Shortcut ${index + 1}: ${shortcut.name}`} footer={shortcut.purpose}>
-              {shortcut.steps.map((text, i) => (
-                <ListRow key={i} label={`${i + 1}. ${text}`} />
-              ))}
-            </ListGroup>
-          ))}
-        </>
-      )}
+
       <Button
-        label={hasLinks ? "I've added them" : "I've built them"}
-        variant={hasLinks ? "primary" : "secondary"}
+        label="I've added them"
+        variant="primary"
+        disabled={!hasLinks}
         fullWidth
         onPress={onNext}
       />
@@ -228,7 +213,7 @@ function Connect({ onConnected }: { onConnected: (credentialId: string | null) =
       }
       setAccounts(result.accounts);
       setSelectedId(result.accounts[0]?.id ?? null);
-    });
+    }).catch(() => { if(active){setLoadError("Couldn’t load your accounts. Check your connection and try again.");setAccounts([]);} });
     return () => {
       active = false;
     };
@@ -239,15 +224,10 @@ function Connect({ onConnected }: { onConnected: (credentialId: string | null) =
   useEffect(() => {
     if (!pairing) return;
     let active = true;
-    let polls = 0;
     const timer = setInterval(async () => {
       setNow(Date.now());
-      polls += 1;
-      if (PREVIEW_ONLY) {
-        if (polls >= 2 && active) onConnected(null);
-        return;
-      }
-      const result = await getPairingSessionStatus(pairing.sessionId);
+      if (Date.now() >= Date.parse(pairing.expiresAtIso)) return;
+      const result = await getPairingSessionStatus(pairing.sessionId).catch(() => null);
       if (!active || !result) return;
       setStatus(result.status);
       if (result.status === "consumed") onConnected(result.deviceCredentialId);
@@ -263,14 +243,8 @@ function Connect({ onConnected }: { onConnected: (credentialId: string | null) =
     if (!account || busy) return;
     setBusy(true);
     setError(null);
-    const started = PREVIEW_ONLY
-      ? ({
-          ok: true,
-          token: "olp_DEMO-walkthrough-only",
-          sessionId: "demo",
-          expiresAtIso: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
-        } as const)
-      : await startPairingSession(account);
+    if (PREVIEW_ONLY) { setBusy(false);setError("Open OneLedger on your iPhone to connect. This preview cannot connect a device.");return; }
+    const started = await startPairingSession(account).catch(() => ({ok:false as const,message:"Couldn’t create a connection. Check your internet and try again."}));
     setBusy(false);
     if (!started.ok) {
       setError(started.message);
@@ -423,7 +397,7 @@ function Verify({
     if (!deviceCredentialId) return;
     let active = true;
     const check = async () => {
-      const value = await getDeviceStatus(deviceCredentialId);
+      const value = await getDeviceStatus(deviceCredentialId).catch(() => null);
       if (!active) return;
       setDevice(value);
       setNow(Date.now());

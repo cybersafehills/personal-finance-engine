@@ -85,17 +85,13 @@ describe("iPhone guide: add the Shortcuts", () => {
     expect(screen.queryByText("Add “OneLedger Capture”")).toBeNull();
   });
 
-  it("walks through building the two Shortcuts by hand when none are published", async () => {
-    links.connect = "";
-    links.capture = "";
+  it("offers web setup rather than unverified manual build steps when installation links are missing", async () => {
+    links.connect = "";links.capture = "";
     await render(<ShortcutsGuide />);
-    expect(await screen.findByText(/One-tap setup isn't published yet/)).toBeTruthy();
-    // Both shortcuts, under the exact names the run link and the automation use.
-    expect(screen.getByText("Shortcut 1: Connect to OneLedger")).toBeTruthy();
-    expect(screen.getByText("Shortcut 2: OneLedger Capture")).toBeTruthy();
-    expect(screen.getByText(/https:\/\/api\.oneledger\.me\/v1\/capture/)).toBeTruthy();
-    expect(screen.getByText("I've built them")).toBeTruthy();
-    expect(screen.queryByText("Add the OneLedger Shortcuts")).toBeNull();
+    expect(await screen.findByText(/Shortcut installation is unavailable/)).toBeTruthy();
+    expect(screen.getByRole("button",{name:"I've added them"}).props.accessibilityState.disabled).toBe(true);
+    expect(screen.queryByText(/Shortcut 1:/)).toBeNull();
+    expect(mockStartPairing).not.toHaveBeenCalled();
   });
 
   it("tells the person when a link could not be opened", async () => {
@@ -273,4 +269,12 @@ describe("iPhone guide: coming back later", () => {
     expect(mockClearId).toHaveBeenCalled();
     expect(await screen.findByRole("button", { name: "Connect this iPhone" })).toBeTruthy();
   });
+});
+
+it("offers a retryable error when pairing cannot reach the server",async()=>{
+ mockStartPairing.mockRejectedValue(new Error("offline"));
+ await render(<ShortcutsGuide/>);await toConnectStep();
+ await fireEvent.press(await screen.findByRole("button",{name:"Connect this iPhone"}));
+ expect(await screen.findByText(/Couldn’t create a connection/)).toBeTruthy();
+ expect(screen.queryByText(/This iPhone is connected/)).toBeNull();
 });
