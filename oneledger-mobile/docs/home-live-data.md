@@ -19,3 +19,9 @@ Recent transactions now appear immediately after monthly cash flow. Cash flow in
 Budget forecast selects an active budget in the displayed currency and reports canonical allocation totals, remaining amount, period-end projection and data-quality warnings. It never mixes budgets or currencies or invents a projection where the server provides none.
 
 Each wallet opens `/wallet/[id]`. That page validates the wallet against the current Space's wallet list, shows balance provenance and freshness, supports recording a checked balance, loads account-filtered monthly Insights and the latest ten wallet transactions, and links to the complete wallet-filtered Transactions list. The Add transaction form selects the wallet by account ID. The full list suppresses whole-Space lifetime totals while viewing a single wallet. Both online and SQLite reads apply the account filter alongside the Space filter.
+
+## Separate landing wallet cards
+
+Home now presents one wallet balance per swipeable card, with pager dots above the card and wallet-specific Add transaction/View wallet actions. No wallet balances are combined. The first card defaults to the primary wallet until the user chooses Make default. That preference is stored on this phone under a user-and-Space-scoped key; choosing it does not change the financial account’s primary status. A removed wallet falls back to the primary available wallet. Failed preference writes display an error and retain the prior default. Late preference reads cannot override an ongoing user selection.
+
+The greeting, Space selector and profile/notification controls share the compact top row. Monthly cash flow is reduced to income, expenses and the two daily totals, without comparisons or a retention bar. Spending breakdown precedes cash flow trends; both start collapsed.

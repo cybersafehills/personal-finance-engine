@@ -61,10 +61,8 @@ export default function Home() {
   const currency = choice?.space === activeId ? choice.currency : wallets?.find((w) => w.isPrimary)?.currency ?? "RWF";
   const currencyOptions = [...new Set<SupportedCurrency>([...(wallets ?? []).map((w) => w.currency), ...(analytics.data?.current.ok ? analytics.data.current.overview.currencies.map((c) => c.currency) : []), currency])];
   const currentResult = analytics.data?.current;
-  const previousResult = analytics.data?.previous;
   const historyResult = analytics.data?.history;
   const current = currencyBlock(currentResult, currency);
-  const previous = currencyBlock(previousResult, currency);
   const history = currencyBlock(historyResult, currency);
   const points = history?.trend && analytics.data ? fillTrend(history.trend, analytics.data.periods.trendFrom, analytics.data.fetchedAt).slice(-months) : [];
   const analyticsMessage = currentResult && !currentResult.ok ? currentResult.message : analytics.error ?? (analytics.loading ? "Loading your monthly activity…" : "No summary is available.");
@@ -82,17 +80,17 @@ export default function Home() {
       {walletsQuery.error && wallets ? <Text variant="caption" color="attention">Couldn&apos;t refresh wallet balances. Showing the last fetched figures.</Text> : null}
       {analytics.error && analytics.data ? <Text variant="caption" color="attention">Couldn&apos;t refresh analytics. Showing the last fetched summary.</Text> : null}
       {currencyOptions.length > 1 ? <View style={styles.currencies}>{currencyOptions.map((c) => <Chip key={c} label={c} selected={currency === c} onPress={() => setChoice({ space: activeId, currency: c })} />)}</View> : null}
-      <HeroBalance wallets={wallets} currency={currency} fallback={recentQuery.data?.balance ?? null} loading={walletsQuery.loading || recentQuery.loading} />
-      <CashFlow currency={currency} current={current} previous={previous} today={currencyBlock(analytics.data?.today,currency)} todayAvailable={analytics.data?.today.ok === true} available={currentResult?.ok === true} message={analyticsMessage} />
+      <HeroBalance key={`${session?.user.id}:${activeId}`} preferenceScope={`${session?.user.id ?? "unknown"}.${activeId}`} wallets={wallets} currency={currency} fallback={recentQuery.data?.balance ?? null} loading={walletsQuery.loading || recentQuery.loading} />
+      <CashFlow currency={currency} current={current} today={currencyBlock(analytics.data?.today,currency)} todayAvailable={analytics.data?.today.ok === true} available={currentResult?.ok === true} message={analyticsMessage} />
       <HomeSection title="Recent transactions" action={<HomeLink label="View all" onPress={() => router.navigate({ pathname: "/transactions", params: { category: "", accountId:"", walletName:"", period: "all", reset: String(Date.now()) } })} />}>
         {recentQuery.error ? <View style={{ gap: 8 }}><Text color="attention">Couldn&apos;t refresh transactions.</Text><Button label="Try again" variant="secondary" onPress={recentQuery.refresh} /></View> : null}
         {recentQuery.loading ? <Text color="textMuted">Loading transactions…</Text> : !recentQuery.data?.recent.length && !recentQuery.error ? <EmptyState title="No transactions yet" description="New transactions will appear here as they are recorded." /> : recentQuery.data?.recent.slice(0, 3).map((t) => <TransactionItem key={t.id} transaction={t} showDate compact />)}
       </HomeSection>
       <BudgetOutlook result={budget.data} currency={currency} now={now} error={budget.error} />
+      <Spending current={current} available={currentResult?.ok === true} message={analyticsMessage} />
       <HomeSection title="Cash flow trends" collapsible subtitle={`Income and expenses · ${currency}`} action={<Pressable accessibilityRole="button" accessibilityLabel={`Show last ${months === 6 ? 3 : 6} months`} onPress={() => setMonths(months === 6 ? 3 : 6)} style={styles.period}><Text variant="caption" color="textMuted">Last {months} months ⌄</Text></Pressable>}>
         {historyResult?.ok ? <TrendChart points={points} currency={currency} /> : <Text color="textMuted">{historyResult && !historyResult.ok ? historyResult.message : analytics.loading ? "Loading your trend…" : analyticsMessage}</Text>}
       </HomeSection>
-      <Spending current={current} available={currentResult?.ok === true} message={analyticsMessage} />
       <WalletPanel wallets={wallets} message={walletsMessage} />
     </ScrollView>
   </SafeAreaView>;
