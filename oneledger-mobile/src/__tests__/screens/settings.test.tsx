@@ -48,7 +48,7 @@ describe("Settings screen", () => {
   it("explains a failed browser launch", async () => {
     (Linking.openURL as jest.Mock).mockRejectedValueOnce(new Error("no browser"));
     await render(<Settings />);
-    await fireEvent.press(screen.getByRole("link", { name: "Profile & region" }));
+    await fireEvent.press(screen.getByRole("link", { name: "Financial accounts" }));
     expect(await screen.findByText("Couldn't open your browser. Please try again.")).toBeTruthy();
   });
 
@@ -63,10 +63,11 @@ describe("Settings screen", () => {
     expect(router.push).toHaveBeenCalledWith("/security");
   });
 
-  it("opens the web page for the rest", async () => {
+  it("opens the native profile editor", async () => {
     await render(<Settings />);
     await fireEvent.press(screen.getByRole("link", { name: "Profile & region" }));
-    expect(Linking.openURL).toHaveBeenCalledWith("https://www.example.test/settings/profile");
+    expect(router.push).toHaveBeenCalledWith("/profile");
+    expect(Linking.openURL).not.toHaveBeenCalled();
   });
 
   it("gives every row somewhere to go", () => {

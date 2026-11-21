@@ -42,3 +42,7 @@ export function hitSlopFor(visualHeight: number) {
   const pad = Math.max(0, Math.ceil((MIN_TOUCH_TARGET - visualHeight) / 2));
   return { top: pad, bottom: pad, left: pad, right: pad };
 }
+
+/** User-selected avatar backgrounds keep a fixed accessible ink pairing in both themes. */
+export const AVATAR_COLORS = { indigo: { bg: '#E9EEFF', ink: '#334D9F' }, mint: { bg: '#DFF5EC', ink: '#176952' }, peach: { bg: '#FFF0DE', ink: '#9B520B' }, rose: { bg: '#FCE7EF', ink: '#993658' }, lilac: { bg: '#EFE7FF', ink: '#6540A3' } } as const;
+export const NAVIGATION_DIVIDER = "#000000";

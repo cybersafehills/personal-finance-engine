@@ -12,7 +12,7 @@ export type SettingsRow = {
   icon: React.ComponentProps<typeof Feather>["name"];
   description: string;
   /** A screen in this app. */
-  route?: "/report-settings" | "/security" | "/notifications" | "/space-members" | "/pay-button" | "/appearance";
+  route?: "/profile" | "/report-settings" | "/security" | "/notifications" | "/space-members" | "/pay-button" | "/appearance";
   /** A page on the web, opened in the browser (the user may need to sign in). */
   webPath?: string;
   /** Shown only when the server says this feature is on (an unknown answer hides it). */
@@ -23,7 +23,7 @@ export type SettingsGroup = { title: string; description: string; rows: Settings
 
 export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
   { title: "Preferences", description: "Personalize OneLedger.", rows: [
-    { label: "Profile & region", icon: "globe", description: "Your personal details and regional defaults.", webPath: "/settings/profile" },
+    { label: "Profile & region", icon: "globe", description: "Your personal details and regional defaults.", route: "/profile" },
     { label: "Appearance", icon: "sun", description: "Light, dark, or automatic.", route: "/appearance" },
     { label: "Notifications", icon: "bell", description: "Phone alerts and your in-app inbox.", route: "/notifications" },
     { label: "Pay button", icon: "send", description: "Choose a hold action and duration.", route: "/pay-button" },

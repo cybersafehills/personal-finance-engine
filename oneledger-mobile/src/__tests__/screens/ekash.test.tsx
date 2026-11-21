@@ -116,3 +116,16 @@ describe("Use eKash screen", () => {
     expect(Linking.openURL).not.toHaveBeenCalled();
   });
 });
+
+it("keeps bank entry separate from mobile contacts and saves leading-zero account IDs",async()=>{
+ await render(<Ekash/>);
+ await fireEvent.press(screen.getByRole('button',{name:'Bank account'}));
+ expect(screen.queryByRole('button',{name:"Choose from my phone's contacts"})).toBeNull();
+ await fireEvent.changeText(screen.getByLabelText("Receiver's ID"),'001/BK-234.56');
+ await fireEvent.changeText(screen.getByLabelText('Amount (RWF)'),'5000');
+ await fireEvent.changeText(screen.getByLabelText('Name (optional)'),'My bank');
+ await fireEvent.press(screen.getByRole('switch',{name:'Save as contact'}));
+ await fireEvent.press(screen.getByRole('button',{name:'Pay with eKash'}));
+ expect(mockCreate).toHaveBeenCalledWith({name:'My bank',kind:'account',number:'001/BK-234.56',trusted:false});
+ expect(Linking.openURL).toHaveBeenCalledWith('tel:*182*1*2*001/BK-234.56*5000%23');
+});

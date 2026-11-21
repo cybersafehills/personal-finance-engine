@@ -26,7 +26,7 @@ export default function Settings() {
   }
   return (
     <MenuScreen title="Settings">
-      <ProfileSummary external onPress={() => void open({ webPath: "/settings/profile" })} />
+      <ProfileSummary onPress={() => router.push("/profile")} />
       {message ? <Text color="attention" accessibilityRole="alert">{message}</Text> : null}
       {visibleSettingsGroups(flags ?? null).map((group) => (
         <MenuGroup key={group.title} title={group.title}>

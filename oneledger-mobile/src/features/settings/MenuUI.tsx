@@ -1,3 +1,5 @@
+import { AccountAvatar } from "@/features/profile/Avatar";
+import { useProfile } from "@/features/profile/ProfileProvider";
 import Feather from "@expo/vector-icons/Feather";
 import { Stack } from "expo-router";
 import { useState, type ComponentProps, type ReactNode } from "react";
@@ -34,13 +36,13 @@ export function ProfileSummary({ onPress, external = false }: { onPress(): void;
   const { colors } = useTheme();
   const { session } = useSession();
   const { active } = useActiveSpace();
+  const profileState = useProfile();
   const meta = session?.user.user_metadata;
-  const named = meta?.full_name ?? meta?.display_name ?? meta?.name;
+  const named = profileState?.profile?.name ?? meta?.full_name ?? meta?.display_name ?? meta?.name;
   const name = typeof named === "string" && named.trim() ? named.trim() : session?.user.email ?? "Your account";
-  const initials = name.includes("@") ? name.slice(0, 2).toUpperCase() : name.split(/\s+/).slice(0, 2).map((s) => s[0]).join("").toUpperCase();
   return (
-    <Pressable accessibilityRole="link" accessibilityLabel="Your profile" accessibilityHint={external ? "Opens profile and region in your browser" : "Open Settings"} onPress={onPress} style={({ pressed }) => [styles.profile, pressed && styles.pressed]}>
-      <View style={styles.avatar}><Text variant="heading" color="accent">{initials}</Text></View>
+    <Pressable accessibilityRole="link" accessibilityLabel="Your profile" accessibilityHint={external ? "Opens profile and region in your browser" : "Edit your profile"} onPress={onPress} style={({ pressed }) => [styles.profile, pressed && styles.pressed]}>
+      <AccountAvatar fallbackName={name} size={48}/>
       <View style={layout.grow}>
         <Text variant="heading" numberOfLines={1} ellipsizeMode="middle">{name}</Text>
         <Text variant="label" color="textMuted" numberOfLines={1}>{active?.name ?? "Personal Space"}</Text>

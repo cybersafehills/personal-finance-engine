@@ -33,7 +33,7 @@ export default function More() {
         {unread && unread > 0 ? <Badge variant="neutral">{unread > 99 ? "99+" : String(unread)}</Badge> : null}
       </Pressable>
     }>
-      <ProfileSummary onPress={() => router.push("/settings")} />
+      <ProfileSummary onPress={() => router.push("/profile")} />
       <TextField compact label="Search tools" placeholder="Search tools" value={search} onChangeText={setSearch} autoCapitalize="none" autoCorrect={false} returnKeyType="search" leading={<Feather name="search" size={19} color={colors.textMuted} />} />
       {groups.map((group) => (
         <MenuGroup key={group.title} title={group.title}>

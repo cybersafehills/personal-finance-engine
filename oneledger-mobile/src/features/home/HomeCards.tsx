@@ -1,3 +1,4 @@
+import { AccountAvatar } from "@/features/profile/Avatar";
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import Feather from "@expo/vector-icons/Feather";
 import { router } from "expo-router";
@@ -24,7 +25,7 @@ export function HomeHeader({ name, unread }: { name: string; unread: number }) {
       <View style={{ flexDirection: "row", gap: 2 }}>
         <Pressable accessibilityRole="button" accessibilityLabel="Search transactions" onPress={() => { const request=String(Date.now()); router.navigate({pathname:"/transactions",params:{focusSearch:request,reset:request,accountId:"",walletName:"",category:"",period:"all"}}); }} style={styles.iconButton}><Feather name="search" size={17} color={colors.textPrimary} /></Pressable>
         <Pressable accessibilityRole="button" accessibilityLabel={`Notifications, ${unread} unread`} onPress={() => router.push("/notifications")} style={styles.iconButton}><Feather name="bell" size={17} color={colors.textPrimary} />{unread > 0 ? <View style={styles.notificationDot} /> : null}</Pressable>
-        <Pressable accessibilityRole="button" accessibilityLabel="Your profile" onPress={() => router.push("/settings")} style={styles.avatar}><Text variant="bodyStrong" color="accent">{name.slice(0, 1).toUpperCase()}</Text></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel="Your profile" onPress={() => router.push("/profile")} style={styles.avatar}><AccountAvatar fallbackName={name} size={44}/></Pressable>
       </View>
     </View>
 

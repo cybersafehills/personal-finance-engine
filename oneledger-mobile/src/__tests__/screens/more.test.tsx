@@ -49,10 +49,10 @@ describe("Option B More", () => {
     await render(<More />);
     for (const label of ["Money", "Documents", "Payments", "Account"]) expect(screen.getByRole("header", { name: label })).toBeTruthy();
   });
-  it("opens Settings from the profile card", async () => {
+  it("opens the profile editor from the profile card", async () => {
     await render(<More />);
     await fireEvent.press(screen.getByRole("link", { name: "Your profile" }));
-    expect(router.push).toHaveBeenCalledWith("/settings");
+    expect(router.push).toHaveBeenCalledWith("/profile");
   });
   it("announces unread notifications and opens the inbox", async () => {
     mockUnread.mockResolvedValue(3);

@@ -38,7 +38,7 @@ const renderHome=()=>render(<PrivacyProvider><Home /></PrivacyProvider>);
 describe("live Home", () => {
   it("uses real wallet, profile and analytics values instead of sample figures",async()=>{
     await renderHome();
-    expect(await screen.findByText("V")).toBeTruthy();
+    expect(await screen.findByText("VP")).toBeTruthy();
     expect((await screen.findAllByText("Real MoMo wallet")).length).toBeGreaterThan(0);
     expect(screen.getAllByText("RWF 14,416").length).toBeGreaterThanOrEqual(2);
     expect(screen.queryByText(/2,485,750/)).toBeNull();

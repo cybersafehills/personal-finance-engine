@@ -18,6 +18,7 @@ import { useTheme } from "@/theme/ThemeProvider";
 // opens in your dialer. It never dials by itself, and you approve it with your own PIN.
 export default function Ekash() {
   const { colors } = useTheme();
+  const [receiverKind, setReceiverKind] = useState<"auto" | "phone" | "account">("auto");
   const [receiver, setReceiver] = useState("");
   const [amount, setAmount] = useState("");
   const [name, setName] = useState("");
@@ -32,7 +33,10 @@ export default function Ekash() {
   const { data: contacts } = useQuery(loadContacts);
 
   const touched = receiver.trim() !== "" || amount.trim() !== "";
-  const code = buildEkashCode(receiver, amount);
+  const phone = /^[+\d\s()-]+$/.test(receiver) ? normalizeRwandaMsisdn(receiver) : null;
+  const code = receiverKind === "phone" && receiver.trim() && !phone
+    ? { ok: false as const, error: "Enter a Rwandan Mobile Money number." }
+    : buildEkashCode(receiverKind !== "account" && phone ? `0${phone.slice(3)}` : receiver, amount);
   const ready = code.ok ? code : null;
 
   async function onPay() {
@@ -41,7 +45,8 @@ export default function Ekash() {
     if (saveContact) {
       if (!name.trim()) return setNote("Add a name to save this receiver, or turn saving off.");
       // Best effort: a duplicate, or a write that is switched off, never blocks the payment.
-      void createTrustedRecipient({ name, kind: normalizeRwandaMsisdn(receiver) ? "phone" : "account", number: receiver.trim(), trusted: false });
+      const saved = await createTrustedRecipient({ name, kind: receiverKind !== "account" && phone ? "phone" : "account", number: receiver.trim(), trusted: false });
+      if (saved) setNote(saved);
     }
     try {
       await Linking.openURL(ready.telHref);
@@ -87,6 +92,8 @@ export default function Ekash() {
                 label={r.name}
                 selected={receiver === r.receiverId}
                 onPress={() => {
+                  setReceiverKind(r.kind === "phone" ? "phone" : "account");
+                  setContactProblem(null);
                   setReceiver(r.receiverId);
                   setName(r.name);
                   setSaveContact(false);
@@ -98,6 +105,9 @@ export default function Ekash() {
       ) : null}
 
       <Card style={{ gap: space[3] }}>
+        <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+          {([['auto', 'Phone or account'], ['phone', 'Mobile Money'], ['account', 'Bank account']] as const).map(([kind, label]) => <Chip key={kind} label={label} selected={receiverKind === kind} onPress={() => { setReceiverKind(kind); setContactProblem(null); setNote(null); }} />)}
+        </View>
         <TextField
           label="Receiver's ID"
           value={receiver}
@@ -109,10 +119,13 @@ export default function Ekash() {
           placeholder="Phone number or account number"
           autoCapitalize="none"
           autoCorrect={false}
-          keyboardType="default"
-          trailing={
+          keyboardType={receiverKind === "phone" ? "phone-pad" : "default"}
+          maxLength={80}
+          help={receiverKind === "account" ? "Enter the bank account exactly as provided. Letters, leading zeroes and separators are supported." : undefined}
+          trailing={receiverKind === "account" ? undefined :
             <ContactPickButton
               onPicked={(c) => {
+                setReceiverKind("phone");
                 setReceiver(c.number);
                 if (c.name) setName(c.name);
                 setSaveContact(false);

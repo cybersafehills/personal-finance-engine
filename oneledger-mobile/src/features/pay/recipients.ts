@@ -1,3 +1,4 @@
+import { normalizeAccountReference } from "@/features/ussd/ekash";
 import { supabase } from "@/api/supabase";
 
 import { activeWorkspace } from "./payment-accounts";
@@ -124,8 +125,8 @@ export function validateNewRecipient(
   let normalized: string | null = null;
   let merchantCode: string | null = null;
   if (input.kind === "account") {
-    const ref = number.replace(/\s/g, "");
-    if (!/^[A-Za-z0-9-]{3,34}$/.test(ref)) return { ok: false, message: "Enter the account number (letters, digits and dashes)." };
+    const ref = normalizeAccountReference(number);
+    if (!ref) return { ok: false, message: "Enter a valid account number without * or #." };
     return {
       ok: true,
       row: {

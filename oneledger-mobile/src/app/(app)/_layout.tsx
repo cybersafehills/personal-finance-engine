@@ -1,3 +1,4 @@
+import { ProfileProvider } from "@/features/profile/ProfileProvider";
 import { Stack } from "expo-router";
 import { NavigationChromeProvider } from "@/components/shell/NavigationChrome";
 import { View,Platform } from "react-native";
@@ -10,7 +11,7 @@ import { useTheme } from "@/theme/ThemeProvider";
 export default function AppLayout() {
   const { colors } = useTheme();
   return (
-    <NavigationChromeProvider><View style={{flex:1}}>
+    <ProfileProvider><NavigationChromeProvider><View style={{flex:1}}>
       <PushBridge />
       <Stack
         screenOptions={{
@@ -47,6 +48,6 @@ export default function AppLayout() {
           }}
         />
       </Stack>
-    </View></NavigationChromeProvider>
+    </View></NavigationChromeProvider></ProfileProvider>
   );
 }
