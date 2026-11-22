@@ -80,7 +80,7 @@ export function PairHandoff({
       >
         {isAndroid
           ? "Open in OneLedger Companion"
-          : "Run “Connect to OneLedger”"}
+          : "Run “OneLedger Capture”"}
       </a>
 
       <div className="flex flex-col gap-2 text-sm text-text-secondary">
@@ -122,9 +122,9 @@ export function PairHandoff({
                     rel="noopener noreferrer"
                     className="font-medium text-accent hover:underline"
                   >
-                    Add “Connect to OneLedger”
+                    Add “OneLedger Capture”
                   </a>
-                  {captureShortcutUrl && (
+                  {captureShortcutUrl && captureShortcutUrl !== shortcutUrl && (
                     <a
                       href={captureShortcutUrl}
                       target="_blank"
@@ -141,7 +141,7 @@ export function PairHandoff({
                   <li>1. Open the Shortcuts app.</li>
                   <li>
                     2. Add the OneLedger Capture Shortcuts, then come back and
-                    tap &ldquo;Run &lsquo;Connect to OneLedger&rsquo;&rdquo;
+                    tap &ldquo;Run &lsquo;OneLedger Capture&rsquo;&rdquo;
                     above.
                   </li>
                 </ol>

@@ -16,11 +16,12 @@ jest.mock("@/features/ios-shortcuts/install-state", () => ({
  loadShortcutInstall: async () => ({connect:{opened:false,added:false},capture:{opened:false,added:false}}),
  saveShortcutInstall: jest.fn(),
 }));
-const links = { connect: "https://www.icloud.com/shortcuts/connect", capture: "https://www.icloud.com/shortcuts/capture" };
+const links = { combined: "", connect: "https://www.icloud.com/shortcuts/connect", capture: "https://www.icloud.com/shortcuts/capture" };
 
 jest.mock("expo-router", () => jest.requireActual("@/test/router-mock"));
 jest.mock("@/lib/config", () => ({
   config: {
+    get combinedShortcutUrl() { return links.combined; },
     get connectShortcutUrl() {
       return links.connect;
     },
@@ -54,6 +55,7 @@ beforeEach(() => {
   jest.useFakeTimers();
   resetRouterMock();
   [mockListAccounts, mockStartPairing, mockPairingStatus, mockDeviceStatus, mockLoadId, mockSaveId, mockClearId].forEach((m) => m.mockReset());
+  links.combined = "";
   links.connect = "https://www.icloud.com/shortcuts/connect";
   links.capture = "https://www.icloud.com/shortcuts/capture";
   mockListAccounts.mockResolvedValue({ ok: true, accounts: [account] });
@@ -68,6 +70,12 @@ afterEach(() => {
 async function toConnectStep() {
   await fireEvent.press(await screen.findByText("I've added them"));
 }
+
+async function finishAutomation() {
+ while (screen.queryByText("Next instruction")) await fireEvent.press(screen.getByText("Next instruction"));
+ await fireEvent.press(screen.getByText("I’ve saved the trigger"));
+}
+
 async function tick(ms: number) {
   await act(async () => {
     jest.advanceTimersByTime(ms);
@@ -204,8 +212,8 @@ describe("iPhone guide: forwarding and checking", () => {
 
   it("lists the Messages automation steps and opens the Shortcuts app", async () => {
     await toAutomateStep();
-    expect(screen.getByText("Open the Shortcuts app and tap Automation at the bottom.")).toBeTruthy();
-    expect(screen.getByText(/Message Contains, type RWF/)).toBeTruthy();
+    expect(screen.getByText("Create a Message automation")).toBeTruthy();
+
     await fireEvent.press(screen.getByText("Open Shortcuts"));
     expect(Linking.openURL).toHaveBeenLastCalledWith("shortcuts://");
   });
@@ -213,7 +221,7 @@ describe("iPhone guide: forwarding and checking", () => {
   it("waits for the first message after the automation is set up", async () => {
     mockDeviceStatus.mockResolvedValue({ status: "active", createdAtIso: new Date().toISOString(), lastUsedAtIso: null });
     await toAutomateStep();
-    await fireEvent.press(screen.getByText("I've done this"));
+    await finishAutomation();
     expect(await screen.findByText("Waiting for the first message")).toBeTruthy();
   });
 
@@ -224,14 +232,14 @@ describe("iPhone guide: forwarding and checking", () => {
       lastUsedAtIso: new Date().toISOString(),
     });
     await toAutomateStep();
-    await fireEvent.press(screen.getByText("I've done this"));
+    await finishAutomation();
     expect(await screen.findByText("OneLedger can receive from this iPhone")).toBeTruthy();
   });
 
   it("shows troubleshooting on request, and lets the person finish", async () => {
     mockDeviceStatus.mockResolvedValue({ status: "active", createdAtIso: new Date().toISOString(), lastUsedAtIso: null });
     await toAutomateStep();
-    await fireEvent.press(screen.getByText("I've done this"));
+    await finishAutomation();
 
     await fireEvent.press(await screen.findByText("It isn't working"));
     expect(screen.getByText("The automation asks me to confirm every time")).toBeTruthy();
@@ -301,4 +309,16 @@ it("offers a fresh pairing attempt without waiting for expiry", async () => {
  await fireEvent.press(await screen.findByRole("button", {name:"Connect this iPhone"}));
  await fireEvent.press(await screen.findByRole("button", {name:"Get a new code and connect"}));
  expect(mockStartPairing).toHaveBeenCalledTimes(2);
+});
+
+it("installs only the merged shortcut and runs that name for pairing", async () => {
+ links.combined="https://www.icloud.com/shortcuts/combined";
+ mockStartPairing.mockResolvedValue(started());
+ await render(<ShortcutsGuide/>);
+ expect(screen.queryByRole("button",{name:"Add “Connect to OneLedger”"})).toBeNull();
+ await fireEvent.press(await screen.findByRole("button",{name:"Add “OneLedger Capture”"}));
+ expect(Linking.openURL).toHaveBeenLastCalledWith(links.combined);
+ await fireEvent.press(screen.getByText("I’ve added OneLedger Capture"));
+ await fireEvent.press(await screen.findByRole("button",{name:"Connect this iPhone"}));
+ expect(Linking.openURL).toHaveBeenLastCalledWith("shortcuts://run-shortcut?name=OneLedger%20Capture&input=text&text=olp_TESTTOKEN123");
 });

@@ -33,8 +33,48 @@ def connect():
 def capture():
     a=[action('gettext','message-input',WFTextActionText=text({'Type':'ExtensionInput'})),action('documentpicker.open','read-config',WFGetFilePath=CONFIG,WFShowFilePicker=False,WFFileErrorIfNotFound=True,WFFileStorageServiceIdentifier='iCloud Drive'),action('detect.dictionary','read-dictionary',WFInput=attachment(ref('read-config','File'))),action('getvalueforkey','read-secret',WFInput=attachment(ref('read-dictionary','Dictionary')),WFDictionaryKey='secret'),action('getvalueforkey','read-url',WFInput=attachment(ref('read-dictionary','Dictionary')),WFDictionaryKey='url'),if_value(ref('message-input'),'has-message'),post('capture-request',{'op':'capture','message':ref('message-input'),'client_version':VERSION},ref('read-url','Dictionary Value'),{'x-device-key':ref('read-secret','Dictionary Value')}),otherwise('has-message'),post('test-request',{'op':'test','client_version':VERSION},ref('read-url','Dictionary Value'),{'x-device-key':ref('read-secret','Dictionary Value')}),action('notification','test-sent',WFNotificationActionBody='Connection test sent. Return to OneLedger to check whether it arrived. This test creates no transaction.'),end('has-message')]
     return workflow('OneLedger Capture',a,0x067A4DFF)
+
+def unified():
+    """One installed shortcut: interactive pairing, silent message capture.
+
+    Pairing always requires foreground confirmation. Message text is untrusted:
+    a sender must not be able to re-pair a phone by texting a pairing token.
+    """
+    pair = connect()['WFWorkflowActions']
+    pair[1]['WFWorkflowActionParameters'].update(WFCondition=8, WFConditionalActionString='olp_')
+    pair.insert(2, action('alert','approve-pairing',
+        WFAlertActionTitle='Connect this iPhone?',
+        WFAlertActionMessage='Continue only if you just tapped Connect in OneLedger. Cancel if this appeared after receiving a message.',
+        WFAlertActionCancelButtonShown=True))
+    fallback = next(i for i,a in enumerate(pair) if a['WFWorkflowActionParameters']['UUID']==uid('has-token-else'))
+    # Reuse the fixed capture protocol, with a friendly unpaired state.
+    record = capture()['WFWorkflowActions'][1:]
+    def reuse_input(value):
+        if isinstance(value, dict): return {k: (uid('pair-input') if k == 'OutputUUID' and v == uid('message-input') else reuse_input(v)) for k,v in value.items()}
+        if isinstance(value, list): return [reuse_input(v) for v in value]
+        return value
+    record = reuse_input(record)
+    record[0]['WFWorkflowActionParameters']['WFFileErrorIfNotFound'] = False
+    read = record[:1]
+    rest = record[1:]
+    record = read + [if_value(ref('read-config','File'),'has-config')] + rest + [
+        otherwise('has-config'),
+        action('notification','connect-first',WFNotificationActionBody='Open OneLedger and tap Connect this iPhone before testing this shortcut.'),
+        end('has-config')]
+    actions = pair[:fallback+1] + record + [end('has-token')]
+    result = workflow('OneLedger Capture', actions, 0x067A4DFF)
+    for a in actions:
+        params = a['WFWorkflowActionParameters']
+        if 'WFJSONValues' in params:
+            for field in params['WFJSONValues']['Value']['WFDictionaryFieldValueItems']:
+                if field['WFKey']['Value']['string']=='client_version': field['WFValue']=text('3.0.0')
+    return result
+
 if __name__=='__main__':
     OUT.mkdir(parents=True,exist_ok=True)
     for name,value in [('Connect to OneLedger',connect()),('OneLedger Capture',capture())]:
         (OUT/(name+'.shortcut')).write_bytes(plistlib.dumps(value,fmt=plistlib.FMT_XML,sort_keys=False))
         print(name, len(value['WFWorkflowActions']), 'actions')
+
+    v3 = OUT / 'v3'; v3.mkdir(exist_ok=True)
+    (v3/'OneLedger Capture.shortcut').write_bytes(plistlib.dumps(unified(),fmt=plistlib.FMT_XML,sort_keys=False))

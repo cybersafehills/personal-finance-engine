@@ -1,5 +1,5 @@
 import { deviceStore } from '@/lib/device-store';
-export const SHORTCUT_RELEASE = '2.0.0';
+export const SHORTCUT_RELEASE = '3.0.0';
 export type ShortcutInstallState = {
     connect: {
         opened: boolean;

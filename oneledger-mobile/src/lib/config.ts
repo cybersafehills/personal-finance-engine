@@ -8,12 +8,12 @@ export const config = {
   supabaseAnonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? "",
   /** Origin of the OneLedger web app that serves /api/mobile/*. */
   apiBaseUrl: (process.env.EXPO_PUBLIC_API_BASE_URL ?? "").replace(/\/+$/, ""),
-  /** Published links verified in the live web setup on 2026-11-21. Build-time
-   * overrides can replace or explicitly disable a link. iCloud link that adds the "Connect to OneLedger" Shortcut (may also
-   *  carry "OneLedger Capture" when the two were shared as one link). */
-  connectShortcutUrl: process.env.EXPO_PUBLIC_MOMO_SHORTCUT_URL ?? "https://www.oneledger.me/shortcuts/v2/Connect%20to%20OneLedger.shortcut",
+  /** Apple-published combined release: one install for pairing and recording. */
+  combinedShortcutUrl: process.env.EXPO_PUBLIC_COMBINED_SHORTCUT_URL ?? "https://www.icloud.com/shortcuts/cd5a678737e14ba79eda55a98a26acd0",
+  /** Optional legacy two-shortcut configuration. Public iCloud links only. */
+  connectShortcutUrl: process.env.EXPO_PUBLIC_MOMO_SHORTCUT_URL ?? "https://www.icloud.com/shortcuts/60d740e6248d400ab6bac9e1597eadf1",
   /** iCloud link for "OneLedger Capture", when it was shared separately. */
-  captureShortcutUrl: process.env.EXPO_PUBLIC_MOMO_CAPTURE_SHORTCUT_URL ?? "https://www.oneledger.me/shortcuts/v2/OneLedger%20Capture.shortcut",
+  captureShortcutUrl: process.env.EXPO_PUBLIC_MOMO_CAPTURE_SHORTCUT_URL ?? "https://www.icloud.com/shortcuts/cd5a678737e14ba79eda55a98a26acd0",
   /** Build-time kill switch for on-device storage and sync: set to "true" to ship a build that is online-only, as before. */
   offlineDisabled: process.env.EXPO_PUBLIC_OFFLINE_DISABLED === "true",
 } as const;

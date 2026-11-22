@@ -1,3 +1,4 @@
+import { AutomationGuide } from "@/features/ios-shortcuts/AutomationGuide";
 import { ShortcutInstaller } from "@/features/ios-shortcuts/ShortcutInstaller";
 import { router } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
@@ -23,8 +24,8 @@ import {
   saveIosDeviceCredentialId,
 } from "@/features/ios-shortcuts/store";
 import {
-  AUTOMATION_STEPS,
   CAPTURE_SHORTCUT_NAME,
+  CONNECT_SHORTCUT_NAME,
   connectPhase,
   connectShortcutRunUrl,
   expiryLabel,
@@ -114,7 +115,7 @@ export default function ShortcutsGuide() {
       <StepWizard
         current={iosGuideStepNumber(step)}
         total={IOS_GUIDE_STEPS.length}
-        title={title}
+        title={step === "install" && config.combinedShortcutUrl ? "Add OneLedger Capture" : title}
       />
 
       {step === "install" ? <Install onNext={() => setStep("connect")} /> : null}
@@ -123,28 +124,24 @@ export default function ShortcutsGuide() {
       ) : null}
       {step === "automate" ? <Automate onNext={() => setStep("verify")} /> : null}
       {step === "verify" ? (
-        <Verify deviceCredentialId={deviceCredentialId} onReconnect={handleReconnect} />
+        <Verify deviceCredentialId={deviceCredentialId} onReconnect={handleReconnect} onUpdate={() => setStep("install")} />
       ) : null}
     </Screen>
   );
 }
 
 function Install({ onNext }: { onNext: () => void }) {
-  const hasLinks = config.connectShortcutUrl !== "";
+  const single = !!config.combinedShortcutUrl;
+  const hasLinks = single || config.connectShortcutUrl !== "";
 
   return (
     <>
       <Card style={{ gap: space[3] }}>
-        <Text>
-          iPhones don&apos;t let apps read your messages, so OneLedger uses two
-          small Apple Shortcuts instead. You add them once.
-        </Text>
+        <Text color="textSecondary">Add in Apple’s preview, then return here. OneLedger will check the connection in the next step.</Text>
         {hasLinks ? (
           <>
-            <ShortcutInstaller connectUrl={config.connectShortcutUrl} captureUrl={config.captureShortcutUrl} open={open} />
-            <Text variant="label" color="textMuted">
-              Open each signed file in Shortcuts, tap Add Shortcut, then return here. If Apple asks to replace the old copy, choose Replace.
-            </Text>
+            <ShortcutInstaller single={single} connectUrl={single ? config.combinedShortcutUrl : config.connectShortcutUrl} captureUrl={config.captureShortcutUrl} open={open} />
+
           </>
         ) : (
           <>
@@ -157,7 +154,7 @@ function Install({ onNext }: { onNext: () => void }) {
       </Card>
 
       <Button
-        label="I've added them"
+        label={single ? "I’ve added OneLedger Capture" : "I've added them"}
         variant="primary"
         disabled={!hasLinks}
         fullWidth
@@ -231,9 +228,9 @@ function Connect({ onConnected }: { onConnected: (credentialId: string | null) =
     setStatus("pending");
     setNow(Date.now());
     setPairing(started);
-    if (!PREVIEW_ONLY && !(await open(connectShortcutRunUrl(started.token)))) {
+    if (!PREVIEW_ONLY && !(await open(connectShortcutRunUrl(started.token, config.combinedShortcutUrl ? CAPTURE_SHORTCUT_NAME : CONNECT_SHORTCUT_NAME)))) {
       setError(
-        "Couldn't open the Shortcut. Check that “Connect to OneLedger” is added, then tap the button below.",
+        "Couldn't open the Shortcut. Check that the shortcut shown in step 1 is installed, then tap the button below.",
       );
     }
   }
@@ -272,14 +269,14 @@ function Connect({ onConnected }: { onConnected: (credentialId: string | null) =
               {pairing.token}
             </Text>
             <Text variant="caption" color="textMuted">
-              Passed securely as Shortcut Input when you open Connect below. Replace older copies of both Shortcuts before connecting.
+              Passed securely as Shortcut Input when you open Connect below. Install the current shortcut before connecting.
             </Text>
           </View>
           <Button
             label="Open the Shortcut again"
             variant="secondary"
             fullWidth
-            onPress={() => open(connectShortcutRunUrl(pairing.token))}
+            onPress={() => open(connectShortcutRunUrl(pairing.token, config.combinedShortcutUrl ? CAPTURE_SHORTCUT_NAME : CONNECT_SHORTCUT_NAME))}
           />
           <Button label="Get a new code and connect" variant="ghost" loading={busy} onPress={start} />
           <Text variant="label" color="textMuted">
@@ -327,46 +324,17 @@ function Connect({ onConnected }: { onConnected: (credentialId: string | null) =
 }
 
 function Automate({ onNext }: { onNext: () => void }) {
-  return (
-    <>
-      <Card style={{ gap: space[3] }}>
-        <Text>
-          This iPhone is connected. Last step in Apple&apos;s Shortcuts app:
-          tell it to pass MoMo messages to OneLedger. Apple requires you to
-          set this up yourself.
-        </Text>
-        {AUTOMATION_STEPS.map((text, index) => (
-          <View key={text} style={{ flexDirection: "row", gap: space[2] }}>
-            <Text variant="bodyStrong" color="accent">
-              {index + 1}.
-            </Text>
-            <Text variant="label" color="textSecondary" style={{ flex: 1 }}>
-              {text}
-            </Text>
-          </View>
-        ))}
-        <Text variant="label" color="textMuted">
-          “RWF” appears in every MoMo message. Anything else that happens to
-          contain it is ignored by OneLedger and never recorded.
-        </Text>
-        <Button
-          label="Open Shortcuts"
-          variant="secondary"
-          fullWidth
-          onPress={() => open(SHORTCUTS_APP_URL)}
-        />
-      </Card>
-      <Button label="I've done this" fullWidth onPress={onNext} />
-    </>
-  );
+  return <><Badge variant="positive">This iPhone is connected</Badge><AutomationGuide onNext={onNext} /></>;
 }
 
 function Verify({
   deviceCredentialId,
   onReconnect,
+  onUpdate,
 }: {
   deviceCredentialId: string | null;
   onReconnect: () => void;
+  onUpdate: () => void;
 }) {
   const [device, setDevice] = useState<IosDeviceStatus | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -453,6 +421,7 @@ function Verify({
       </Card>
 
       <Button label="Finish" fullWidth onPress={() => router.back()} />
+      <Button label="Update or reinstall OneLedger Capture" variant="secondary" fullWidth onPress={onUpdate} />
       <Button label="Connect this iPhone again" variant="ghost" fullWidth onPress={onReconnect} />
     </>
   );

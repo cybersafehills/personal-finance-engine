@@ -1,6 +1,6 @@
 """Regression checks for the published iPhone pairing/capture protocol."""
 import unittest
-from build import connect, capture, uid
+from build import connect, capture, unified, uid
 
 class ShortcutReleaseTests(unittest.TestCase):
     def test_connect_uses_input_not_clipboard(self):
@@ -39,5 +39,32 @@ class ShortcutReleaseTests(unittest.TestCase):
         request = next(a for a in actions if a['WFWorkflowActionParameters']['UUID'] == uid('test-request'))
         self.assertIn("'string': 'test'", str(request))
         self.assertNotIn("'string': 'message'", str(request))
+
+class UnifiedShortcutTests(unittest.TestCase):
+    def test_all_output_references_resolve(self):
+        workflow = unified()
+        ids = {a['WFWorkflowActionParameters']['UUID'] for a in workflow['WFWorkflowActions']}
+        def check(value):
+            if isinstance(value, dict):
+                if 'OutputUUID' in value: self.assertIn(value['OutputUUID'], ids)
+                for v in value.values(): check(v)
+            elif isinstance(value, list):
+                for v in value: check(v)
+        check(workflow)
+
+    def test_pairing_requires_explicit_confirmation_before_network(self):
+        actions = unified()['WFWorkflowActions']
+        self.assertEqual(8, actions[1]['WFWorkflowActionParameters']['WFCondition'])
+        self.assertEqual('olp_', actions[1]['WFWorkflowActionParameters']['WFConditionalActionString'])
+        alert = actions[2]
+        self.assertTrue(alert['WFWorkflowActionIdentifier'].endswith('alert'))
+        self.assertTrue(alert['WFWorkflowActionParameters']['WFAlertActionCancelButtonShown'])
+        capture_start = next(i for i,a in enumerate(actions) if a['WFWorkflowActionParameters']['UUID']==uid('has-token-else'))
+        self.assertNotIn('is.workflow.actions.alert', str(actions[capture_start:]))
+
+    def test_missing_configuration_is_handled_without_a_picker(self):
+        file = next(a for a in unified()['WFWorkflowActions'] if a['WFWorkflowActionIdentifier'].endswith('documentpicker.open'))
+        self.assertFalse(file['WFWorkflowActionParameters']['WFShowFilePicker'])
+        self.assertFalse(file['WFWorkflowActionParameters']['WFFileErrorIfNotFound'])
 
 if __name__ == '__main__': unittest.main()

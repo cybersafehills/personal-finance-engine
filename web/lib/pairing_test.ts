@@ -91,16 +91,16 @@ Deno.test("connectorKeyForProvider: mirrors the DB backfill CASE", () => {
   }
 });
 
-Deno.test("devicePairShortcutRunUrl: runs the Connect Shortcut, spaces as %20 (never +)", () => {
+Deno.test("devicePairShortcutRunUrl: runs the combined Shortcut, spaces as %20 (never +)", () => {
   const { token } = generatePairingToken();
   const url = devicePairShortcutRunUrl(token);
   assert(url.startsWith("shortcuts://run-shortcut?"));
   // iOS Shortcuts does not treat "+" as a space - a "+"-encoded name makes it
   // report "the file doesn't exist".
-  assert(url.includes("name=Connect%20to%20OneLedger"));
+  assert(url.includes("name=OneLedger%20Capture"));
   assert(!url.includes("+"));
   const q = new URLSearchParams(url.slice(url.indexOf("?") + 1));
-  assertEquals(q.get("name"), "Connect to OneLedger");
+  assertEquals(q.get("name"), "OneLedger Capture");
   assertEquals(q.get("input"), "text");
   assertEquals(q.get("text"), token);
 });
