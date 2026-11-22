@@ -1,3 +1,4 @@
+import { ThemeCycleButton } from "@/features/settings/ThemeCycleButton";
 import Feather from "@expo/vector-icons/Feather";
 import { router } from "expo-router";
 import { useCallback, useState } from "react";
@@ -28,10 +29,10 @@ export default function More() {
   const showRecording = !query || "automatic recording this phone iphone shortcuts setup".includes(query);
   return (
     <MenuScreen title="More" root action={
-      <Pressable accessibilityRole="link" accessibilityLabel={unread ? `Notifications, ${unread} unread` : "Notifications"} onPress={() => router.push("/notifications")} style={({ pressed }) => [styles.inbox, pressed && styles.pressed]}>
+      <View style={{flexDirection:"row",alignItems:"center",gap:6}}><ThemeCycleButton/><Pressable accessibilityRole="link" accessibilityLabel={unread ? `Notifications, ${unread} unread` : "Notifications"} onPress={() => router.push("/notifications")} style={({ pressed }) => [styles.inbox, pressed && styles.pressed]}>
         <Feather name="bell" size={23} color={colors.accent} />
         {unread && unread > 0 ? <Badge variant="neutral">{unread > 99 ? "99+" : String(unread)}</Badge> : null}
-      </Pressable>
+      </Pressable></View>
     }>
       <ProfileSummary onPress={() => router.push("/profile")} />
       <TextField compact label="Search tools" placeholder="Search tools" value={search} onChangeText={setSearch} autoCapitalize="none" autoCorrect={false} returnKeyType="search" leading={<Feather name="search" size={19} color={colors.textMuted} />} />

@@ -1,3 +1,4 @@
+import { publishedShortcut } from "@/lib/published-shortcuts";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { PageHeader } from "../../components/PageHeader";
@@ -160,9 +161,8 @@ async function StepBody({
       <OnboardingConnectStep
         accounts={accounts.filter((a) => a.is_active)}
         pairingEnabled={pairingEnabled}
-        shortcutUrl={process.env.NEXT_PUBLIC_MOMO_SHORTCUT_URL?.trim() || null}
-        captureShortcutUrl={process.env.NEXT_PUBLIC_MOMO_CAPTURE_SHORTCUT_URL
-          ?.trim() || null}
+        shortcutUrl={publishedShortcut("connect", process.env.NEXT_PUBLIC_MOMO_SHORTCUT_URL)}
+        captureShortcutUrl={publishedShortcut("capture", process.env.NEXT_PUBLIC_MOMO_CAPTURE_SHORTCUT_URL)}
         mtnSender={process.env.MOMO_SMS_SENDER?.trim() || null}
         androidCompanionUrl={process.env.NEXT_PUBLIC_ANDROID_COMPANION_URL
           ?.trim() || null}

@@ -11,6 +11,11 @@ const mockDeviceStatus = jest.fn();
 const mockLoadId = jest.fn();
 const mockSaveId = jest.fn();
 const mockClearId = jest.fn();
+jest.mock("@/features/ios-shortcuts/install-state", () => ({
+ EMPTY_INSTALL: {connect:{opened:false,added:false},capture:{opened:false,added:false}},
+ loadShortcutInstall: async () => ({connect:{opened:false,added:false},capture:{opened:false,added:false}}),
+ saveShortcutInstall: jest.fn(),
+}));
 const links = { connect: "https://www.icloud.com/shortcuts/connect", capture: "https://www.icloud.com/shortcuts/capture" };
 
 jest.mock("expo-router", () => jest.requireActual("@/test/router-mock"));
@@ -72,16 +77,16 @@ async function tick(ms: number) {
 describe("iPhone guide: add the Shortcuts", () => {
   it("offers both Shortcuts and opens each link", async () => {
     await render(<ShortcutsGuide />);
-    await fireEvent.press(await screen.findByText("Add “Connect to OneLedger”"));
+    await fireEvent.press(await screen.findByRole("button", { name: "Add “Connect to OneLedger”" }));
     expect(Linking.openURL).toHaveBeenLastCalledWith(links.connect);
-    await fireEvent.press(screen.getByText("Add “OneLedger Capture”"));
+    await fireEvent.press(screen.getByRole("button", { name: "Add “OneLedger Capture”" }));
     expect(Linking.openURL).toHaveBeenLastCalledWith(links.capture);
   });
 
   it("offers a single button when both Shortcuts share one link", async () => {
     links.capture = "";
     await render(<ShortcutsGuide />);
-    expect(await screen.findByText("Add the OneLedger Shortcuts")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Add “Connect to OneLedger”" })).toBeTruthy();
     expect(screen.queryByText("Add “OneLedger Capture”")).toBeNull();
   });
 
@@ -97,8 +102,8 @@ describe("iPhone guide: add the Shortcuts", () => {
   it("tells the person when a link could not be opened", async () => {
     (Linking.openURL as jest.Mock).mockRejectedValue(new Error("no handler"));
     await render(<ShortcutsGuide />);
-    await fireEvent.press(await screen.findByText("Add “Connect to OneLedger”"));
-    expect(await screen.findByText(/Couldn't open that link/)).toBeTruthy();
+    await fireEvent.press(await screen.findByRole("button", { name: "Add “Connect to OneLedger”" }));
+    expect(await screen.findByText(/Could not open the download/)).toBeTruthy();
   });
 });
 
@@ -220,7 +225,7 @@ describe("iPhone guide: forwarding and checking", () => {
     });
     await toAutomateStep();
     await fireEvent.press(screen.getByText("I've done this"));
-    expect(await screen.findByText("OneLedger is receiving from this iPhone")).toBeTruthy();
+    expect(await screen.findByText("OneLedger can receive from this iPhone")).toBeTruthy();
   });
 
   it("shows troubleshooting on request, and lets the person finish", async () => {
@@ -246,7 +251,7 @@ describe("iPhone guide: coming back later", () => {
       lastUsedAtIso: new Date().toISOString(),
     });
     await render(<ShortcutsGuide />);
-    expect(await screen.findByText("OneLedger is receiving from this iPhone")).toBeTruthy();
+    expect(await screen.findByText("OneLedger can receive from this iPhone")).toBeTruthy();
     expect(screen.queryByText("I've added them")).toBeNull();
   });
 
@@ -277,4 +282,23 @@ it("offers a retryable error when pairing cannot reach the server",async()=>{
  await fireEvent.press(await screen.findByRole("button",{name:"Connect this iPhone"}));
  expect(await screen.findByText(/Couldn’t create a connection/)).toBeTruthy();
  expect(screen.queryByText(/This iPhone is connected/)).toBeNull();
+});
+
+it("keeps download and Added states separate and offers reinstall", async () => {
+ await render(<ShortcutsGuide />);
+ await fireEvent.press(await screen.findByRole("button", {name:"Add “Connect to OneLedger”"}));
+ expect(await screen.findByRole("button", {name:"Add it again “Connect to OneLedger”"})).toBeTruthy();
+ const check = screen.getByRole("checkbox", {name:"Connect to OneLedger added"});
+ expect(check.props.accessibilityState.checked).toBe(false);
+ await fireEvent.press(check);
+ expect(screen.getByRole("checkbox", {name:"Connect to OneLedger added"}).props.accessibilityState.checked).toBe(true);
+ expect(screen.getByRole("checkbox", {name:"OneLedger Capture added"}).props.accessibilityState.checked).toBe(false);
+ expect(mockStartPairing).not.toHaveBeenCalled();
+});
+it("offers a fresh pairing attempt without waiting for expiry", async () => {
+ mockStartPairing.mockResolvedValue(started());mockPairingStatus.mockResolvedValue({status:"pending",deviceCredentialId:null});
+ await render(<ShortcutsGuide/>);await toConnectStep();
+ await fireEvent.press(await screen.findByRole("button", {name:"Connect this iPhone"}));
+ await fireEvent.press(await screen.findByRole("button", {name:"Get a new code and connect"}));
+ expect(mockStartPairing).toHaveBeenCalledTimes(2);
 });

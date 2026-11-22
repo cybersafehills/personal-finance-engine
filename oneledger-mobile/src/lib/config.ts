@@ -11,9 +11,9 @@ export const config = {
   /** Published links verified in the live web setup on 2026-11-21. Build-time
    * overrides can replace or explicitly disable a link. iCloud link that adds the "Connect to OneLedger" Shortcut (may also
    *  carry "OneLedger Capture" when the two were shared as one link). */
-  connectShortcutUrl: process.env.EXPO_PUBLIC_MOMO_SHORTCUT_URL ?? "https://www.icloud.com/shortcuts/9f6db8e8335949e5bf72411dc625bfcb",
+  connectShortcutUrl: process.env.EXPO_PUBLIC_MOMO_SHORTCUT_URL ?? "https://www.oneledger.me/shortcuts/v2/Connect%20to%20OneLedger.shortcut",
   /** iCloud link for "OneLedger Capture", when it was shared separately. */
-  captureShortcutUrl: process.env.EXPO_PUBLIC_MOMO_CAPTURE_SHORTCUT_URL ?? "https://www.icloud.com/shortcuts/49f9859716f740699b87e1bd2c97de92",
+  captureShortcutUrl: process.env.EXPO_PUBLIC_MOMO_CAPTURE_SHORTCUT_URL ?? "https://www.oneledger.me/shortcuts/v2/OneLedger%20Capture.shortcut",
   /** Build-time kill switch for on-device storage and sync: set to "true" to ship a build that is online-only, as before. */
   offlineDisabled: process.env.EXPO_PUBLIC_OFFLINE_DISABLED === "true",
 } as const;

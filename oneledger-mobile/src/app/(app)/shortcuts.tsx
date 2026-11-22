@@ -1,6 +1,7 @@
+import { ShortcutInstaller } from "@/features/ios-shortcuts/ShortcutInstaller";
 import { router } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
-import { Linking, Platform, View } from "react-native";
+import { AppState, Linking, Platform, View } from "react-native";
 
 import {
   Badge,
@@ -23,6 +24,7 @@ import {
 } from "@/features/ios-shortcuts/store";
 import {
   AUTOMATION_STEPS,
+  CAPTURE_SHORTCUT_NAME,
   connectPhase,
   connectShortcutRunUrl,
   expiryLabel,
@@ -128,12 +130,7 @@ export default function ShortcutsGuide() {
 }
 
 function Install({ onNext }: { onNext: () => void }) {
-  const [failed, setFailed] = useState(false);
   const hasLinks = config.connectShortcutUrl !== "";
-
-  async function add(url: string) {
-    setFailed(!(await open(url)));
-  }
 
   return (
     <>
@@ -144,25 +141,9 @@ function Install({ onNext }: { onNext: () => void }) {
         </Text>
         {hasLinks ? (
           <>
-            <Button
-              label={
-                config.captureShortcutUrl
-                  ? "Add “Connect to OneLedger”"
-                  : "Add the OneLedger Shortcuts"
-              }
-              fullWidth
-              onPress={() => add(config.connectShortcutUrl)}
-            />
-            {config.captureShortcutUrl ? (
-              <Button
-                label="Add “OneLedger Capture”"
-                fullWidth
-                onPress={() => add(config.captureShortcutUrl)}
-              />
-            ) : null}
+            <ShortcutInstaller connectUrl={config.connectShortcutUrl} captureUrl={config.captureShortcutUrl} open={open} />
             <Text variant="label" color="textMuted">
-              Each one opens in the Shortcuts app. Tap Add Shortcut, then come
-              back here.
+              Open each signed file in Shortcuts, tap Add Shortcut, then return here. If Apple asks to replace the old copy, choose Replace.
             </Text>
           </>
         ) : (
@@ -173,12 +154,6 @@ function Install({ onNext }: { onNext: () => void }) {
             <Button label="Open device setup on the web" variant="secondary" fullWidth onPress={() => open(`${config.apiBaseUrl}/integrations/connections/pair`)} />
           </>
         )}
-        {failed ? (
-          <Text variant="label" color="attention" accessibilityRole="alert">
-            Couldn&apos;t open that link. Make sure the Shortcuts app is
-            installed.
-          </Text>
-        ) : null}
       </Card>
 
       <Button
@@ -224,17 +199,20 @@ function Connect({ onConnected }: { onConnected: (credentialId: string | null) =
   useEffect(() => {
     if (!pairing) return;
     let active = true;
-    const timer = setInterval(async () => {
+    const check = async () => {
       setNow(Date.now());
       if (Date.now() >= Date.parse(pairing.expiresAtIso)) return;
       const result = await getPairingSessionStatus(pairing.sessionId).catch(() => null);
       if (!active || !result) return;
       setStatus(result.status);
       if (result.status === "consumed") onConnected(result.deviceCredentialId);
-    }, STATUS_POLL_MS);
+    };
+    const timer = setInterval(check, STATUS_POLL_MS);
+    const subscription = AppState.addEventListener("change", (state) => { if (state === "active") void check(); });
     return () => {
       active = false;
       clearInterval(timer);
+      subscription.remove();
     };
   }, [pairing, onConnected]);
 
@@ -294,7 +272,7 @@ function Connect({ onConnected }: { onConnected: (credentialId: string | null) =
               {pairing.token}
             </Text>
             <Text variant="caption" color="textMuted">
-              Only needed if the Shortcut asks you to type it.
+              Passed securely as Shortcut Input when you open Connect below. Replace older copies of both Shortcuts before connecting.
             </Text>
           </View>
           <Button
@@ -303,6 +281,7 @@ function Connect({ onConnected }: { onConnected: (credentialId: string | null) =
             fullWidth
             onPress={() => open(connectShortcutRunUrl(pairing.token))}
           />
+          <Button label="Get a new code and connect" variant="ghost" loading={busy} onPress={start} />
           <Text variant="label" color="textMuted">
             Waiting for this iPhone to connect…
           </Text>
@@ -419,7 +398,10 @@ function Verify({
         {working && display ? (
           <>
             <Badge variant={display.variant}>{display.label}</Badge>
-            <Text variant="heading">OneLedger is receiving from this iPhone</Text>
+            <Text variant="heading">OneLedger can receive from this iPhone</Text>
+            <Text variant="label" color="textSecondary">
+              A connection test or message reached OneLedger. The next incoming MoMo message confirms that your Messages automation runs in the background.
+            </Text>
             <Text variant="label" color="textSecondary">
               {display.detail} {device?.lastUsedAtIso ? `(${formatDateTime(device.lastUsedAtIso)})` : ""}
             </Text>
@@ -433,8 +415,7 @@ function Verify({
           <>
             <Badge variant="neutral">Waiting for the first message</Badge>
             <Text>
-              Your next MoMo message will confirm it. To check now, make a
-              small MoMo payment or ask someone to send you a little.
+              Your next MoMo message will confirm the Messages automation. No payment is needed just to finish setup.
             </Text>
             <Text variant="label" color="textMuted">
               This screen updates by itself. You can also leave: the
@@ -444,6 +425,7 @@ function Verify({
         )}
       </Card>
 
+      <Button label="Test connection without a payment" variant="secondary" fullWidth onPress={() => open(`shortcuts://run-shortcut?name=${encodeURIComponent(CAPTURE_SHORTCUT_NAME)}`)} />
       <Card style={{ gap: space[3] }}>
         <Button
           label={showHelp ? "Hide troubleshooting" : "It isn't working"}

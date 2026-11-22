@@ -153,6 +153,8 @@ export const config = {
   // cookie. Each handler is dark unless MOBILE_API_ENABLED === "true" and
   // does its own auth (credentials for sign-in, a Supabase bearer JWT
   // elsewhere).
+  // Credential-free, Apple-signed installation files must be downloadable by
+  // Shortcuts without a browser login. No account data lives under this prefix.
   matcher:
-    "/((?!_next/static|_next/image|favicon.ico|icon.png|apple-icon.png|api/cron|api/v1/|api/mobile/|api/health/email|api/admin/operational-health|brand/|v1/).*)",
+    "/((?!_next/static|_next/image|favicon.ico|icon.png|apple-icon.png|api/cron|api/v1/|api/mobile/|api/health/email|api/admin/operational-health|brand/|shortcuts/v2/|v1/).*)",
 };
