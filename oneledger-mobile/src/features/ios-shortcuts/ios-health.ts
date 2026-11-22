@@ -64,7 +64,7 @@ export function iosHealthDisplay(
     case "working":
       return {
         variant: "positive",
-        label: "Working",
+        label: "Previous activity received",
         detail: `Last heard from this iPhone ${lastHeardLabel(device.lastUsedAtIso!, nowMs)}.`,
       };
     case "waiting":
@@ -105,7 +105,7 @@ export const IOS_TROUBLESHOOTING: Troubleshooting[] = [
   },
   {
     problem: "A MoMo message came in but nothing was recorded",
-    fix: "On iOS 27, use one Message contains RWF condition with no unfinished Sender row. Keep Automation on and Confirm Before Run off. Run “OneLedger Capture” once without input and allow its file and network permissions, then check that your next message arrives.",
+    fix: "On iOS 27, use one Message contains RWF condition with no unfinished Sender row. Keep Automation on and Confirm Before Run off. Use Test connection in OneLedger and allow the shortcut’s file and network prompts. The Message trigger must run OneLedger Capture with the received message as its input; a trigger alone cannot record anything.",
   },
   {
     problem: "It says disconnected or the code expired",

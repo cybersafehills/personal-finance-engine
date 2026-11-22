@@ -532,12 +532,13 @@ export function PairWizard({
         >
           <div className="flex flex-col gap-4 text-sm text-text-secondary">
             <details open className="rounded-control border border-border-subtle bg-surface p-4">
-              <summary className="font-medium text-text-primary">iOS 27 · Edit the installed shortcut</summary>
+              <summary className="font-medium text-text-primary">iOS 27 · Finish the Message automation</summary>
               <ol className="mt-3 flex flex-col gap-3">
-                <li>1. Open <strong>OneLedger Capture</strong> in Shortcuts. Tap <strong>Edit → Automation → Message</strong>. Don’t start a blank New Shortcut.</li>
+                <li>1. Open <strong>Shortcuts → Automation</strong>. Continue your Message automation, or tap + and choose Message.</li>
                 <li>2. Change the left-hand <strong>Sender</strong> label to <strong>Message</strong>. Set <strong>contains RWF</strong>. Remove extra conditions; an unfinished Sender row prevents the trigger from running.</li>
-                <li>3. Expand the trigger arrow: <strong>Automation on</strong>, <strong>Confirm Before Run off</strong>.</li>
-                <li>4. In <strong>Edit → Info → Privacy</strong>, allow running when locked. Return using the back arrow to save, then come back here.</li>
+                <li>3. Below the trigger, add <strong>Run Shortcut → OneLedger Capture</strong>. Set Input to the received message / Shortcut Input. Do not type RWF as the action’s input.</li>
+                <li>4. Expand the trigger: <strong>Automation on</strong>, <strong>Confirm Before Run off</strong>. Save with the back arrow.</li>
+                <li>5. In the shortcut editor, the circled ⓘ at the bottom opens Info. If Privacy → Allow Running When Locked is offered, enable it; otherwise skip this optional setting. Return using the back arrow to save, then come back here.</li>
               </ol>
             </details>
             <details className="rounded-control border border-border-subtle bg-surface p-4">
@@ -554,7 +555,7 @@ export function PairWizard({
           title="Checking the connection"
           hint={isAndroid
             ? "The Companion sent a test the moment it paired. Otherwise, just wait for your next MoMo message."
-            : "Run OneLedger Capture without input to test the connection, or wait for your next MoMo message."}
+            : "Use Test connection in the OneLedger mobile app, or wait for a real incoming MoMo message."}
         >
           <ul className="flex flex-col gap-2 text-sm">
             <li className="text-money-positive">
@@ -576,7 +577,7 @@ export function PairWizard({
             </li>
           </ul>
           <p className="text-xs text-text-muted">
-            You can leave this — it keeps working in the background.
+            A connection response does not prove the Messages trigger is configured. Confirm forwarding with a real incoming MoMo message.
           </p>
         </StepShell>
       )}

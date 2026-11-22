@@ -9,11 +9,11 @@ export const config = {
   /** Origin of the OneLedger web app that serves /api/mobile/*. */
   apiBaseUrl: (process.env.EXPO_PUBLIC_API_BASE_URL ?? "").replace(/\/+$/, ""),
   /** Apple-published combined release: one install for pairing and recording. */
-  combinedShortcutUrl: process.env.EXPO_PUBLIC_COMBINED_SHORTCUT_URL ?? "https://www.icloud.com/shortcuts/cd5a678737e14ba79eda55a98a26acd0",
+  combinedShortcutUrl: process.env.EXPO_PUBLIC_COMBINED_SHORTCUT_URL ?? "https://www.icloud.com/shortcuts/d8ea3c4ec279424c9d08fe3512d350c9",
   /** Optional legacy two-shortcut configuration. Public iCloud links only. */
   connectShortcutUrl: process.env.EXPO_PUBLIC_MOMO_SHORTCUT_URL ?? "https://www.icloud.com/shortcuts/60d740e6248d400ab6bac9e1597eadf1",
   /** iCloud link for "OneLedger Capture", when it was shared separately. */
-  captureShortcutUrl: process.env.EXPO_PUBLIC_MOMO_CAPTURE_SHORTCUT_URL ?? "https://www.icloud.com/shortcuts/cd5a678737e14ba79eda55a98a26acd0",
+  captureShortcutUrl: process.env.EXPO_PUBLIC_MOMO_CAPTURE_SHORTCUT_URL ?? "https://www.icloud.com/shortcuts/d8ea3c4ec279424c9d08fe3512d350c9",
   /** Build-time kill switch for on-device storage and sync: set to "true" to ship a build that is online-only, as before. */
   offlineDisabled: process.env.EXPO_PUBLIC_OFFLINE_DISABLED === "true",
 } as const;

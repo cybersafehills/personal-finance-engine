@@ -5,9 +5,10 @@ import { useTheme } from "@/theme/ThemeProvider";
 
 const APPLE_GUIDE = "https://support.apple.com/guide/shortcuts/add-automations-apdfbdbd7123/10.0/ios/27";
 const modern = [
-  { title: "Open the installed shortcut", detail: "In Shortcuts, open the installed OneLedger Capture shortcut. Tap Edit → Automation → Message.", highlight: "Use the installed shortcut", help: "If you are in a blank “New Shortcut”, go back to the library. Add the trigger to OneLedger Capture itself; its recording actions are already built." },
-  { title: "Keep one Message condition", detail: "Tap the blue Sender label at the far left and change it to Message. Set contains to RWF. Keep only that one condition.", highlight: "Message  contains  RWF", help: "Seeing “Configure Sender”? Tap the blue Sender label at the far left, change it to Message, and enter RWF. If you now have two Message rows, remove the extra row with its minus button. You should have one Message contains RWF condition." },
-  { title: "Allow background recording", detail: "Expand the arrow beside “When I receive a message”. Keep Automation on and Confirm Before Run off. In Edit → Info → Privacy, allow running when locked. Use the back arrow to save, then return here.", highlight: "Automation ON · Confirm Before Run OFF", help: "In Edit → Info → Privacy, enable Allow Running When Locked. Return with the top-left back arrow to save. If a Done button appears, tap it. Then return to OneLedger and test the connection. There is no Run Immediately screen in this layout." },
+  { title: "Open your Message automation", detail: "Open Shortcuts → Automation. Continue the “New Shortcut” where you added the Message trigger. If you have not created one, tap + and choose Message. This automation will run the OneLedger Capture shortcut you installed.", highlight: "Message automation → run OneLedger Capture", help: "You install only OneLedger Capture. The separate automation is the event that starts it when a message arrives. You do not need to edit OneLedger Capture’s recording actions. If you already attached a working Message trigger directly to OneLedger Capture, keep that approach and do not enable a second trigger." },
+  { title: "Fix the unfinished Sender condition", detail: "Your screenshot still has “Sender is Sender” above “Message contains RWF”. Tap the first blue Sender label at the far left and change that condition to Message contains RWF. Remove the extra Message row with its minus button.", highlight: "One condition: Message contains RWF", help: "The warning “Configure Sender” means that first condition is incomplete. The RWF row underneath does not cancel it. If changing the first label is unavailable, configure Sender with the exact MoMo sender from a real message and keep Message contains RWF; both conditions must then match." },
+  { title: "Add the recording action", detail: "Below the Message trigger, use the bottom Search field to find Run Shortcut. Add that action, tap its shortcut name and choose OneLedger Capture. Set its Input to the received Message from the trigger (Shortcut Input).", highlight: "Run Shortcut: OneLedger Capture · Input: received message", help: "The RWF condition is only a filter, not the message to send. Do not type RWF into the action’s Input. Expand Run Shortcut if Input is hidden, and select the trigger’s received message variable. A Message trigger with nothing below it cannot record anything. If your trigger is directly inside OneLedger Capture, its existing recording actions already serve this purpose; skip adding Run Shortcut there to avoid calling itself." },
+  { title: "Save and test forwarding", detail: "Expand the arrow beside “When I receive a message”. Keep Automation on and Confirm Before Run off. Use the top-left back arrow to save. Return here and run the connection test before waiting for a real incoming MoMo message.", highlight: "Automation ON · Confirm Before Run OFF", help: "The circled ⓘ at the bottom of the shortcut editor is the Info button, between redo and Share in your screenshot. If it offers Privacy → Allow Running When Locked, enable it. If that option is absent, skip it; do not keep searching for an Edit menu. First-run file and api.oneledger.me prompts are separate permissions. A successful connection test still does not prove the Messages trigger runs." },
 ];
 const classic = [
   { title: "Create a Message automation", detail: "In Shortcuts, tap Automation → + → Message.", highlight: "Automation → Message", help: "Use this guide for iOS 17–26. If your editor has a trigger inside the shortcut, switch to the iOS 27 guide." },
@@ -26,7 +27,7 @@ export function AutomationGuide({ onNext, majorVersion = Number.parseInt(String(
   const current = steps[index];
   async function openShortcut() {
     setOpenError(false);
-    try { await Linking.openURL(isModern ? "shortcuts://open-shortcut?name=OneLedger%20Capture" : "shortcuts://"); }
+    try { await Linking.openURL("shortcuts://"); }
     catch { setOpenError(true); }
   }
   function move(next: number) { setIndex(next); setHelp(false); }
@@ -44,7 +45,7 @@ export function AutomationGuide({ onNext, majorVersion = Number.parseInt(String(
       <Text>{current.detail}</Text>
       <Button label={help ? "Hide help" : "I can’t find this"} variant="ghost" onPress={() => setHelp(!help)} />
       {help ? <Text color="textSecondary">{current.help}</Text> : null}
-      <Button label={isModern ? "Open OneLedger Capture" : "Open Shortcuts"} variant="secondary" onPress={() => void openShortcut()} />
+      <Button label="Open Shortcuts" variant="secondary" onPress={() => void openShortcut()} />
       {openError ? <Text accessibilityRole="alert" color="attention">Couldn’t open Shortcuts. Open it from your Home Screen and choose OneLedger Capture.</Text> : null}
     </Card>
     <View style={{ flexDirection: "row", gap: 10 }}>

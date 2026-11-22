@@ -20,7 +20,7 @@ it("keeps the connected device's real health status", async () => {
   mockId.mockResolvedValue("device-id");
   mockDevice.mockResolvedValue({ status: "active", createdAtIso: new Date().toISOString(), lastUsedAtIso: new Date().toISOString() });
   await render(<IosStatusCard compact />);
-  expect(await screen.findByText("Working")).toBeTruthy();
+  expect(await screen.findByText("Previous activity received")).toBeTruthy();
   expect(screen.queryByText("Set up")).toBeNull();
 });
 it("does not mistake a failed status lookup for a new setup", async () => {

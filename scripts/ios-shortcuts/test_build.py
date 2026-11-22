@@ -67,4 +67,17 @@ class UnifiedShortcutTests(unittest.TestCase):
         self.assertFalse(file['WFWorkflowActionParameters']['WFShowFilePicker'])
         self.assertFalse(file['WFWorkflowActionParameters']['WFFileErrorIfNotFound'])
 
+class ExplicitConnectionTest(unittest.TestCase):
+    def test_explicit_test_and_no_implicit_output(self):
+        actions=unified()['WFWorkflowActions']
+        command=next(a['WFWorkflowActionParameters'] for a in actions if a['WFWorkflowActionParameters']['UUID']==uid('test-command-if'))
+        self.assertEqual(4,command['WFCondition'])
+        self.assertEqual('oneledger:test',command['WFConditionalActionString'])
+        request=next(a for a in actions if a['WFWorkflowActionParameters']['UUID']==uid('explicit-test-request'))
+        self.assertIn("'string': 'test'", str(request))
+        self.assertNotIn("'string': 'message'", str(request))
+        self.assertEqual('is.workflow.actions.nothing',actions[-1]['WFWorkflowActionIdentifier'])
+        check=next(a for a in actions if a['WFWorkflowActionParameters']['UUID']==uid('test-confirmed'))
+        self.assertEqual('test',check['WFWorkflowActionParameters']['WFDictionaryKey'])
+
 if __name__ == '__main__': unittest.main()

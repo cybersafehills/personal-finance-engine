@@ -26,6 +26,7 @@ import {
 import {
   CAPTURE_SHORTCUT_NAME,
   CONNECT_SHORTCUT_NAME,
+  captureTestRunUrl,
   connectPhase,
   connectShortcutRunUrl,
   expiryLabel,
@@ -38,6 +39,8 @@ import {
 import { AccountPicker } from "@/features/pairing/AccountPicker";
 import {
   getDeviceStatus,
+  getShortcutDeliveryStatus,
+  type ShortcutDeliveryStatus,
   getPairingSessionStatus,
   listPairableAccounts,
   startPairingSession,
@@ -124,7 +127,7 @@ export default function ShortcutsGuide() {
       ) : null}
       {step === "automate" ? <Automate onNext={() => setStep("verify")} /> : null}
       {step === "verify" ? (
-        <Verify deviceCredentialId={deviceCredentialId} onReconnect={handleReconnect} onUpdate={() => setStep("install")} />
+        <Verify deviceCredentialId={deviceCredentialId} onReconnect={handleReconnect} onUpdate={() => setStep("install")} onReview={() => setStep("automate")} />
       ) : null}
     </Screen>
   );
@@ -331,22 +334,28 @@ function Verify({
   deviceCredentialId,
   onReconnect,
   onUpdate,
+  onReview,
 }: {
   deviceCredentialId: string | null;
   onReconnect: () => void;
   onUpdate: () => void;
+  onReview: () => void;
 }) {
   const [device, setDevice] = useState<IosDeviceStatus | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [showHelp, setShowHelp] = useState(false);
+  const [delivery, setDelivery] = useState<ShortcutDeliveryStatus | null>(null);
+  const [testStartedAt, setTestStartedAt] = useState<number | null>(null);
+  const [testOpenError, setTestOpenError] = useState(false);
 
   useEffect(() => {
     if (!deviceCredentialId) return;
     let active = true;
     const check = async () => {
-      const value = await getDeviceStatus(deviceCredentialId).catch(() => null);
+      const [value, evidence] = await Promise.all([getDeviceStatus(deviceCredentialId).catch(() => null), getShortcutDeliveryStatus(deviceCredentialId).catch(() => null)]);
       if (!active) return;
       setDevice(value);
+      setDelivery(evidence);
       setNow(Date.now());
     };
     check();
@@ -357,7 +366,13 @@ function Verify({
     };
   }, [deviceCredentialId]);
 
-  const working = device?.status === "active" && device.lastUsedAtIso !== null;
+  const activityAt = delivery?.testAt ? Date.parse(delivery.testAt) : NaN;
+  const working = device?.status === "active" && testStartedAt !== null && Number.isFinite(activityAt) && activityAt >= testStartedAt;
+  async function testConnection() {
+    setTestStartedAt(Date.now());
+    setTestOpenError(false);
+    if (!(await open(captureTestRunUrl()))) setTestOpenError(true);
+  }
   const display = device ? iosHealthDisplay(device, now) : null;
 
   return (
@@ -365,10 +380,10 @@ function Verify({
       <Card style={{ gap: space[3] }}>
         {working && display ? (
           <>
-            <Badge variant={display.variant}>{display.label}</Badge>
+            <Badge variant="positive">Connection test received</Badge>
             <Text variant="heading">OneLedger can receive from this iPhone</Text>
             <Text variant="label" color="textSecondary">
-              A connection test or message reached OneLedger. The next incoming MoMo message confirms that your Messages automation runs in the background.
+              OneLedger confirmed a successful test after you started it. This checks the connection only. A real incoming MoMo message is still needed to confirm background forwarding.
             </Text>
             <Text variant="label" color="textSecondary">
               {display.detail} {device?.lastUsedAtIso ? `(${formatDateTime(device.lastUsedAtIso)})` : ""}
@@ -381,19 +396,22 @@ function Verify({
           </>
         ) : (
           <>
-            <Badge variant="neutral">Waiting for the first message</Badge>
+            <Badge variant="neutral">{testStartedAt ? "Waiting for a fresh test" : "Connection not verified this visit"}</Badge>
             <Text>
-              Your next MoMo message will confirm the Messages automation. No payment is needed just to finish setup.
+              Run the connection test below. Previous activity does not verify this setup. No payment is needed for this test.
             </Text>
             <Text variant="label" color="textMuted">
-              This screen updates by itself. You can also leave: the
-              transaction will appear in OneLedger within a few minutes.
+              This screen updates when a fresh response arrives. If Shortcuts reports an error, the connection has not passed this test.
             </Text>
           </>
         )}
       </Card>
 
-      <Button label="Test connection without a payment" variant="secondary" fullWidth onPress={() => open(`shortcuts://run-shortcut?name=${encodeURIComponent(CAPTURE_SHORTCUT_NAME)}`)} />
+      <Button label="Test connection without a payment" variant="secondary" fullWidth onPress={() => void testConnection()} />
+      {testStartedAt && delivery?.rejection && Date.parse(delivery.rejection.created_at) >= testStartedAt && !working ? <Text accessibilityRole="alert" color="attention">The latest request was rejected ({delivery.rejection.reason_code ?? "unknown error"}). Update OneLedger Capture and retry. Pairing alone does not confirm recording.</Text> : null}
+      {testOpenError ? <Text accessibilityRole="alert" color="attention">Couldn’t open the test. Check that the current OneLedger Capture is installed.</Text> : null}
+      {testStartedAt && !working && now - testStartedAt > 60_000 ? <Text accessibilityRole="alert" color="attention">No fresh test response yet. Update OneLedger Capture and check the error shown in Shortcuts.</Text> : null}
+      <Button label="Review forwarding instructions" variant="ghost" onPress={onReview} />
       <Card style={{ gap: space[3] }}>
         <Button
           label={showHelp ? "Hide troubleshooting" : "It isn't working"}

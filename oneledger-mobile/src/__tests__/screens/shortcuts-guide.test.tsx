@@ -8,6 +8,7 @@ const mockListAccounts = jest.fn();
 const mockStartPairing = jest.fn();
 const mockPairingStatus = jest.fn();
 const mockDeviceStatus = jest.fn();
+const mockDeliveryStatus = jest.fn();
 const mockLoadId = jest.fn();
 const mockSaveId = jest.fn();
 const mockClearId = jest.fn();
@@ -35,6 +36,7 @@ jest.mock("@/features/pairing/pairing", () => ({
   startPairingSession: (account: unknown) => mockStartPairing(account),
   getPairingSessionStatus: (id: string) => mockPairingStatus(id),
   getDeviceStatus: (id: string) => mockDeviceStatus(id),
+  getShortcutDeliveryStatus: (id: string) => mockDeliveryStatus(id),
 }));
 jest.mock("@/features/ios-shortcuts/store", () => ({
   loadIosDeviceCredentialId: () => mockLoadId(),
@@ -54,12 +56,13 @@ const started = (over: Record<string, unknown> = {}) => ({
 beforeEach(() => {
   jest.useFakeTimers();
   resetRouterMock();
-  [mockListAccounts, mockStartPairing, mockPairingStatus, mockDeviceStatus, mockLoadId, mockSaveId, mockClearId].forEach((m) => m.mockReset());
+  [mockListAccounts, mockStartPairing, mockPairingStatus, mockDeviceStatus, mockDeliveryStatus, mockLoadId, mockSaveId, mockClearId].forEach((m) => m.mockReset());
   links.combined = "";
   links.connect = "https://www.icloud.com/shortcuts/connect";
   links.capture = "https://www.icloud.com/shortcuts/capture";
   mockListAccounts.mockResolvedValue({ ok: true, accounts: [account] });
   mockLoadId.mockResolvedValue(null);
+  mockDeliveryStatus.mockResolvedValue(null);
   jest.spyOn(Linking, "openURL").mockResolvedValue(true as never);
 });
 afterEach(() => {
@@ -222,7 +225,7 @@ describe("iPhone guide: forwarding and checking", () => {
     mockDeviceStatus.mockResolvedValue({ status: "active", createdAtIso: new Date().toISOString(), lastUsedAtIso: null });
     await toAutomateStep();
     await finishAutomation();
-    expect(await screen.findByText("Waiting for the first message")).toBeTruthy();
+    expect(await screen.findByText("Connection not verified this visit")).toBeTruthy();
   });
 
   it("confirms it is working once a message has come through", async () => {
@@ -233,7 +236,7 @@ describe("iPhone guide: forwarding and checking", () => {
     });
     await toAutomateStep();
     await finishAutomation();
-    expect(await screen.findByText("OneLedger can receive from this iPhone")).toBeTruthy();
+    expect(await screen.findByText("Connection not verified this visit")).toBeTruthy();
   });
 
   it("shows troubleshooting on request, and lets the person finish", async () => {
@@ -259,7 +262,7 @@ describe("iPhone guide: coming back later", () => {
       lastUsedAtIso: new Date().toISOString(),
     });
     await render(<ShortcutsGuide />);
-    expect(await screen.findByText("OneLedger can receive from this iPhone")).toBeTruthy();
+    expect(await screen.findByText("Connection not verified this visit")).toBeTruthy();
     expect(screen.queryByText("I've added them")).toBeNull();
   });
 
@@ -321,4 +324,21 @@ it("installs only the merged shortcut and runs that name for pairing", async () 
  await fireEvent.press(screen.getByText("I’ve added OneLedger Capture"));
  await fireEvent.press(await screen.findByRole("button",{name:"Connect this iPhone"}));
  expect(Linking.openURL).toHaveBeenLastCalledWith("shortcuts://run-shortcut?name=OneLedger%20Capture&input=text&text=olp_TESTTOKEN123");
+});
+
+it("requires a fresh successful test event, never stale activity or a rejection", async () => {
+ mockLoadId.mockResolvedValue("cred-9");
+ mockDeviceStatus.mockResolvedValue({status:"active",createdAtIso:new Date().toISOString(),lastUsedAtIso:new Date(Date.now()-86400000).toISOString()});
+ mockDeliveryStatus.mockResolvedValue({testAt:new Date(Date.now()-86400000).toISOString(),captureAt:null,rejection:null});
+ await render(<ShortcutsGuide/>);
+ await fireEvent.press(await screen.findByText("Test connection without a payment"));
+ expect(Linking.openURL).toHaveBeenLastCalledWith("shortcuts://run-shortcut?name=OneLedger%20Capture&input=text&text=oneledger%3Atest");
+ expect(screen.queryByText("Connection test received")).toBeNull();
+ mockDeliveryStatus.mockResolvedValue({testAt:null,captureAt:null,rejection:{created_at:new Date().toISOString(),reason_code:"INVALID_CAPTURE_PAYLOAD"}});
+ await tick(5100);
+ expect(await screen.findByText(/latest request was rejected/)).toBeTruthy();
+ expect(screen.queryByText("Connection test received")).toBeNull();
+ mockDeliveryStatus.mockResolvedValue({testAt:new Date().toISOString(),captureAt:null,rejection:null});
+ await tick(5100);
+ expect(await screen.findByText("Connection test received")).toBeTruthy();
 });

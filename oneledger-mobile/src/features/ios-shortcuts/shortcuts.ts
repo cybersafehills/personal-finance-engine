@@ -67,8 +67,12 @@ export function expiryLabel(expiresAtIso: string, nowMs: number): string {
 
 /** Compact iOS 27 reference. The visible guide selects the device's layout. */
 export const AUTOMATION_STEPS: string[] = [
-  "Open the installed OneLedger Capture shortcut. Tap Edit → Automation → Message.",
+  "Open Shortcuts → Automation. Add a Message trigger that runs OneLedger Capture with the received message as input.",
   "Change the left Sender label to Message and set contains RWF. Remove unfinished or duplicate conditions.",
   "Expand the trigger: Automation on, Confirm Before Run off.",
   "Allow Running When Locked in Edit → Info → Privacy. Return with the back arrow to save.",
 ];
+
+/** Explicit test input avoids treating an empty Text output as a message. */
+export const CAPTURE_TEST_INPUT = "oneledger:test";
+export const captureTestRunUrl = () => `shortcuts://run-shortcut?name=${encodeURIComponent(CAPTURE_SHORTCUT_NAME)}&input=text&text=${encodeURIComponent(CAPTURE_TEST_INPUT)}`;

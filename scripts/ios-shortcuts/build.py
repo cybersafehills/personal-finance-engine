@@ -62,12 +62,32 @@ def unified():
         action('notification','connect-first',WFNotificationActionBody='Open OneLedger and tap Connect this iPhone before testing this shortcut.'),
         end('has-config')]
     actions = pair[:fallback+1] + record + [end('has-token')]
+    # Use an explicit test command; empty Text content can still be a value in
+    # Shortcuts and must not be sent as an empty capture message.
+    test_start = next(i for i,a in enumerate(actions) if a['WFWorkflowActionParameters']['UUID']==uid('has-message-if'))
+    test_end = next(i for i,a in enumerate(actions) if a['WFWorkflowActionParameters']['UUID']==uid('has-message-end'))
+    old = actions[test_start:test_end+1]
+    match = action('text.match','message-nonblank',WFMatchTextPattern=r'\S',WFText=attachment(ref('pair-input')))
+    old[0]['WFWorkflowActionParameters']['WFInput']={'Type':'Variable','Variable':attachment(ref('message-nonblank','Matches'))}
+    # Only the explicit test command uses the no-ledger test path.
+    test_actions = [post('explicit-test-request',{'op':'test','client_version':'3.1.0'},ref('read-url','Dictionary Value'),{'x-device-key':ref('read-secret','Dictionary Value')}),
+        action('getvalueforkey','test-confirmed',WFInput=attachment(ref('explicit-test-request','Contents of URL')),WFDictionaryKey='test'),
+        if_value(ref('test-confirmed','Dictionary Value'),'test-ok'),
+        action('notification','test-ok-notice',WFNotificationActionBody='Connection test received by OneLedger. Return to the app. Incoming-message automation still needs a real message test.'),
+        otherwise('test-ok'),action('notification','test-error-notice',WFNotificationActionBody='Connection test failed. Return to OneLedger and update the shortcut or reconnect. This test has not passed.'),end('test-ok')]
+    command = if_value(ref('pair-input'),'test-command')
+    command['WFWorkflowActionParameters'].update(WFCondition=4,WFConditionalActionString='oneledger:test')
+    # Empty input reports how to run the explicit test instead of submitting capture.
+    message_if = old[0]
+    capture_request = old[1]
+    actions[test_start:test_end+1] = [command] + test_actions + [otherwise('test-command'),match,message_if,capture_request,otherwise('has-message'),action('notification','no-message',WFNotificationActionBody='No incoming message supplied. Use Test connection in OneLedger, or pass the incoming message to this shortcut.'),end('has-message'),end('test-command')]
+    actions.append(action('nothing','no-output'))
     result = workflow('OneLedger Capture', actions, 0x067A4DFF)
     for a in actions:
         params = a['WFWorkflowActionParameters']
         if 'WFJSONValues' in params:
             for field in params['WFJSONValues']['Value']['WFDictionaryFieldValueItems']:
-                if field['WFKey']['Value']['string']=='client_version': field['WFValue']=text('3.0.0')
+                if field['WFKey']['Value']['string']=='client_version': field['WFValue']=text('3.1.0')
     return result
 
 if __name__=='__main__':

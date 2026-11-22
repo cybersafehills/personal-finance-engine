@@ -1,3 +1,4 @@
+import { bearerGet } from "@/api/bearer";
 import * as Crypto from "expo-crypto";
 
 import { supabase } from "@/api/supabase";
@@ -179,4 +180,15 @@ export async function connectThisPhone(
   const started = await startPairingSession(account);
   if (!started.ok) return started;
   return pairDevice(started.token);
+}
+
+export type ShortcutDeliveryStatus = { testAt: string | null; captureAt: string | null; rejection: {created_at: string; reason_code: string | null} | null };
+/** Read redacted success events, rather than inferring success from last_used_at. */
+export async function getShortcutDeliveryStatus(id: string): Promise<ShortcutDeliveryStatus | null> {
+  const r = await bearerGet(`/api/mobile/shortcuts/status?device_id=${encodeURIComponent(id)}`);
+  if (r.kind !== "response" || r.status !== 200 || !r.body || typeof r.body !== "object") return null;
+  const b = r.body as Record<string, unknown>;
+  const date = (v: unknown) => typeof v === "string" && Number.isFinite(Date.parse(v)) ? v : null;
+  const rejected = b.rejection && typeof b.rejection === "object" ? b.rejection as Record<string, unknown> : null;
+  return {testAt:date(b.testAt),captureAt:date(b.captureAt),rejection:rejected && date(rejected.created_at) ? {created_at:date(rejected.created_at)!,reason_code:typeof rejected.reason_code === "string" ? rejected.reason_code : null} : null};
 }
