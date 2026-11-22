@@ -347,6 +347,7 @@ function Verify({
   const [delivery, setDelivery] = useState<ShortcutDeliveryStatus | null>(null);
   const [testStartedAt, setTestStartedAt] = useState<number | null>(null);
   const [testOpenError, setTestOpenError] = useState(false);
+  const [watchStartedAt] = useState(() => Date.now());
 
   useEffect(() => {
     if (!deviceCredentialId) return;
@@ -368,6 +369,8 @@ function Verify({
 
   const activityAt = delivery?.testAt ? Date.parse(delivery.testAt) : NaN;
   const working = device?.status === "active" && testStartedAt !== null && Number.isFinite(activityAt) && activityAt >= testStartedAt;
+  const captureAt = delivery?.captureAt ? Date.parse(delivery.captureAt) : NaN;
+  const messageReceived = device?.status === "active" && Number.isFinite(captureAt) && captureAt >= watchStartedAt;
   async function testConnection() {
     setTestStartedAt(Date.now());
     setTestOpenError(false);
@@ -411,6 +414,14 @@ function Verify({
       {testStartedAt && delivery?.rejection && Date.parse(delivery.rejection.created_at) >= testStartedAt && !working ? <Text accessibilityRole="alert" color="attention">The latest request was rejected ({delivery.rejection.reason_code ?? "unknown error"}). Update OneLedger Capture and retry. Pairing alone does not confirm recording.</Text> : null}
       {testOpenError ? <Text accessibilityRole="alert" color="attention">Couldn’t open the test. Check that the current OneLedger Capture is installed.</Text> : null}
       {testStartedAt && !working && now - testStartedAt > 60_000 ? <Text accessibilityRole="alert" color="attention">No fresh test response yet. Update OneLedger Capture and check the error shown in Shortcuts.</Text> : null}
+      <Card style={{ gap: space[3] }}>
+        <Badge variant={messageReceived ? "positive" : "neutral"}>{messageReceived ? "New message received" : "Waiting for an incoming message"}</Badge>
+        <Text variant="bodyStrong">{messageReceived ? "A message reached OneLedger" : "The Message automation still needs a real message"}</Text>
+        <Text color="textSecondary">{messageReceived
+          ? "OneLedger accepted a message from this iPhone while this check was open. Check Transactions for the processed entry. The connection test does not create a transaction."
+          : "Leave the automation on and wait for your next normal MoMo message. No extra payment is needed. If it arrives but this status stays unchanged, check the Sender warning and the Run action’s Input."}</Text>
+        {delivery?.captureAt ? <Text variant="caption" color="textMuted">Last message accepted on {formatDateTime(delivery.captureAt)}</Text> : null}
+      </Card>
       <Button label="Review forwarding instructions" variant="ghost" onPress={onReview} />
       <Card style={{ gap: space[3] }}>
         <Button

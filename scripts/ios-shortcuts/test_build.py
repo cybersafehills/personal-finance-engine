@@ -68,6 +68,18 @@ class UnifiedShortcutTests(unittest.TestCase):
         self.assertFalse(file['WFWorkflowActionParameters']['WFFileErrorIfNotFound'])
 
 class ExplicitConnectionTest(unittest.TestCase):
+    def test_capture_sends_original_message_never_configuration_or_prompt(self):
+        actions=unified()['WFWorkflowActions']
+        self.assertFalse(any(a['WFWorkflowActionIdentifier'].endswith('ask') for a in actions))
+        self.assertNotIn('AskEachTime', str(actions))
+        request=next(a['WFWorkflowActionParameters'] for a in actions if a['WFWorkflowActionParameters']['UUID']==uid('capture-request'))
+        fields=request['WFJSONValues']['Value']['WFDictionaryFieldValueItems']
+        message=next(f['WFValue'] for f in fields if f['WFKey']['Value']['string']=='message')
+        self.assertIn(uid('pair-input'), str(message))
+        self.assertNotIn(uid('read-config'), str(message))
+        self.assertNotIn(uid('config'), str(message))
+
+
     def test_explicit_test_and_no_implicit_output(self):
         actions=unified()['WFWorkflowActions']
         command=next(a['WFWorkflowActionParameters'] for a in actions if a['WFWorkflowActionParameters']['UUID']==uid('test-command-if'))

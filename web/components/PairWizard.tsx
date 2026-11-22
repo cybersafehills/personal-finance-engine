@@ -533,13 +533,17 @@ export function PairWizard({
           <div className="flex flex-col gap-4 text-sm text-text-secondary">
             <details open className="rounded-control border border-border-subtle bg-surface p-4">
               <summary className="font-medium text-text-primary">iOS 27 · Finish the Message automation</summary>
+              <p role="alert" className="mt-3 rounded-control border border-border-subtle bg-surface p-3 font-medium text-text-primary">If you see “Configure Sender”, stop here. That unfinished condition prevents automatic recording.</p>
               <ol className="mt-3 flex flex-col gap-3">
-                <li>1. Open <strong>Shortcuts → Automation</strong>. Continue your Message automation, or tap + and choose Message.</li>
-                <li>2. Change the left-hand <strong>Sender</strong> label to <strong>Message</strong>. Set <strong>contains RWF</strong>. Remove extra conditions; an unfinished Sender row prevents the trigger from running.</li>
-                <li>3. Below the trigger, add <strong>Run Shortcut → OneLedger Capture</strong>. Set Input to the received message / Shortcut Input. Do not type RWF as the action’s input.</li>
-                <li>4. Expand the trigger: <strong>Automation on</strong>, <strong>Confirm Before Run off</strong>. Save with the back arrow.</li>
-                <li>5. In the shortcut editor, the circled ⓘ at the bottom opens Info. If Privacy → Allow Running When Locked is offered, enable it; otherwise skip this optional setting. Return using the back arrow to save, then come back here.</li>
+                <li>1. Open <strong>Shortcuts → Automation</strong>. Open the new shortcut where you added <strong>Message contains RWF</strong>.</li>
+                <li>2. Fix <strong>Sender is Sender</strong>: tap the first Sender label. If it offers <strong>Message</strong>, use <strong>contains RWF</strong> and remove the extra Message row with <strong>−</strong>. Otherwise, select the sender of your actual MoMo message. Do not leave “Configure Sender” showing.</li>
+                <li>3. Tap the bottom <strong>Search</strong> field. Find <strong>Run Shortcut</strong> and add that action below the Message rule.</li>
+                <li>4. In the new <strong>Run</strong> box, tap the blue <strong>Shortcut</strong> name. Choose <strong>OneLedger Capture</strong> from the list. No website link is needed. Do not choose the separate shortcut called Run Shortcut.</li>
+                <li>5. Expand the <strong>&gt;</strong> arrow in the Run box. Set <strong>Input</strong> to the incoming <strong>Message / Shortcut Input</strong>. Tap or hold Input to choose a variable. Use the message’s <strong>Content / Text</strong> if details are offered.</li>
+                <li>6. Expand the Message rule. Keep <strong>Automation ON</strong> and <strong>Confirm Before Run OFF</strong>. Use the top-left <strong>back arrow</strong> to save.</li>
               </ol>
+              <p className="mt-3 rounded-control border border-border-subtle bg-surface p-3"><strong>Asked to type Text?</strong> Cancel. Remove <strong>Ask Each Time</strong> from the Run action’s Input and select the incoming message instead. Do not type RWF, a link, or connection details.</p>
+              <p className="mt-3 text-xs">If Info/Privacy offers Allow Running When Locked, enable it. If absent, skip that optional setting. Do not add a second Message trigger to Capture or make Capture run itself.</p>
             </details>
             <details className="rounded-control border border-border-subtle bg-surface p-4">
               <summary className="font-medium text-text-primary">iOS 17–26 · Automation tab</summary>

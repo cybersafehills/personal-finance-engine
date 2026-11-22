@@ -342,3 +342,16 @@ it("requires a fresh successful test event, never stale activity or a rejection"
  await tick(5100);
  expect(await screen.findByText("Connection test received")).toBeTruthy();
 });
+
+it("distinguishes connection tests and old captures from a newly accepted message", async () => {
+ mockLoadId.mockResolvedValue("cred-9");
+ mockDeviceStatus.mockResolvedValue({status:"active",createdAtIso:new Date().toISOString(),lastUsedAtIso:new Date().toISOString()});
+ mockDeliveryStatus.mockResolvedValue({testAt:new Date().toISOString(),captureAt:new Date(Date.now()-86400000).toISOString(),rejection:null});
+ await render(<ShortcutsGuide/>);
+ expect(await screen.findByText("Waiting for an incoming message")).toBeTruthy();
+ expect(screen.queryByText("New message received")).toBeNull();
+ mockDeliveryStatus.mockResolvedValue({testAt:new Date().toISOString(),captureAt:new Date(Date.now()+1000).toISOString(),rejection:null});
+ await tick(5100);
+ expect(await screen.findByText("New message received")).toBeTruthy();
+ expect(screen.queryByText("Connection test received")).toBeNull();
+});
