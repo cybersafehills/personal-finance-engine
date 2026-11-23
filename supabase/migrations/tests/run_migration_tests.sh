@@ -719,8 +719,8 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # Platform Console foundation (20270120000000) adds 3 RPC-only tables (RLS on, no
 # authenticated grants): console_staff, console_role_permissions,
 # console_audit_events. 140 + 3 = 143; 20270123000000 adds 5 more (tickets, ticket events,
-# incidents, incident events, approval requests) = 148.
-if [ "$TABLE_COUNT" = "148" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# incidents, incident events, approval requests) = 148; 20270124000000 adds 5 billing tables = 153.
+if [ "$TABLE_COUNT" = "153" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -1091,12 +1091,12 @@ AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_p
 # returns a boolean, takes only an id). 139 + 1 = 140.
 # Financial foundations (Codex, #294) add 10 authenticated-callable functions on
 # top of the Platform Console's 154 (140 + 14): 164.
-# Platform Console workflows (20270123000000) add 18 (support x7, incidents x5,
-# approvals x4, integrations/communications x2). 164 + 18 = 182.
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "182" ]; then
-  pass "authenticated holds EXECUTE on exactly the 182 functions expected, no more"
+# Platform Console workflows (20270123000000) add 18: 164 + 18 = 182.
+# Platform Console billing (20270124000000) adds 16: 182 + 16 = 198.
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "198" ]; then
+  pass "authenticated holds EXECUTE on exactly the 198 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 182 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 198 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -10090,6 +10090,105 @@ check_console "owner can read the communications overview" "$(console_call "$CON
 check_console "support agent cannot read communications" "$(console_call "$CON_SUPPORT" aal2 "select public.console_communications_overview();")" "not_authorized"
 IOUT="$(console_call "$CON_OWNER" aal2 "select public.console_integrations_overview();")"
 if printf '%s' "$IOUT" | grep -Eiq 'https?://|secret|token|endpoint'; then fail "Console: integrations overview leaked a URL or secret"; else pass "Console: integrations overview returns counts only"; fi
+
+# --- billing ledger (20270124000000) ---
+CON_FIN="$(psql -d pfe_rls -t -A -c "insert into auth.users (email) values ('console-fin@example.com') returning id;" | head -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "insert into public.console_staff (user_id, role) values ('$CON_FIN', 'finance_admin');" >/dev/null
+PLAN_OK="$(psql -d pfe_rls -t -A -c "select count(*) from public.billing_plans where yearly_rwf = monthly_rwf * 12;")"
+if [ "$PLAN_OK" = "3" ]; then pass "Console billing: all 3 plans have yearly = monthly x 12 (no annual discount)"; else fail "Console billing: plan price rule ($PLAN_OK)"; fi
+PRICES="$(psql -d pfe_rls -t -A -c "select string_agg(code || ':' || monthly_rwf || '/' || yearly_rwf, ',' order by monthly_rwf) from public.billing_plans;")"
+if [ "$PRICES" = "personal:2500/30000,vip:5000/60000,business:10000/120000" ]; then pass "Console billing: official prices are seeded exactly"; else fail "Console billing: prices wrong ($PRICES)"; fi
+check_console "a plan price cannot be changed (superuser)" "$(psql -d pfe_rls -t -A -c "update public.billing_plans set monthly_rwf = 1;" 2>&1)" "append-only"
+check_console "a discounted yearly price is rejected by constraint" "$(psql -d pfe_rls -t -A -c "insert into public.billing_plans (code, name, monthly_rwf, yearly_rwf) values ('personal', 'x', 100, 1000);" 2>&1)" "violates"
+
+check_console "owner can read the billing overview" "$(console_call "$CON_OWNER" aal2 "select public.console_billing_overview(30);")" "mrr_rwf"
+check_console "analyst can read the billing overview" "$(console_call "$USER_B" aal2 "select public.console_billing_overview(30);")" "mrr_rwf"
+check_console "support agent cannot read billing" "$(console_call "$CON_SUPPORT" aal2 "select public.console_billing_overview(30);")" "not_authorized"
+check_console "staff at aal1 cannot read billing" "$(console_call "$CON_OWNER" aal1 "select public.console_billing_overview(30);")" "mfa_required"
+check_console "analyst cannot create a subscription" "$(console_call "$USER_B" aal2 "select public.console_billing_create_subscription('$WORKSPACE_A', 'personal', 'monthly');")" "not_authorized"
+
+SUB="$(console_call "$CON_ADMIN" aal2 "select public.console_billing_create_subscription('$WORKSPACE_A', 'personal', 'monthly');" | uuid_of)"
+if [ -n "$SUB" ]; then pass "Console billing: admin can create a subscription"; else fail "Console billing: create subscription failed"; fi
+check_console "a second live subscription for the workspace is rejected" "$(console_call "$CON_ADMIN" aal2 "select public.console_billing_create_subscription('$WORKSPACE_A', 'vip', 'yearly');")" "already_subscribed"
+check_console "an unknown plan is rejected" "$(console_call "$CON_ADMIN" aal2 "select public.console_billing_create_subscription('$WORKSPACE_B', 'gold', 'monthly');")" "invalid_plan"
+check_console "an invalid interval is rejected" "$(console_call "$CON_ADMIN" aal2 "select public.console_billing_create_subscription('$WORKSPACE_B', 'personal', 'weekly');")" "violates check"
+check_console "a payment cannot be recorded with a short reference" "$(console_call "$CON_ADMIN" aal2 "select public.console_billing_record_payment('$SUB', 'mtn_momo', 'ab');")" "reference_required"
+PAY1="$(console_call "$CON_ADMIN" aal2 "select public.console_billing_record_payment('$SUB', 'mtn_momo', 'MTN-TEST-0001', 'succeeded');")"
+check_console "a succeeded payment is recorded" "$PAY1" "succeeded"
+S1="$(psql -d pfe_rls -t -A -c "select status || '|' || (current_period_end > now() + interval '27 days')::text from public.billing_subscriptions where id = '$SUB';")"
+if [ "$S1" = "active|true" ]; then pass "Console billing: settling activates the subscription for a month"; else fail "Console billing: activation wrong ($S1)"; fi
+AMT="$(psql -d pfe_rls -t -A -c "select amount_rwf from public.billing_payments where provider_reference = 'MTN-TEST-0001';")"
+if [ "$AMT" = "2500" ]; then pass "Console billing: amount is derived from the plan price, not supplied"; else fail "Console billing: amount wrong ($AMT)"; fi
+END1="$(psql -d pfe_rls -t -A -c "select current_period_end from public.billing_subscriptions where id = '$SUB';")"
+DUP="$(console_call "$CON_ADMIN" aal2 "select public.console_billing_record_payment('$SUB', 'mtn_momo', 'MTN-TEST-0001', 'succeeded');")"
+check_console "a repeated provider reference is reported as a duplicate" "$DUP" '"duplicate": true'
+END1B="$(psql -d pfe_rls -t -A -c "select current_period_end from public.billing_subscriptions where id = '$SUB';")"
+if [ "$END1" = "$END1B" ]; then pass "Console billing: a duplicate payment does not extend the period twice"; else fail "Console billing: duplicate extended the period"; fi
+CNT="$(psql -d pfe_rls -t -A -c "select count(*) from public.billing_payments where provider_reference = 'MTN-TEST-0001';")"
+if [ "$CNT" = "1" ]; then pass "Console billing: exactly one ledger row per provider reference"; else fail "Console billing: duplicate ledger rows ($CNT)"; fi
+SUB_B="$(console_call "$CON_ADMIN" aal2 "select public.console_billing_create_subscription('$WORKSPACE_B', 'business', 'yearly');" | uuid_of)"
+check_console "a reference already used by another subscription is rejected" "$(console_call "$CON_ADMIN" aal2 "select public.console_billing_record_payment('$SUB_B', 'mtn_momo', 'MTN-TEST-0001');")" "reference_in_use"
+check_console "analyst cannot record a payment" "$(console_call "$USER_B" aal2 "select public.console_billing_record_payment('$SUB', 'mtn_momo', 'MTN-TEST-0009');")" "not_authorized"
+PAY2="$(console_call "$CON_ADMIN" aal2 "select public.console_billing_record_payment('$SUB', 'airtel_money', 'AIR-TEST-0002', 'initiated');" | uuid_of)"
+S2="$(psql -d pfe_rls -t -A -c "select (current_period_end = '$END1'::timestamptz)::text from public.billing_subscriptions where id = '$SUB';")"
+if [ "$S2" = "true" ]; then pass "Console billing: an initiated payment does not extend the period (initiation is not settlement)"; else fail "Console billing: initiated payment extended the period"; fi
+check_console "settling an initiated payment succeeds" "$(console_call "$CON_ADMIN" aal2 "select public.console_billing_settle_payment('$PAY2', 'succeeded');")" "succeeded"
+S3="$(psql -d pfe_rls -t -A -c "select (current_period_end > '$END1'::timestamptz + interval '27 days')::text from public.billing_subscriptions where id = '$SUB';")"
+if [ "$S3" = "true" ]; then pass "Console billing: early renewal extends from the existing period end (no days lost)"; else fail "Console billing: renewal maths wrong"; fi
+check_console "settling twice is rejected" "$(console_call "$CON_ADMIN" aal2 "select public.console_billing_settle_payment('$PAY2', 'succeeded');")" "not_initiated"
+check_console "reconciliation exception needs a note" "$(console_call "$CON_ADMIN" aal2 "select public.console_billing_set_reconciliation('$PAY2', 'exception');")" "note_required"
+check_console_ok "a payment can be marked matched" "$(console_call "$CON_ADMIN" aal2 "select public.console_billing_set_reconciliation('$PAY2', 'matched');")"
+
+# Refunds (four-eyes)
+PAYID="$(psql -d pfe_rls -t -A -c "select id from public.billing_payments where provider_reference = 'MTN-TEST-0001';")"
+check_console "a refund above the payment is rejected" "$(console_call "$CON_ADMIN" aal2 "select public.console_billing_refund_request('$PAYID', 9999, 'customer overcharged badly');")" "refund_exceeds_payment"
+check_console "a short refund reason is rejected" "$(console_call "$CON_ADMIN" aal2 "select public.console_billing_refund_request('$PAYID', 1000, 'short');")" "reason_required"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "insert into public.billing_payments (subscription_id, workspace_id, amount_rwf, provider, provider_reference, status) select id, workspace_id, 2500, 'bank', 'BANK-INIT-1', 'initiated' from public.billing_subscriptions where id = '$SUB';" >/dev/null
+INIT_PAY="$(psql -d pfe_rls -t -A -c "select id from public.billing_payments where provider_reference = 'BANK-INIT-1';")"
+check_console "a refund cannot be requested for an unsettled payment" "$(console_call "$CON_ADMIN" aal2 "select public.console_billing_refund_request('$INIT_PAY', 100, 'trying an unsettled one');")" "payment_not_settled"
+RF="$(console_call "$CON_ADMIN" aal2 "select public.console_billing_refund_request('$PAYID', 1000, 'customer was charged twice by mistake');" | uuid_of)"
+if [ -n "$RF" ]; then pass "Console billing: a refund can be requested"; else fail "Console billing: refund request failed"; fi
+check_console "a second open refund for the payment is rejected" "$(console_call "$CON_ADMIN" aal2 "select public.console_billing_refund_request('$PAYID', 500, 'another attempt at refunding');")" "refund_already_open"
+check_console "the Platform Owner cannot approve refunds" "$(console_call "$CON_OWNER" aal2 "select public.console_billing_refund_decide('$RF', 'approve');")" "not_authorized"
+check_console "the requester (no approve_refunds) cannot approve" "$(console_call "$CON_ADMIN" aal2 "select public.console_billing_refund_decide('$RF', 'approve');")" "not_authorized"
+check_console "processing before approval is rejected" "$(console_call "$CON_FIN" aal2 "select public.console_billing_refund_process('$RF', 'MOMO-OUT-1');")" "not_approved"
+check_console "finance approves the refund" "$(console_call "$CON_FIN" aal2 "select public.console_billing_refund_decide('$RF', 'approve', 'verified');")" "approved"
+check_console "deciding twice is rejected" "$(console_call "$CON_FIN" aal2 "select public.console_billing_refund_decide('$RF', 'approve');")" "not_pending"
+check_console "processing needs a payout reference" "$(console_call "$CON_FIN" aal2 "select public.console_billing_refund_process('$RF', 'x');")" "reference_required"
+check_console "finance marks the refund processed" "$(console_call "$CON_FIN" aal2 "select public.console_billing_refund_process('$RF', 'MOMO-OUT-0001');")" "processed"
+check_console "processing again is idempotent" "$(console_call "$CON_FIN" aal2 "select public.console_billing_refund_process('$RF', 'MOMO-OUT-0001');")" "processed"
+check_console "refunds cannot exceed what remains on the payment" "$(console_call "$CON_ADMIN" aal2 "select public.console_billing_refund_request('$PAYID', 1600, 'asking for more than remains');")" "refund_exceeds_payment"
+RF2="$(console_call "$CON_FIN" aal2 "select public.console_billing_refund_request('$PAYID', 1500, 'refund the remainder of the payment');" | uuid_of)"
+check_console "a finance admin cannot approve their own refund request" "$(console_call "$CON_FIN" aal2 "select public.console_billing_refund_decide('$RF2', 'approve');")" "self_approval_forbidden"
+check_console "refund list shows viewer flags" "$(console_call "$CON_FIN" aal2 "select public.console_billing_refunds(null, 20);")" "viewer_can_decide"
+check_console "support agent cannot list refunds" "$(console_call "$CON_SUPPORT" aal2 "select public.console_billing_refunds();")" "not_authorized"
+
+# Cancellation + period roll
+check_console "cancelling needs a reason" "$(console_call "$CON_ADMIN" aal2 "select public.console_billing_cancel('$SUB', true, 'short');")" "reason_required"
+check_console "cancel at period end keeps the subscription active" "$(console_call "$CON_ADMIN" aal2 "select public.console_billing_cancel('$SUB', true, 'customer asked to stop renewing');")" "active"
+check_console "scheduling the same cancel twice is idempotent" "$(console_call "$CON_ADMIN" aal2 "select public.console_billing_cancel('$SUB', true, 'customer asked to stop renewing');")" "active"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "update public.billing_subscriptions set status = 'active', current_period_end = now() - interval '1 day' where id = '$SUB_B';" >/dev/null
+RP="$(console_call "$CON_ADMIN" aal2 "select public.console_billing_roll_periods();")"
+check_console "rolling periods moves a lapsed subscription to past_due" "$RP" '"past_due": 1'
+RP2="$(console_call "$CON_ADMIN" aal2 "select public.console_billing_roll_periods();")"
+check_console "rolling periods twice changes nothing the second time" "$RP2" '"past_due": 0'
+check_console "immediate cancel closes the subscription" "$(console_call "$CON_ADMIN" aal2 "select public.console_billing_cancel('$SUB', false, 'closing the account at customer request');")" "cancelled"
+check_console "a payment on a cancelled subscription is rejected" "$(console_call "$CON_ADMIN" aal2 "select public.console_billing_record_payment('$SUB', 'mtn_momo', 'MTN-TEST-0777');")" "subscription_closed"
+check_console "cancelling again is idempotent" "$(console_call "$CON_ADMIN" aal2 "select public.console_billing_cancel('$SUB', false, 'closing the account at customer request');")" "cancelled"
+
+# Lists, analytics, audit, lockdown
+check_console "subscriptions list works" "$(console_call "$CON_OWNER" aal2 "select public.console_billing_subscriptions('live', 10);")" "SUB-"
+check_console "payments list works" "$(console_call "$CON_OWNER" aal2 "select public.console_billing_payments(null, null, 10);")" "PAY-"
+check_console "subscription detail returns payments and events" "$(console_call "$CON_OWNER" aal2 "select public.console_billing_subscription_get('$SUB');")" "period_extended"
+check_console "analytics work" "$(console_call "$CON_OWNER" aal2 "select public.console_billing_analytics(12);")" "collected_by_month"
+check_console "workspace lookup returns references and types only" "$(console_call "$CON_ADMIN" aal2 "select public.console_billing_workspace_lookup('${WORKSPACE_A:0:8}');")" "has_live_subscription"
+BILL_AUD="$(psql -d pfe_rls -t -A -c "select count(distinct action) from public.console_audit_events where action like 'billing.%';")"
+if [ "$BILL_AUD" -ge 8 ]; then pass "Console billing: each billing command writes an audit entry ($BILL_AUD distinct actions)"; else fail "Console billing: audit coverage low ($BILL_AUD)"; fi
+check_console "authenticated cannot read payments directly" "$(console_call "$CON_FIN" aal2 "select count(*) from public.billing_payments;")" "permission denied"
+check_console "authenticated cannot insert a payment directly" "$(console_call "$CON_FIN" aal2 "insert into public.billing_payments (subscription_id, workspace_id, amount_rwf, provider, provider_reference, status) values ('$SUB', '$WORKSPACE_A', 1, 'manual', 'FORGED-1', 'succeeded');")" "permission denied"
+check_console "subscription history is append-only" "$(psql -d pfe_rls -t -A -c "delete from public.billing_subscription_events;" 2>&1)" "append-only"
+LEAK2="$(console_call "$CON_OWNER" aal2 "select public.console_billing_payments(null, null, 50);")"
+if printf '%s' "$LEAK2" | grep -Eiq 'a@example|b@example|"name"|email'; then fail "Console billing: payments list leaked a name or email"; else pass "Console billing: payments list shows no customer names or emails"; fi
 
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="

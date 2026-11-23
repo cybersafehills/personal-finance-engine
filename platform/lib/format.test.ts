@@ -29,3 +29,15 @@ test("humanizeAction tidies machine names", () => {
   assert.equal(humanizeAction("permission.denied"), "Permission denied");
   assert.equal(humanizeAction(""), "—");
 });
+
+import { formatRwf, ratePercent } from "./format.ts";
+test("formatRwf groups thousands and rounds to whole francs", () => {
+  assert.equal(formatRwf(2500), "RWF 2,500");
+  assert.equal(formatRwf(120000), "RWF 120,000");
+  assert.equal(formatRwf(833.4), "RWF 833");
+});
+test("ratePercent never turns 'no data' into 0%", () => {
+  assert.equal(ratePercent(0, 0), null);
+  assert.equal(ratePercent(3, 4), 75);
+  assert.equal(ratePercent(0, 5), 0);
+});

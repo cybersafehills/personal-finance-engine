@@ -34,10 +34,10 @@ export const NAV: NavGroup[] = [
   {
     label: "Revenue",
     items: [
-      { label: "Subscriptions", icon: "repeat" },
-      { label: "Billing & Payments", icon: "card" },
-      { label: "Revenue Analytics", icon: "trend" },
-      { label: "Refunds & Reconciliation", icon: "receipt" },
+      { label: "Subscriptions", icon: "repeat", href: "/revenue/subscriptions", permission: "view_financial_metrics", description: "Plans, periods and renewals" },
+      { label: "Billing & Payments", icon: "card", href: "/revenue/billing", permission: "view_financial_metrics", description: "Collections, payments and reconciliation" },
+      { label: "Revenue Analytics", icon: "trend", href: "/revenue/analytics", permission: "view_financial_metrics", description: "Collected revenue, mix and churn" },
+      { label: "Refunds & Reconciliation", icon: "receipt", href: "/revenue/refunds", permission: "view_financial_metrics", description: "Four-eyes refunds" },
     ],
   },
   {

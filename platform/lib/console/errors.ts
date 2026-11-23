@@ -25,6 +25,19 @@ const MESSAGES: Record<string, string> = {
   self_approval_forbidden: "You cannot approve a request you made. A different owner must decide it.",
   cannot_decide_own_access: "You cannot decide a request about your own access.",
   invalid_decision: "That decision is not valid.",
+  workspace_not_found: "No workspace matches that reference.",
+  invalid_plan: "That plan is not available.",
+  already_subscribed: "That workspace already has a live subscription.",
+  reference_required: "Enter the provider's reference (at least 3 characters).",
+  reference_in_use: "That provider reference is already recorded against a different subscription.",
+  subscription_closed: "That subscription is cancelled or expired, so it cannot take payments.",
+  invalid_outcome: "That outcome is not valid.",
+  not_initiated: "Only a payment that is still 'initiated' can be settled.",
+  invalid_state: "That state is not valid.",
+  refund_exceeds_payment: "The refund is more than what is left on that payment.",
+  refund_already_open: "That payment already has a refund waiting for a decision.",
+  payment_not_settled: "Only a settled (succeeded) payment can be refunded.",
+  not_approved: "The refund must be approved before it can be marked as paid out.",
 };
 
 export const FAILURE_REASONS: Record<string, string> = {
