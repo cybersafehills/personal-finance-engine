@@ -75,7 +75,9 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-        run: supabase db push
+        # --include-all: migrations from parallel PRs can merge in a different
+        # order than their versions; apply any that prod has not seen yet.
+        run: supabase db push --include-all
 
       - name: Deploy all Edge Functions
         env:
