@@ -72,3 +72,13 @@ export function formatDate(iso: string): string {
   if (Number.isNaN(d.getTime())) return "—";
   return new Intl.DateTimeFormat("en-GB", { timeZone: "Africa/Kigali", day: "2-digit", month: "short", year: "numeric" }).format(d);
 }
+
+/** "RWF 2,500". Whole francs only; RWF has no minor unit in use. */
+export function formatRwf(n: number): string {
+  return `RWF ${new Intl.NumberFormat("en-US").format(Math.round(n))}`;
+}
+
+/** Share as a whole percent, or null when the denominator is 0 (no data, not "0%"). */
+export function ratePercent(part: number, whole: number): number | null {
+  return whole > 0 ? Math.round((part / whole) * 100) : null;
+}

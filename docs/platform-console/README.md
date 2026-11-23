@@ -48,6 +48,12 @@ Write rules: one SECURITY DEFINER function per command, `console_assert` first, 
 
 **Finding F6 (not fixed here):** customers have table-level UPDATE on `profiles` with an own-row policy, and only `is_platform_admin` is guarded. `profiles.status` (`active`/`suspended`) is therefore customer-writable, so a customer-suspend action in the console would not be enforceable. Customer suspend/restore is deliberately not built until `status` is protected the same way.
 
+## 1c. Billing (2026-11-23)
+
+Design: [billing-design.md](billing-design.md). Migration `20270124000000` (5 tables, 16 functions; harness 153 tables / 198 authenticated functions, 1212 checks). Pages: `/revenue/subscriptions` (+ detail), `/revenue/billing`, `/revenue/analytics`, `/revenue/refunds`.
+
+A **staff-run ledger**: no provider is integrated, nothing moves money, and `workspace_plans` (entitlements) is never touched. Prices are fixed by a check constraint (yearly = monthly x 12, no discount); a payment's amount is derived from the plan, never supplied; payments are idempotent on `(provider, reference)`; initiation is separate from settlement; refunds are four-eyes (Finance Administrator only, never the requester, never the Platform Owner) with a payout reference, capped at the payment. MRR/ARR are labelled estimates, kept apart from collected cash.
+
 ## 2. Repository audit (Part III)
 
 | # | Question | Finding |
