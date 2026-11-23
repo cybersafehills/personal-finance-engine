@@ -37,7 +37,7 @@ export function GET(request: NextRequest) {
       // The subset that has a name or a number to group by. Only these can be sorted; the rest
       // (fees, imported rows with no counterparty) stay unresolved however often it is run.
       sortable_transactions: list.sortableTransactions,
-      counterparties: list.counterparties.map((c) => ({ ...c, kind: kindForMobile(c.kind) })),
+      counterparties: list.counterparties.map((c) => ({ ...c, kind: kindForMobile(c.kind, request.nextUrl.searchParams.get("contract") === "2" ? 2 : 1) })),
     };
   });
 }

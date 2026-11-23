@@ -181,6 +181,6 @@ export const SELF_EXPLANATION =
  * The mobile app only knows person / merchant / unknown. "My account" is a person
  * as far as it is concerned, until the app learns the new kind.
  */
-export function kindForMobile<T extends string | null>(kind: T): T | "person" {
-  return kind === "self" ? "person" : kind;
+export function kindForMobile<T extends string | null>(kind: T, version = 1): T | "person" {
+  return kind === "self" && version < 2 ? "person" : kind;
 }

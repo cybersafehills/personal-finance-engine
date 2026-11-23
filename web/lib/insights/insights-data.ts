@@ -1,3 +1,4 @@
+import { completePages } from "../../shared/financial";
 import "server-only";
 import { supabaseSession } from "../supabase-session-server";
 import { linkedTransferIdSet } from "../transfer-exclusion";
@@ -45,37 +46,31 @@ export async function fetchInsightFacts(
   to: string,
 ): Promise<{ facts: InsightFact[]; linked: Set<string>; truncated: boolean }> {
   const supabase = await supabaseSession();
-  const { data, error } = await supabase
-    .from("transactions")
-    .select(COLUMNS)
-    .eq("workspace_id", workspaceId)
-    .neq("dedupe_state", "merged")
-    .gte("occurred_at", from)
-    .lt("occurred_at", to)
-    .order("occurred_at", { ascending: false })
-    .order("id", { ascending: false })
-    .limit(MAX_FACT_ROWS + 1);
-  if (error) throw new Error(`fetchInsightFacts: ${error.message}`);
+  const data = await completePages<Row>(async (offset, size) => {
+    const { data, error } = await supabase.from("transactions").select(COLUMNS)
+      .eq("workspace_id", workspaceId).neq("dedupe_state", "merged")
+      .gte("occurred_at", from).lt("occurred_at", to).order("id")
+      .range(offset, offset + size - 1);
+    if (error) throw new Error(`fetchInsightFacts: ${error.message}`);
+    return data ?? [];
+  }, MAX_FACT_ROWS);
 
   const rows = (data ?? []) as Row[];
   const truncated = rows.length > MAX_FACT_ROWS;
   const kept = truncated ? rows.slice(0, MAX_FACT_ROWS) : rows;
 
-  const { data: links, error: linkError } = await supabase
-    .from("transfer_links")
-    .select("out_transaction_id, in_transaction_id")
-    .eq("workspace_id", workspaceId)
-    .eq("status", "linked");
-  if (linkError) throw new Error(`fetchInsightFacts links: ${linkError.message}`);
-
-  // Resolve merged counterparties to their survivors so a merge changes the
-  // grouping (and the displayed name), exactly as in the counterparty list.
-  const { data: cps, error: cpError } = await supabase
-    .from("counterparties")
-    .select("id, display_name, merged_into_id")
-    .eq("workspace_id", workspaceId)
-    .limit(10_000);
-  if (cpError) throw new Error(`fetchInsightFacts counterparties: ${cpError.message}`);
+  const links = await completePages<{ out_transaction_id: string; in_transaction_id: string }>(async (offset, size) => {
+    const { data, error } = await supabase.from("transfer_links").select("out_transaction_id,in_transaction_id")
+      .eq("workspace_id", workspaceId).eq("status", "linked").order("id").range(offset, offset + size - 1);
+    if (error) throw new Error("Insight transfer classification is unavailable.");
+    return data ?? [];
+  });
+  const cps = await completePages<CounterpartyRef>(async (offset, size) => {
+    const { data, error } = await supabase.from("counterparties").select("id,display_name,merged_into_id")
+      .eq("workspace_id", workspaceId).order("id").range(offset, offset + size - 1);
+    if (error) throw new Error("Insight people are unavailable.");
+    return data ?? [];
+  });
   const effective = buildEffectiveMap((cps ?? []) as CounterpartyRef[]);
 
   return {

@@ -1,5 +1,5 @@
 import { formatDateTime } from "@/lib/kigali-time";
-import { formatMoney } from "@/lib/money";
+import { formatAmount } from "../../../../web/shared/financial";
 
 import type { BalanceReason, BalanceStatus, Wallet } from "./types";
 
@@ -37,7 +37,7 @@ export const reasonText = (r: BalanceReason): string => REASON_TEXT[r];
 
 /** "RWF 78,900" or "No balance yet" - a number only when the status supports one. */
 export function balanceText(w: Wallet): string {
-  return w.balance.amountMinor === null ? "No balance yet" : formatMoney(w.balance.amountMinor, w.currency);
+  return w.balance.amountMinor === null ? "No balance yet" : formatAmount(w.balance.amountMinor, w.currency, false);
 }
 
 export function asOfText(w: Wallet): string | null {

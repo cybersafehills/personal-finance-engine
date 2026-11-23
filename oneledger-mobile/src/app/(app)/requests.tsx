@@ -1,6 +1,7 @@
 import { router } from "expo-router";
 import { useCallback } from "react";
-import { Pressable, View } from "react-native";
+import { View } from "react-native";
+import { PrivatePressable as Pressable } from "@/features/privacy/PrivatePressable";
 
 import { Badge, Button, Card, EmptyState, Screen, ScreenHeader, Text } from "@/components/ds";
 import { listRequests } from "@/features/requests/actions";

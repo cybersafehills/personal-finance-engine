@@ -1,5 +1,5 @@
 import { useFocusEffect } from "expo-router";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { AppState } from "react-native";
 import { useActiveSpace } from "@/features/spaces/ActiveSpaceProvider";
 import { subscribeRuntime } from "@/offline/runtime";
@@ -9,7 +9,16 @@ export type QueryState<T> = {
 };
 
 /** Keeps refresh results within their originating Space and ignores stale responses. */
-export function useQuery<T>(load: () => Promise<T>, options: { refreshIntervalMs?: number } = {}): QueryState<T> {
+export function useQuery<T>(rawLoad: () => Promise<T>, optionsOrKey: { refreshIntervalMs?: number } | string = {}): QueryState<T> {
+  // A string is a query key (used by screens that pass an inline loader): the loader is read through a
+  // ref so a new function each render does not refetch; a changed key does.
+  const queryKey = typeof optionsOrKey === "string" ? optionsOrKey : null;
+  const options = typeof optionsOrKey === "string" ? {} : optionsOrKey;
+  const loadRef = useRef(rawLoad);
+  useLayoutEffect(() => { loadRef.current = rawLoad; });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const keyedLoad = useCallback(() => loadRef.current(), [queryKey]);
+  const load = queryKey === null ? rawLoad : keyedLoad;
   const { activeId } = useActiveSpace();
   const [snapshot, setSnapshot] = useState<{ space: string | null; value: T } | null>(null);
   const [loading, setLoading] = useState(true);

@@ -1,3 +1,4 @@
+import { formatAmount } from "../shared/financial";
 import { formatRwf } from "../lib/format";
 import type { LifetimeFlowTotals } from "../lib/queries";
 
@@ -20,16 +21,18 @@ function formatDdMmYyyy(iso: string | null): string | null {
 function FlowChip({
   srLabel,
   amountRwf,
+  currency = "RWF",
   info,
 }: {
   srLabel: string;
   amountRwf: number;
+  currency?: string;
   info: string;
 }) {
   return (
     <details className="relative inline-block">
       <summary className="flex cursor-pointer list-none items-center gap-1 rounded-full bg-lifetime-badge-bg px-2 py-0.5 text-xs font-semibold text-lifetime-badge-text [&::-webkit-details-marker]:hidden">
-        <span className="tabular-nums">{formatRwf(amountRwf)}</span>
+        <span className="tabular-nums">{currency === "RWF" ? formatRwf(amountRwf) : formatAmount(amountRwf, currency, false)}</span>
         <span
           aria-hidden="true"
           className="grid h-3.5 w-3.5 place-items-center rounded-full border border-lifetime-badge-text/40 text-[0.6rem] font-bold leading-none"
@@ -55,16 +58,12 @@ export function LifetimeFlowBadge({ totals }: { totals: LifetimeFlowTotals }) {
 
   return (
     <div className="mb-3 flex flex-wrap items-center gap-2">
-      <FlowChip
-        srLabel="Total sent through OneLedger"
-        amountRwf={totals.sentRwf}
-        info={`Total money sent through OneLedger ${since}.`}
-      />
-      <FlowChip
-        srLabel="Total received through OneLedger"
-        amountRwf={totals.receivedRwf}
-        info={`Total money received through OneLedger ${since}.`}
-      />
+      {(totals.byCurrency ?? [{ currency: "RWF", sentMinor: totals.sentRwf, receivedMinor: totals.receivedRwf }]).map((flow) => (
+        <span key={flow.currency} className="inline-flex gap-2">
+          <FlowChip srLabel={`Total sent ${flow.currency}`} currency={flow.currency} amountRwf={flow.sentMinor} info={`Total money sent ${since}. Own-account movement excluded.`} />
+          <FlowChip srLabel={`Total received ${flow.currency}`} currency={flow.currency} amountRwf={flow.receivedMinor} info={`Total money received ${since}. Own-account movement excluded.`} />
+        </span>
+      ))}
     </div>
   );
 }

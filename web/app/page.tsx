@@ -191,8 +191,12 @@ export default async function HomePage() {
         aria-label="Today's activity"
         className={`grid grid-cols-2 gap-3 lg:col-start-1 ${mainColumnSpan}`}
       >
-        <SummaryMetric label="Received today" amountRwf={today.receivedRwf} />
-        <SummaryMetric label="Spent today" amountRwf={-today.spentRwf} />
+        {(today.byCurrency?.length ? today.byCurrency : [{ currency: "RWF", receivedMinor: 0, sentMinor: 0 }]).map((flow) => (
+          <div key={flow.currency} className="contents">
+            <SummaryMetric label="Received today" amountRwf={flow.receivedMinor} currency={flow.currency} />
+            <SummaryMetric label="Spent today" amountRwf={-flow.sentMinor} currency={flow.currency} />
+          </div>
+        ))}
       </section>
 
       {/* Both omitted entirely (not an empty-state box) when there's no

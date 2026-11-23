@@ -71,3 +71,8 @@ describe("parseBalanceInput", () => {
     for (const bad of ["", "abc", "-5", "1e3", "1.2.3"]) expect(parseBalanceInput(bad, 0)).toBeNull();
   });
 });
+
+it.each(["USD", "EUR"])("wallet amounts name %s explicitly", (currency) => {
+  const result = parseWalletsResponse(200, body([acct({ currency, balance: { status: "confirmed", amount_minor: "1234", as_of: "2026-11-18T12:00:00Z", basis: "provider_reported", reasons: [] } })]));
+  expect(result.ok && balanceText(result.wallets[0])).toBe(`${currency} 12.34`);
+});
