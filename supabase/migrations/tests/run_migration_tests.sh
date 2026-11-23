@@ -721,7 +721,8 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # console_audit_events. 140 + 3 = 143; 20270123000000 adds 5 more (tickets, ticket events,
 # incidents, incident events, approval requests) = 148; provider tariffs (20270124000000) add provider_tariffs and
 # provider_tariff_tiers (RLS enabled, SELECT-only for authenticated, verified rows only) = 150.
-if [ "$TABLE_COUNT" = "150" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# Payment splits (20270125000000) add payment_split_plans and pay_split_preferences (both RLS enabled) = 152.
+if [ "$TABLE_COUNT" = "152" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -872,10 +873,12 @@ AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from inform
 # payment_request_events and payment_requests_v (security_invoker). 172 + 3 = 175.
 # OneLedger 3.0 E4 (20261228000000): SELECT on counterparty_split_events. 175 + 1 = 176.
 # Provider tariffs (20270124000000): SELECT on provider_tariffs and provider_tariff_tiers. 177 + 2 = 179.
-if [ "$AUTHENTICATED_GRANT_COUNT" = "179" ]; then
-  pass "authenticated holds exactly the 179 table grants expected, no more"
+# Payment splits (20270125000000): SELECT on payment_split_plans; SELECT, INSERT, UPDATE on
+# pay_split_preferences (own row only, by RLS). 179 + 4 = 183.
+if [ "$AUTHENTICATED_GRANT_COUNT" = "183" ]; then
+  pass "authenticated holds exactly the 183 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 179 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 183 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -1095,10 +1098,12 @@ AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_p
 # top of the Platform Console's 154 (140 + 14): 164.
 # Platform Console workflows (20270123000000) add 18 (support x7, incidents x5,
 # approvals x4, integrations/communications x2). 164 + 18 = 182.
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "182" ]; then
-  pass "authenticated holds EXECUTE on exactly the 182 functions expected, no more"
+# Payment splits (20270125000000): create_payment_split_plan,
+# attach_intent_to_split_plan, stop_payment_split_plan (member-checked). 182 + 3 = 185.
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "185" ]; then
+  pass "authenticated holds EXECUTE on exactly the 185 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 182 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 185 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -10197,6 +10202,88 @@ fi
 psql -d pfe_rls -v ON_ERROR_STOP=1 -c "delete from public.provider_tariffs where service_provider_id = '$PT_PROV'; delete from public.service_providers where id = '$PT_PROV';" >/dev/null && pass "provider tariffs: deleting a verified tariff cascades its tiers" || fail "provider tariffs: cleanup failed"
 
 echo ""
+# ===========================================================================
+# Payment splits (20270125000000_payment_split_plans). A capacity plan is only
+# accepted for an amount OVER the network's published capacity (eKash RWF
+# 10,000,000) with every part within it; parts must add up; parts are attached
+# one at a time, the next only after the previous is settled; a stopped plan
+# accepts nothing; workspaces are isolated. Uses USER_A / USER_B / WORKSPACE_A.
+# ===========================================================================
+echo "=== Payment splits ==="
+
+PS_PLAN() { # $1 key, $2 total, $3 parts json
+  echo "{\"workspace_id\":\"$WORKSPACE_A\",\"idempotency_key\":\"$1\",\"kind\":\"capacity\",\"network_slug\":\"ekash\",\"payment_type\":\"pay_person\",\"total_amount_minor\":$2,\"planned_parts\":$3,\"planned_fee_minor\":60,\"fee_basis\":\"published_maximum\"}"
+}
+ps_refused() { # label regex user sql
+  if as_user "$3" "$4" >/dev/null 2>$ARTIFACT_DIR/pfe_ps.log; then
+    fail "payment splits: $1 was accepted"
+  elif grep -qE "$2" $ARTIFACT_DIR/pfe_ps.log; then
+    pass "payment splits: $1 is refused"
+  else
+    fail "payment splits: $1 refused with an unexpected error: $(cat $ARTIFACT_DIR/pfe_ps.log)"
+  fi
+  rm -f $ARTIFACT_DIR/pfe_ps.log
+}
+
+PS_R1="$(as_user "$USER_A" "select public.create_payment_split_plan('$(PS_PLAN ps-1 25000000 '["10000000","10000000","5000000"]')'::jsonb);")"
+PS_ID="$(psql -d pfe_rls -t -A -c "select id from public.payment_split_plans where workspace_id = '$WORKSPACE_A' and idempotency_key = 'ps-1';")"
+if [ -n "$PS_ID" ]; then
+  pass "payment splits: a capacity plan for 25,000,000 in three parts within capacity is accepted"
+else
+  fail "payment splits: valid capacity plan was not created ($PS_R1)"
+fi
+PS_R2="$(as_user "$USER_A" "select public.create_payment_split_plan('$(PS_PLAN ps-1 25000000 '["10000000","10000000","5000000"]')'::jsonb);")"
+PS_N="$(psql -d pfe_rls -t -A -c "select count(*) from public.payment_split_plans where workspace_id = '$WORKSPACE_A' and idempotency_key = 'ps-1';")"
+if [ "$PS_N" = "1" ] && echo "$PS_R2" | grep -q '"existed": true'; then
+  pass "payment splits: create_payment_split_plan is idempotent on the key"
+else
+  fail "payment splits: idempotency failed (rows=$PS_N r2=$PS_R2)"
+fi
+
+ps_refused "an amount that does NOT exceed capacity (10,000,000 exactly)" "not_over_capacity" "$USER_A" "select public.create_payment_split_plan('$(PS_PLAN ps-2 10000000 '["5000000","5000000"]')'::jsonb);"
+ps_refused "a part above capacity" "part_over_capacity" "$USER_A" "select public.create_payment_split_plan('$(PS_PLAN ps-3 25000000 '["12000000","8000000","5000000"]')'::jsonb);"
+ps_refused "parts that do not add up to the total" "parts_do_not_sum" "$USER_A" "select public.create_payment_split_plan('$(PS_PLAN ps-4 25000000 '["10000000","10000000","4000000"]')'::jsonb);"
+ps_refused "a single part" "invalid_parts" "$USER_A" "select public.create_payment_split_plan('$(PS_PLAN ps-5 25000000 '["25000000"]')'::jsonb);"
+ps_refused "a plan in another user's workspace" "not_authorized" "$USER_B" "select public.create_payment_split_plan('$(PS_PLAN ps-6 25000000 '["10000000","10000000","5000000"]')'::jsonb);"
+ps_refused "a fee-saving plan without a verified tariff" "fee_saving_needs_verified_tariff" "$USER_A" "select public.create_payment_split_plan('{\"workspace_id\":\"$WORKSPACE_A\",\"kind\":\"fee_saving\",\"payment_type\":\"pay_person\",\"total_amount_minor\":151000,\"planned_parts\":[\"150000\",\"1000\"],\"fee_basis\":\"none\"}'::jsonb);"
+
+PS_B_SEES="$(as_user "$USER_B" "select count(*) from public.payment_split_plans where id = '$PS_ID';")"
+if [ "$PS_B_SEES" = "0" ]; then
+  pass "payment splits: another workspace's member cannot read the plan (RLS)"
+else
+  fail "payment splits: plan visible across workspaces ($PS_B_SEES)"
+fi
+
+PS_MK_INTENT() { # $1 key, $2 amount
+  as_user "$USER_A" "select public.create_payment_intent('{\"workspace_id\":\"$WORKSPACE_A\",\"idempotency_key\":\"$1\",\"payment_type\":\"pay_person\",\"amount_minor\":$2,\"recipient_kind\":\"phone\",\"recipient_msisdn_normalized\":\"250781234567\"}'::jsonb);" >/dev/null
+  psql -d pfe_rls -t -A -c "select id from public.payment_intents where workspace_id = '$WORKSPACE_A' and idempotency_key = '$1';"
+}
+PS_I1="$(PS_MK_INTENT ps-i1 10000000)"
+PS_I2="$(PS_MK_INTENT ps-i2 10000000)"
+PS_IBAD="$(PS_MK_INTENT ps-ibad 9999999)"
+
+ps_refused "attaching a part whose amount is not the planned amount" "amount_mismatch" "$USER_A" "select public.attach_intent_to_split_plan('$PS_ID', '$PS_IBAD', 1);"
+as_user "$USER_A" "select public.attach_intent_to_split_plan('$PS_ID', '$PS_I1', 1);" >/dev/null && pass "payment splits: part 1 attaches" || fail "payment splits: part 1 did not attach"
+ps_refused "attaching part 2 before part 1 is settled" "previous_part_not_settled" "$USER_A" "select public.attach_intent_to_split_plan('$PS_ID', '$PS_I2', 2);"
+
+as_user "$USER_A" "select public.transition_payment_intent('$PS_I1', 'initiated', null, '{}'::jsonb);" >/dev/null
+as_user "$USER_A" "select public.transition_payment_intent('$PS_I1', 'awaiting_verification', null, '{}'::jsonb);" >/dev/null
+as_user "$USER_A" "select public.manually_confirm_payment('$PS_I1', 'done');" >/dev/null
+as_user "$USER_A" "select public.attach_intent_to_split_plan('$PS_ID', '$PS_I2', 2);" >/dev/null && pass "payment splits: part 2 attaches once part 1 is successful" || fail "payment splits: part 2 did not attach after part 1 settled"
+
+PS_STOP="$(as_user "$USER_A" "select public.stop_payment_split_plan('$PS_ID');")"
+PS_STOPPED="$(psql -d pfe_rls -t -A -c "select (stopped_at is not null)::text from public.payment_split_plans where id = '$PS_ID';")"
+PS_I2_STATE="$(psql -d pfe_rls -t -A -c "select state from public.payment_intents where id = '$PS_I2';")"
+PS_I1_STATE="$(psql -d pfe_rls -t -A -c "select state from public.payment_intents where id = '$PS_I1';")"
+if [ "$PS_STOPPED" = "true" ] && [ "$PS_I2_STATE" = "cancelled" ] && [ "$PS_I1_STATE" = "successful" ]; then
+  pass "payment splits: stopping cancels unsent draft parts and leaves a settled part alone"
+else
+  fail "payment splits: stop misbehaved (stopped=$PS_STOPPED part1=$PS_I1_STATE part2=$PS_I2_STATE out=$PS_STOP)"
+fi
+PS_I3="$(PS_MK_INTENT ps-i3 5000000)"
+ps_refused "attaching a part to a stopped plan" "plan_stopped" "$USER_A" "select public.attach_intent_to_split_plan('$PS_ID', '$PS_I3', 3);"
+
+
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="
 if [ "$FAIL_COUNT" -ne 0 ]; then
   exit 1

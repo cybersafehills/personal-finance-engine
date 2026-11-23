@@ -20,7 +20,7 @@ import {
 } from "./fee-estimate.ts";
 
 export const FEE_DISCLAIMER =
-  "These are estimates, not guarantees. Fees are set by your provider and can change; check with them before you pay. OneLedger does not charge this fee, does not move money, and will not suggest splitting a payment to get around a limit.";
+  "These are estimates, not guarantees. Fees are set by your provider and can change; check with them before you pay. OneLedger does not charge this fee and does not move money.";
 
 export type PublishedSection = {
   network: { slug: string; name: string };

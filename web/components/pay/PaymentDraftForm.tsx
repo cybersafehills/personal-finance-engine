@@ -1,8 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createDraftIntent } from "../../app/pay/assisted-actions";
+import { getSplitOfferAction, startSplitAction } from "../../app/pay/splits/actions";
+import { SplitOfferCard } from "./SplitOfferCard";
+import type { SplitOffer } from "../../lib/pay/splits/offer";
+import { fill, formatRwf } from "../../lib/pay/splits/format";
 import { messages } from "../../lib/ussd/messages";
 import {
   guessProvider,
@@ -11,6 +16,7 @@ import {
 } from "../../lib/pay/phone";
 
 const t = messages().pay.assisted;
+const ts = messages().pay.splits;
 
 type PaymentType =
   | "pay_person"
@@ -49,8 +55,14 @@ export function PaymentDraftForm({
   trustedRecipients,
   recentRecipients,
   defaults,
+  splitsEnabled = false,
+  ekashCapacityMinor = null,
 }: {
   type: PaymentType;
+  /** PAY_SPLITS_ENABLED for this workspace. Off: the form is exactly as before. */
+  splitsEnabled?: boolean;
+  /** eKash per-transaction capacity (minor units, digits) for the hint, when known. */
+  ekashCapacityMinor?: string | null;
   accounts: Account[];
   budgets: Budget[];
   trustedRecipients: TrustedRecipient[];
@@ -85,6 +97,11 @@ export function PaymentDraftForm({
   const [note, setNote] = useState("");
   const [category, setCategory] = useState("");
   const [budgetId, setBudgetId] = useState(defaults.budgetId ?? "");
+  // Splits: whether the user chose to pay over eKash, and the server's offer.
+  const [overEkash, setOverEkash] = useState(false);
+  const [offerFor, setOfferFor] = useState<{ key: string; offer: SplitOffer | null } | null>(null);
+  const [splitPending, setSplitPending] = useState(false);
+  const splitCapable = splitsEnabled && (type === "pay_person" || type === "pay_merchant");
 
   const selectedRecipient = trustedRecipients.find((r) => r.id === recipientId);
   const effectiveMsisdn = selectedRecipient?.normalized_msisdn ?? msisdn;
@@ -99,21 +116,44 @@ export function PaymentDraftForm({
   const providerGuess =
     guessProvider(norm.normalized) ?? providerNetworkForAccount(account?.provider);
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (pending) return;
-    setError(null);
-
+  function parsedAmountMinor(): number | null {
     const amountNumber = Number(amount.replace(/[,\s]/g, ""));
-    if (!Number.isFinite(amountNumber) || amountNumber <= 0) {
-      setError("Enter an amount greater than zero.");
-      return;
-    }
+    if (!Number.isFinite(amountNumber) || amountNumber <= 0) return null;
     // RWF is a zero-decimal currency in this app (lib/money.ts).
-    const amountMinor = currency === "RWF" ? Math.round(amountNumber) : Math.round(amountNumber * 100);
+    return currency === "RWF" ? Math.round(amountNumber) : Math.round(amountNumber * 100);
+  }
 
-    setPending(true);
-    const res = await createDraftIntent({
+  // Ask the server whether this amount should be offered as parts. Debounced; an
+  // answer is shown only while it still matches what is on screen. The server
+  // decides; nothing is computed here.
+  const offerMinor = splitCapable && currency === "RWF" ? parsedAmountMinor() : null;
+  const offerKey = offerMinor !== null && Number.isSafeInteger(offerMinor)
+    ? JSON.stringify([type, overEkash, accountId, effectiveMsisdn, offerMinor])
+    : null;
+  const offer = offerKey !== null && offerFor?.key === offerKey ? offerFor.offer : null;
+
+  useEffect(() => {
+    if (offerKey === null || offerMinor === null) return;
+    let cancelled = false;
+    const handle = setTimeout(async () => {
+      const res = await getSplitOfferAction({
+        paymentType: type,
+        networkSlug: overEkash ? "ekash" : null,
+        sourceAccountId: accountId || undefined,
+        recipientMsisdn: NEEDS_MSISDN.includes(type) ? effectiveMsisdn.trim() || undefined : undefined,
+        amountMinor: offerMinor,
+      });
+      if (!cancelled) setOfferFor({ key: offerKey, offer: res.ok ? res.offer : null });
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [offerKey]);
+
+  function buildDraft(amountMinor: number) {
+    return {
       paymentType: type,
       sourceAccountId: accountId || undefined,
       provider: providerGuess ?? undefined,
@@ -138,7 +178,22 @@ export function PaymentDraftForm({
       budgetId: budgetId || undefined,
       trustedRecipientId: recipientId || undefined,
       idempotencyKey,
-    });
+    };
+  }
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (pending) return;
+    setError(null);
+
+    const amountMinor = parsedAmountMinor();
+    if (amountMinor === null) {
+      setError("Enter an amount greater than zero.");
+      return;
+    }
+
+    setPending(true);
+    const res = await createDraftIntent(buildDraft(amountMinor));
     setPending(false);
 
     if (!res.ok) {
@@ -146,6 +201,30 @@ export function PaymentDraftForm({
       return;
     }
     router.push(`/pay/${res.id}`);
+    router.refresh();
+  }
+
+  // Take the split the server offered. The server recomputes the parts from the
+  // amount, so what is stored is never what the browser displayed.
+  async function onStartSplit() {
+    if (splitPending || pending) return;
+    setError(null);
+    const amountMinor = parsedAmountMinor();
+    if (amountMinor === null) {
+      setError("Enter an amount greater than zero.");
+      return;
+    }
+    setSplitPending(true);
+    const res = await startSplitAction({
+      ...buildDraft(amountMinor),
+      networkSlug: overEkash ? "ekash" : null,
+    });
+    setSplitPending(false);
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    router.push(`/pay/${res.intentId}`);
     router.refresh();
   }
 
@@ -237,6 +316,23 @@ export function PaymentDraftForm({
         </fieldset>
       )}
 
+      {splitCapable && (
+        <label className="flex items-start gap-2 text-sm text-text-secondary">
+          <input
+            type="checkbox"
+            checked={overEkash}
+            onChange={(e) => setOverEkash(e.target.checked)}
+            className="mt-0.5"
+          />
+          <span>
+            <span className="font-medium text-text-primary">{ts.ekashChoice}</span>
+            <span className="block text-xs">
+              {fill(ts.ekashHint, { capacity: formatRwf(ekashCapacityMinor ?? "10000000") })}
+            </span>
+          </span>
+        </label>
+      )}
+
       {NEEDS_METER.includes(type) && (
         <label>
           <span className={labelText}>Meter number</span>
@@ -316,6 +412,17 @@ export function PaymentDraftForm({
           </label>
         )}
       </div>
+
+      {splitCapable && offer && (
+        <SplitOfferCard offer={offer} pending={splitPending} onAccept={onStartSplit} />
+      )}
+      {splitCapable && (
+        <p className="text-xs text-text-muted">
+          <Link href="/pay/splits" className="underline">
+            {messages().pay.splits.settings.title}
+          </Link>
+        </p>
+      )}
 
       <div className="rounded-control bg-background px-3 py-2.5 text-xs text-text-secondary">
         {t.handoffNotice}

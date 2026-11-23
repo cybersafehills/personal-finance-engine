@@ -166,6 +166,63 @@ const en = {
     disabledTitle: "Pay & Services isn't available",
     disabledBody:
       "This feature is turned off for your account right now. Check back later.",
+    splits: {
+      // {placeholders} are filled by lib/pay/splits/format.ts
+      capacityTitle: "Above the eKash limit for one transfer",
+      capacityBody:
+        "eKash sends up to {capacity} RWF at a time. {total} RWF can go as {n} transfers, one after another.",
+      capacityFee:
+        "Fees: up to {fee} RWF in total ({perPart} RWF at most per transfer). Your bank or wallet sets the final charge.",
+      limitsNote:
+        "Your bank or wallet may have lower limits of its own. Check before you send.",
+      savingTitle: "Lower fees available",
+      savingBody:
+        "{total} RWF costs {single} RWF in fees as one transfer, and {planned} RWF as {n} parts. That saves {savings} RWF.",
+      source: "Fee source",
+      verifiedOn: "verified {date}",
+      partRow: "Part {i} · {amount} RWF",
+      accept: "Split into {n} parts",
+      working: "Preparing…",
+      keepOne: "Send as one transfer instead",
+      howItWorks:
+        "OneLedger never moves money. You send each part yourself, one at a time, and confirm each before the next.",
+      ekashChoice: "Send over eKash",
+      ekashHint:
+        "Up to {capacity} RWF goes as one transfer. Above that, the amount is offered as parts.",
+      plan: {
+        title: "Sending in {n} parts",
+        subtitleCapacity: "This amount is above the network's limit for one transfer.",
+        subtitleSaving: "Sending in parts costs less in fees.",
+        partRow: "Part {i} · {amount} RWF",
+        thisPart: "This payment",
+        prepareNext: "Prepare part {i}",
+        waiting: "Confirm that part {i} went through to continue.",
+        blocked: "The last part didn't go through. Stop here, or check with your provider.",
+        complete: "Every part is prepared.",
+        stopped: "This split was stopped.",
+        stop: "Stop here",
+        sendRemaining: "Send remaining {amount} RWF as one transfer",
+        remaining: "Not yet prepared: {amount} RWF",
+        feesNote: "Fees shown are estimates, not guarantees.",
+      },
+      settings: {
+        title: "Splits",
+        enable: "Suggest cheaper splits",
+        explain:
+          "Some amounts cost less in fees when sent in two or more parts. OneLedger works out the parts and you send them one by one. It applies to transfers from MTN to MTN, and only when a verified fee table is available.",
+        question: "When should OneLedger suggest splitting?",
+        any: "Any savings",
+        anyHint: "Even a small saving is enough.",
+        balanced: "Balanced",
+        balancedHint: "Save at least 50 RWF per extra transfer.",
+        recommended: "Recommended",
+        bigger: "Bigger savings",
+        biggerHint: "Save at least 250 RWF per extra transfer.",
+        ekashNote:
+          "An amount above the eKash limit for one transfer is always offered as parts. That does not depend on this setting.",
+        saved: "Saved",
+      },
+    },
     assisted: {
       newTitle: {
         pay_person: "Pay a person",

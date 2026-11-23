@@ -112,6 +112,23 @@ export function isTrustedRecipientsEnabled(workspaceId: string | null): boolean 
   );
 }
 
+// Payment splits (a payment sent as several transfers). OPT-IN like scan-to-pay:
+// off unless PAY_SPLITS_ENABLED is exactly "true". It needs the assisted-pay
+// surface because every part is an ordinary draft payment intent.
+export function isPaySplitsEnabled(workspaceId: string | null): boolean {
+  return (
+    isAssistedPayEnabled(workspaceId) &&
+    process.env.PAY_SPLITS_ENABLED === "true" &&
+    workspaceAllowed(workspaceId)
+  );
+}
+
+export function assertPaySplitsEnabled(workspaceId: string | null): void {
+  if (!isPaySplitsEnabled(workspaceId)) {
+    throw new FeatureDisabledError("pay_splits");
+  }
+}
+
 // SMS-to-intent reconciliation (Phase 2b). OPT-IN: unlike every other
 // Pay flag (on unless "false"), this is off unless explicitly "true" —
 // it's a new, ledger-adjacent capability that ships behind an accuracy

@@ -302,11 +302,9 @@ Deno.test("result: an amount above the published maximum warns and offers nothin
     now: NOW,
   });
   assertEquals(r.published?.warnings.map((w) => w.kind), ["above_maximum"]);
-  assertEquals(JSON.stringify(serializeFeeResult(r)).includes("split"), true); // only inside the disclaimer
-  assertEquals(
-    JSON.stringify({ ...serializeFeeResult(r), disclaimer: "" }).includes("split"),
-    false,
-  );
+  // The calculator itself never proposes a split. Splits are offered in Pay
+  // (lib/pay/splits), for an amount above a network's per-transaction capacity.
+  assertEquals(JSON.stringify(serializeFeeResult(r)).includes("split"), false);
 });
 
 import { estimateFromTariff, type ProviderTariff, type TariffTier } from "./fee-estimate.ts";
