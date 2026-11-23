@@ -25,6 +25,12 @@ const MESSAGES: Record<string, string> = {
   self_approval_forbidden: "You cannot approve a request you made. A different owner must decide it.",
   cannot_decide_own_access: "You cannot decide a request about your own access.",
   invalid_decision: "That decision is not valid.",
+  invalid_end_date: "The end date must be today or later.",
+  financial_pairing: "A financial provider must submit a Banking offer, and Banking offers must come from a financial provider.",
+  advertiser_kind_mismatch: "That advertiser already exists with a different type.",
+  offer_expired: "This offer has passed its end date.",
+  offer_not_approved: "Only approved offers can be chosen for a placement.",
+  invalid_setting: "One of the placement settings is not valid.",
 };
 
 export const FAILURE_REASONS: Record<string, string> = {

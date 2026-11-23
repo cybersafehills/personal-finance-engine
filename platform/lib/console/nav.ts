@@ -55,6 +55,7 @@ export const NAV: NavGroup[] = [
       { label: "System Health", icon: "heart", href: "/platform/health", permission: "view_system_health", description: "Pipeline and job health" },
       { label: "Integrations", icon: "plug", href: "/platform/integrations", permission: "view_integrations", description: "Connection and sync status" },
       { label: "Communications", icon: "mail", href: "/platform/communications", permission: "view_system_health", description: "Notification and email delivery" },
+      { label: "Partners & Placements", icon: "gift", href: "/platform/partners", permission: "view_partners", description: "Sponsored offers, review and where they appear" },
       { label: "Feature Management", icon: "flag" },
       { label: "Configuration", icon: "sliders" },
     ],
