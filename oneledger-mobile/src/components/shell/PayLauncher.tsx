@@ -3,7 +3,7 @@ import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import * as Linking from "expo-linking";
 import { router } from "expo-router";
 import { useState, type ReactNode } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { Platform, Pressable, StyleSheet, View } from "react-native";
 import Animated, { Easing, FadeOut, Keyframe, ReduceMotion } from "react-native-reanimated";
 
 import { Button, PressableScale, Text } from "@/components/ds";
@@ -356,7 +356,8 @@ const useStyles = makeStyles((colors) => StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: space[2],
-    minHeight: 48,
+    // Android sizes a two-line label ("Government services") as one line, so the tile needs room for two.
+    minHeight: Platform.OS === "android" ? 60 : 48,
     paddingHorizontal: space[3],
     paddingVertical: space[2],
     borderRadius: radii.control,
