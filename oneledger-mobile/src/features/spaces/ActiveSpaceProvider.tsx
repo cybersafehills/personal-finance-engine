@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -13,6 +14,7 @@ import { deviceStore } from "@/lib/device-store";
 
 import { getSpaces } from "./queries";
 import { setRequestedWorkspace } from "./request-space";
+import { selectWorkspace } from "./selected-space";
 import { isSpaceKind, requestedWorkspaceId, resolveActiveSpace, storageKey, type Space } from "./spaces";
 
 type ActiveSpaceValue = {
@@ -120,6 +122,14 @@ export function ActiveSpaceProvider({ children }: { children: ReactNode }) {
     },
     [userId],
   );
+
+  // Publish the explicit selection for modules that read it outside React (goals, budgets,
+  // pay accounts, requests). A layout effect so it is set before any child screen starts loading.
+  const selectedId = active?.id ?? null;
+  useLayoutEffect(() => {
+    selectWorkspace(selectedId);
+    return () => selectWorkspace(null);
+  }, [selectedId]);
 
   const value = useMemo(
     () => ({ spaces, active, activeId: active?.id ?? null, setActive, activateCreated }),

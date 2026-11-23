@@ -89,7 +89,7 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
         void syncNow(true);
       } catch (error) {
         // No encryption / unreadable store: stay online-only, never fall back to plaintext.
-        if (!(error instanceof OfflineUnavailableError)) console.warn("offline: could not start");
+        if (!(error instanceof OfflineUnavailableError)) console.warn("offline: could not start", error instanceof Error ? error.message : String(error));
         setAvailable(false);
       }
     })();
