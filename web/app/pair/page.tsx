@@ -1,3 +1,4 @@
+import { publishedShortcut } from "@/lib/published-shortcuts";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { OneLedgerLogo } from "../../components/brand/OneLedgerLogo";
@@ -24,9 +25,9 @@ export default async function PairPage({
   const valid = PAIRING_TOKEN_PATTERN.test(code);
   const platform = params.p === "android" ? "android" : "ios";
 
-  const shortcutUrl = process.env.NEXT_PUBLIC_MOMO_SHORTCUT_URL?.trim() || null;
+  const shortcutUrl = publishedShortcut("connect", process.env.NEXT_PUBLIC_MOMO_SHORTCUT_URL);
   const captureShortcutUrl =
-    process.env.NEXT_PUBLIC_MOMO_CAPTURE_SHORTCUT_URL?.trim() || null;
+    publishedShortcut("capture", process.env.NEXT_PUBLIC_MOMO_CAPTURE_SHORTCUT_URL);
   const androidCompanionUrl =
     process.env.NEXT_PUBLIC_ANDROID_COMPANION_URL?.trim() || null;
 

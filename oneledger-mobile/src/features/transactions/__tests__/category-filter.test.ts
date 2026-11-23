@@ -1,4 +1,3 @@
-import { selectWorkspace } from "@/features/spaces/selected-space";
 import { getTransactions } from "../queries";
 
 const mockCalls: [string, ...unknown[]][] = [];
@@ -21,13 +20,27 @@ jest.mock("@/api/supabase", () => ({
 }));
 
 beforeEach(() => {
-  selectWorkspace("ws-1");
   mockCalls.length = 0;
 });
 
 const calls = (name: string) => mockCalls.filter(([n]) => n === name).map(([, ...args]) => args);
 
 describe("getTransactions category filter", () => {
+  it("scopes the ledger to the selected Space and uses a stable tie-break order", async () => {
+    await getTransactions({ workspaceId: "workspace-a" });
+    expect(calls("eq")).toContainEqual(["workspace_id", "workspace-a"]);
+    expect(calls("order")).toContainEqual(["id", { ascending: false }]);
+  });
+
+  it("does not read all accessible Spaces while the selected one is unknown", async () => {
+    await expect(getTransactions({ workspaceId: null })).rejects.toThrow("Select a Space");
+    expect(mockCalls).toEqual([]);
+  });
+  it("filters wallet activity by account as well as Space", async () => {
+    await getTransactions({workspaceId:"w1",accountId:"a1"});
+    expect(calls("eq")).toContainEqual(["workspace_id","w1"]);
+    expect(calls("eq")).toContainEqual(["account_id","a1"]);
+  });
   it("matches a category exactly", async () => {
     await getTransactions({ category: "Food" });
     expect(calls("eq")).toContainEqual(["category", "Food"]);

@@ -1,8 +1,9 @@
 // Spaces (personal, household, organization). Pure rules, kept apart from
 // React and native APIs so they are unit-testable.
 //
-// Selected Space scopes financial data. Database membership and source RLS
-// independently decide which records the user can access.
+// Switching changes the active Space for server read models and for the Home
+// and Transactions list/balance/totals queries. RLS remains the authorization
+// boundary; an explicit workspace filter keeps multiple memberships separate.
 
 export type SpaceKind = "personal" | "household" | "organization";
 

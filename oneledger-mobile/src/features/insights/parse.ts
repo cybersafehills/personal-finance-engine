@@ -71,6 +71,20 @@ function person(raw: unknown): PersonRow | null {
   return { key: raw.key, displayName: raw.display_name, sentMinor: sent, receivedMinor: recv, count: n };
 }
 
+function trend(raw: unknown): CurrencyOverview["trend"] {
+  if (!Array.isArray(raw)) return null;
+  const result: NonNullable<CurrencyOverview["trend"]> = [];
+  for (const b of raw) {
+    if (!isRecord(b) || !str(b.bucket_start) || !/^\d{4}-\d{2}-\d{2}$/.test(b.bucket_start)) return null;
+    const date = new Date(`${b.bucket_start}T00:00:00Z`);
+    if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== b.bucket_start) return null;
+    const i = minor(b.money_in_minor), o = minor(b.money_out_minor), n = minor(b.net_minor);
+    if (i === null || o === null || n === null) return null;
+    result.push({ bucketStart: b.bucket_start, moneyInMinor: i, moneyOutMinor: o, netMinor: n });
+  }
+  return result;
+}
+
 function currencyOverview(raw: unknown): CurrencyOverview | "skip" | null {
   if (!isRecord(raw)) return null;
   if (!CURRENCIES.includes(raw.currency as SupportedCurrency)) return "skip";
@@ -99,6 +113,7 @@ function currencyOverview(raw: unknown): CurrencyOverview | "skip" | null {
 
   return {
     currency: raw.currency as SupportedCurrency,
+    trend: trend(raw.trend),
     moneyInMinor: inM,
     moneyOutMinor: outM,
     netMinor: net,

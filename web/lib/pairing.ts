@@ -188,24 +188,15 @@ export function androidCompanionPairUrl(token: string): string {
   return `oneledger://pair?${PAIR_HANDOFF_QUERY}=${encodeURIComponent(token)}`;
 }
 
-/** The Messages-automation forwarder (Shortcut B). Not the pairing Shortcut. */
+/** Combined release: interactive pairing and background message recording. */
 export const CAPTURE_SHORTCUT_NAME = "OneLedger Capture";
-/** The one-time pairing Shortcut (Shortcut A) — runs op:"pair" with the code. */
-export const CONNECT_SHORTCUT_NAME = "Connect to OneLedger";
+/** Previous two-shortcut installs can explicitly select the legacy run name. */
+export const LEGACY_CONNECT_SHORTCUT_NAME = "Connect to OneLedger";
+export const CONNECT_SHORTCUT_NAME = CAPTURE_SHORTCUT_NAME;
 
-/**
- * `shortcuts://run-shortcut?...` deep link that runs the one-time
- * "Connect to OneLedger" Shortcut on this iPhone, passing the pairing token as
- * its text input. Two things the Shortcuts URL scheme is strict about:
- *
- *  - It opens the *pairing* Shortcut, not "OneLedger Capture" — that one is the
- *    Messages-automation forwarder and has no pairing step.
- *  - Spaces in the name must be percent-encoded as %20. The scheme does NOT
- *    treat "+" as a space, so a `URLSearchParams`-built query
- *    ("Connect+to+OneLedger") makes iOS report "the file doesn't exist".
- *
- * A harmless no-op on a desktop browser — the wizard's poll is what actually
- * advances the flow, however the token reaches the device.
+/** Passes a fresh pairing code as text to the merged OneLedger Capture release.
+ * Percent-encode spaces: Shortcuts treats plus signs literally. The shortcut
+ * requires foreground confirmation before replacing a device connection.
  */
 export function devicePairShortcutRunUrl(
   token: string,

@@ -17,10 +17,10 @@ import { OfflineUnavailableError, openUserDatabase, type OpenedDb } from "./expo
 import { EMPTY_SUMMARY, OfflineContext, type OfflineValue } from "./offline-context";
 import { getCursor } from "./local-store";
 import { retryHeld, summarizeOutbox, type OutboxSummary } from "./outbox";
-import { setLocalWriteHandler, setOfflineRuntime, getOfflineRuntime } from "./runtime";
+import { setLocalWriteHandler, setOfflineRuntime } from "./runtime";
 import { deriveSyncStatus } from "./status";
-import { runSync, finishSync, TX_STREAM, type SyncReport } from "./sync-engine";
-import { createUserTransport } from "./transport";
+import { runSync, TX_STREAM, type SyncReport } from "./sync-engine";
+import { supabaseTransport } from "./transport";
 
 // Owns the open local database for the signed-in user and decides WHEN to sync:
 // on launch, on returning to the foreground, when connectivity comes back, after
@@ -33,13 +33,10 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
   const { session } = useSession();
   const userId = session?.user.id ?? null;
 
-  const currentUser = useRef(userId);
-  useEffect(() => { currentUser.current = userId; }, [userId]);
   const opened = useRef<OpenedDb | null>(null);
   const [available, setAvailable] = useState(false);
   const [online, setOnline] = useState(true);
   const [syncing, setSyncing] = useState(false);
-  const [refreshFailed, setRefreshFailed] = useState(false);
   const [authNeeded, setAuthNeeded] = useState(false);
   const [summary, setSummary] = useState<OutboxSummary>(EMPTY_SUMMARY);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
@@ -54,13 +51,10 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
   const syncNow = useCallback(
     async (ignoreBackoff = true) => {
       const handle = opened.current;
-      if (!handle || !userId) return;
-      const active = () => opened.current === handle && currentUser.current === userId;
+      if (!handle) return;
       setSyncing(true);
       try {
-        const report: SyncReport = await runSync({ db: handle.db, transport: createUserTransport(userId), ignoreBackoff, isActive: active });
-        if (!active()) return;
-        setRefreshFailed(report.stoppedFor === "error");
+        const report: SyncReport = await runSync({ db: handle.db, transport: supabaseTransport, ignoreBackoff });
         setAuthNeeded(report.stoppedFor === "auth");
         // Reachability is learned from the attempt itself, not from the OS flag.
         setOnline(report.stoppedFor !== "offline");
@@ -68,7 +62,8 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
           setOfflineRuntime({ db: handle.db, userId, bootstrapped: true });
         }
       } finally {
-        if (active()) { setSyncing(false); await refreshCounts(); }
+        setSyncing(false);
+        await refreshCounts();
       }
     },
     [refreshCounts, userId],
@@ -91,10 +86,10 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
         setOfflineRuntime({ db: handle.db, userId, bootstrapped: complete });
         setAvailable(true);
         await refreshCounts();
-        void syncNow(true).catch(() => undefined);
+        void syncNow(true);
       } catch (error) {
         // No encryption / unreadable store: stay online-only, never fall back to plaintext.
-        if (!(error instanceof OfflineUnavailableError)) console.warn("offline: could not start");
+        if (!(error instanceof OfflineUnavailableError)) console.warn("offline: could not start", error instanceof Error ? error.message : String(error));
         setAvailable(false);
       }
     })();
@@ -106,7 +101,7 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
       setAvailable(false);
       setSummary(EMPTY_SUMMARY);
       setLastSyncedAt(null);
-      if (handle) void finishSync(handle.db).then(() => handle.close());
+      void handle?.close();
     };
   }, [userId, refreshCounts, syncNow]);
 
@@ -141,23 +136,10 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(timer);
   }, [available, waiting, syncNow]);
 
-  // Expiry invalidates rendered financial results even if the user leaves a
-  // screen open and never explicitly refreshes. Foreground sync rechecks too.
-  useEffect(() => {
-    const db = opened.current?.db;
-    if (!available || !db) return;
-    let active = true;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    void db.get<{ expires_at: string }>("SELECT min(expires_at) AS expires_at FROM workspace_leases WHERE kind <> 'personal' AND expires_at > ?", [new Date().toISOString()]).then((lease) => {
-      if (!active || !lease?.expires_at) return;
-      timer = setTimeout(() => { const runtime = getOfflineRuntime(); if (runtime?.db === db) setOfflineRuntime({ ...runtime }); }, Math.max(1, Date.parse(lease.expires_at) - Date.now() + 1));
-    });
-    return () => { active = false; if (timer) clearTimeout(timer); };
-  }, [available, lastSyncedAt]);
-
+  const syncOnDemand = useCallback(() => syncNow(true), [syncNow]);
   const value = useMemo<OfflineValue>(
     () => ({
-      status: deriveSyncStatus({ available, online, syncing, summary, authNeeded, refreshFailed }),
+      status: deriveSyncStatus({ available, online, syncing, summary, authNeeded }),
       summary,
       lastSyncedAt,
       available,
@@ -166,13 +148,13 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
         void refreshCounts();
         void syncNow(false);
       },
-      syncNow: () => syncNow(true),
+      syncNow: syncOnDemand,
       retryHeldOps: async () => {
         if (opened.current) await retryHeld(opened.current.db);
         await syncNow(true);
       },
     }),
-    [available, online, syncing, summary, authNeeded, refreshFailed, lastSyncedAt, refreshCounts, syncNow],
+    [available, online, syncing, summary, authNeeded, lastSyncedAt, refreshCounts, syncNow, syncOnDemand],
   );
 
   return <OfflineContext.Provider value={value}>{children}</OfflineContext.Provider>;

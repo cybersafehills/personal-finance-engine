@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { StyleSheet, View } from "react-native";
 import { SafeAreaView, type Edge } from "react-native-safe-area-context";
 
+import { useNavigationChrome } from "@/components/shell/NavigationChromeContext";
 import { space } from "@/theme/tokens";
 import { makeStyles } from "@/theme/ThemeProvider";
 
@@ -19,8 +20,9 @@ export function ListScreen({
   edges?: readonly Edge[];
 }) {
   const styles = useStyles();
+  const {payOn,onTabs}=useNavigationChrome();
   return (
-    <SafeAreaView style={styles.safe} edges={edges}>
+    <SafeAreaView style={[styles.safe,payOn&&!onTabs&&{paddingBottom:64}]} edges={edges}>
       <View style={styles.body}>{children}</View>
     </SafeAreaView>
   );

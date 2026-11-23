@@ -89,6 +89,14 @@
         {
           "contactsPermission": "OneLedger opens your contacts only when you tap the contact button, so you can pick one person to pay. It does not read or keep your address book."
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Choose a profile picture for your OneLedger account.",
+          "cameraPermission": "Allow OneLedger to read payment QR codes and merchant posters.",
+          "microphonePermission": false
+        }
       ]
     ],
     "experiments": {

@@ -12,16 +12,18 @@ export function PayTabButton({
   onHold,
   holdMs = 500,
   hint = "Opens Pay and Services",
+  floating = false,
 }: {
   onPress: () => void;
   onHold?: () => void;
   holdMs?: number;
   hint?: string;
+  floating?: boolean;
 }) {
   const styles = useStyles();
   const { colors } = useTheme();
   return (
-    <View style={styles.slot}>
+    <View style={floating ? styles.floatingSlot : styles.slot}>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Pay"
@@ -29,18 +31,20 @@ export function PayTabButton({
         onPress={onPress}
         onLongPress={onHold}
         delayLongPress={holdMs}
-        style={({ pressed }) => [styles.circle, pressed && { opacity: 0.85 }]}
+        style={({ pressed }) => [styles.circle, floating && styles.floatingCircle, pressed && { opacity: 0.85 }]}
       >
         <Feather name="send" size={20} color={colors.onSolid} />
       </Pressable>
-      <Text variant="caption" color="textMuted" style={styles.label}>
+      {floating ? null : <Text variant="caption" color="textMuted" style={styles.label}>
         Pay
-      </Text>
+      </Text>}
     </View>
   );
 }
 
 const useStyles = makeStyles((colors) => StyleSheet.create({
+  floatingSlot:{width:48,height:48},
+  floatingCircle:{marginTop:0},
   slot: { flex: 1, alignItems: "center", justifyContent: "flex-start" },
   circle: {
     width: 48,

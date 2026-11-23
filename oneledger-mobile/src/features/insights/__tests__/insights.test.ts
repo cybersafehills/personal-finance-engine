@@ -158,3 +158,18 @@ describe("insightPeriods (Africa/Kigali days, `to` exclusive)", () => {
     expect(d.find((x) => x.id === "this_month")!.to).toBe("2026-12-31T22:00:00.000Z");
   });
 });
+
+
+describe("Home trend response", () => {
+  const point = {bucket_start:"2026-11-01",money_in_minor:"9007199254740993",money_out_minor:"100",net_minor:"9007199254740893"};
+  it("preserves exact minor units in monthly buckets", () => {
+    const r=parseInsightsResponse(200,body([currencyBlock({trend:[point]})]));
+    expect(r.ok && r.overview.currencies[0].trend?.[0]).toEqual({bucketStart:"2026-11-01",moneyInMinor:9007199254740993n,moneyOutMinor:100n,netMinor:9007199254740893n});
+  });
+  it("does not turn malformed dates or amounts into a zero trend", () => {
+    for (const bad of [{...point,bucket_start:"2026-02-30"},{...point,money_out_minor:100},{...point,net_minor:"bad"}]) {
+      const r=parseInsightsResponse(200,body([currencyBlock({trend:[bad]})]));
+      expect(r.ok && r.overview.currencies[0].trend).toBeNull();
+    }
+  });
+});

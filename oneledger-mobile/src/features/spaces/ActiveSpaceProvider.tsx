@@ -1,9 +1,9 @@
-import { selectWorkspace } from "./selected-space";
 import {
   createContext,
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -14,7 +14,8 @@ import { deviceStore } from "@/lib/device-store";
 
 import { getSpaces } from "./queries";
 import { setRequestedWorkspace } from "./request-space";
-import { requestedWorkspaceId, resolveActiveSpace, storageKey, type Space } from "./spaces";
+import { selectWorkspace } from "./selected-space";
+import { isSpaceKind, requestedWorkspaceId, resolveActiveSpace, storageKey, type Space } from "./spaces";
 
 type ActiveSpaceValue = {
   spaces: readonly Space[];
@@ -38,7 +39,7 @@ const Context = createContext<ActiveSpaceValue>({
  * Which Space the user is viewing. The choice is remembered per user on the
  * device, validated against current memberships (a revoked Space falls back to
  * Personal), and cleared on sign-out. Failing to load the list is not fatal:
- * with no Space the requests simply use the server's default (Personal).
+ * the saved membership list preserves the selected Space for offline reads.
  */
 const NO_SPACES: readonly Space[] = [];
 
@@ -57,7 +58,6 @@ export function ActiveSpaceProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!userId) {
-      selectWorkspace(null);
       setRequestedWorkspace(null);
       return;
     }
@@ -65,32 +65,30 @@ export function ActiveSpaceProvider({ children }: { children: ReactNode }) {
     (async () => {
       try {
         const [list, stored] = await Promise.all([
-          getSpaces(userId),
+          getSpaces(),
           deviceStore.get(storageKey(userId)),
         ]);
         if (cancelled) return;
+        void deviceStore.set(`ol.spaces.v1.${userId}`, JSON.stringify(list)).catch(() => {});
         const next = resolveActiveSpace(list, stored);
-        selectWorkspace(next?.id ?? null);
         setRequestedWorkspace(requestedWorkspaceId(next));
-        await deviceStore.set(`oneledger.spaces.${userId}`, JSON.stringify(list));
         setLoaded({ userId, spaces: list, active: next });
       } catch {
-        // Not fatal: no Space means the server default (Personal).
+        // Restore the last known scope for offline reads; online RLS still applies.
         if (cancelled) return;
-        const cached = await deviceStore.get(`oneledger.spaces.${userId}`);
+        const [saved, selected] = await Promise.all([deviceStore.get(`ol.spaces.v1.${userId}`), deviceStore.get(storageKey(userId))]).catch(() => [null, null]);
         if (cancelled) return;
-        let list: Space[] = [];
-        try { list = cached ? JSON.parse(cached) : []; } catch { /* no cached membership list */ }
-        const stored = await deviceStore.get(storageKey(userId));
-        if (cancelled) return;
-        const next = resolveActiveSpace(list, stored);
-        selectWorkspace(next?.id ?? null);
+        let cached: Space[] = [];
+        try {
+          const parsed: unknown = saved ? JSON.parse(saved) : [];
+          if (Array.isArray(parsed)) cached = parsed.filter((s): s is Space => !!s && typeof s.id === "string" && typeof s.name === "string" && isSpaceKind(s.kind) && typeof s.role === "string");
+        } catch { /* A missing cache cannot authorize any online read. */ }
+        const next = resolveActiveSpace(cached, selected);
         setRequestedWorkspace(requestedWorkspaceId(next));
-        setLoaded({ userId, spaces: list, active: next });
+        setLoaded({ userId, spaces: cached, active: next });
       }
     })();
     return () => {
-      selectWorkspace(null);
       cancelled = true;
     };
   }, [userId]);
@@ -101,7 +99,6 @@ export function ActiveSpaceProvider({ children }: { children: ReactNode }) {
       if (!next || !userId) return;
       void deviceStore.set(storageKey(userId), id);
       // Before state, so the reload that follows already names the new Space.
-      selectWorkspace(next?.id ?? null);
       setRequestedWorkspace(requestedWorkspaceId(next));
       setLoaded({ userId, spaces, active: next });
     },
@@ -114,10 +111,9 @@ export function ActiveSpaceProvider({ children }: { children: ReactNode }) {
       // The new Space is not in the list yet: read it, then switch to it. If
       // the read fails the Space still exists; it shows up on the next load.
       try {
-        const list = await getSpaces(userId);
+        const list = await getSpaces();
         const next = list.find((s) => s.id === id) ?? resolveActiveSpace(list, null);
         void deviceStore.set(storageKey(userId), next?.id ?? id);
-        selectWorkspace(next?.id ?? null);
         setRequestedWorkspace(requestedWorkspaceId(next));
         setLoaded({ userId, spaces: list, active: next });
       } catch {
@@ -126,6 +122,14 @@ export function ActiveSpaceProvider({ children }: { children: ReactNode }) {
     },
     [userId],
   );
+
+  // Publish the explicit selection for modules that read it outside React (goals, budgets,
+  // pay accounts, requests). A layout effect so it is set before any child screen starts loading.
+  const selectedId = active?.id ?? null;
+  useLayoutEffect(() => {
+    selectWorkspace(selectedId);
+    return () => selectWorkspace(null);
+  }, [selectedId]);
 
   const value = useMemo(
     () => ({ spaces, active, activeId: active?.id ?? null, setActive, activateCreated }),

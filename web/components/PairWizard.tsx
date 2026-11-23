@@ -11,6 +11,8 @@ import Link from "next/link";
 import type { AccountRow } from "../lib/queries";
 import {
   androidCompanionPairUrl,
+  CAPTURE_SHORTCUT_NAME,
+  LEGACY_CONNECT_SHORTCUT_NAME,
   devicePairShortcutRunUrl,
   type PairPlatform,
   pairHandoffUrl,
@@ -62,6 +64,7 @@ export function PairWizard({
   const [step, setStep] = useState<StepKey>("service");
   const [platform, setPlatform] = useState<PairPlatform>("ios");
   const isAndroid = platform === "android";
+  const singleShortcut = !captureShortcutUrl || captureShortcutUrl === shortcutUrl;
   const steps = STEP_LABELS[platform];
   const [accountId, setAccountId] = useState(accounts[0]?.id ?? "");
   const [session, setSession] = useState<Session | null>(null);
@@ -260,7 +263,7 @@ export function PairWizard({
             : shortcutUrl
             ? (
               <div className="flex flex-col gap-3 rounded-card border border-border-subtle bg-surface p-4">
-                {captureShortcutUrl
+                {!singleShortcut && captureShortcutUrl
                   ? (
                     <>
                       <p className="text-sm text-text-secondary">
@@ -326,11 +329,8 @@ export function PairWizard({
                         Your iPhone opens the Shortcuts app and shows a
                         preview — scroll to the bottom and tap{" "}
                         <span className="font-medium">Add Shortcut</span>.
-                        You’ll get two:{" "}
-                        <span className="font-medium">Connect to OneLedger</span>
-                        {" "}and{" "}
-                        <span className="font-medium">OneLedger Capture</span>.
-                        You don’t need to open or edit either one.
+                        One shortcut connects this phone and records supported messages.
+                        Add it once, then return here.
                       </p>
                     </>
                   )}
@@ -435,12 +435,12 @@ export function PairWizard({
               <a
                 href={isAndroid
                   ? androidCompanionPairUrl(session.token)
-                  : devicePairShortcutRunUrl(session.token)}
+                  : devicePairShortcutRunUrl(session.token, singleShortcut ? CAPTURE_SHORTCUT_NAME : LEGACY_CONNECT_SHORTCUT_NAME)}
                 className="inline-flex min-h-11 w-fit items-center rounded-control bg-accent px-4 text-sm font-medium text-accent-foreground"
               >
                 {isAndroid
                   ? "Open in OneLedger Companion"
-                  : "Open “Connect to OneLedger”"}
+                  : `Open “${singleShortcut ? CAPTURE_SHORTCUT_NAME : LEGACY_CONNECT_SHORTCUT_NAME}”`}
               </a>
 
               <p className="flex items-center gap-2 text-xs text-text-secondary">
@@ -530,47 +530,27 @@ export function PairWizard({
           title="Turn on transaction messages"
           hint="Apple needs you to allow this one automation. It’s the only manual step left."
         >
-          <ol className="flex flex-col gap-3 text-sm text-text-secondary">
-            <li>
-              1. In <span className="font-medium">Shortcuts</span>, open the{" "}
-              <span className="font-medium">Automation</span> tab and tap{" "}
-              <span className="font-medium">+</span>.
-            </li>
-            <li>
-              2. Choose <span className="font-medium">Message</span>. Leave
-              {" "}
-              <span className="font-medium">Sender</span> blank — MoMo texts
-              show a generic network label, not a name you can reliably
-              match. Instead, under{" "}
-              <span className="font-medium">Message Contains</span>, type
-              {" "}
-              <code className="rounded bg-background px-1 py-0.5 text-xs">
-                RWF
-              </code>
-              {" "}— it appears in every real MoMo or bank message. Set{" "}
-              <span className="font-medium">Run Immediately</span> and turn
-              notifications off.
-            </li>
-            <li>
-              3. For the action, pick{" "}
-              <span className="font-medium">Run Shortcut → OneLedger Capture</span>
-              {" "}
-              and pass the message as its input. Save.
-            </li>
-          </ol>
-          <p className="rounded-control border border-border-subtle bg-surface p-3 text-xs text-text-muted">
-            A message containing “RWF” that isn’t a real transaction is
-            simply ignored — OneLedger only records ones it can actually
-            parse.
-            {mtnSender && (
-              <>
-                {" "}If your MoMo texts do show a stable sender, you can add
-                {" "}
-                <span className="font-medium">{mtnSender}</span> too for
-                extra filtering.
-              </>
-            )}
-          </p>
+          <div className="flex flex-col gap-4 text-sm text-text-secondary">
+            <details open className="rounded-control border border-border-subtle bg-surface p-4">
+              <summary className="font-medium text-text-primary">iOS 27 · Finish the Message automation</summary>
+              <p role="alert" className="mt-3 rounded-control border border-border-subtle bg-surface p-3 font-medium text-text-primary">If you see “Configure Sender”, stop here. That unfinished condition prevents automatic recording.</p>
+              <ol className="mt-3 flex flex-col gap-3">
+                <li>1. Open <strong>Shortcuts → Automation</strong>. Open the new shortcut where you added <strong>Message contains RWF</strong>.</li>
+                <li>2. Fix <strong>Sender is Sender</strong>: tap the first Sender label. If it offers <strong>Message</strong>, use <strong>contains RWF</strong> and remove the extra Message row with <strong>−</strong>. Otherwise, select the sender of your actual MoMo message. Do not leave “Configure Sender” showing.</li>
+                <li>3. Tap the bottom <strong>Search</strong> field. Find <strong>Run Shortcut</strong> and add that action below the Message rule.</li>
+                <li>4. In the new <strong>Run</strong> box, tap the blue <strong>Shortcut</strong> name. Choose <strong>OneLedger Capture</strong> from the list. No website link is needed. Do not choose the separate shortcut called Run Shortcut.</li>
+                <li>5. Expand the <strong>&gt;</strong> arrow in the Run box. Set <strong>Input</strong> to the incoming <strong>Message / Shortcut Input</strong>. Tap or hold Input to choose a variable. Use the message’s <strong>Content / Text</strong> if details are offered.</li>
+                <li>6. Expand the Message rule. Keep <strong>Automation ON</strong> and <strong>Confirm Before Run OFF</strong>. Use the top-left <strong>back arrow</strong> to save.</li>
+              </ol>
+              <p className="mt-3 rounded-control border border-border-subtle bg-surface p-3"><strong>Asked to type Text?</strong> Cancel. Remove <strong>Ask Each Time</strong> from the Run action’s Input and select the incoming message instead. Do not type RWF, a link, or connection details.</p>
+              <p className="mt-3 text-xs">If Info/Privacy offers Allow Running When Locked, enable it. If absent, skip that optional setting. Do not add a second Message trigger to Capture or make Capture run itself.</p>
+            </details>
+            <details className="rounded-control border border-border-subtle bg-surface p-4">
+              <summary className="font-medium text-text-primary">iOS 17–26 · Automation tab</summary>
+              <p className="mt-3">Open Automation → + → Message. Set Message Contains to RWF. Choose Run Immediately, then Next. Choose OneLedger Capture, passing the message as Shortcut Input, and save with Done.</p>
+            </details>
+            <p className="text-xs text-text-muted">Only an actual incoming message confirms the automation. A connection test checks the network path without creating a transaction.{mtnSender ? ` Optional sender filter: ${mtnSender}.` : ""}</p>
+          </div>
         </StepShell>
       )}
 
@@ -579,7 +559,7 @@ export function PairWizard({
           title="Checking the connection"
           hint={isAndroid
             ? "The Companion sent a test the moment it paired. Otherwise, just wait for your next MoMo message."
-            : "Run “Test OneLedger connection” from Shortcuts, or just wait for your next MoMo message."}
+            : "Use Test connection in the OneLedger mobile app, or wait for a real incoming MoMo message."}
         >
           <ul className="flex flex-col gap-2 text-sm">
             <li className="text-money-positive">
@@ -601,7 +581,7 @@ export function PairWizard({
             </li>
           </ul>
           <p className="text-xs text-text-muted">
-            You can leave this — it keeps working in the background.
+            A connection response does not prove the Messages trigger is configured. Confirm forwarding with a real incoming MoMo message.
           </p>
         </StepShell>
       )}

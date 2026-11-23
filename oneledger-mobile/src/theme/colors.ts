@@ -10,6 +10,7 @@
 
 export const lightColors = {
   background: "#f6f6f7",
+  guideScrim: "#151a38",
   surface: "#ffffff",
   borderSubtle: "#e8e8ea",
   borderStrong: "#d4d4d8",
@@ -45,6 +46,13 @@ export const lightColors = {
 
   /** Interactive text, icons, links, selected borders. */
   accent: "#33509e",
+  accentBg: "#eaf0ff",
+  homeGradientStart: "#312b64",
+  homeGradientEnd: "#7b6bf0",
+  chartIncome: "#6956ee",
+  chartExpense: "#149d99",
+  chartFood: "#f7ad66",
+  chartOther: "#e1e6f0",
   /** A brand-blue fill (primary button, balance card, selected chip) that carries `onSolid`. */
   accentSolid: "#33509e",
   accentSolidPressed: "#263c76",
@@ -60,6 +68,7 @@ export type Palette = { readonly [K in ColorToken]: string };
 
 export const darkColors: Palette = {
   background: "#0d0e11",
+  guideScrim: "#000000",
   surface: "#16181d",
   borderSubtle: "#26282f",
   borderStrong: "#3b3e48",
@@ -90,6 +99,13 @@ export const darkColors: Palette = {
   lifetimeBadgeText: "#1a1a1a",
 
   accent: "#8fa5f2",
+  accentBg: "#202b4a",
+  homeGradientStart: "#312b64",
+  homeGradientEnd: "#7b6bf0",
+  chartIncome: "#a395ff",
+  chartExpense: "#47d0c4",
+  chartFood: "#f7ad66",
+  chartOther: "#586277",
   accentSolid: "#3d5fc4",
   accentSolidPressed: "#334fa8",
   onSolid: "#ffffff",

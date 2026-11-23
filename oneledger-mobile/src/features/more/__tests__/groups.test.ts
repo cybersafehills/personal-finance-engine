@@ -4,22 +4,20 @@ const labels = (flags: Parameters<typeof visibleGroups>[0]) =>
   visibleGroups(flags).flatMap((g) => g.links.map((l) => l.label));
 
 describe("visibleGroups", () => {
-  it("keeps the old statement fallback but hides opt-in features when unknown", () => {
+  it("shows everything when the server's answer is unknown", () => {
     expect(labels(null)).toContain("Statements");
-    expect(labels(null)).not.toContain("Insights");
-    expect(labels(null)).not.toContain("Wallets");
-    expect(labels(null)).not.toContain("Payment requests");
+    expect(labels(null)).toContain("Insights");
   });
 
   it("hides only features the server says are off", () => {
-    expect(labels({ statements: false, insightsCenter: true })).not.toContain("Statements");
-    expect(labels({ statements: false, insightsCenter: true })).toContain("Insights");
+    expect(labels({ statements: false, insights: true })).not.toContain("Statements");
+    expect(labels({ statements: false, insights: true })).toContain("Insights");
     expect(labels({})).toContain("Statements");
   });
 
   it("drops a group that ends up empty", () => {
     const titles = visibleGroups({ statements: false }).map((g) => g.title);
-    expect(titles).toContain("Reports and statements");
+    expect(titles).toContain("Documents");
     const all = visibleGroups({ statements: false, insights: false }).flatMap((g) => g.links);
     expect(all.every((l) => l.requires !== "statements")).toBe(true);
   });

@@ -1,6 +1,5 @@
 import { router } from "expo-router";
-import { StyleSheet, View } from "react-native";
-import { PrivatePressable as Pressable } from "@/features/privacy/PrivatePressable";
+import { Pressable, StyleSheet, View } from "react-native";
 
 import { Badge, ProgressBar, Text } from "@/components/ds";
 import { totals, worstStatus } from "@/features/budgets/display";

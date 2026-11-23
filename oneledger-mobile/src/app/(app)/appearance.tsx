@@ -1,7 +1,7 @@
-import Feather from "@expo/vector-icons/Feather";
-import { View , StyleSheet } from "react-native";
+import { StyleSheet, View } from "react-native";
 
-import { Card, ListGroup, ListRow, Screen, ScreenHeader, Text } from "@/components/ds";
+import { Card, Text } from "@/components/ds";
+import { MenuGroup, MenuRow, MenuScreen } from "@/features/settings/MenuUI";
 import { THEME_PREFERENCES } from "@/theme/preference";
 import { makeStyles, useTheme } from "@/theme/ThemeProvider";
 import { radii, space } from "@/theme/tokens";
@@ -11,23 +11,21 @@ import { radii, space } from "@/theme/tokens";
 export default function Appearance() {
   const { preference, setPreference, scheme, colors } = useTheme();
   const styles = useStyles();
-  const tick = <Feather name="check" size={16} color={colors.accent} />;
-
   return (
-    <Screen>
-      <ScreenHeader title="Appearance" subtitle="Choose how OneLedger looks on this phone" />
-      <ListGroup title="Theme" footer="Automatic follows your phone's own Light / Dark setting, including when it switches at night.">
+    <MenuScreen title="Appearance" subtitle="Choose how OneLedger looks on this phone.">
+      <MenuGroup title="Theme" footer="Automatic follows your phone's own Light / Dark setting, including when it switches at night.">
         {THEME_PREFERENCES.map((option) => (
-          <ListRow
+          <MenuRow
             key={option.id}
             label={option.label}
-            hint={option.description}
-            value={preference === option.id ? tick : undefined}
+            icon={option.id === "system" ? "monitor" : option.id === "dark" ? "moon" : "sun"}
+            role="radio"
+            selected={preference === option.id}
             a11yLabel={`${option.label}${preference === option.id ? ", selected" : ""}`}
             onPress={() => setPreference(option.id)}
           />
         ))}
-      </ListGroup>
+      </MenuGroup>
 
       <Card style={styles.preview} accessibilityLabel={`Preview, showing the ${scheme} appearance`}>
         <Text variant="caption" color="textMuted">
@@ -41,7 +39,7 @@ export default function Appearance() {
           <View style={[styles.swatch, { backgroundColor: colors.ekashSolid }]} />
         </View>
       </Card>
-    </Screen>
+    </MenuScreen>
   );
 }
 

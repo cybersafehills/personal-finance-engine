@@ -53,10 +53,11 @@ describe("guide content", () => {
     expect(iosGuideStepNumber("install")).toBe(1);
     expect(iosGuideStepNumber("verify")).toBe(4);
   });
-  it("tells the user to match on RWF and to leave Sender empty", () => {
+  it("uses the iOS 27 message filter without an unfinished Sender", () => {
     const text = AUTOMATION_STEPS.join(" ");
     expect(text).toContain("RWF");
-    expect(text).toContain("Leave Sender empty");
+    expect(text).not.toContain("Leave Sender empty");
+    expect(text).toContain("Confirm Before Run off");
     expect(text).toContain("OneLedger Capture");
   });
 });

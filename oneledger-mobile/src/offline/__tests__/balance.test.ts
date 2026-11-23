@@ -41,10 +41,3 @@ describe("describeFreshness", () => {
   it("stale", () => expect(describeFreshness({ lastSyncedAtIso: "2026-11-10T00:00:00Z", unsyncedCount: 0, nowMs: now }).caveat).toBe("may_be_stale"));
   it("fresh", () => expect(describeFreshness({ lastSyncedAtIso: "2026-11-17T11:00:00Z", unsyncedCount: 0, nowMs: now }).caveat).toBe("none"));
 });
-
-it("category edits never create an additional pending financial effect", () => {
-  const result = computeLocalBalance([{ id: "known", occurred_at: "2026-11-18T08:00:00Z", balance_after_rwf: 50000, principal_effect_rwf: -1200, fee_effect_rwf: -50, settlement_state: "settled", sync_state: "pending", server_updated_at: "2026-11-18T08:00:00Z" }]);
-  expect(result.confirmedRwf).toBe(50000);
-  expect(result.pendingEffectRwf).toBe(0);
-  expect(result.pendingCount).toBe(0);
-});

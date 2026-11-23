@@ -1,9 +1,8 @@
 import { router } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
-import { View } from "react-native";
-import { PrivatePressable as Pressable } from "@/features/privacy/PrivatePressable";
+import { Pressable, View } from "react-native";
 
-import { fetchInsights, fetchMoreFlags, fetchWallets } from "@/api/mobile-api";
+import { fetchInsights, fetchWallets } from "@/api/mobile-api";
 import {
   Badge,
   Button,
@@ -23,8 +22,6 @@ import {
   formatBps,
   netTone,
 } from "@/features/insights/display";
-import { ForecastPanel } from "@/features/insights/ForecastPanel";
-import { useActiveSpace } from "@/features/spaces/ActiveSpaceProvider";
 import { insightPeriods, type PeriodId } from "@/features/insights/period";
 import { personIdFromKey } from "@/features/people/display";
 import type { CurrencyOverview, Drilldown } from "@/features/insights/types";
@@ -54,19 +51,12 @@ function openDrilldown(d: Drilldown, title: string) {
 }
 
 export default function Insights() {
-  const { activeId } = useActiveSpace();
-  return <InsightsForSpace key={activeId ?? "none"} workspaceId={activeId} />;
-}
-
-function InsightsForSpace({ workspaceId }: { workspaceId: string | null }) {
   const periods = useMemo(() => insightPeriods(new Date()), []);
   const [periodId, setPeriodId] = useState<PeriodId>("this_month");
   const [walletId, setWalletId] = useState<string | null>(null);
   const period = periods.find((p) => p.id === periodId) ?? periods[0];
 
-  const loadWallets = useCallback(() => fetchWallets(workspaceId ?? undefined), [workspaceId]);
-  const loadFlags = useCallback(() => workspaceId ? fetchMoreFlags() : Promise.resolve(null), [workspaceId]);
-  const { data: flags } = useQuery(loadFlags);
+  const loadWallets = useCallback(() => fetchWallets(), []);
   const { data: wallets } = useQuery(loadWallets);
   const walletList = wallets && wallets.ok ? wallets.wallets : [];
 
@@ -106,8 +96,6 @@ function InsightsForSpace({ workspaceId }: { workspaceId: string | null }) {
           ))}
         </View>
       ) : null}
-
-      {workspaceId && flags?.insights && flags.insightsCenter ? <ForecastPanel workspaceId={workspaceId} accountId={walletId} /> : null}
 
       {(loading && !data) || switching ? (
         <Text variant="label" color="textMuted" accessibilityLiveRegion="polite">

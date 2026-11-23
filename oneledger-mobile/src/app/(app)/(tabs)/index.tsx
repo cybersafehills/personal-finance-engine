@@ -1,185 +1,103 @@
-import { router } from "expo-router";
-import { useCallback, useState } from "react";
-import { SelectedWallet } from "@/features/wallets/SelectedWallet";
-import { useOffline } from "@/offline/offline-context";
-import { RefreshControl, ScrollView, StyleSheet, View } from "react-native";
+import { GuideScrollView } from "@/features/guides/GuideScrollView";
+import { GuidesHomeCard } from "@/features/guides/GuidesHomeCard";
+import { router, useFocusEffect } from "expo-router";
+import { useCallback, useEffect, useState } from "react";
+import { AppState, RefreshControl, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-
-import { Button, Card, EmptyState, ListGroup, ListRow, MoneyAmount, Text } from "@/components/ds";
-import { fetchBudgets } from "@/api/mobile-api";
-import { captureSupported, getCaptureHealth } from "@/features/capture/capture";
-import { BalanceCard } from "@/features/home/BalanceCard";
-import { BudgetStatusCard } from "@/features/home/BudgetStatusCard";
-import {
-  getCurrentBalance,
-  getReviewQueueCount,
-  getTodayTotals,
-  getTransactions,
-} from "@/features/transactions/queries";
+import { Button, Chip, EmptyState, Text } from "@/components/ds";
+import { fetchWallets, fetchBudgets } from "@/api/mobile-api";
+import { useSession } from "@/features/auth/SessionProvider";
+import { HomeHeader, HeroBalance, CashFlow, Spending, WalletPanel, HomeSection, HomeLink } from "@/features/home/HomeCards";
+import { BudgetOutlook } from "@/features/home/BudgetOutlook";
+import { useChromeScroll } from "@/components/shell/useChromeScroll";
+import { HomeTrends } from "@/features/home/HomeTrends";
+import { currencyBlock, loadHomeInsights, profileName } from "@/features/home/live-data";
+import { getCurrentBalance, getTransactions } from "@/features/transactions/queries";
 import { TransactionItem } from "@/features/transactions/TransactionItem";
+import { getUnreadNotificationCount } from "@/features/notifications/queries";
+import { useActiveSpace } from "@/features/spaces/ActiveSpaceProvider";
 import { useQuery } from "@/hooks/useQuery";
-import { space } from "@/theme/tokens";
+import { useOffline } from "@/offline/offline-context";
 import { makeStyles, useTheme } from "@/theme/ThemeProvider";
+import type { SupportedCurrency } from "@/lib/money";
+import { kigaliDateKey } from "@/lib/kigali-time";
 
-// Home shows the six most recent, as the web does.
-const RECENT_LIMIT = 6;
-
-async function loadHome(accountId?: string) {
-  const nowIso = new Date().toISOString();
-  const [balance, today, recent, reviewCount, health] = await Promise.all([
-    accountId ? Promise.resolve(null) : getCurrentBalance(),
-    getTodayTotals(nowIso, accountId),
-    getTransactions({ limit: RECENT_LIMIT, accountId }),
-    getReviewQueueCount().catch(() => null),
-    getCaptureHealth().catch(() => null),
-  ]);
-  return { balance, today, recent, reviewCount, health, nowIso };
-}
-
-// Same order as the web's Home on a phone: balance, today's totals, budget
-// status, then recent transactions. Mobile shows recording setup and review
-// actions below the budget when they are needed.
 export default function Home() {
   const styles = useStyles();
+  const onScroll=useChromeScroll();
   const { colors } = useTheme();
-  // `loadHome` is a module-level function, so its identity is stable.
-  const [accountId, setAccountId] = useState<string | undefined>();
-  const load = useCallback(() => loadHome(accountId), [accountId]);
-  const { data, loading, refreshing, error, refresh } = useQuery(load, accountId ?? "all-wallets");
-  const sync = useOffline();
-  const reviewCount = data?.reviewCount ?? 0;
-  // Server-computed, so it loads on its own: a slow or unavailable budget
-  // service never delays or breaks the rest of Home.
-  const loadBudgets = useCallback(() => fetchBudgets(), []);
-  const { data: budgetResult } = useQuery(loadBudgets);
-  const budget = budgetResult?.ok ? (budgetResult.budgets[0] ?? null) : null;
-
-  // Recording is "not working" when the engine exists but is not healthy.
-  const recordingNeedsSetup =
-    captureSupported &&
-    data?.health != null &&
-    (data.health.state === "setup_required" ||
-      data.health.state === "permission_required" ||
-      data.health.state === "reauthentication_required");
-
-  return (
-    <SafeAreaView style={styles.safe} edges={["left", "right"]}>
-      <ScrollView
-        contentContainerStyle={styles.content}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.accent} />
-        }
-      >
-        <SelectedWallet onSelect={setAccountId} />
-        {sync.lastSyncedAt ? <Text variant="caption">Saved activity last synced {sync.lastSyncedAt}. Newer changes may be missing.</Text> : null}
-        {error ? (
-          <EmptyState
-            variant="setup"
-            title={error}
-            action={<Button label="Try again" variant="secondary" onPress={refresh} />}
-          />
-        ) : null}
-
-        {data ? (
-          <>
-            {!accountId ? <BalanceCard balance={data.balance} nowIso={data.nowIso} /> : null}
-
-            {(data.today.byCurrency?.length ? data.today.byCurrency : [{ currency: "RWF", sentMinor: data.today.spentRwf, receivedMinor: data.today.receivedRwf }]).map((flow) => <View key={flow.currency} style={styles.row}>
-              <Tile label="Received today" amountRwf={flow.receivedMinor} currency={flow.currency} />
-              <Tile label="Spent today" amountRwf={-flow.sentMinor} currency={flow.currency} />
-            </View>)}
-
-            {budget ? <BudgetStatusCard budget={budget} nowIso={data.nowIso} /> : null}
-
-            {recordingNeedsSetup || reviewCount > 0 ? (
-              <ListGroup>
-                {recordingNeedsSetup ? (
-                  <ListRow
-                    icon="radio"
-                    label="Automatic recording is off"
-                    hint="Let OneLedger record your MoMo transactions from this phone."
-                    value={
-                      <Text variant="label" color="accent">
-                        Set it up
-                      </Text>
-                    }
-                    onPress={() => router.push("/connect")}
-                  />
-                ) : null}
-                {reviewCount > 0 ? (
-                  <ListRow
-                    icon="check-circle"
-                    label={`${reviewCount} transaction${reviewCount === 1 ? "" : "s"} to review`}
-                    value={
-                      <Text variant="label" color="accent">
-                        Review now
-                      </Text>
-                    }
-                    onPress={() => router.push("/inbox")}
-                  />
-                ) : null}
-              </ListGroup>
-            ) : null}
-
-            <Card style={{ paddingHorizontal: space[1], paddingVertical: space[2] }}>
-              <View style={styles.cardHeader}>
-                <Text variant="caption" color="textMuted" style={styles.kicker}>
-                  RECENT TRANSACTIONS
-                </Text>
-                <Button label="See all" variant="ghost" onPress={() => router.push("/transactions")} />
-              </View>
-              {data.recent.length === 0 ? (
-                <EmptyState
-                  title="No transactions yet"
-                  description="New MoMo transactions will appear here automatically."
-                />
-              ) : (
-                data.recent.map((transaction) => (
-                  <TransactionItem key={transaction.id} transaction={transaction} showDate />
-                ))
-              )}
-            </Card>
-          </>
-        ) : loading ? (
-          <Text variant="label" color="textMuted">
-            Loading…
-          </Text>
-        ) : null}
-      </ScrollView>
-    </SafeAreaView>
-  );
+  const { session } = useSession();
+  const { activeId } = useActiveSpace();
+  const offline = useOffline();
+  const syncNow = offline.syncNow;
+  const [now, setNow] = useState(() => new Date());
+  const [pulling, setPulling] = useState(false);
+  const [choice, setChoice] = useState<{ space: string | null; currency: SupportedCurrency } | null>(null);
+  const day = kigaliDateKey(now.toISOString());
+  useFocusEffect(useCallback(() => {
+    void syncNow().catch(() => {});
+    const timer = setInterval(() => { void syncNow().catch(() => {}); }, 60000);
+    return () => clearInterval(timer);
+  }, [syncNow]));
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 60000);
+    const app = AppState.addEventListener("change", (s) => { if (s === "active") setNow(new Date()); });
+    return () => { clearInterval(timer); app.remove(); };
+  }, []);
+  const loadWallets = useCallback(() => { if (!activeId) throw new Error("Space is loading"); return fetchWallets(); }, [activeId]);
+  const walletsQuery = useQuery(loadWallets, { refreshIntervalMs: 60000 });
+  const loadRecent = useCallback(async () => {
+    const [recent, balance] = await Promise.all([getTransactions({ limit: 3, workspaceId: activeId }), getCurrentBalance(activeId).catch(() => null)]);
+    return { recent, balance };
+  }, [activeId]);
+  const recentQuery = useQuery(loadRecent, { refreshIntervalMs: 60000 });
+  const loadAnalytics = useCallback(() => { if (!activeId || !day) throw new Error("Space is loading"); return loadHomeInsights(new Date()); }, [activeId, day]);
+  const analytics = useQuery(loadAnalytics, { refreshIntervalMs: 60000 });
+  const loadBudget = useCallback(() => { if (!activeId) throw new Error("Space is loading"); return fetchBudgets(); }, [activeId]);
+  const budget = useQuery(loadBudget, { refreshIntervalMs: 60000 });
+  const profile = useQuery(profileName);
+  const unread = useQuery(getUnreadNotificationCount);
+  const meta = session?.user.user_metadata;
+  const fallbackName = typeof meta?.full_name === "string" ? meta.full_name : typeof meta?.name === "string" ? meta.name : "there";
+  const name = profile.data ?? fallbackName;
+  const wallets = walletsQuery.data?.ok ? walletsQuery.data.wallets : null;
+  const currency = choice?.space === activeId ? choice.currency : wallets?.find((w) => w.isPrimary)?.currency ?? "RWF";
+  const currencyOptions = [...new Set<SupportedCurrency>([...(wallets ?? []).map((w) => w.currency), ...(analytics.data?.current.ok ? analytics.data.current.overview.currencies.map((c) => c.currency) : []), currency])];
+  const currentResult = analytics.data?.current;
+  const current = currencyBlock(currentResult, currency);
+  const analyticsMessage = currentResult && !currentResult.ok ? currentResult.message : analytics.error ?? (analytics.loading ? "Loading your monthly activity…" : "No summary is available.");
+  const walletsMessage = walletsQuery.data && !walletsQuery.data.ok ? walletsQuery.data.message : walletsQuery.error ?? (walletsQuery.loading ? "Loading your wallets…" : "Your wallets are unavailable.");
+  async function refresh() {
+    setPulling(true);
+    try { await offline.syncNow(); } catch { /* Query errors below keep saved data visible. */ }
+    finally { setNow(new Date()); walletsQuery.refresh(); recentQuery.refresh(); analytics.refresh(); budget.refresh(); profile.refresh(); unread.refresh(); setPulling(false); }
+  }
+  if (!activeId) return <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}><View style={styles.content}><Text color="textMuted">Loading your workspace. Connect to load your Spaces if this is your first launch.</Text></View></SafeAreaView>;
+  return <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
+    <View testID="home-fixed-toolbar" style={styles.toolbar}><HomeHeader name={name} unread={unread.data ?? 0} /></View>
+    <GuideScrollView testID="home-content-scroll" style={{flex:1}} onScroll={onScroll} scrollEventThrottle={32} contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={pulling || walletsQuery.refreshing || recentQuery.refreshing || analytics.refreshing} onRefresh={() => void refresh()} tintColor={colors.accent} />}>
+      {offline.status.kind === "offline" ? <Text variant="caption" color="attention">Offline · Showing saved transactions. Wallet and analytics updates need a connection.</Text> : null}
+      {walletsQuery.error && wallets ? <Text variant="caption" color="attention">Couldn&apos;t refresh wallet balances. Showing the last fetched figures.</Text> : null}
+      {analytics.error && analytics.data ? <Text variant="caption" color="attention">Couldn&apos;t refresh analytics. Showing the last fetched summary.</Text> : null}
+      {currencyOptions.length > 1 ? <View style={styles.currencies}>{currencyOptions.map((c) => <Chip key={c} label={c} selected={currency === c} onPress={() => setChoice({ space: activeId, currency: c })} />)}</View> : null}
+      <HeroBalance key={`${session?.user.id}:${activeId}`} preferenceScope={`${session?.user.id ?? "unknown"}.${activeId}`} wallets={wallets} currency={currency} fallback={recentQuery.data?.balance ?? null} loading={walletsQuery.loading || recentQuery.loading} />
+      <GuidesHomeCard loaded={!walletsQuery.loading && !recentQuery.loading && !walletsQuery.error && !recentQuery.error} />
+      <CashFlow currency={currency} current={current} previous={currencyBlock(analytics.data?.previous,currency)} previousAvailable={analytics.data?.previous.ok===true} today={currencyBlock(analytics.data?.today,currency)} todayAvailable={analytics.data?.today.ok === true} available={currentResult?.ok === true} message={analyticsMessage} />
+      <HomeSection guideId="home-recent" title="Recent transactions" dense action={<HomeLink label="View all" onPress={() => router.navigate({ pathname: "/transactions", params: { focusSearch:"", category: "", accountId:"", walletName:"", period: "all", reset: String(Date.now()) } })} />}>
+        {recentQuery.error ? <View style={{ gap: 8 }}><Text color="attention">Couldn&apos;t refresh transactions.</Text><Button label="Try again" variant="secondary" onPress={recentQuery.refresh} /></View> : null}
+        {recentQuery.loading ? <Text color="textMuted">Loading transactions…</Text> : !recentQuery.data?.recent.length && !recentQuery.error ? <EmptyState title="No transactions yet" description="New transactions will appear here as they are recorded." /> : <View>{recentQuery.data?.recent.slice(0, 3).map((t) => <TransactionItem key={t.id} transaction={t} showDate compact />)}</View>}
+      </HomeSection>
+      <BudgetOutlook result={budget.data} currency={currency} now={now} error={budget.error} />
+      <Spending key={`spending.${session?.user.id}.${activeId}`} scope={`${session?.user.id}.${activeId}`} current={current} available={currentResult?.ok === true} message={analyticsMessage} />
+      <HomeTrends key={`trends.${session?.user.id}.${activeId}`} scope={`${session?.user.id}.${activeId}`} currency={currency} nowIso={now.toISOString()} day={day}/>
+      <WalletPanel wallets={wallets} message={walletsMessage} />
+    </GuideScrollView>
+  </SafeAreaView>;
 }
-
-/** One of today's totals. Signed, coloured and masked like every other amount. */
-function Tile({ label, amountRwf, currency }: { label: string; amountRwf: number; currency?: string }) {
-  const styles = useStyles();
-  return (
-    <Card style={styles.tile}>
-      <Text variant="caption" color="textMuted">
-        {label}
-      </Text>
-      <MoneyAmount amountRwf={amountRwf} currency={currency} size="lg" />
-    </Card>
-  );
-}
-
-const useStyles = makeStyles((colors) => StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.background },
-  content: {
-    paddingHorizontal: space[4],
-    paddingVertical: space[3],
-    gap: space[3],
-    width: "100%",
-    maxWidth: 480,
-    alignSelf: "center",
-  },
-  row: { flexDirection: "row", gap: space[2] },
-  tile: { flex: 1, paddingVertical: space[3], gap: space[1] },
-    cardHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingLeft: space[3],
-  },
-  kicker: { letterSpacing: 0.6 },
+const useStyles = makeStyles((c) => StyleSheet.create({
+  safe: { flex: 1, backgroundColor: c.background },
+  toolbar: { paddingHorizontal:16,paddingBottom:8,maxWidth:480,width:"100%",alignSelf:"center",backgroundColor:c.background },
+  content: { paddingHorizontal: 16, paddingTop: 0, paddingBottom: 24, gap: 12, maxWidth: 480, width: "100%", alignSelf: "center" },
+  currencies: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  period: { minHeight: 44, padding: 8, borderWidth: 1, borderColor: c.borderSubtle, borderRadius: 10, justifyContent: "center" },
 }));

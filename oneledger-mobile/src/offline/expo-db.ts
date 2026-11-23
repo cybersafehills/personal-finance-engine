@@ -57,16 +57,11 @@ export async function openUserDatabase(userId: string): Promise<OpenedDb> {
         "This build has no database encryption, so offline storage is switched off.",
       );
     }
-    try {
     await native.execAsync(`PRAGMA key = "x'${key}'"`);
     // Reading the schema proves the key is right (a wrong key reads as "not a database").
     await native.getAllAsync("SELECT count(*) FROM sqlite_master");
     await native.execAsync("PRAGMA journal_mode = WAL");
     return native;
-    } catch (error) {
-      await native.closeAsync().catch(() => undefined);
-      throw error;
-    }
   };
 
   let native: SQLite.SQLiteDatabase;
@@ -74,10 +69,25 @@ export async function openUserDatabase(userId: string): Promise<OpenedDb> {
     native = await open();
   } catch (error) {
     if (error instanceof OfflineUnavailableError) throw error;
-    // An open/read error cannot prove key loss. Never erase pending financial
-    // records for storage-full, transient, corruption or schema errors.
-    throw new OfflineUnavailableError(created ? "key_lost" : "open_failed",
-      "Your saved data could not be opened. It has been kept on this phone. Try again or contact support before removing local data.");
+    if (!created) {
+      // The key exists but no longer opens the file (restored from a backup, or the
+      // keystore was reset). The contents are unreadable by anyone; start fresh and
+      // re-download from the server. Unsynced changes in the old file are lost.
+      await SQLite.deleteDatabaseAsync(file).catch(() => undefined);
+      try {
+        native = await open();
+      } catch (retry) {
+        throw new OfflineUnavailableError("key_lost", retry instanceof Error ? retry.message : "Could not reopen the local database.");
+      }
+    } else {
+      // A brand-new key with an existing file: the file belongs to a lost key.
+      await SQLite.deleteDatabaseAsync(file).catch(() => undefined);
+      try {
+        native = await open();
+      } catch (retry) {
+        throw new OfflineUnavailableError("open_failed", retry instanceof Error ? retry.message : "Could not open the local database.");
+      }
+    }
   }
 
   const db = createSqlDb({
@@ -85,13 +95,13 @@ export async function openUserDatabase(userId: string): Promise<OpenedDb> {
     run: async (sql, params) => void (await native.runAsync(sql, params)),
     all: (sql, params) => native.getAllAsync(sql, params),
   });
-  try { await migrate(db); } catch (error) { await native.closeAsync(); throw error; }
+  await migrate(db);
   return { db, slug, close: () => native.closeAsync() };
 }
 
 /** Removes a user's local database and key (explicit account removal). */
 export async function destroyUserDatabase(userId: string): Promise<void> {
   const slug = await userSlug(userId);
-  await SQLite.deleteDatabaseAsync(`ol-${slug}.db`);
+  await SQLite.deleteDatabaseAsync(`ol-${slug}.db`).catch(() => undefined);
   await deviceStore.remove(`ol.offline.key.${slug}`);
 }

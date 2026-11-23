@@ -1,4 +1,4 @@
-import { useId, useState, type ReactNode } from "react";
+import { useId, useState, type ReactNode, type Ref } from "react";
 import {
   InputAccessoryView,
   Keyboard,
@@ -8,6 +8,7 @@ import {
   TextInput,
   View,
   type TextInputProps,
+  type TextInputInstance,
 } from "react-native";
 
 import { radii, space } from "@/theme/tokens";
@@ -18,6 +19,7 @@ import { makeStyles, useTheme } from "@/theme/ThemeProvider";
 
 export type TextFieldProps = Omit<TextInputProps, "style"> & {
   label: string;
+  inputRef?: Ref<TextInputInstance>;
   help?: string;
   error?: string;
   /** An icon or small control drawn inside the box, on the left (e.g. "save as contact"). */
@@ -32,7 +34,7 @@ export type TextFieldProps = Omit<TextInputProps, "style"> & {
  * Labelled text input: label + optional help + error, wired for assistive
  * tech once. 44pt tall; text is 15pt, one step above body so what you type stays readable.
  */
-export function TextField({ label, help, error, leading, trailing, compact = false, ...input }: TextFieldProps) {
+export function TextField({ label, help, error, leading, trailing, compact = false, inputRef, ...input }: TextFieldProps) {
   const styles = useStyles();
   const { colors, isDark } = useTheme();
   const id = useId();
@@ -58,6 +60,7 @@ export function TextField({ label, help, error, leading, trailing, compact = fal
       >
         {leading ? <View style={styles.leading}>{leading}</View> : null}
         <TextInput
+          ref={inputRef}
           maxFontSizeMultiplier={MAX_FONT_SCALE}
           accessibilityLabel={label}
           accessibilityLabelledBy={compact ? undefined : `${id}-label`}

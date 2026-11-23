@@ -1,3 +1,4 @@
+import { publishedShortcut } from "@/lib/published-shortcuts";
 import { redirect } from "next/navigation";
 import { getAccounts } from "../../../../lib/queries";
 import { devicePairingV2Enabled } from "../../../../lib/pairing";
@@ -17,9 +18,9 @@ export default async function PairDevicePage() {
   const accounts = await getAccounts();
   const activeAccounts = accounts.filter((a) => a.is_active);
 
-  const shortcutUrl = process.env.NEXT_PUBLIC_MOMO_SHORTCUT_URL?.trim() || null;
+  const shortcutUrl = publishedShortcut("connect", process.env.NEXT_PUBLIC_MOMO_SHORTCUT_URL);
   const captureShortcutUrl =
-    process.env.NEXT_PUBLIC_MOMO_CAPTURE_SHORTCUT_URL?.trim() || null;
+    publishedShortcut("capture", process.env.NEXT_PUBLIC_MOMO_CAPTURE_SHORTCUT_URL);
   const mtnSender = process.env.MOMO_SMS_SENDER?.trim() || null;
   // A Play listing / signed APK link for the OneLedger Companion, once published.
   const androidCompanionUrl =

@@ -63,7 +63,7 @@ describe("iosHealthDisplay", () => {
   it("explains each state in plain language", () => {
     expect(iosHealthDisplay(device({ lastUsedAtIso: ago(3 * HOUR) }), NOW)).toEqual({
       variant: "positive",
-      label: "Working",
+      label: "Previous activity received",
       detail: "Last heard from this iPhone 3 hours ago.",
     });
     expect(iosHealthDisplay(device({ createdAtIso: ago(HOUR) }), NOW).label).toBe(

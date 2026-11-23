@@ -1,49 +1,44 @@
-import { usePrivacy } from "@/features/privacy/PrivacyProvider";
+import { GuideAnchor } from "@/features/guides/GuideAnchor";
 import * as Linking from "expo-linking";
 import { router } from "expo-router";
-import { useCallback } from "react";
-
+import { useCallback, useState } from "react";
 import { fetchMoreFlags } from "@/api/mobile-api";
-import { Button, Card, ListGroup, ListRow, Screen, ScreenHeader, Text } from "@/components/ds";
+import { Text } from "@/components/ds";
+import { useLock } from "@/features/lock/LockProvider";
+import { MenuGroup, MenuRow, MenuScreen, ProfileSummary, SignOutRow } from "@/features/settings/MenuUI";
 import { visibleSettingsGroups, type SettingsRow } from "@/features/settings/groups";
 import { useQuery } from "@/hooks/useQuery";
 import { config } from "@/lib/config";
+import { useTheme } from "@/theme/ThemeProvider";
 
-// Settings, grouped like the web's. Rows with a native screen open it; the
-// rest open the web page (marked with the "opens outside the app" arrow; the
-// browser may ask you to sign in once).
 export default function Settings() {
-  const privacy = usePrivacy();
+  const { preference } = useTheme();
+  const { enabled, available, loading } = useLock();
   const load = useCallback(() => fetchMoreFlags(), []);
   const { data: flags } = useQuery(load);
-  function open(row: SettingsRow) {
+  const [message, setMessage] = useState<string | null>(null);
+  async function open(row: Pick<SettingsRow, "route" | "webPath">) {
+    setMessage(null);
     if (row.route) router.push(row.route);
-    else if (row.webPath) Linking.openURL(`${config.apiBaseUrl}${row.webPath}`);
+    else if (row.webPath) {
+      try { await Linking.openURL(`${config.apiBaseUrl}${row.webPath}`); }
+      catch { setMessage("Couldn't open your browser. Please try again."); }
+    }
   }
-
   return (
-    <Screen>
-      <ScreenHeader title="Settings" />
-      <Card>
-        <Text variant="bodyStrong">Full financial privacy</Text>
-        <Text variant="caption">Hide amounts on financial screens, including their screen-reader labels.</Text>
-        <Button label={privacy.fullPrivacy ? "Turn off full privacy" : "Turn on full privacy"} onPress={() => privacy.setFullPrivacy(!privacy.fullPrivacy)} />
-        {privacy.saveError ? <Text accessibilityRole="alert">{privacy.saveError}</Text> : null}
-      </Card>
+    <MenuScreen title="Settings">
+      <ProfileSummary onPress={() => router.push("/profile")} />
+      {message ? <Text color="attention" accessibilityRole="alert">{message}</Text> : null}
       {visibleSettingsGroups(flags ?? null).map((group) => (
-        <ListGroup key={group.title} title={group.title} footer={group.description}>
+        <MenuGroup key={group.title} title={group.title}>
           {group.rows.map((row) => (
-            <ListRow
-              key={row.label}
-              role="link"
-              label={row.label}
-              hint={row.description}
-              external={!!row.webPath}
-              onPress={() => open(row)}
-            />
+            <GuideAnchor key={row.label} id={row.route ? `setting-${row.route.slice(1)}` : row.webPath === "/settings/accounts" ? "setting-accounts" : `setting-${row.label.toLowerCase().replace(/[^a-z0-9]+/g,"-")}`}><MenuRow role="link" icon={row.icon} label={row.label}
+              value={row.route === "/appearance" ? (preference === "system" ? "Automatic" : preference === "dark" ? "Dark" : "Light") : row.route === "/security" ? (loading ? "Checking…" : !available ? "Unavailable" : enabled ? "On" : "Off") : undefined}
+              external={!!row.webPath} onPress={() => void open(row)} /></GuideAnchor>
           ))}
-        </ListGroup>
+        </MenuGroup>
       ))}
-    </Screen>
+      <SignOutRow />
+    </MenuScreen>
   );
 }

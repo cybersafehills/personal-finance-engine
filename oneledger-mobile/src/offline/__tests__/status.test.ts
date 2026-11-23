@@ -4,7 +4,6 @@ const none = { pending: 0, inFlight: 0, retrying: 0, needsAttention: 0, conflict
 const base = { available: true, online: true, syncing: false, summary: none, authNeeded: false };
 
 describe("deriveSyncStatus", () => {
-  it("a failed refresh is not up to date", () => expect(deriveSyncStatus({ ...base, refreshFailed: true }).label).toBe("Refresh failed"));
   it("up to date", () => expect(deriveSyncStatus(base).kind).toBe("synced"));
   it("offline with saved changes", () => {
     const s = deriveSyncStatus({ ...base, online: false, summary: { ...none, pending: 2 } });

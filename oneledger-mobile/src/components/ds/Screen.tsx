@@ -1,12 +1,16 @@
+import { GuideScrollView } from "@/features/guides/GuideScrollView";
 import type { ReactNode } from "react";
 import {
   KeyboardAvoidingView,
   Platform,
-  ScrollView,
   StyleSheet,
+  type StyleProp,
+  type ViewStyle,
 } from "react-native";
 import { SafeAreaView, type Edge } from "react-native-safe-area-context";
 
+import { useChromeScroll } from "@/components/shell/useChromeScroll";
+import { useNavigationChrome } from "@/components/shell/NavigationChromeContext";
 import { space } from "@/theme/tokens";
 import { makeStyles } from "@/theme/ThemeProvider";
 
@@ -18,6 +22,7 @@ export function Screen({
   children,
   centered = false,
   edges = ["left", "right", "bottom"],
+  contentStyle,
 }: {
   children: ReactNode;
   /** Vertically centre the content (sign-in style screens). */
@@ -28,22 +33,27 @@ export function Screen({
    * header (sign-in, the connect modal) pass `["top", ...]`.
    */
   edges?: readonly Edge[];
+  contentStyle?: StyleProp<ViewStyle>;
 }) {
   const styles = useStyles();
+  const onScroll=useChromeScroll();
+  const {payOn,onTabs}=useNavigationChrome();
   return (
     <SafeAreaView style={styles.safe} edges={edges}>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        <ScrollView
+        <GuideScrollView
+          onScroll={onScroll}
+          scrollEventThrottle={32}
           keyboardShouldPersistTaps="handled"
           // Drag the form down to put the keyboard away (a number pad has no Return key).
           keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
-          contentContainerStyle={[styles.content, centered && styles.centered]}
+          contentContainerStyle={[styles.content, centered && styles.centered, contentStyle,payOn&&!onTabs&&{paddingBottom:88}]}
         >
           {children}
-        </ScrollView>
+        </GuideScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );

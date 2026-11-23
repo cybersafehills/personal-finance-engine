@@ -25,9 +25,12 @@ async function bearerRequest(path: string, init: RequestInit = {}): Promise<Bear
   const workspaceId = getRequestedWorkspace();
 
   let response: Response;
+  const controller=new AbortController();
+  const timeout=init.signal?undefined:setTimeout(()=>controller.abort(),30000);
   try {
     response = await fetch(`${config.apiBaseUrl}${path}`, {
       ...init,
+      signal:init.signal??controller.signal,
       headers: {
         ...(init.headers as Record<string, string> | undefined),
         authorization: `Bearer ${token}`,
@@ -36,7 +39,7 @@ async function bearerRequest(path: string, init: RequestInit = {}): Promise<Bear
     });
   } catch {
     return { kind: "network" };
-  }
+  } finally { if(timeout)clearTimeout(timeout); }
   let body: unknown = null;
   try {
     body = await response.json();
@@ -49,14 +52,15 @@ async function bearerRequest(path: string, init: RequestInit = {}): Promise<Bear
   return { kind: "response", status: response.status, body };
 }
 
-export function bearerGet(path: string): Promise<BearerResponse> {
-  return bearerRequest(path);
+export function bearerGet(path: string,signal?:AbortSignal): Promise<BearerResponse> {
+  return bearerRequest(path,{signal});
 }
 
 /** POST a JSON body with the user's own token (the server runs it under RLS, second factor required). */
-export function bearerPost(path: string, body: unknown): Promise<BearerResponse> {
+export function bearerPost(path: string, body: unknown,signal?:AbortSignal): Promise<BearerResponse> {
   return bearerRequest(path, {
     method: "POST",
+    signal,
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });

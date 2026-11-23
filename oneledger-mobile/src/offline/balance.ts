@@ -19,7 +19,6 @@ export type BalanceTx = {
   settlement_state: string | null;
   sync_state: string;
   dedupe_state?: string;
-  server_updated_at?: string | null;
 };
 
 export type LocalBalance = {
@@ -43,7 +42,7 @@ export function computeLocalBalance(rows: BalanceTx[]): LocalBalance {
   for (const row of rows) {
     if (seen.has(row.id) || row.dedupe_state === "merged") continue; // a row is never counted twice
     seen.add(row.id);
-    if (UNSYNCED.has(row.sync_state) && row.server_updated_at == null) {
+    if (UNSYNCED.has(row.sync_state)) {
       // Refused (failed) entries are shown but are NOT part of the estimate.
       if (row.sync_state !== "failed" && row.settlement_state === "settled") {
         pendingEffect += (row.principal_effect_rwf ?? 0) + (row.fee_effect_rwf ?? 0);

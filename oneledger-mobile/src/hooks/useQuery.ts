@@ -1,80 +1,55 @@
-import { subscribeRuntime } from "@/offline/runtime";
 import { useFocusEffect } from "expo-router";
-import { useCallback, useEffect, useRef, useState } from "react";
-
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { AppState } from "react-native";
 import { useActiveSpace } from "@/features/spaces/ActiveSpaceProvider";
+import { subscribeRuntime } from "@/offline/runtime";
 
 export type QueryState<T> = {
-  data: T | null;
-  /** True only for the first load (nothing to show yet). */
-  loading: boolean;
-  /** True while a pull-to-refresh is running. */
-  refreshing: boolean;
-  error: string | null;
-  refresh(): void;
+  data: T | null; loading: boolean; refreshing: boolean; error: string | null; refresh(): void;
 };
 
-/**
- * Loads data when the screen gains focus and on demand. Keeps showing the
- * previous data while reloading, so returning to a tab never flashes empty.
- * A stale response (an older request finishing after a newer one) is dropped.
- */
-export function useQuery<T>(load: () => Promise<T>, queryKey = ""): QueryState<T> {
-  const { activeId: spaceId } = useActiveSpace();
-  const activeId = `${spaceId ?? "none"}|${queryKey}`;
-  const currentScope = useRef(activeId);
-  useEffect(() => { currentScope.current = activeId; }, [activeId]);
-  const [result, setResult] = useState<{ scope: string | null; data: T } | null>(null);
-  const data = result?.scope === activeId ? result.data : null;
+/** Keeps refresh results within their originating Space and ignores stale responses. */
+export function useQuery<T>(rawLoad: () => Promise<T>, optionsOrKey: { refreshIntervalMs?: number } | string = {}): QueryState<T> {
+  // A string is a query key (used by screens that pass an inline loader): the loader is read through a
+  // ref so a new function each render does not refetch; a changed key does.
+  const queryKey = typeof optionsOrKey === "string" ? optionsOrKey : null;
+  const options = typeof optionsOrKey === "string" ? {} : optionsOrKey;
+  const loadRef = useRef(rawLoad);
+  useLayoutEffect(() => { loadRef.current = rawLoad; });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const keyedLoad = useCallback(() => loadRef.current(), [queryKey]);
+  const load = queryKey === null ? rawLoad : keyedLoad;
+  const { activeId } = useActiveSpace();
+  const [snapshot, setSnapshot] = useState<{ space: string | null; value: T } | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [failure, setFailure] = useState<{ space: string | null; message: string } | null>(null);
   const requestId = useRef(0);
-
-  const run = useCallback(
-    async (userInitiated: boolean) => {
-      const id = ++requestId.current;
-      const scope = activeId;
-      setError(null);
-      if (userInitiated) setRefreshing(true);
-      try {
-        const next = await load();
-        if (id !== requestId.current || currentScope.current !== scope) return;
-        setResult({ scope, data: next });
-        setError(null);
-      } catch {
-        if (id !== requestId.current || currentScope.current !== scope) return;
-        setResult(null);
-        setError("Couldn't load this. Check your connection and try again.");
-      } finally {
-        if (id === requestId.current) {
-          setLoading(false);
-          setRefreshing(false);
-        }
-      }
-    },
-    [load, activeId],
-  );
-
-  useFocusEffect(
-    useCallback(() => {
-      run(false);
-    }, [run]),
-  );
-
-  // Switching Space reloads (the focus effect above only fires on focus).
-  const lastSpace = useRef(activeId);
-  useEffect(() => {
-    if (lastSpace.current === activeId) return;
-    lastSpace.current = activeId;
-    run(false);
-  }, [activeId, run]);
-
-  useEffect(() => subscribeRuntime(() => { setResult(null); void run(false); }), [run]);
-
-  const refresh = useCallback(() => {
-    run(true);
-  }, [run]);
-
-  return { data, loading: loading || (result !== null && result.scope !== activeId && !error), refreshing, error, refresh };
+  const run = useCallback(async (userInitiated: boolean) => {
+    const id = ++requestId.current;
+    if (userInitiated) setRefreshing(true);
+    try {
+      const next = await load();
+      if (id !== requestId.current) return;
+      setSnapshot({ space: activeId, value: next });
+      setFailure(null);
+    } catch {
+      if (id !== requestId.current) return;
+      setFailure({ space: activeId, message: "Couldn't load this. Check your connection and try again." });
+    } finally {
+      if (id === requestId.current) { setLoading(false); setRefreshing(false); }
+    }
+  }, [load, activeId]);
+  const interval = options.refreshIntervalMs;
+  useFocusEffect(useCallback(() => {
+    void run(false);
+    const unsubscribe = subscribeRuntime(() => void run(false));
+    const app = AppState.addEventListener("change", (state) => { if (state === "active") void run(false); });
+    const timer = interval ? setInterval(() => void run(false), interval) : undefined;
+    return () => { requestId.current++; unsubscribe(); app.remove(); if (timer) clearInterval(timer); };
+  }, [run, interval]));
+  const data = snapshot?.space === activeId ? snapshot.value : null;
+  const error = failure?.space === activeId ? failure.message : null;
+  const refresh = useCallback(() => { void run(true); }, [run]);
+  return { data, loading: loading || (snapshot?.space !== activeId && !error), refreshing, error, refresh };
 }

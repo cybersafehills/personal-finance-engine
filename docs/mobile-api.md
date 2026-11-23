@@ -131,7 +131,6 @@ All use the same guard as `/inbox` and `/budgets` (flag `MOBILE_API_ENABLED`, pe
 | Endpoint | Flag | Purpose |
 |---|---|---|
 | `GET /api/mobile/insights/overview?from&to[&account_id=…][&category][&counterparty][&tz][&granularity=day\|week\|month][&compare=previous]` | `INSIGHTS_CENTER` | Money in/out/net, categories, accounts, top counterparties, transfers excluded, pending, per currency. `from`/`to` are full ISO instants (`to` exclusive), max 400 days; `422 range_too_large` above 20,000 transactions. Every aggregate carries a `drilldown` filter. |
-| `GET /api/mobile/insights/forecast?[workspace_id=…][&account_id=…][&days=7\|14\|30]` | `INSIGHTS_CENTER` and `INTELLIGENCE_ENABLED` (+ respective allowlists) | Forward-looking RWF cash-flow scenarios from today. Default horizon is 30 days. The optional Space must agree with the authenticated request scope. An account filter returns only that wallet or an empty list. Output includes the opening balance date, scheduled and estimated projections, a no-new-income scenario, and the calculation basis. The server uses the same calculation as the web forecast. Amounts are decimal strings. `422 forecast_unavailable` covers excessive history or unsafe amounts. |
 | `GET /api/mobile/insights/drilldown?kind&currency&from&to[&value][&limit<=100&offset]` | `INSIGHTS_CENTER` | The transactions behind one aggregate, classified exactly as the totals are. |
 | `GET /api/mobile/accounts` | `BALANCE_PROVENANCE` | Accounts with `balance.status` = `confirmed\|estimated\|stale\|unavailable`, `amount_minor` (null when unavailable), `as_of`, `basis`, `reasons`. |
 | `GET /api/mobile/counterparties?[q][&kind][&limit&offset]` | `COUNTERPARTIES` | People/merchants with sent/received/net/count/first/last per currency, plus `unresolved_transactions` (all not yet linked) and `sortable_transactions` (the subset with a name or number that sorting can link). |
@@ -447,3 +446,16 @@ The pay intent payload now also carries `updatedAt` (when it last changed) and
 `verified` (true only when the provider's message confirmed it). `GET
 /api/mobile/config` gains `paymentRequests`.
 
+
+## Documents creation and report schedules
+
+The native Documents console uses the existing bearer/MFA/Space guard for these endpoints:
+
+- `GET /api/mobile/statements/generate`: authorized financial-source options and the profile timezone. Requires the Statements feature flag and the same `statement.generate` capability as the web form.
+- `POST /api/mobile/statements/generate`: `{ action: "preview" | "generate", request: StatementRequest }`. The bounded transport parser delegates to the canonical web preview/generator. Preserve `clientToken` across generation retries. Currency totals, coverage warnings, account authorization and immutable storage remain server responsibilities. Large requests use the existing statement worker.
+- `GET /api/mobile/reports/preferences`: saved settings for the caller and selected Space. A failed read is an error, never a default form that can overwrite existing settings.
+- `POST /api/mobile/reports/preferences`: explicit schedule/email edits. The handler reloads and preserves the current AI and alert preferences before calling the web preference validator and save action.
+
+Both POST routes use the existing rate limit, bounded JSON body, no-store responses and second-factor checks. No privileged key is embedded in the app. PDF/CSV downloads continue to use fresh short-lived links on each tap. Report lists are scoped to the selected Space; the web's cross-Space history remains unchanged.
+
+Native statements show compact summaries with expandable details and poll while queued documents prepare. The create flow separates editable criteria from an authoritative preview, then requires explicit Generate. Unknown opening/closing balances are shown as unavailable. Account/Space changes discard the old form and preview. Read requests have a 30-second network deadline; generation allows 75 seconds and retries use the same idempotency token.

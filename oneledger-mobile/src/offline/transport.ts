@@ -1,9 +1,5 @@
 import { supabase } from "@/api/supabase";
-import { createClient } from "@supabase/supabase-js";
-import { config } from "@/lib/config";
-import type { ManualAccount } from "@/features/manual/input";
-import { isCurrency, completePages } from "../../../web/shared/financial";
-import type { SnapshotPage } from "./visibility";
+import { listManualAccounts } from "@/features/manual/actions";
 
 import type { ServerTransaction, CreateManualPayload, SetCategoryPayload } from "./local-store";
 import type { OutboxOp } from "./outbox";
@@ -14,23 +10,16 @@ import type { SyncTransport } from "./sync-engine";
 // (Row Level Security + server-side authorization on every call). Error
 // messages are reduced to stable codes; payloads are never logged or surfaced.
 
-// Never use the mutable singleton's credentials for a queued operation. Capture
-// an explicitly bound bearer after checking the current identity on EVERY call.
-async function userClient(userId: string) {
+function requireClient() {
   if (!supabase) throw new TransportError("permanent", "not_configured");
-  const { data } = await supabase.auth.getSession();
-  if (!data.session || data.session.user.id !== userId) throw new TransportError("auth", "session_changed");
-  return createClient(config.supabaseUrl, config.supabaseAnonKey, {
-    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-    global: { headers: { Authorization: `Bearer ${data.session.access_token}` } },
-  });
+  return supabase;
 }
 
-async function applySetCategory(op: OutboxOp, userId: string) {
+async function applySetCategory(op: OutboxOp) {
   const p = JSON.parse(op.payload) as SetCategoryPayload;
   let result;
   try {
-    result = await (await userClient(userId)).rpc("sync_set_category", {
+    result = await requireClient().rpc("sync_set_category", {
       p_op_id: op.op_id,
       p_transaction_id: p.transaction_id,
       p_category: p.category,
@@ -39,8 +28,7 @@ async function applySetCategory(op: OutboxOp, userId: string) {
       p_base_subcategory: p.base_subcategory,
       p_force: p.force,
     });
-  } catch (error) {
-    if (error instanceof TransportError) throw error;
+  } catch {
     throw new TransportError("network", "network_unreachable");
   }
   if (result.error) {
@@ -52,14 +40,14 @@ async function applySetCategory(op: OutboxOp, userId: string) {
   return { status: data.status as "applied" | "replayed", serverUpdatedAt: data.server_updated_at ?? null };
 }
 
-export function createUserTransport(userId: string): SyncTransport { return {
+export const supabaseTransport: SyncTransport = {
   async applyOp(op) {
-    if (op.op_type === "set_category") return applySetCategory(op, userId);
+    if (op.op_type === "set_category") return applySetCategory(op);
     if (op.op_type !== "create_manual_transaction") throw new TransportError("permanent", "unsupported_operation");
     const p = JSON.parse(op.payload) as CreateManualPayload;
     let result;
     try {
-      result = await (await userClient(userId)).rpc("sync_create_manual_transaction", {
+      result = await requireClient().rpc("sync_create_manual_transaction", {
         p_op_id: op.op_id,
         p_id: p.transaction_id,
         p_account_id: p.p_account_id,
@@ -71,8 +59,7 @@ export function createUserTransport(userId: string): SyncTransport { return {
         p_counterparty_name: p.p_counterparty_name,
         p_notes: p.p_notes,
       });
-    } catch (error) {
-      if (error instanceof TransportError) throw error;
+    } catch {
       throw new TransportError("network", "network_unreachable");
     }
     if (result.error) {
@@ -88,13 +75,12 @@ export function createUserTransport(userId: string): SyncTransport { return {
   async fetchChanges(after, limit) {
     let result;
     try {
-      result = await (await userClient(userId)).rpc("sync_transactions_changes", {
+      result = await requireClient().rpc("sync_transactions_changes", {
         p_after_updated_at: after.updatedAt,
         p_after_id: after.id,
         p_limit: limit,
       });
-    } catch (error) {
-      if (error instanceof TransportError) throw error;
+    } catch {
       throw new TransportError("network", "network_unreachable");
     }
     if (result.error) {
@@ -104,26 +90,10 @@ export function createUserTransport(userId: string): SyncTransport { return {
   },
 
   async fetchAccounts() {
-    const client = await userClient(userId);
-    const data = await completePages<{ id: string; name: string; currency: string; workspace_id: string }>(async (offset, size) => {
-      const { data, error } = await client.from("accounts").select("id,name,currency,workspace_id")
-        .eq("is_active", true).is("archived_at", null).order("id").range(offset, offset + size - 1);
-      if (error) throw classifyError({ message: error.message });
-      return data ?? [];
-    });
-    return (data ?? []).filter((a) => isCurrency(a.currency)).map((a): ManualAccount => ({ id: a.id, name: a.name, currency: a.currency as ManualAccount["currency"], workspaceId: a.workspace_id }));
+    try {
+      return await listManualAccounts();
+    } catch (error) {
+      throw classifyError({ message: error instanceof Error ? error.message : "" });
+    }
   },
-  async fetchSnapshotPage(afterId) {
-    const { data, error, status } = await (await userClient(userId)).rpc("sync_financial_snapshot_page", { p_after_id: afterId, p_limit: 200 });
-    if (error) throw classifyError({ status, message: error.message, networkFailure: status === 0 });
-    const page = data as SnapshotPage;
-    if (!page || !Array.isArray(page.rows) || !Array.isArray(page.workspaces)) throw new TransportError("server", "invalid_snapshot");
-    return page;
-  },
-  async visibleIds(ids) {
-    const { data, error, status } = await (await userClient(userId)).rpc("sync_visible_transaction_ids", { p_ids: ids });
-    if (error) throw classifyError({ status, message: error.message, networkFailure: status === 0 });
-    if (!Array.isArray(data)) throw new TransportError("server", "invalid_snapshot");
-    return data as string[];
-  },
-}; }
+};

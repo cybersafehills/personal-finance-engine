@@ -6,7 +6,7 @@ import type { SqlDb } from "./sql";
 // Steps are additive and never drop user data. A database NEWER than this build
 // (an older app opened after a newer one) is refused rather than mangled.
 
-export const LOCAL_SCHEMA_VERSION = 3;
+export const LOCAL_SCHEMA_VERSION = 2;
 
 const STEPS: { version: number; sql: string[] }[] = [
   {
@@ -111,14 +111,6 @@ const STEPS: { version: number; sql: string[] }[] = [
       `CREATE INDEX idx_outbox_entity ON outbox (entity_id, seq)`,
     ],
   },
-  { version: 3, sql: [
-    `ALTER TABLE transactions ADD COLUMN is_own_transfer INTEGER NOT NULL DEFAULT 0`,
-    `ALTER TABLE transactions ADD COLUMN visibility_revoked INTEGER NOT NULL DEFAULT 0`,
-    `CREATE TABLE workspace_leases (workspace_id TEXT PRIMARY KEY, kind TEXT NOT NULL, checked_at TEXT NOT NULL, expires_at TEXT NOT NULL)`,
-    `CREATE TABLE wallet_snapshots (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, payload TEXT NOT NULL)`,
-    `CREATE TABLE snapshot_seen (id TEXT PRIMARY KEY)`,
-    `CREATE INDEX idx_tx_workspace_date ON transactions(workspace_id, occurred_at DESC, id)`,
-  ] },
 ];
 
 export class MigrationError extends Error {}

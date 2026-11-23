@@ -1,9 +1,10 @@
+import { GuideAnchor } from "@/features/guides/GuideAnchor";
 import Feather from "@expo/vector-icons/Feather";
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import * as Linking from "expo-linking";
 import { router } from "expo-router";
 import { useState, type ReactNode } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { Platform, Pressable, StyleSheet, View } from "react-native";
 import Animated, { Easing, FadeOut, Keyframe, ReduceMotion } from "react-native-reanimated";
 
 import { Button, PressableScale, Text } from "@/components/ds";
@@ -118,23 +119,23 @@ export function PayLauncher({
   return (
     <View style={styles.root}>
       <Animated.View entering={rise(step++)} style={styles.header}>
-        <View style={styles.headerText}>
+        <GuideAnchor id="pay-overview" style={styles.headerText}>
           <Text variant="heading" accessibilityRole="header">
             Pay & Services
           </Text>
           <Text variant="label" color="textMuted" numberOfLines={1}>
             Prepare a payment or find a USSD code.
           </Text>
-        </View>
+        </GuideAnchor>
       </Animated.View>
 
       <View style={styles.body}>
         {config.scanToPay ? (
           <Animated.View entering={rise(step++)}>
-            <FeatureRow
+            <GuideAnchor id="pay-scan"><FeatureRow
               tone="scan"
               label="Scan to pay"
-              caption="Scan a merchant payment QR code."
+              caption="Scan a payment QR code or merchant poster."
               icon={<Feather name="maximize" size={16} color={colors.onSolid} />}
               infoLabel="About scan to pay"
               onInfo={() => setInfo("scan")}
@@ -142,13 +143,13 @@ export function PayLauncher({
                 onClose();
                 router.push("/scan");
               }}
-            />
+            /></GuideAnchor>
           </Animated.View>
         ) : null}
 
         {config.paymentRequests ? (
           <Animated.View entering={rise(step++)}>
-            <FeatureRow
+            <GuideAnchor id="pay-request"><FeatureRow
               tone="request"
               label="Request payment"
               caption="Ask someone to pay you with a link."
@@ -159,11 +160,11 @@ export function PayLauncher({
                 onClose();
                 router.push("/request-new");
               }}
-            />
+            /></GuideAnchor>
           </Animated.View>
         ) : null}
 
-        <Animated.View entering={rise(step++)} style={styles.grid}>
+        <GuideAnchor id="pay-services"><Animated.View entering={rise(step++)} style={styles.grid}>
           {LAUNCHER_ACTIONS.map((action) => {
             const available = actionAvailableHere(action, config);
             const brand = action.kind === "ekash";
@@ -196,7 +197,7 @@ export function PayLauncher({
               </PressableScale>
             );
           })}
-        </Animated.View>
+        </Animated.View></GuideAnchor>
 
         <Animated.View entering={rise(step++)}>
           <PressableScale
@@ -356,7 +357,8 @@ const useStyles = makeStyles((colors) => StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: space[2],
-    minHeight: 48,
+    // Android sizes a two-line label ("Government services") as one line, so the tile needs room for two.
+    minHeight: Platform.OS === "android" ? 60 : 48,
     paddingHorizontal: space[3],
     paddingVertical: space[2],
     borderRadius: radii.control,

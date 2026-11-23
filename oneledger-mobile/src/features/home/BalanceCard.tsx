@@ -30,7 +30,7 @@ export function BalanceCard({
     <View style={styles.card}>
       <View style={styles.top}>
         <Text variant="label" color="onSolid" style={styles.dim}>
-          Recorded balance
+          Current balance
         </Text>
         <Pressable
           accessibilityRole="button"
@@ -52,7 +52,7 @@ export function BalanceCard({
 
       <View style={styles.footer}>
         <Text variant="label" color="onSolid" style={styles.dim}>
-          RWF · Last captured message
+          MTN Mobile Money
         </Text>
         {balance ? (
           <Text variant="caption" color="onSolid" style={styles.faint}>

@@ -64,7 +64,7 @@ export function iosHealthDisplay(
     case "working":
       return {
         variant: "positive",
-        label: "Working",
+        label: "Previous activity received",
         detail: `Last heard from this iPhone ${lastHeardLabel(device.lastUsedAtIso!, nowMs)}.`,
       };
     case "waiting":
@@ -97,15 +97,15 @@ export type Troubleshooting = { problem: string; fix: string };
 export const IOS_TROUBLESHOOTING: Troubleshooting[] = [
   {
     problem: "The Shortcut says it can't be found or the file doesn't exist",
-    fix: "The Shortcuts must be named exactly “Connect to OneLedger” and “OneLedger Capture”. Rename them in the Shortcuts app if you changed them.",
+    fix: "The installed shortcut must be named “OneLedger Capture”. If you still use the older “Connect to OneLedger”, update to the combined release from setup.",
   },
   {
     problem: "The automation asks me to confirm every time",
-    fix: "Open the automation in Shortcuts and choose Run Immediately instead of Ask Before Running.",
+    fix: "On iOS 27, expand the trigger and turn Confirm Before Run off. On iOS 17–26, choose Run Immediately, or turn Ask Before Running off.",
   },
   {
     problem: "A MoMo message came in but nothing was recorded",
-    fix: "Check the automation's Message Contains is exactly RWF with Sender left empty, and that the automation is switched on. Then run “OneLedger Capture” once by hand from the Shortcuts app and allow any permission it asks for.",
+    fix: "On iOS 27, use one Message contains RWF condition with no unfinished Sender row. Keep Automation on and Confirm Before Run off. Use Test connection in OneLedger and allow the shortcut’s file and network prompts. The Message trigger must run OneLedger Capture with the received message as its input; a trigger alone cannot record anything.",
   },
   {
     problem: "It says disconnected or the code expired",

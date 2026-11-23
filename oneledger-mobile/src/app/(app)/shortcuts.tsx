@@ -1,14 +1,15 @@
+import { GuideAnchor } from "@/features/guides/GuideAnchor";
+import { AutomationGuide } from "@/features/ios-shortcuts/AutomationGuide";
+import { ShortcutInstaller } from "@/features/ios-shortcuts/ShortcutInstaller";
 import { router } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
-import { Linking, Platform, View } from "react-native";
+import { AppState, Linking, Platform, View } from "react-native";
 
 import {
   Badge,
   Button,
   Card,
   EmptyState,
-  ListGroup,
-  ListRow,
   Screen,
   StepWizard,
   Text,
@@ -24,13 +25,14 @@ import {
   saveIosDeviceCredentialId,
 } from "@/features/ios-shortcuts/store";
 import {
-  AUTOMATION_STEPS,
+  CAPTURE_SHORTCUT_NAME,
+  CONNECT_SHORTCUT_NAME,
+  captureTestRunUrl,
   connectPhase,
   connectShortcutRunUrl,
   expiryLabel,
   IOS_GUIDE_STEPS,
   iosGuideStepNumber,
-  MANUAL_BUILD,
   SHORTCUTS_APP_URL,
   type IosGuideStep,
   type PairingStatus,
@@ -38,6 +40,8 @@ import {
 import { AccountPicker } from "@/features/pairing/AccountPicker";
 import {
   getDeviceStatus,
+  getShortcutDeliveryStatus,
+  type ShortcutDeliveryStatus,
   getPairingSessionStatus,
   listPairableAccounts,
   startPairingSession,
@@ -49,7 +53,7 @@ import { formatDateTime } from "@/lib/kigali-time";
 import { space } from "@/theme/tokens";
 
 // Anywhere but a real iPhone this screen is a walkthrough only: it creates
-// no pairing session on the server and simulates the Shortcut's part.
+// no pairing session on the server and cannot claim a connected device.
 const PREVIEW_ONLY = Platform.OS !== "ios";
 
 const STATUS_POLL_MS = 3_000;
@@ -89,7 +93,7 @@ export default function ShortcutsGuide() {
     (async () => {
       const id = await loadIosDeviceCredentialId();
       if (!id) return;
-      const status = await getDeviceStatus(id);
+      const status = await getDeviceStatus(id).catch(() => null);
       if (!active || status?.status !== "active") return;
       setDeviceCredentialId(id);
       setStep((current) => (current === "install" ? "verify" : current));
@@ -112,11 +116,11 @@ export default function ShortcutsGuide() {
         <Badge variant="attention">Walkthrough only: this isn&apos;t an iPhone</Badge>
       ) : null}
 
-      <StepWizard
+      <GuideAnchor id="recording-page"><StepWizard
         current={iosGuideStepNumber(step)}
         total={IOS_GUIDE_STEPS.length}
-        title={title}
-      />
+        title={step === "install" && config.combinedShortcutUrl ? "Add OneLedger Capture" : title}
+      /></GuideAnchor>
 
       {step === "install" ? <Install onNext={() => setStep("connect")} /> : null}
       {step === "connect" ? (
@@ -124,82 +128,39 @@ export default function ShortcutsGuide() {
       ) : null}
       {step === "automate" ? <Automate onNext={() => setStep("verify")} /> : null}
       {step === "verify" ? (
-        <Verify deviceCredentialId={deviceCredentialId} onReconnect={handleReconnect} />
+        <Verify deviceCredentialId={deviceCredentialId} onReconnect={handleReconnect} onUpdate={() => setStep("install")} onReview={() => setStep("automate")} />
       ) : null}
     </Screen>
   );
 }
 
 function Install({ onNext }: { onNext: () => void }) {
-  const [failed, setFailed] = useState(false);
-  const hasLinks = config.connectShortcutUrl !== "";
-
-  async function add(url: string) {
-    setFailed(!(await open(url)));
-  }
+  const single = !!config.combinedShortcutUrl;
+  const hasLinks = single || config.connectShortcutUrl !== "";
 
   return (
     <>
       <Card style={{ gap: space[3] }}>
-        <Text>
-          iPhones don&apos;t let apps read your messages, so OneLedger uses two
-          small Apple Shortcuts instead. You add them once.
-        </Text>
+        <Text color="textSecondary">Add in Apple’s preview, then return here. OneLedger will check the connection in the next step.</Text>
         {hasLinks ? (
           <>
-            <Button
-              label={
-                config.captureShortcutUrl
-                  ? "Add “Connect to OneLedger”"
-                  : "Add the OneLedger Shortcuts"
-              }
-              fullWidth
-              onPress={() => add(config.connectShortcutUrl)}
-            />
-            {config.captureShortcutUrl ? (
-              <Button
-                label="Add “OneLedger Capture”"
-                fullWidth
-                onPress={() => add(config.captureShortcutUrl)}
-              />
-            ) : null}
-            <Text variant="label" color="textMuted">
-              Each one opens in the Shortcuts app. Tap Add Shortcut, then come
-              back here.
-            </Text>
+            <ShortcutInstaller single={single} connectUrl={single ? config.combinedShortcutUrl : config.connectShortcutUrl} captureUrl={config.captureShortcutUrl} open={open} />
+
           </>
         ) : (
           <>
             <Text variant="label" color="textSecondary">
-              One-tap setup isn&apos;t published yet, so you build the two
-              Shortcuts yourself once (about 10 minutes). Open the Shortcuts app,
-              create each one with the exact name below, add the actions in
-              order, then come back and continue.
+              Shortcut installation is unavailable in this build. Use the published web setup instead.
             </Text>
-            <Button label="Open the Shortcuts app" variant="secondary" fullWidth onPress={() => open(SHORTCUTS_APP_URL)} />
+            <Button label="Open device setup on the web" variant="secondary" fullWidth onPress={() => open(`${config.apiBaseUrl}/integrations/connections/pair`)} />
           </>
         )}
-        {failed ? (
-          <Text variant="label" color="attention" accessibilityRole="alert">
-            Couldn&apos;t open that link. Make sure the Shortcuts app is
-            installed.
-          </Text>
-        ) : null}
       </Card>
-      {hasLinks ? null : (
-        <>
-          {MANUAL_BUILD.map((shortcut, index) => (
-            <ListGroup key={shortcut.name} title={`Shortcut ${index + 1}: ${shortcut.name}`} footer={shortcut.purpose}>
-              {shortcut.steps.map((text, i) => (
-                <ListRow key={i} label={`${i + 1}. ${text}`} />
-              ))}
-            </ListGroup>
-          ))}
-        </>
-      )}
+
       <Button
-        label={hasLinks ? "I've added them" : "I've built them"}
-        variant={hasLinks ? "primary" : "secondary"}
+        label={single ? "I’ve added OneLedger Capture" : "I've added them"}
+        variant="primary"
+        disabled={!hasLinks}
         fullWidth
         onPress={onNext}
       />
@@ -228,7 +189,7 @@ function Connect({ onConnected }: { onConnected: (credentialId: string | null) =
       }
       setAccounts(result.accounts);
       setSelectedId(result.accounts[0]?.id ?? null);
-    });
+    }).catch(() => { if(active){setLoadError("Couldn’t load your accounts. Check your connection and try again.");setAccounts([]);} });
     return () => {
       active = false;
     };
@@ -239,22 +200,20 @@ function Connect({ onConnected }: { onConnected: (credentialId: string | null) =
   useEffect(() => {
     if (!pairing) return;
     let active = true;
-    let polls = 0;
-    const timer = setInterval(async () => {
+    const check = async () => {
       setNow(Date.now());
-      polls += 1;
-      if (PREVIEW_ONLY) {
-        if (polls >= 2 && active) onConnected(null);
-        return;
-      }
-      const result = await getPairingSessionStatus(pairing.sessionId);
+      if (Date.now() >= Date.parse(pairing.expiresAtIso)) return;
+      const result = await getPairingSessionStatus(pairing.sessionId).catch(() => null);
       if (!active || !result) return;
       setStatus(result.status);
       if (result.status === "consumed") onConnected(result.deviceCredentialId);
-    }, STATUS_POLL_MS);
+    };
+    const timer = setInterval(check, STATUS_POLL_MS);
+    const subscription = AppState.addEventListener("change", (state) => { if (state === "active") void check(); });
     return () => {
       active = false;
       clearInterval(timer);
+      subscription.remove();
     };
   }, [pairing, onConnected]);
 
@@ -263,14 +222,8 @@ function Connect({ onConnected }: { onConnected: (credentialId: string | null) =
     if (!account || busy) return;
     setBusy(true);
     setError(null);
-    const started = PREVIEW_ONLY
-      ? ({
-          ok: true,
-          token: "olp_DEMO-walkthrough-only",
-          sessionId: "demo",
-          expiresAtIso: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
-        } as const)
-      : await startPairingSession(account);
+    if (PREVIEW_ONLY) { setBusy(false);setError("Open OneLedger on your iPhone to connect. This preview cannot connect a device.");return; }
+    const started = await startPairingSession(account).catch(() => ({ok:false as const,message:"Couldn’t create a connection. Check your internet and try again."}));
     setBusy(false);
     if (!started.ok) {
       setError(started.message);
@@ -279,9 +232,9 @@ function Connect({ onConnected }: { onConnected: (credentialId: string | null) =
     setStatus("pending");
     setNow(Date.now());
     setPairing(started);
-    if (!PREVIEW_ONLY && !(await open(connectShortcutRunUrl(started.token)))) {
+    if (!PREVIEW_ONLY && !(await open(connectShortcutRunUrl(started.token, config.combinedShortcutUrl ? CAPTURE_SHORTCUT_NAME : CONNECT_SHORTCUT_NAME)))) {
       setError(
-        "Couldn't open the Shortcut. Check that “Connect to OneLedger” is added, then tap the button below.",
+        "Couldn't open the Shortcut. Check that the shortcut shown in step 1 is installed, then tap the button below.",
       );
     }
   }
@@ -320,15 +273,16 @@ function Connect({ onConnected }: { onConnected: (credentialId: string | null) =
               {pairing.token}
             </Text>
             <Text variant="caption" color="textMuted">
-              Only needed if the Shortcut asks you to type it.
+              Passed securely as Shortcut Input when you open Connect below. Install the current shortcut before connecting.
             </Text>
           </View>
           <Button
             label="Open the Shortcut again"
             variant="secondary"
             fullWidth
-            onPress={() => open(connectShortcutRunUrl(pairing.token))}
+            onPress={() => open(connectShortcutRunUrl(pairing.token, config.combinedShortcutUrl ? CAPTURE_SHORTCUT_NAME : CONNECT_SHORTCUT_NAME))}
           />
+          <Button label="Get a new code and connect" variant="ghost" loading={busy} onPress={start} />
           <Text variant="label" color="textMuted">
             Waiting for this iPhone to connect…
           </Text>
@@ -374,58 +328,36 @@ function Connect({ onConnected }: { onConnected: (credentialId: string | null) =
 }
 
 function Automate({ onNext }: { onNext: () => void }) {
-  return (
-    <>
-      <Card style={{ gap: space[3] }}>
-        <Text>
-          This iPhone is connected. Last step in Apple&apos;s Shortcuts app:
-          tell it to pass MoMo messages to OneLedger. Apple requires you to
-          set this up yourself.
-        </Text>
-        {AUTOMATION_STEPS.map((text, index) => (
-          <View key={text} style={{ flexDirection: "row", gap: space[2] }}>
-            <Text variant="bodyStrong" color="accent">
-              {index + 1}.
-            </Text>
-            <Text variant="label" color="textSecondary" style={{ flex: 1 }}>
-              {text}
-            </Text>
-          </View>
-        ))}
-        <Text variant="label" color="textMuted">
-          “RWF” appears in every MoMo message. Anything else that happens to
-          contain it is ignored by OneLedger and never recorded.
-        </Text>
-        <Button
-          label="Open Shortcuts"
-          variant="secondary"
-          fullWidth
-          onPress={() => open(SHORTCUTS_APP_URL)}
-        />
-      </Card>
-      <Button label="I've done this" fullWidth onPress={onNext} />
-    </>
-  );
+  return <><Badge variant="positive">This iPhone is connected</Badge><AutomationGuide onNext={onNext} /></>;
 }
 
 function Verify({
   deviceCredentialId,
   onReconnect,
+  onUpdate,
+  onReview,
 }: {
   deviceCredentialId: string | null;
   onReconnect: () => void;
+  onUpdate: () => void;
+  onReview: () => void;
 }) {
   const [device, setDevice] = useState<IosDeviceStatus | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [showHelp, setShowHelp] = useState(false);
+  const [delivery, setDelivery] = useState<ShortcutDeliveryStatus | null>(null);
+  const [testStartedAt, setTestStartedAt] = useState<number | null>(null);
+  const [testOpenError, setTestOpenError] = useState(false);
+  const [watchStartedAt] = useState(() => Date.now());
 
   useEffect(() => {
     if (!deviceCredentialId) return;
     let active = true;
     const check = async () => {
-      const value = await getDeviceStatus(deviceCredentialId);
+      const [value, evidence] = await Promise.all([getDeviceStatus(deviceCredentialId).catch(() => null), getShortcutDeliveryStatus(deviceCredentialId).catch(() => null)]);
       if (!active) return;
       setDevice(value);
+      setDelivery(evidence);
       setNow(Date.now());
     };
     check();
@@ -436,7 +368,15 @@ function Verify({
     };
   }, [deviceCredentialId]);
 
-  const working = device?.status === "active" && device.lastUsedAtIso !== null;
+  const activityAt = delivery?.testAt ? Date.parse(delivery.testAt) : NaN;
+  const working = device?.status === "active" && testStartedAt !== null && Number.isFinite(activityAt) && activityAt >= testStartedAt;
+  const captureAt = delivery?.captureAt ? Date.parse(delivery.captureAt) : NaN;
+  const messageReceived = device?.status === "active" && Number.isFinite(captureAt) && captureAt >= watchStartedAt;
+  async function testConnection() {
+    setTestStartedAt(Date.now());
+    setTestOpenError(false);
+    if (!(await open(captureTestRunUrl()))) setTestOpenError(true);
+  }
   const display = device ? iosHealthDisplay(device, now) : null;
 
   return (
@@ -444,8 +384,11 @@ function Verify({
       <Card style={{ gap: space[3] }}>
         {working && display ? (
           <>
-            <Badge variant={display.variant}>{display.label}</Badge>
-            <Text variant="heading">OneLedger is receiving from this iPhone</Text>
+            <Badge variant="positive">Connection test received</Badge>
+            <Text variant="heading">OneLedger can receive from this iPhone</Text>
+            <Text variant="label" color="textSecondary">
+              OneLedger confirmed a successful test after you started it. This checks the connection only. A real incoming MoMo message is still needed to confirm background forwarding.
+            </Text>
             <Text variant="label" color="textSecondary">
               {display.detail} {device?.lastUsedAtIso ? `(${formatDateTime(device.lastUsedAtIso)})` : ""}
             </Text>
@@ -457,19 +400,30 @@ function Verify({
           </>
         ) : (
           <>
-            <Badge variant="neutral">Waiting for the first message</Badge>
+            <Badge variant="neutral">{testStartedAt ? "Waiting for a fresh test" : "Connection not verified this visit"}</Badge>
             <Text>
-              Your next MoMo message will confirm it. To check now, make a
-              small MoMo payment or ask someone to send you a little.
+              Run the connection test below. Previous activity does not verify this setup. No payment is needed for this test.
             </Text>
             <Text variant="label" color="textMuted">
-              This screen updates by itself. You can also leave: the
-              transaction will appear in OneLedger within a few minutes.
+              This screen updates when a fresh response arrives. If Shortcuts reports an error, the connection has not passed this test.
             </Text>
           </>
         )}
       </Card>
 
+      <Button label="Test connection without a payment" variant="secondary" fullWidth onPress={() => void testConnection()} />
+      {testStartedAt && delivery?.rejection && Date.parse(delivery.rejection.created_at) >= testStartedAt && !working ? <Text accessibilityRole="alert" color="attention">The latest request was rejected ({delivery.rejection.reason_code ?? "unknown error"}). Update OneLedger Capture and retry. Pairing alone does not confirm recording.</Text> : null}
+      {testOpenError ? <Text accessibilityRole="alert" color="attention">Couldn’t open the test. Check that the current OneLedger Capture is installed.</Text> : null}
+      {testStartedAt && !working && now - testStartedAt > 60_000 ? <Text accessibilityRole="alert" color="attention">No fresh test response yet. Update OneLedger Capture and check the error shown in Shortcuts.</Text> : null}
+      <Card style={{ gap: space[3] }}>
+        <Badge variant={messageReceived ? "positive" : "neutral"}>{messageReceived ? "New message received" : "Waiting for an incoming message"}</Badge>
+        <Text variant="bodyStrong">{messageReceived ? "A message reached OneLedger" : "The Message automation still needs a real message"}</Text>
+        <Text color="textSecondary">{messageReceived
+          ? "OneLedger accepted a message from this iPhone while this check was open. Check Transactions for the processed entry. The connection test does not create a transaction."
+          : "Leave the automation on and wait for your next normal MoMo message. No extra payment is needed. If it arrives but this status stays unchanged, check the Sender warning and the Run action’s Input."}</Text>
+        {delivery?.captureAt ? <Text variant="caption" color="textMuted">Last message accepted on {formatDateTime(delivery.captureAt)}</Text> : null}
+      </Card>
+      <Button label="Review forwarding instructions" variant="ghost" onPress={onReview} />
       <Card style={{ gap: space[3] }}>
         <Button
           label={showHelp ? "Hide troubleshooting" : "It isn't working"}
@@ -497,6 +451,7 @@ function Verify({
       </Card>
 
       <Button label="Finish" fullWidth onPress={() => router.back()} />
+      <Button label="Update or reinstall OneLedger Capture" variant="secondary" fullWidth onPress={onUpdate} />
       <Button label="Connect this iPhone again" variant="ghost" fullWidth onPress={onReconnect} />
     </>
   );

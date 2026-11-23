@@ -19,3 +19,8 @@ describe("eKash code", () => {
     expect(ekashShareText("*182*1*2*1*2#", "Rent")).toBe("*182*1*2*1*2#\nReference: Rent");
   });
 });
+
+it("preserves varied bank IDs without allowing USSD or URI injection",()=>{
+ for(const id of ['001-234-56','BK/001.234_5','00001234567890123456789012345678901234567890']) expect(buildEkashCode(id,'5000')).toMatchObject({ok:true,display:`*182*1*2*${id}*5000#`});
+ for(const id of ['001#*1','tel:123','001?x=1','001%23','001{amount}','001\\23']) expect(buildEkashCode(id,'5000').ok).toBe(false);
+});

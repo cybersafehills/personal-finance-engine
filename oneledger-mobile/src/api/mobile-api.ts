@@ -169,10 +169,12 @@ export async function fetchInsights(params: {
   to: string;
   accountIds?: string[];
   compare?: boolean;
+  granularity?: "day" | "week" | "month";
 }): Promise<InsightsResult> {
   const q = new URLSearchParams({ from: params.from, to: params.to, tz: "Africa/Kigali" });
   for (const id of params.accountIds ?? []) q.append("account_id", id);
   if (params.compare) q.set("compare", "previous");
+  if (params.granularity) q.set("granularity", params.granularity);
   const result = await bearerGet(`/api/mobile/insights/overview?${q.toString()}`);
   if (result.kind !== "response") {
     return { ok: false, ...failureForOutcome(result, "Insights") };
@@ -200,22 +202,17 @@ export async function fetchDrilldown(d: Drilldown, limit = 50, offset = 0): Prom
 }
 
 /** Wallets with an honest balance label (Confirmed / Estimated / Out of date / Not available). */
-export async function fetchWallets(workspaceId?: string): Promise<WalletsResult> {
-  const path = workspaceId ? `/api/mobile/accounts?workspace_id=${encodeURIComponent(workspaceId)}` : "/api/mobile/accounts";
-  const result = await bearerGet(path);
+export async function fetchWallets(): Promise<WalletsResult> {
+  const result = await bearerGet("/api/mobile/accounts");
   if (result.kind !== "response") {
     return { ok: false, ...failureForOutcome(result, "Your wallets") };
   }
-  const wallets = parseWalletsResponse(result.status, result.body);
-  if (wallets.ok && workspaceId && wallets.workspaceId !== workspaceId) {
-    return { ok: false, ...failureForOutcome({ kind: "space_unsupported" }, "Your wallets") };
-  }
-  return wallets;
+  return parseWalletsResponse(result.status, result.body);
 }
 
 /** People and merchants with sent/received/net per currency (all time). */
 export async function fetchPeople(params: { q?: string; kind?: PersonKind; limit?: number }): Promise<PeopleResult> {
-  const q = new URLSearchParams({ limit: String(params.limit ?? 100), contract: "2" });
+  const q = new URLSearchParams({ limit: String(params.limit ?? 100) });
   if (params.q && params.q.trim()) q.set("q", params.q.trim().slice(0, 80));
   if (params.kind) q.set("kind", params.kind);
   const result = await bearerGet(`/api/mobile/counterparties?${q.toString()}`);
@@ -227,7 +224,7 @@ export async function fetchPeople(params: { q?: string; kind?: PersonKind; limit
 
 /** One person or merchant, with their transactions. */
 export async function fetchPerson(id: string, limit = 50): Promise<PersonResult> {
-  const result = await bearerGet(`/api/mobile/counterparties/${encodeURIComponent(id)}?limit=${limit}&contract=2`);
+  const result = await bearerGet(`/api/mobile/counterparties/${encodeURIComponent(id)}?limit=${limit}`);
   if (result.kind !== "response") {
     return { ok: false, ...failureForOutcome(result, "This person") };
   }
