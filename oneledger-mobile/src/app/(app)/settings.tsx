@@ -1,20 +1,19 @@
+import { GuideAnchor } from "@/features/guides/GuideAnchor";
 import * as Linking from "expo-linking";
 import { router } from "expo-router";
-import { useCallback, useState } from "react";
-import { fetchMoreFlags } from "@/api/mobile-api";
+import { useState } from "react";
+import { useMoreFlags } from "@/features/more/flags-cache";
 import { Text } from "@/components/ds";
 import { useLock } from "@/features/lock/LockProvider";
 import { MenuGroup, MenuRow, MenuScreen, ProfileSummary, SignOutRow } from "@/features/settings/MenuUI";
 import { visibleSettingsGroups, type SettingsRow } from "@/features/settings/groups";
-import { useQuery } from "@/hooks/useQuery";
 import { config } from "@/lib/config";
 import { useTheme } from "@/theme/ThemeProvider";
 
 export default function Settings() {
   const { preference } = useTheme();
   const { enabled, available, loading } = useLock();
-  const load = useCallback(() => fetchMoreFlags(), []);
-  const { data: flags } = useQuery(load);
+  const flags = useMoreFlags();
   const [message, setMessage] = useState<string | null>(null);
   async function open(row: Pick<SettingsRow, "route" | "webPath">) {
     setMessage(null);
@@ -31,9 +30,9 @@ export default function Settings() {
       {visibleSettingsGroups(flags ?? null).map((group) => (
         <MenuGroup key={group.title} title={group.title}>
           {group.rows.map((row) => (
-            <MenuRow key={row.label} role="link" icon={row.icon} label={row.label}
+            <GuideAnchor key={row.label} id={row.route ? `setting-${row.route.slice(1)}` : row.webPath === "/settings/accounts" ? "setting-accounts" : `setting-${row.label.toLowerCase().replace(/[^a-z0-9]+/g,"-")}`}><MenuRow role="link" icon={row.icon} label={row.label}
               value={row.route === "/appearance" ? (preference === "system" ? "Automatic" : preference === "dark" ? "Dark" : "Light") : row.route === "/security" ? (loading ? "Checking…" : !available ? "Unavailable" : enabled ? "On" : "Off") : undefined}
-              external={!!row.webPath} onPress={() => void open(row)} />
+              external={!!row.webPath} onPress={() => void open(row)} /></GuideAnchor>
           ))}
         </MenuGroup>
       ))}

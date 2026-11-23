@@ -1,4 +1,5 @@
-import { act, fireEvent, render, screen } from "@testing-library/react-native";
+import { OfflineContext, useOffline } from "@/offline/offline-context";
+import { act, fireEvent, render, screen, userEvent } from "@testing-library/react-native";
 
 import Transactions from "@/app/(app)/(tabs)/transactions";
 import type { TransactionRow } from "@/features/transactions/queries";
@@ -260,4 +261,25 @@ it("keeps the keyboard closed for ordinary Transactions navigation",async()=>{
  mockGetTransactions.mockResolvedValue([]);
  await render(<Transactions />);
  expect(screen.getByLabelText("Search").props.autoFocus).toBe(false);
+});
+
+it("renders refresh results without waiting for a full background sync", async () => {
+  const sync = jest.fn(() => new Promise<void>(() => {}));
+  function SlowSync() {
+    const base = useOffline();
+    return <OfflineContext.Provider value={{...base, syncNow: sync}}><Transactions/></OfflineContext.Provider>;
+  }
+  mockGetTransactions.mockResolvedValue([row("old", "Previously loaded")]);
+  await render(<SlowSync/>);
+  await screen.findByText("Previously loaded");
+  mockGetTransactions.mockResolvedValue([row("new", "Freshly loaded")]);
+  await userEvent.setup({ advanceTimers: jest.advanceTimersByTime }).pullToRefresh(screen.getByTestId("transactions-list"));
+  expect(await screen.findByText("Freshly loaded")).toBeTruthy();
+  expect(sync).toHaveBeenCalled();
+});
+it("shows transaction rows while lifetime totals are still pending", async () => {
+  mockLifetime.mockReturnValue(new Promise(() => {}));
+  mockGetTransactions.mockResolvedValue([row("ready", "Visible immediately")]);
+  await render(<Transactions/>);
+  expect(await screen.findByText("Visible immediately")).toBeTruthy();
 });

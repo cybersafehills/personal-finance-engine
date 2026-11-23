@@ -1,5 +1,7 @@
+import { GuideAnchor } from "@/features/guides/GuideAnchor";
 import { AccountAvatar } from "@/features/profile/Avatar";
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
+import { iconInk } from "@/components/ds/BrandIcon";
 import Feather from "@expo/vector-icons/Feather";
 import { router } from "expo-router";
 import { useState, type ReactNode } from "react";
@@ -23,8 +25,8 @@ export function HomeHeader({ name, unread }: { name: string; unread: number }) {
     <View style={styles.header}>
       <View style={{flex:1}}><HomeSpaceSwitcher/></View>
       <View style={{ flexDirection: "row", gap: 2 }}>
-        <Pressable accessibilityRole="button" accessibilityLabel="Search transactions" onPress={() => { const request=String(Date.now()); router.navigate({pathname:"/transactions",params:{focusSearch:request,reset:request,accountId:"",walletName:"",category:"",period:"all"}}); }} style={styles.iconButton}><Feather name="search" size={17} color={colors.textPrimary} /></Pressable>
-        <Pressable accessibilityRole="button" accessibilityLabel={`Notifications, ${unread} unread`} onPress={() => router.push("/notifications")} style={styles.iconButton}><Feather name="bell" size={17} color={colors.textPrimary} />{unread > 0 ? <View style={styles.notificationDot} /> : null}</Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel="Search transactions" onPress={() => { const request=String(Date.now()); router.navigate({pathname:"/transactions",params:{focusSearch:request,reset:request,accountId:"",walletName:"",category:"",period:"all"}}); }} style={styles.iconButton}><Feather name="search" size={17} color={iconInk("search", colors)} /></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel={`Notifications, ${unread} unread`} onPress={() => router.push("/notifications")} style={styles.iconButton}><Feather name="bell" size={17} color={iconInk("bell", colors)} />{unread > 0 ? <View style={styles.notificationDot} /> : null}</Pressable>
         <Pressable accessibilityRole="button" accessibilityLabel="Your profile" onPress={() => router.push("/profile")} style={styles.avatar}><AccountAvatar fallbackName={name} size={44}/></Pressable>
       </View>
     </View>
@@ -32,15 +34,16 @@ export function HomeHeader({ name, unread }: { name: string; unread: number }) {
   </View>;
 }
 
-export function HomeSection({ title, subtitle, action, children, collapsible = false, dense = false, pinScope, sectionId }: { title: string; subtitle?: string; action?: ReactNode; children: ReactNode; collapsible?: boolean; dense?: boolean; pinScope?:string; sectionId?:string }) {
+export function HomeSection({ title, subtitle, action, children, collapsible = false, dense = false, pinScope, sectionId, guideId }: { title: string; subtitle?: string; action?: ReactNode; children: ReactNode; collapsible?: boolean; dense?: boolean; pinScope?:string; sectionId?:string; guideId?:string }) {
   const styles=useStyles();const {colors}=useTheme();
   const [localExpanded,setLocalExpanded]=useState(false);
   const pin=usePinnedSection(pinScope,sectionId);
   const expanded=pinScope ? pin.expanded : localExpanded;
   const toggle=()=>pinScope ? pin.toggle() : setLocalExpanded(!localExpanded);
   const heading=<View style={{flex:1,gap:3}}><Text variant="heading" style={styles.sectionTitle}>{title}</Text>{subtitle?<Text variant="caption" color="textMuted" style={styles.small}>{subtitle}</Text>:null}</View>;
+  const guideHeading=guideId?<GuideAnchor id={guideId} style={{flex:1}}>{heading}</GuideAnchor>:heading;
   return <Card style={[styles.section,dense&&styles.denseSection]}>
-    {collapsible ? <View style={styles.sectionHeading}><Pressable accessibilityRole="button" accessibilityLabel={title} accessibilityState={{expanded}} onPress={toggle} style={styles.collapseTitle}>{heading}</Pressable>{action}{pinScope?<Pressable accessibilityRole="button" accessibilityLabel={`${pin.pinned?"Unpin":"Pin"} ${title}`} accessibilityState={{selected:pin.pinned}} onPress={()=>pin.pin(!pin.pinned)} hitSlop={{left:4,right:4}} style={styles.sectionControl}><MaterialCommunityIcons name={pin.pinned?"pin":"pin-off"} size={17} color={colors.accent}/></Pressable>:null}<Pressable accessibilityRole="button" accessibilityLabel={`${expanded?"Collapse":"Expand"} ${title}`} onPress={toggle} hitSlop={{left:4,right:4}} style={styles.sectionControl}><Feather name={expanded?"chevron-up":"chevron-down"} size={17} color={colors.textMuted}/></Pressable></View>:<View style={styles.sectionHeading}>{heading}{action}</View>}
+    {collapsible ? <View style={styles.sectionHeading}><Pressable accessibilityRole="button" accessibilityLabel={title} accessibilityState={{expanded}} onPress={toggle} style={styles.collapseTitle}>{guideHeading}</Pressable>{action}{pinScope?<Pressable accessibilityRole="button" accessibilityLabel={`${pin.pinned?"Unpin":"Pin"} ${title}`} accessibilityState={{selected:pin.pinned}} onPress={()=>pin.pin(!pin.pinned)} hitSlop={{left:4,right:4}} style={styles.sectionControl}><MaterialCommunityIcons name={pin.pinned?"pin":"pin-off"} size={17} color={colors.accent}/></Pressable>:null}<Pressable accessibilityRole="button" accessibilityLabel={`${expanded?"Collapse":"Expand"} ${title}`} onPress={toggle} hitSlop={{left:4,right:4}} style={styles.sectionControl}><Feather name={expanded?"chevron-up":"chevron-down"} size={17} color={colors.textMuted}/></Pressable></View>:<View style={styles.sectionHeading}>{guideHeading}{action}</View>}
     {pinScope&&pin.error?<Text variant="caption" color="attention">{pin.error}</Text>:null}
     {!collapsible||expanded?children:null}
   </Card>;
@@ -58,7 +61,7 @@ export function CashFlow({ currency, current, previous, previousAvailable = fals
   const money = (amount: bigint, ready: boolean) => amountsHidden ? "••••••" : ready ? compactMoney(amount,currency) : "—";
   const income=current?.moneyInMinor ?? 0n, expense=current?.moneyOutMinor ?? 0n;
   const retained=retainedPercent(income,expense);
-  return <HomeSection title="Cash flow" dense action={<Text variant="caption" color="textMuted">{currency}</Text>}>
+  return <HomeSection guideId="home-cash-flow" title="Cash flow" dense action={<Text variant="caption" color="textMuted">{currency}</Text>}>
     <View style={styles.dailyPrimary}>{[{label:"Received today",amount:today?.moneyInMinor ?? 0n,positive:true},{label:"Spent today",amount:today?.moneyOutMinor ?? 0n,positive:false}].map(item => <View key={item.label} style={{flex:1,gap:5}}><Text variant="caption" color="textMuted">{item.label}</Text><Text variant="title" style={styles.dailyAmount} color={item.positive ? "moneyPositive" : "moneyRequest"} tabular adjustsFontSizeToFit numberOfLines={1}>{money(item.amount,todayAvailable)}</Text></View>)}</View>
     {!todayAvailable ? <Text variant="caption" color="textMuted">Today’s activity is unavailable.</Text> : null}
     <View style={styles.monthlyFooter}><Text variant="caption" color="textMuted" style={styles.small}>This month · Settled activity</Text>
@@ -86,7 +89,7 @@ export function Spending({ current, available, message, scope }: { current: Curr
   const slices = rows.length > 4 ? [...rows.slice(0, 3).map((r) => ({ label: r.category, amount: r.amountMinor, category: r.category })), { label: "Other", amount: rows.slice(3).reduce((s, r) => s + r.amountMinor, 0n), category: null }] : rows.map((r) => ({ label: r.category, amount: r.amountMinor, category: r.category }));
   const palette = [colors.chartIncome, colors.chartExpense, colors.chartFood, colors.chartOther];
   const sum = slices.reduce((s, p) => s + p.amount, 0n);
-  return <HomeSection title="Spending breakdown" subtitle="Where your money goes" collapsible pinScope={scope} sectionId="spending" dense>
+  return <HomeSection guideId="home-spending" title="Spending breakdown" subtitle="Where your money goes" collapsible pinScope={scope} sectionId="spending" dense>
     {!available ? <Text color="textMuted">{message}</Text> : !rows.length ? <Text color="textMuted">Your spending categories appear after your first settled expense.</Text> : negative ? <><Text color="textMuted">Net spending includes refunds.</Text>{rows.map((r) => <View key={r.category} style={styles.walletRow}><Text>{r.category}</Text><Text>{amountsHidden ? "••••••" : formatMoney(r.amountMinor, currency)}</Text></View>)}</> : <View style={styles.breakdown}>
       <Donut slices={slices.map((s, i) => ({ ...s, color: palette[i] }))} total={<><Text variant="heading" tabular>{amountsHidden ? "••••" : compactMoney(current?.moneyOutMinor ?? sum, currency).replace(currency + " ", "")}</Text><Text variant="caption" color="textMuted">Total spent</Text></>} />
       <View style={styles.categoryGrid}>{slices.map((s, i) => <Pressable key={s.label} accessibilityRole="button" accessibilityLabel={`${s.label}, ${amountsHidden ? "amount hidden" : formatMoney(s.amount, currency)}`} onPress={() => router.navigate({ pathname: "/transactions", params: { focusSearch:"", category: s.category ?? "", accountId:"", walletName:"", period: "month", reset: String(Date.now()) } })} style={styles.category}>
@@ -100,7 +103,7 @@ export function WalletPanel({ wallets, message, manage = true }: { wallets: Wall
   const { colors } = useTheme();
   const { amountsHidden } = usePrivacy();
   const styles = useStyles();
-  return <HomeSection title="Your wallets" action={manage ? <HomeLink label="Manage" onPress={() => router.push("/wallets")} /> : undefined}>
+  return <HomeSection guideId="home-wallets" title="Your wallets" action={manage ? <GuideAnchor id="home-wallets-manage"><HomeLink label="Manage" onPress={() => router.push("/wallets")} /></GuideAnchor> : undefined}>
     {wallets === null ? <Text color="textMuted">{message}</Text> : !wallets.length ? <Text color="textMuted">No wallets yet. Add an account to start.</Text> : wallets.map((w) => <Pressable accessibilityRole="button" accessibilityLabel={`Open ${w.name}`} key={w.id} style={styles.walletRow} onPress={() => router.push({pathname:"/wallet/[id]",params:{id:w.id}})}>
       <View style={styles.walletIcon}><Feather name={w.provider === "cash" ? "dollar-sign" : w.provider.includes("money") || w.provider.includes("momo") ? "smartphone" : "credit-card"} size={18} color={colors.accent} /></View>
       <View style={{ flex: 1, gap: 5 }}><View style={styles.walletTop}><Text variant="bodyStrong" numberOfLines={2} style={styles.walletName}>{w.name}</Text><Text variant="bodyStrong" tabular style={styles.walletAmount}>{amountsHidden ? "••••••" : w.balance.amountMinor === null ? "—" : formatMoney(w.balance.amountMinor, w.currency)}</Text></View><Text variant="caption" color="textMuted" style={styles.small}>{PROVIDER_LABEL[w.provider] ?? w.provider} · {STATUS_LABEL[w.balance.status]}</Text></View>

@@ -1,3 +1,4 @@
+import { PartnerPlacement } from "@/features/partners/PartnerOfferCard";
 import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useRef, useState } from "react";
 import { ScrollView, View } from "react-native";
@@ -164,6 +165,8 @@ export default function PayNew() {
   return (
     <Screen>
       <ScreenHeader title={person ? "Pay a person" : "Pay a merchant"} subtitle={PAY_COPY.feeNotice} />
+      {/* Sponsored, at the top when the platform places it there; otherwise below the form. */}
+      <PartnerPlacement slot="top" id={person ? "pay-person" : "pay-merchant"} paused={submitting || recipientText.length > 0 || amountText.length > 0}/>
 
       {people && people.saved.length > 0 ? (
         <View style={{ gap: space[1] }}>
@@ -292,6 +295,8 @@ export default function PayNew() {
         disabled={!accounts || accounts.length === 0}
         onPress={submit}
       />
+      {/* Sponsored, below the form and the main action; rotation pauses while the form is in use. */}
+      <PartnerPlacement slot="bottom" id={person ? "pay-person" : "pay-merchant"} paused={submitting || recipientText.length > 0 || amountText.length > 0}/>
     </Screen>
   );
 }

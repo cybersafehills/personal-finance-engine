@@ -20,12 +20,12 @@ import { PrivacyProvider } from "@/features/privacy/PrivacyProvider";
 //   signed in             -> (app)
 // The lock screen is an overlay rather than a route so the navigation
 // state underneath survives a lock/unlock.
-function RootNavigator() {
+function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
   const { colors } = useTheme();
   const { loading, session, mfaRequired } = useSession();
   const lock = useLock();
 
-  if (loading || lock.loading) return null;
+  if (!fontsReady || loading || lock.loading) return null;
 
   const signedIn = !!session;
 
@@ -66,7 +66,8 @@ export default function RootLayout() {
 
   // Render nothing until Geist is ready so text never flashes in a fallback
   // face. On a font error, carry on with the system font rather than block.
-  if (!fontsLoaded && !fontError) return null;
+  // Providers mount while fonts load, so secure session, app lock, Spaces and
+  // the local database initialize in parallel. The navigator still waits for fonts.
 
   return (
     <ThemeProvider>
@@ -76,7 +77,7 @@ export default function RootLayout() {
             <PrivacyProvider>
               <OfflineProvider>
                 <ActiveSpaceProvider>
-                  <RootNavigator />
+                  <RootNavigator fontsReady={fontsLoaded || !!fontError} />
                 </ActiveSpaceProvider>
               </OfflineProvider>
             </PrivacyProvider>

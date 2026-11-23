@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useDockClearance } from "@/components/shell/dockClearance";
 import { StyleSheet, View } from "react-native";
 import { SafeAreaView, type Edge } from "react-native-safe-area-context";
 
@@ -20,9 +21,9 @@ export function ListScreen({
   edges?: readonly Edge[];
 }) {
   const styles = useStyles();
-  const {payOn,onTabs}=useNavigationChrome();
+  const {onTabs}=useNavigationChrome();
   return (
-    <SafeAreaView style={[styles.safe,payOn&&!onTabs&&{paddingBottom:64}]} edges={edges}>
+    <SafeAreaView style={[styles.safe,!onTabs&&{paddingBottom:84}]} edges={onTabs ? edges : [...new Set([...edges, "bottom" as const])]}>
       <View style={styles.body}>{children}</View>
     </SafeAreaView>
   );
@@ -32,6 +33,12 @@ export const listContentStyle = {
   paddingHorizontal: space[4],
   paddingBottom: space[6],
 } as const;
+
+/** listContentStyle plus room to scroll clear of the floating dock on a tab screen. */
+export function useListContentStyle() {
+  const dock = useDockClearance();
+  return { paddingHorizontal: space[4], paddingBottom: space[6] + dock } as const;
+}
 
 const useStyles = makeStyles((colors) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },

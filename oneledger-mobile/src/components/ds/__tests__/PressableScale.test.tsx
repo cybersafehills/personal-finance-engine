@@ -1,24 +1,23 @@
 import { fireEvent, render, screen } from "@testing-library/react-native";
 import { Text } from "react-native";
 
-import { PressableScale, splitStyle } from "../PressableScale";
-
-describe("splitStyle", () => {
-  it("keeps how big the control is in its parent on the outer view, and its look on the inner one", () => {
-    const { layout, visual } = splitStyle([
-      { flexBasis: "48%", flexGrow: 1, marginTop: 4 },
-      { flexDirection: "row", gap: 8, minHeight: 48, borderWidth: 1, backgroundColor: "#eee" },
-    ]);
-    expect(layout).toEqual({ flexBasis: "48%", flexGrow: 1, marginTop: 4 });
-    expect(visual).toEqual({ flexDirection: "row", gap: 8, minHeight: 48, borderWidth: 1, backgroundColor: "#eee" });
-  });
-
-  it("copes with no style at all", () => {
-    expect(splitStyle(undefined)).toEqual({ layout: {}, visual: {} });
-  });
-});
+import { PressableScale } from "../PressableScale";
 
 describe("PressableScale", () => {
+  it("keeps intrinsic button sizing on the press target without an expanding flex child", async () => {
+    await render(<PressableScale accessibilityRole="button" accessibilityLabel="Rules" style={{ minHeight: 40, alignSelf: "flex-start", paddingVertical: 8 }}><Text>Rules</Text></PressableScale>);
+    const button = screen.getByRole("button", { name: "Rules" });
+    expect(button).toHaveStyle({ minHeight: 40, alignSelf: "flex-start", paddingVertical: 8 });
+    expect(button.children).toContain(screen.getByText("Rules"));
+  });
+  it("preserves an explicit circle size and ignores disabled presses", async () => {
+    const onPress = jest.fn();
+    await render(<PressableScale disabled accessibilityRole="button" accessibilityLabel="Pay" onPress={onPress} style={{ width: 48, height: 48, borderRadius: 24 }}><Text>Pay</Text></PressableScale>);
+    const button = screen.getByRole("button", { name: "Pay" });
+    expect(button).toHaveStyle({ width: 48, height: 48, borderRadius: 24 });
+    await fireEvent.press(button);
+    expect(onPress).not.toHaveBeenCalled();
+  });
   it("renders its content, passes the press through, and keeps the control's accessible name", async () => {
     const onPress = jest.fn();
     await render(

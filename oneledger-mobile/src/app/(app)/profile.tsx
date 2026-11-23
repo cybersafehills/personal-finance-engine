@@ -14,7 +14,7 @@ import { config } from '@/lib/config';
 import { useTheme } from '@/theme/ThemeProvider';
 export default function ProfileScreen(){
   const state=useProfile();
-  return <Screen><ScreenHeader title="Your profile"/>{state?.profile?<ProfileEditor key={state.profile.id} profile={state.profile} refresh={state.refresh}/>:<Card><Text>{state?.error || 'Loading your profile…'}</Text>{state?.error?<Button label="Try again" onPress={()=>void state.refresh()}/>:null}</Card>}</Screen>;
+  return <Screen><ScreenHeader title="Your profile" subtitle="Personal details and regional preferences" guideId="profile-page"/>{state?.profile?<ProfileEditor key={state.profile.id} profile={state.profile} refresh={state.refresh}/>:<Card><Text>{state?.error || 'Loading your profile…'}</Text>{state?.error?<Button label="Try again" onPress={()=>void state.refresh()}/>:null}</Card>}</Screen>;
 }
 export function ProfileEditor({profile,refresh}:{profile:Profile;refresh():Promise<void>}){
   const {colors}=useTheme();
@@ -57,8 +57,8 @@ export function ProfileEditor({profile,refresh}:{profile:Profile;refresh():Promi
       {message?<Text variant="caption" accessibilityRole="alert" color={message.startsWith('Profile saved')?'moneyPositive':'attention'}>{message}</Text>:null}
     </Card>
     <MenuGroup title="Your account">
-      <MenuRow label="Email" value={profile.email} icon="mail"/>
-      <MenuRow label="Regional preferences" value={[profile.country,profile.currency].filter(Boolean).join(' · ')} icon="globe" external onPress={()=>void Linking.openURL(`${config.apiBaseUrl}/settings/profile`).catch(()=>setMessage('Could not open regional preferences.'))}/>
+      <MenuRow label="Email" valueBelow value={profile.email} icon="mail"/>
+      <MenuRow label="Regional preferences" valueBelow value={[profile.country,profile.currency].filter(Boolean).join(' · ')} icon="globe" external onPress={()=>void Linking.openURL(`${config.apiBaseUrl}/settings/profile`).catch(()=>setMessage('Could not open regional preferences.'))}/>
       <MenuRow label="App lock" icon="lock" onPress={()=>router.push('/security')}/>
       <MenuRow label="Settings" icon="settings" onPress={()=>router.push('/settings')}/>
     </MenuGroup>

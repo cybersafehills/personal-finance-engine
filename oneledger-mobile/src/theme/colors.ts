@@ -1,3 +1,40 @@
+// Creative surfaces intentionally retain their art direction in both themes.
+const creativeColors = {
+  iconMoneyStart: "#075c54",
+  iconMoneyEnd: "#118568",
+  iconLearningStart: "#99400c",
+  iconLearningEnd: "#c87717",
+  iconCommunicationStart: "#a52357",
+  iconCommunicationEnd: "#cf4770",
+  iconNeutralStart: "#303640",
+  iconNeutralEnd: "#596575",
+  creativePearl: "#e4ddff",
+  creativeLilac: "#9b8ee2",
+  creativeEdgeLight: "#a99ae8",
+  creativeEdgeDark: "#51418a",
+  creativeGoldLight: "#fff0b6",
+  creativeGold: "#efc272",
+  creativeGoldDark: "#b87b33",
+  creativeShadow: "#000000",
+  creativeScreen: "#443875",
+  creativeSpeaker: "#c8bdec",
+  creativeSignal: "#e9e3ff",
+  creativeHandle: "#a69bd2",
+  creativePaper: "#f5f0ff",
+  creativeSpine: "#8372bd",
+  creativePrint: "#7965af",
+  creativeCoinEdge: "#ba8844",
+  creativeCoinRim: "#fff0bc",
+  creativeBankInk: "#6a579c",
+  partnerConnectivityStart: "#35256c",
+  partnerConnectivityEnd: "#14142e",
+  partnerLearningStart: "#07564f",
+  partnerLearningEnd: "#102c32",
+  partnerBankingStart: "#652641",
+  partnerBankingEnd: "#251627",
+  partnerOnMuted: "#f0edf9",
+} as const;
+
 // The two palettes. Every token exists in both (the `Palette` type makes a missing
 // or extra key a compile error), and tests check contrast for the pairs that carry
 // text. Naming is by ROLE, not by hue, so a token can change colour per theme:
@@ -9,14 +46,16 @@
 //   *Bg                               a quiet tint behind that meaning
 
 export const lightColors = {
+  ...creativeColors,
   background: "#f6f6f7",
+  guideScrim: "#151a38",
   surface: "#ffffff",
   borderSubtle: "#e8e8ea",
   borderStrong: "#d4d4d8",
 
   textPrimary: "#18181b",
-  textSecondary: "#52525b",
-  textMuted: "#6b6b73",
+  textSecondary: "#34343b",
+  textMuted: "#484850",
 
   moneyPositive: "#067a4d",
   moneyPositiveBg: "#e9f7f0",
@@ -46,6 +85,8 @@ export const lightColors = {
   /** Interactive text, icons, links, selected borders. */
   accent: "#33509e",
   accentBg: "#eaf0ff",
+  navSelectedBg: "#eeebff",
+  navSelectedInk: "#54449c",
   homeGradientStart: "#312b64",
   homeGradientEnd: "#7b6bf0",
   chartIncome: "#6956ee",
@@ -66,14 +107,16 @@ export type ColorToken = keyof typeof lightColors;
 export type Palette = { readonly [K in ColorToken]: string };
 
 export const darkColors: Palette = {
+  ...creativeColors,
   background: "#0d0e11",
+  guideScrim: "#000000",
   surface: "#16181d",
   borderSubtle: "#26282f",
   borderStrong: "#3b3e48",
 
   textPrimary: "#f3f4f6",
-  textSecondary: "#b8bbc4",
-  textMuted: "#8f929d",
+  textSecondary: "#d1d3db",
+  textMuted: "#b1b4bf",
 
   moneyPositive: "#3dd68c",
   moneyPositiveBg: "#0f2c20",
@@ -98,6 +141,8 @@ export const darkColors: Palette = {
 
   accent: "#8fa5f2",
   accentBg: "#202b4a",
+  navSelectedBg: "#eeebff",
+  navSelectedInk: "#c4baff",
   homeGradientStart: "#312b64",
   homeGradientEnd: "#7b6bf0",
   chartIncome: "#a395ff",

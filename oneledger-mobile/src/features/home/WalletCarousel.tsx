@@ -1,3 +1,4 @@
+import { GuideAnchor } from "@/features/guides/GuideAnchor";
 import Feather from "@expo/vector-icons/Feather";
 import { router } from "expo-router";
 import { useEffect, useId, useRef, useState } from "react";
@@ -60,13 +61,13 @@ export function WalletCarousel({ wallets, fallback, loading, preferenceScope }: 
   return <View style={{gap:4}} onLayout={({nativeEvent:{layout}}) => setWidth(Math.max(1,layout.width))}>
     {ordered.length>1?<View testID="wallet-controls" style={styles.controls}><Pressable accessibilityRole="button" accessibilityLabel="Next wallet" accessibilityHint="Swipe the card or tap to switch wallets" accessibilityValue={{text:`${selectedIndex+1} of ${ordered.length}: ${selected.name}`}} onPress={()=>choose((selectedIndex+1)%ordered.length)} hitSlop={{top:8,bottom:8}} style={styles.dots}>{visibleDots.map((w,i)=><View key={w.id} style={[styles.dot,i+dotStart===selectedIndex&&styles.activeDot]}/>)}</Pressable></View>:null}
     {ordered.length ? <ScrollView testID="wallet-carousel" ref={pager} horizontal pagingEnabled directionalLockEnabled showsHorizontalScrollIndicator={false} onScrollBeginDrag={() => {interacted.current=true;}} contentOffset={{x:selectedIndex*width,y:0}} onMomentumScrollEnd={({nativeEvent}) => {interacted.current=true;const index=Math.max(0,Math.min(ordered.length-1,Math.round(nativeEvent.contentOffset.x/width)));setSelectedId(ordered[index].id);}}>
-      {ordered.map((wallet,i) => <View key={wallet.id} style={{width}} accessibilityElementsHidden={i!==selectedIndex} importantForAccessibility={i===selectedIndex ? "auto" : "no-hide-descendants"}><WalletBalanceCard wallet={wallet} loading={loading} defaultOnLaunch={i===0} saving={saving} onMakeDefault={preferenceScope?()=>void saveDefault(wallet.id):undefined} /></View>)}
+      {ordered.map((wallet,i) => <View key={wallet.id} style={{width}} accessibilityElementsHidden={i!==selectedIndex} importantForAccessibility={i===selectedIndex ? "auto" : "no-hide-descendants"}><WalletBalanceCard guideEnabled={i === selectedIndex} wallet={wallet} loading={loading} defaultOnLaunch={i===0} saving={saving} onMakeDefault={preferenceScope?()=>void saveDefault(wallet.id):undefined} /></View>)}
     </ScrollView> : <WalletBalanceCard fallback={wallets === null ? fallback : null} loading={loading} />}
     {error ? <Text variant="caption" color="attention">{error}</Text> : null}
   </View>;
 }
 
-function WalletBalanceCard({wallet,fallback,loading,defaultOnLaunch=false,saving=false,onMakeDefault}:{wallet?:Wallet;fallback?:CurrentBalance|null;loading:boolean;defaultOnLaunch?:boolean;saving?:boolean;onMakeDefault?:()=>void}) {
+function WalletBalanceCard({wallet,fallback,loading,defaultOnLaunch=false,saving=false,onMakeDefault,guideEnabled=true}:{guideEnabled?:boolean;wallet?:Wallet;fallback?:CurrentBalance|null;loading:boolean;defaultOnLaunch?:boolean;saving?:boolean;onMakeDefault?:()=>void}) {
   const styles=useStyles();
   const {colors}=useTheme();
   const {amountsHidden,toggleAmountsHidden}=usePrivacy();
@@ -76,15 +77,15 @@ function WalletBalanceCard({wallet,fallback,loading,defaultOnLaunch=false,saving
   const asOf=wallet ? wallet.balance.asOf : fallback?.asOfIso;
   const label=wallet?.name ?? (fallback ? "Last reported balance" : "Your wallet");
   return <View style={{gap:5}}>
-    <View testID="balance-card" style={styles.card} onLayout={({nativeEvent:{layout}})=>setSize(old=>old.width===layout.width&&old.height===layout.height?old:{width:layout.width,height:layout.height})}>
+    <GuideAnchor id="overview" enabled={guideEnabled}><View testID="balance-card" style={styles.card} onLayout={({nativeEvent:{layout}})=>setSize(old=>old.width===layout.width&&old.height===layout.height?old:{width:layout.width,height:layout.height})}>
       <Svg testID="balance-card-background" width={size.width} height={size.height} viewBox="0 0 360 190" preserveAspectRatio="none" style={StyleSheet.absoluteFill} accessible={false} pointerEvents="none"><Defs><LinearGradient id={id} x1="0" y1="0" x2="1" y2="1"><Stop offset="0" stopColor={colors.homeGradientStart}/><Stop offset="1" stopColor={colors.homeGradientEnd}/></LinearGradient></Defs><Rect width={360} height={190} fill={`url(#${id})`}/><Circle cx={300} cy={-30} r={210} fill="none" stroke={colors.onSolid} strokeOpacity={0.07} strokeWidth={40}/><Circle cx={300} cy={-30} r={180} fill="none" stroke={colors.onSolid} strokeOpacity={0.12}/></Svg>
       <View style={styles.cardTop}><Text variant="bodyStrong" color="onSolid" numberOfLines={2} style={{flex:1,fontSize:13,lineHeight:18}}>{label}</Text><Pressable accessibilityRole="button" accessibilityLabel={amountsHidden ? "Show balances" : "Hide balances"} onPress={toggleAmountsHidden} style={styles.eye}><Feather name={amountsHidden ? "eye-off" : "eye"} size={18} color={colors.onSolid}/></Pressable>{wallet?<Pressable accessibilityRole="button" accessibilityLabel={defaultOnLaunch?`${wallet.name} is the default landing wallet`:`Use ${wallet.name} on launch`} disabled={defaultOnLaunch||saving||!onMakeDefault} onPress={onMakeDefault} style={styles.defaultButton}><Feather name="star" size={13} color={colors.onSolid}/><Text variant="caption" color="onSolid" style={{fontSize:10,lineHeight:14}}>{saving?"Saving…":defaultOnLaunch?"Default":"Set default"}</Text></Pressable>:null}</View>
       <Text variant="display" color="onSolid" tabular adjustsFontSizeToFit numberOfLines={1} style={styles.amount}>{amountsHidden ? "••••••" : amount !== null ? formatMoney(amount,wallet?.currency ?? "RWF") : loading ? "Loading…" : "—"}</Text>
       {wallet?.balance.status === "confirmed" ? null : <Text variant="caption" color="onSolid">{wallet ? STATUS_LABEL[wallet.balance.status] : fallback ? "Single provider snapshot" : "No wallet balance available"}</Text>}
       {wallet ? <BalanceTrend wallet={wallet} hidden={amountsHidden}/> : null}
-      <View style={styles.actions}><Pressable accessibilityRole="button" accessibilityLabel={wallet ? `Add transaction to ${wallet.name}` : "Add transaction"} onPress={()=>router.push(wallet ? {pathname:"/add-transaction",params:{accountId:wallet.id}} : "/add-transaction")} style={styles.add}><Text variant="label" style={{color:colors.homeGradientStart}}>+ Add transaction</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel={wallet ? `View ${wallet.name}` : "View wallets"} onPress={()=>router.push(wallet ? {pathname:"/wallet/[id]",params:{id:wallet.id}} : "/wallets")} style={styles.details}><Text variant="label" color="onSolid">{wallet ? "View wallet ↗" : "View wallets ↗"}</Text></Pressable></View>
+      <View style={styles.actions}><GuideAnchor id="add-transaction" enabled={guideEnabled} style={{flex:1.2}}><Pressable accessibilityRole="button" accessibilityLabel={wallet ? `Add transaction to ${wallet.name}` : "Add transaction"} onPress={()=>router.push(wallet ? {pathname:"/add-transaction",params:{accountId:wallet.id}} : "/add-transaction")} style={styles.add}><Text variant="label" style={{color:colors.homeGradientStart}}>+ Add transaction</Text></Pressable></GuideAnchor><Pressable accessibilityRole="button" accessibilityLabel={wallet ? `View ${wallet.name}` : "View wallets"} onPress={()=>router.push(wallet ? {pathname:"/wallet/[id]",params:{id:wallet.id}} : "/wallets")} style={styles.details}><Text variant="label" color="onSolid">{wallet ? "View wallet ↗" : "View wallets ↗"}</Text></Pressable></View>
     </View>
-    <Text variant="caption" color="textMuted" style={styles.updatedAt}>{asOf ? `Last updated on ${formatDateTime(asOf)}` : "Balance freshness unavailable"}</Text>
+    </GuideAnchor><Text variant="caption" color="textMuted" style={styles.updatedAt}>{asOf ? `Last updated on ${formatDateTime(asOf)}` : "Balance freshness unavailable"}</Text>
     {!wallet && fallback?.pendingCount ? <Text variant="caption" color="attention">{fallback.pendingCount} local changes not yet confirmed</Text> : null}
   </View>;
 }

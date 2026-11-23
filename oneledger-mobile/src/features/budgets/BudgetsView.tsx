@@ -1,3 +1,6 @@
+import { PartnerPlacement } from "@/features/partners/PartnerOfferCard";
+import { GuideSuggestion } from "@/features/guides/GuideSuggestion";
+import { GuideAnchor } from "@/features/guides/GuideAnchor";
 import * as Linking from "expo-linking";
 import { router } from "expo-router";
 import { useCallback } from "react";
@@ -46,6 +49,7 @@ export function BudgetsView({ embedded = false }: { embedded?: boolean }) {
     <Screen edges={embedded ? ["left", "right"] : undefined}>
       <ScreenHeader title={embedded ? "Plan" : "Budget"} subtitle="How this period is going" inline={embedded} />
 
+      <GuideSuggestion id="plan" enabled={data?.ok === true && data.budgets.length > 0} />
       {loading && !data ? (
         <Text variant="label" color="textMuted">
           Loading…
@@ -75,20 +79,21 @@ export function BudgetsView({ embedded = false }: { embedded?: boolean }) {
           }
         />
       ) : data ? (
-        data.budgets.map((budget) => <BudgetCard key={budget.id} budget={budget} />)
+        data.budgets.map((budget, index) => <BudgetCard key={budget.id} budget={budget} guideEnabled={index === 0} />)
       ) : null}
+      {embedded ? <PartnerPlacement id="plan" ready={data?.ok === true && data.budgets.length > 0}/> : null}
     </Screen>
   );
 }
 
-function BudgetCard({ budget }: { budget: Budget }) {
+function BudgetCard({ budget, guideEnabled = false }: { budget: Budget; guideEnabled?: boolean }) {
   const sum = totals(budget.allocations);
   const worst = statusDisplay(worstStatus(budget.allocations));
   const pace = paceLabel(budget.elapsedFraction);
 
   return (
     <>
-      <Card style={{ gap: space[3] }}>
+      <GuideAnchor id="budget-progress" enabled={guideEnabled}><Card style={{ gap: space[3] }}>
         <View style={{ gap: 2 }}>
           <Text variant="heading">{budget.name}</Text>
           <Text variant="label" color="textMuted">
@@ -115,6 +120,7 @@ function BudgetCard({ budget }: { budget: Budget }) {
         </Text>
       </Card>
 
+      </GuideAnchor>
       {budget.alerts.length > 0 ? (
         <Card style={{ gap: space[2] }}>
           <Text variant="label" color="textSecondary">

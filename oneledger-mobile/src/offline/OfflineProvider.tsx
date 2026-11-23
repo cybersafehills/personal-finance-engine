@@ -34,6 +34,7 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
   const userId = session?.user.id ?? null;
 
   const opened = useRef<OpenedDb | null>(null);
+  const syncFlight = useRef<{ handle: OpenedDb; task: Promise<void> } | null>(null);
   const [available, setAvailable] = useState(false);
   const [online, setOnline] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -49,22 +50,28 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const syncNow = useCallback(
-    async (ignoreBackoff = true) => {
+    (ignoreBackoff = true): Promise<void> => {
       const handle = opened.current;
-      if (!handle) return;
+      if (!handle) return Promise.resolve();
+      if (syncFlight.current?.handle === handle) return syncFlight.current.task;
+      const flight = { handle, task: Promise.resolve() };
+      syncFlight.current = flight;
       setSyncing(true);
-      try {
-        const report: SyncReport = await runSync({ db: handle.db, transport: supabaseTransport, ignoreBackoff });
-        setAuthNeeded(report.stoppedFor === "auth");
-        // Reachability is learned from the attempt itself, not from the OS flag.
-        setOnline(report.stoppedFor !== "offline");
-        if (userId && (await getCursor(handle.db, TX_STREAM)).complete) {
-          setOfflineRuntime({ db: handle.db, userId, bootstrapped: true });
+      flight.task = (async () => {
+        try {
+          const report: SyncReport = await runSync({ db: handle.db, transport: supabaseTransport, ignoreBackoff });
+          if (opened.current !== handle) return;
+          setAuthNeeded(report.stoppedFor === "auth");
+          setOnline(report.stoppedFor !== "offline");
+          const complete = (await getCursor(handle.db, TX_STREAM)).complete;
+          if (opened.current !== handle) return;
+          if (userId && complete) setOfflineRuntime({ db: handle.db, userId, bootstrapped: true });
+        } finally {
+          if (syncFlight.current === flight) syncFlight.current = null;
+          if (opened.current === handle) { setSyncing(false); await refreshCounts(); }
         }
-      } finally {
-        setSyncing(false);
-        await refreshCounts();
-      }
+      })();
+      return flight.task;
     },
     [refreshCounts, userId],
   );

@@ -51,7 +51,7 @@ export default function UssdDirectory() {
 
   return (
     <Screen>
-      <ScreenHeader title={params.title || "USSD directory"} subtitle="USSD codes for Mobile Money, banking and government services in Rwanda." />
+      <ScreenHeader guideId="ussd-page" title={params.title || "USSD directory"} subtitle="USSD codes for Mobile Money, banking and government services in Rwanda." />
 
       <TextField label="Search" value={query} onChangeText={setQuery} placeholder="Name, service or code" autoCapitalize="none" returnKeyType="search" />
 

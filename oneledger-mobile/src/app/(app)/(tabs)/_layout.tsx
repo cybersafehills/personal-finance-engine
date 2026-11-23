@@ -1,7 +1,6 @@
 import Feather from "@expo/vector-icons/Feather";
 import { Tabs } from "expo-router";
 
-import { MotionTabBar } from "@/components/shell/MotionTabBar";
 import { AppHeader } from "@/components/shell/AppHeader";
 import { fonts } from "@/theme/typography";
 import { useTheme } from "@/theme/ThemeProvider";
@@ -28,7 +27,8 @@ export default function TabsLayout() {
   const { colors } = useTheme();
   return (
     <Tabs
-      tabBar={(props)=><MotionTabBar {...props}/>}
+      // The dock floats above the screens and reserves no space, so content scrolls behind its glass.
+      tabBar={() => null}
       screenOptions={{
         headerShown: true,
         header: () => <AppHeader />,
