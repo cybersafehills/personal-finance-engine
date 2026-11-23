@@ -25,6 +25,7 @@ import {
 } from "@/features/inbox/display";
 import { groupInbox, type InboxGroup } from "@/features/inbox/grouping";
 import type { InboxInlineAction, InboxItem } from "@/features/inbox/types";
+import { useForecastEnabled } from "@/features/insights/useForecastEnabled";
 import { InboxNotifications } from "@/features/notifications/InboxNotifications";
 import {
   confirmCategory,
@@ -61,6 +62,7 @@ function runAction(action: InboxInlineAction): Promise<void> {
 export default function Inbox() {
   const listContent = useListContentStyle();
   const { colors } = useTheme();
+  const forecastEnabled = useForecastEnabled();
   const load = useCallback(() => fetchInbox(), []);
   const { data, loading, refreshing, refresh } = useQuery(load);
   const [decided, setDecided] = useState<ReadonlySet<string>>(new Set());
@@ -113,6 +115,13 @@ export default function Inbox() {
         ListHeaderComponent={
           <View style={{ paddingTop: space[4], gap: space[3], marginBottom: space[3] }}>
             <ScreenHeader title="Inbox" subtitle="Everything that needs a decision" inline />
+            {forecastEnabled ? (
+              <Card style={{ gap: space[1] }}>
+                <Text variant="bodyStrong">Cash-flow forecast</Text>
+                <Text variant="caption" color="textMuted">Your 30-day outlook, recurring payments and spending pace.</Text>
+                <Button label="Open the forecast" variant="ghost" size="sm" onPress={() => router.push("/forecast")} />
+              </Card>
+            ) : null}
             <InboxNotifications />
             {items.length > 0 ? (
               <View style={{ flexDirection: "row", gap: space[2] }}>
