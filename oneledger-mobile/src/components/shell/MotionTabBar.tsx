@@ -46,8 +46,8 @@ export function MotionTabBar(props: Partial<TabProps> = {}) {
   return (
     <Animated.View pointerEvents={keyboardHeight > 0 ? "none" : "box-none"} accessibilityLabel="Main navigation" style={frameStyle}>
       <Animated.View style={[styles.dock, {
-        // Mostly solid with a hint of see-through, so content passing behind is only faintly visible.
-        backgroundColor: withAlpha(colors.surface, 0.9),
+        // Almost solid: content passing behind must not read through as clutter.
+        backgroundColor: withAlpha(colors.surface, 0.98),
         borderColor: colors.borderSubtle,
         boxShadow: "0 4px 16px rgba(0, 0, 0, 0.10)",
       }, dockStyle]}>
