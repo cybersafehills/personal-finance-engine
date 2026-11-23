@@ -1,5 +1,7 @@
+import { formatAmount, type CurrencyFlow } from "../../../../web/shared/financial";
 import { useState } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { StyleSheet, View } from "react-native";
+import { PrivatePressable as Pressable } from "@/features/privacy/PrivatePressable";
 
 import { Text } from "@/components/ds";
 import { formatRwf } from "@/lib/money";
@@ -22,17 +24,17 @@ export function LifetimeChips({
   totals,
   accountCreatedIso,
 }: {
-  totals: LifetimeFlow;
+  totals: LifetimeFlow & { byCurrency?: CurrencyFlow[] };
   accountCreatedIso: string | null;
 }) {
   const styles = useStyles();
   const [open, setOpen] = useState<Kind | null>(null);
   if (totals.count === 0) return null;
 
-  const chip = (kind: Kind, amountRwf: number) => (
+  const chip = (kind: Kind, amountRwf: number, currency = "RWF") => (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`Total ${kind} through OneLedger: ${formatRwf(amountRwf)}. More information`}
+      accessibilityLabel={`Total ${kind} through OneLedger: ${(currency === "RWF" ? formatRwf(amountRwf) : formatAmount(amountRwf, currency, false))}. More information`}
       accessibilityState={{ expanded: open === kind }}
       onPress={() => setOpen(open === kind ? null : kind)}
       hitSlop={hitSlopFor(22)}
@@ -40,7 +42,7 @@ export function LifetimeChips({
     >
       <View style={styles.chip}>
         <Text variant="caption" color="lifetimeBadgeText" tabular style={styles.amount}>
-          {formatRwf(amountRwf)}
+          {(currency === "RWF" ? formatRwf(amountRwf) : formatAmount(amountRwf, currency, false))}
         </Text>
         <View style={styles.i}>
           <Text variant="caption" color="lifetimeBadgeText" style={styles.iText}>
@@ -54,8 +56,7 @@ export function LifetimeChips({
   return (
     <View style={styles.wrap}>
       <View style={styles.row}>
-        {chip("sent", totals.sentRwf)}
-        {chip("received", totals.receivedRwf)}
+        {(totals.byCurrency ?? [{ currency: "RWF", sentMinor: totals.sentRwf, receivedMinor: totals.receivedRwf }]).map((f) => <View key={f.currency} style={styles.row}>{chip("sent", f.sentMinor, f.currency)}{chip("received", f.receivedMinor, f.currency)}</View>)}
       </View>
       {open ? (
         <View style={styles.info} accessibilityLiveRegion="polite">

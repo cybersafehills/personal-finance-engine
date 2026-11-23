@@ -235,6 +235,7 @@ export type OutboxEntry = {
   attempts: number;
   lastError: string | null;
   amountRwf: number | null;
+  currency?: string | null;
   direction: string | null;
   counterparty: string | null;
   occurredAt: string | null;
@@ -247,18 +248,20 @@ export type OutboxEntry = {
 export async function listOutboxEntries(db: SqlDb): Promise<OutboxEntry[]> {
   const rows = await db.all<{
     op_id: string; state: OutboxState; attempts: number; last_error: string | null;
-    amount_rwf: number | null; direction: string | null; counterparty_name: string | null; occurred_at: string | null;
+    currency: string | null; readable_id: string | null; amount_rwf: number | null; direction: string | null; counterparty_name: string | null; occurred_at: string | null;
     op_type: string; payload: string; conflict_data: string | null;
   }>(
-    `SELECT o.op_id, o.state, o.attempts, o.last_error, o.op_type, o.payload, o.conflict_data, t.amount_rwf, t.direction, t.counterparty_name, t.occurred_at
-     FROM outbox o LEFT JOIN transactions t ON t.id = o.entity_id ORDER BY o.seq ASC`,
+    `SELECT o.op_id, o.state, o.attempts, o.last_error, o.op_type, o.payload, o.conflict_data, t.id as readable_id, t.currency, t.amount_rwf, t.direction, t.counterparty_name, t.occurred_at
+     FROM outbox o LEFT JOIN transactions t ON t.id = o.entity_id AND t.visibility_revoked = 0
+       AND t.workspace_id IN (SELECT workspace_id FROM workspace_leases WHERE kind = 'personal' OR (checked_at <= ? AND expires_at > ?))
+     ORDER BY o.seq ASC`, [new Date().toISOString(), new Date().toISOString()],
   );
   return rows.map((r) => ({
     opId: r.op_id, state: r.state, attempts: r.attempts, lastError: r.last_error,
-    amountRwf: r.amount_rwf, direction: r.direction, counterparty: r.counterparty_name, occurredAt: r.occurred_at,
+    currency: r.currency, amountRwf: r.amount_rwf, direction: r.direction, counterparty: r.counterparty_name, occurredAt: r.occurred_at,
     opType: r.op_type,
     conflict:
-      r.state === "conflict" && r.conflict_data
+      r.readable_id && r.state === "conflict" && r.conflict_data
         ? (() => {
             const p = JSON.parse(r.payload) as { category: string; subcategory: string | null };
             const sv = JSON.parse(r.conflict_data) as { category: string | null; subcategory: string | null };

@@ -38,7 +38,7 @@ export function GET(
     const d = res.detail;
     return {
       workspace_id: workspaceId,
-      counterparty: { ...d.counterparty, kind: kindForMobile(d.counterparty.kind) },
+      counterparty: { ...d.counterparty, kind: kindForMobile(d.counterparty.kind, request.nextUrl.searchParams.get("contract") === "2" ? 2 : 1) },
       merged_from: d.mergedFrom,
       total_transactions: d.totalTransactions,
       limit: page.value.limit,

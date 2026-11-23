@@ -1,0 +1,116 @@
+{
+  "scope": {
+    "spaces": ["personal", "household"],
+    "roles": ["owner", "member", "viewer", "removed"],
+    "sources": ["private", "shared"]
+  },
+  "format": [
+    { "currency": "RWF", "minor": 1234, "display": "RWF 1,234" },
+    { "currency": "USD", "minor": 1234, "display": "USD 12.34" },
+    { "currency": "EUR", "minor": 1234, "display": "EUR 12.34" }
+  ],
+  "rows": [
+    {
+      "id": "income",
+      "currency": "RWF",
+      "direction": "in",
+      "principal_effect_rwf": 10000,
+      "fee_effect_rwf": 0,
+      "settlement_state": "settled"
+    },
+    {
+      "id": "expense",
+      "currency": "RWF",
+      "direction": "out",
+      "principal_effect_rwf": -1200,
+      "fee_effect_rwf": -50,
+      "settlement_state": "settled"
+    },
+    {
+      "id": "transfer-out",
+      "currency": "RWF",
+      "direction": "out",
+      "principal_effect_rwf": -5000,
+      "fee_effect_rwf": -100,
+      "settlement_state": "settled",
+      "is_own_transfer": true
+    },
+    {
+      "id": "transfer-in",
+      "currency": "RWF",
+      "direction": "in",
+      "principal_effect_rwf": 5000,
+      "fee_effect_rwf": 0,
+      "settlement_state": "settled",
+      "is_own_transfer": true
+    },
+    {
+      "id": "self-unpaired",
+      "currency": "RWF",
+      "direction": "in",
+      "principal_effect_rwf": 99000,
+      "fee_effect_rwf": 0,
+      "settlement_state": "settled",
+      "is_own_transfer": true
+    },
+    {
+      "id": "usd",
+      "currency": "USD",
+      "direction": "out",
+      "principal_effect_rwf": -1234,
+      "fee_effect_rwf": 0,
+      "settlement_state": "settled"
+    },
+    {
+      "id": "eur",
+      "currency": "EUR",
+      "direction": "in",
+      "principal_effect_rwf": 1234,
+      "fee_effect_rwf": 0,
+      "settlement_state": "settled"
+    },
+    {
+      "id": "pending",
+      "currency": "RWF",
+      "direction": "out",
+      "principal_effect_rwf": -400,
+      "fee_effect_rwf": 0,
+      "settlement_state": "pending"
+    },
+    {
+      "id": "failed",
+      "currency": "RWF",
+      "direction": "out",
+      "principal_effect_rwf": -400,
+      "fee_effect_rwf": 0,
+      "settlement_state": "failed"
+    },
+    {
+      "id": "reversed",
+      "currency": "RWF",
+      "direction": "out",
+      "principal_effect_rwf": -400,
+      "fee_effect_rwf": 0,
+      "settlement_state": "reversed"
+    },
+    {
+      "id": "duplicate",
+      "currency": "RWF",
+      "direction": "out",
+      "principal_effect_rwf": -1200,
+      "fee_effect_rwf": -50,
+      "settlement_state": "settled",
+      "dedupe_state": "merged"
+    }
+  ],
+  "expected": [
+    { "currency": "EUR", "sentMinor": 0, "receivedMinor": 1234, "count": 1 },
+    {
+      "currency": "RWF",
+      "sentMinor": 1250,
+      "receivedMinor": 10000,
+      "count": 2
+    },
+    { "currency": "USD", "sentMinor": 1234, "receivedMinor": 0, "count": 1 }
+  ]
+}

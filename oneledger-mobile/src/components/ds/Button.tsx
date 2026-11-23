@@ -1,3 +1,5 @@
+import { usePrivacy } from "@/features/privacy/PrivacyProvider";
+import { privateText } from "@/features/privacy/mask";
 import {
   ActivityIndicator,
   Pressable,
@@ -32,6 +34,7 @@ export function Button({
   disabled,
   ...rest
 }: ButtonProps) {
+  const { fullPrivacy } = usePrivacy();
   const styles = useStyles();
   const { colors } = useTheme();
   const inactive = disabled || loading;
@@ -44,6 +47,7 @@ export function Button({
       disabled={inactive}
       hitSlop={hitSlopFor(CONTROL_HEIGHT[size])}
       {...rest}
+      accessibilityLabel={privateText(rest.accessibilityLabel, fullPrivacy)}
       style={({ pressed }) => [
         styles.base,
         size === "sm" && styles.small,

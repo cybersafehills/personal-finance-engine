@@ -13,6 +13,7 @@ const mockReviewCount = jest.fn();
 const mockHealth = jest.fn();
 const mockFetchBudgets = jest.fn();
 
+jest.mock("@/features/wallets/SelectedWallet", () => ({ SelectedWallet: () => null }));
 jest.mock("expo-router", () => jest.requireActual("@/test/router-mock"));
 jest.mock("@/api/mobile-api", () => ({ fetchBudgets: () => mockFetchBudgets() }));
 jest.mock("@/features/capture/capture", () => ({
@@ -92,9 +93,9 @@ beforeEach(() => {
 describe("Home screen", () => {
   it("shows the balance, today's totals and recent transactions", async () => {
     await renderHome();
-    expect(await screen.findByText("Current balance")).toBeTruthy();
+    expect(await screen.findByText("Recorded balance")).toBeTruthy();
     expect(screen.getByText("250,000 RWF")).toBeTruthy();
-    expect(screen.getByText("MTN Mobile Money")).toBeTruthy();
+    expect(screen.getByText("RWF · Last captured message")).toBeTruthy();
     expect(screen.getByText("Received today")).toBeTruthy();
     expect(screen.getByText("+5,000 RWF")).toBeTruthy();
     expect(screen.getByText("Spent today")).toBeTruthy();
@@ -188,4 +189,11 @@ describe("Home screen", () => {
     await renderHome();
     expect(await screen.findByText("Try again")).toBeTruthy();
   });
+});
+
+it("keeps cached Home useful when the network-only review count fails", async () => {
+  mockReviewCount.mockRejectedValue(new Error("offline"));
+  await renderHome();
+  expect(await screen.findByText("Kigali Fresh")).toBeTruthy();
+  expect(screen.queryByText("Couldn't load this. Check your connection and try again.")).toBeNull();
 });

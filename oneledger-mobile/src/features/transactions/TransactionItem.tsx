@@ -54,7 +54,7 @@ export function TransactionItem({
           ) : null}
         </View>
       </View>
-      <MoneyAmount amountRwf={signedAmountRwf(transaction)} masked={masked} />
+      <MoneyAmount amountRwf={signedAmountRwf(transaction)} currency={transaction.currency} masked={masked} />
     </Pressable>
   );
 }

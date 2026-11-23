@@ -50,7 +50,7 @@ beforeEach(() => {
   [mockFlags, mockSignOut, mockHealth, mockUnread, mockIsPushEnabled, mockEnablePush, mockDisablePush].forEach((m) => m.mockReset());
   flags.pushSupported = true;
   flags.captureSupported = true;
-  mockFlags.mockResolvedValue(null);
+  mockFlags.mockResolvedValue({ wallets: true, people: true, paymentRequests: true, insightsCenter: true });
   mockHealth.mockResolvedValue({ state: "active" });
   mockUnread.mockResolvedValue(0);
   mockIsPushEnabled.mockResolvedValue(false);
@@ -67,7 +67,7 @@ describe("More screen: Bills", () => {
   });
 
   it("hides Bills when the server cannot say", async () => {
-    mockFlags.mockResolvedValue(null);
+    mockFlags.mockResolvedValue({ wallets: true, people: true, paymentRequests: true, insightsCenter: true });
     await render(<More />);
     await waitFor(() => expect(mockFlags).toHaveBeenCalled());
     expect(screen.queryByText("Bills")).toBeNull();
@@ -111,7 +111,7 @@ describe("More screen", () => {
   });
 
   it("hides a feature the server says is off", async () => {
-    mockFlags.mockResolvedValue({ statements: false, insights: true });
+    mockFlags.mockResolvedValue({ statements: false, insightsCenter: true });
     await render(<More />);
     await screen.findByText("Insights");
     await waitFor(() => expect(screen.queryByText("Statements")).toBeNull());

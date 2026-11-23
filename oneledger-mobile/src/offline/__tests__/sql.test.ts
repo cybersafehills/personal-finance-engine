@@ -70,6 +70,6 @@ describe("v1 -> v2 upgrade", () => {
     const row = await db.get<{ state: string; attempts: number; payload: string }>("SELECT state, attempts, payload FROM outbox WHERE op_id = 'op-1'");
     expect(row).toEqual({ state: "retry", attempts: 3, payload: '{"a":1}' });
     await db.run("UPDATE outbox SET state = 'conflict' WHERE op_id = 'op-1'"); // new state now allowed
-    expect((await db.get<{ user_version: number }>("PRAGMA user_version"))?.user_version).toBe(2);
+    expect((await db.get<{ user_version: number }>("PRAGMA user_version"))?.user_version).toBe(LOCAL_SCHEMA_VERSION);
   });
 });

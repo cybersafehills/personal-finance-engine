@@ -200,17 +200,22 @@ export async function fetchDrilldown(d: Drilldown, limit = 50, offset = 0): Prom
 }
 
 /** Wallets with an honest balance label (Confirmed / Estimated / Out of date / Not available). */
-export async function fetchWallets(): Promise<WalletsResult> {
-  const result = await bearerGet("/api/mobile/accounts");
+export async function fetchWallets(workspaceId?: string): Promise<WalletsResult> {
+  const path = workspaceId ? `/api/mobile/accounts?workspace_id=${encodeURIComponent(workspaceId)}` : "/api/mobile/accounts";
+  const result = await bearerGet(path);
   if (result.kind !== "response") {
     return { ok: false, ...failureForOutcome(result, "Your wallets") };
   }
-  return parseWalletsResponse(result.status, result.body);
+  const wallets = parseWalletsResponse(result.status, result.body);
+  if (wallets.ok && workspaceId && wallets.workspaceId !== workspaceId) {
+    return { ok: false, ...failureForOutcome({ kind: "space_unsupported" }, "Your wallets") };
+  }
+  return wallets;
 }
 
 /** People and merchants with sent/received/net per currency (all time). */
 export async function fetchPeople(params: { q?: string; kind?: PersonKind; limit?: number }): Promise<PeopleResult> {
-  const q = new URLSearchParams({ limit: String(params.limit ?? 100) });
+  const q = new URLSearchParams({ limit: String(params.limit ?? 100), contract: "2" });
   if (params.q && params.q.trim()) q.set("q", params.q.trim().slice(0, 80));
   if (params.kind) q.set("kind", params.kind);
   const result = await bearerGet(`/api/mobile/counterparties?${q.toString()}`);
@@ -222,7 +227,7 @@ export async function fetchPeople(params: { q?: string; kind?: PersonKind; limit
 
 /** One person or merchant, with their transactions. */
 export async function fetchPerson(id: string, limit = 50): Promise<PersonResult> {
-  const result = await bearerGet(`/api/mobile/counterparties/${encodeURIComponent(id)}?limit=${limit}`);
+  const result = await bearerGet(`/api/mobile/counterparties/${encodeURIComponent(id)}?limit=${limit}&contract=2`);
   if (result.kind !== "response") {
     return { ok: false, ...failureForOutcome(result, "This person") };
   }

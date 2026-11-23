@@ -1,3 +1,4 @@
+import { subscribeRuntime } from "@/offline/runtime";
 import { useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -18,8 +19,13 @@ export type QueryState<T> = {
  * previous data while reloading, so returning to a tab never flashes empty.
  * A stale response (an older request finishing after a newer one) is dropped.
  */
-export function useQuery<T>(load: () => Promise<T>): QueryState<T> {
-  const [data, setData] = useState<T | null>(null);
+export function useQuery<T>(load: () => Promise<T>, queryKey = ""): QueryState<T> {
+  const { activeId: spaceId } = useActiveSpace();
+  const activeId = `${spaceId ?? "none"}|${queryKey}`;
+  const currentScope = useRef(activeId);
+  useEffect(() => { currentScope.current = activeId; }, [activeId]);
+  const [result, setResult] = useState<{ scope: string | null; data: T } | null>(null);
+  const data = result?.scope === activeId ? result.data : null;
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -28,14 +34,17 @@ export function useQuery<T>(load: () => Promise<T>): QueryState<T> {
   const run = useCallback(
     async (userInitiated: boolean) => {
       const id = ++requestId.current;
+      const scope = activeId;
+      setError(null);
       if (userInitiated) setRefreshing(true);
       try {
         const next = await load();
-        if (id !== requestId.current) return;
-        setData(next);
+        if (id !== requestId.current || currentScope.current !== scope) return;
+        setResult({ scope, data: next });
         setError(null);
       } catch {
-        if (id !== requestId.current) return;
+        if (id !== requestId.current || currentScope.current !== scope) return;
+        setResult(null);
         setError("Couldn't load this. Check your connection and try again.");
       } finally {
         if (id === requestId.current) {
@@ -44,7 +53,7 @@ export function useQuery<T>(load: () => Promise<T>): QueryState<T> {
         }
       }
     },
-    [load],
+    [load, activeId],
   );
 
   useFocusEffect(
@@ -54,7 +63,6 @@ export function useQuery<T>(load: () => Promise<T>): QueryState<T> {
   );
 
   // Switching Space reloads (the focus effect above only fires on focus).
-  const { activeId } = useActiveSpace();
   const lastSpace = useRef(activeId);
   useEffect(() => {
     if (lastSpace.current === activeId) return;
@@ -62,9 +70,11 @@ export function useQuery<T>(load: () => Promise<T>): QueryState<T> {
     run(false);
   }, [activeId, run]);
 
+  useEffect(() => subscribeRuntime(() => { setResult(null); void run(false); }), [run]);
+
   const refresh = useCallback(() => {
     run(true);
   }, [run]);
 
-  return { data, loading, refreshing, error, refresh };
+  return { data, loading: loading || (result !== null && result.scope !== activeId && !error), refreshing, error, refresh };
 }

@@ -1,5 +1,7 @@
 import { router } from "expo-router";
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
+import { SelectedWallet } from "@/features/wallets/SelectedWallet";
+import { useOffline } from "@/offline/offline-context";
 import { RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -22,26 +24,30 @@ import { makeStyles, useTheme } from "@/theme/ThemeProvider";
 // Home shows the six most recent, as the web does.
 const RECENT_LIMIT = 6;
 
-async function loadHome() {
+async function loadHome(accountId?: string) {
   const nowIso = new Date().toISOString();
   const [balance, today, recent, reviewCount, health] = await Promise.all([
-    getCurrentBalance(),
-    getTodayTotals(nowIso),
-    getTransactions({ limit: RECENT_LIMIT }),
-    getReviewQueueCount(),
-    getCaptureHealth(),
+    accountId ? Promise.resolve(null) : getCurrentBalance(),
+    getTodayTotals(nowIso, accountId),
+    getTransactions({ limit: RECENT_LIMIT, accountId }),
+    getReviewQueueCount().catch(() => null),
+    getCaptureHealth().catch(() => null),
   ]);
   return { balance, today, recent, reviewCount, health, nowIso };
 }
 
 // Same order as the web's Home on a phone: balance, today's totals, budget
-// status, then recent transactions. The app adds two cards the web does not
-// have on Home (recording needs setup, transactions to review) below the budget.
+// status, then recent transactions. Mobile shows recording setup and review
+// actions below the budget when they are needed.
 export default function Home() {
   const styles = useStyles();
   const { colors } = useTheme();
   // `loadHome` is a module-level function, so its identity is stable.
-  const { data, loading, refreshing, error, refresh } = useQuery(loadHome);
+  const [accountId, setAccountId] = useState<string | undefined>();
+  const load = useCallback(() => loadHome(accountId), [accountId]);
+  const { data, loading, refreshing, error, refresh } = useQuery(load, accountId ?? "all-wallets");
+  const sync = useOffline();
+  const reviewCount = data?.reviewCount ?? 0;
   // Server-computed, so it loads on its own: a slow or unavailable budget
   // service never delays or breaks the rest of Home.
   const loadBudgets = useCallback(() => fetchBudgets(), []);
@@ -64,7 +70,9 @@ export default function Home() {
           <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.accent} />
         }
       >
-        {error && !data ? (
+        <SelectedWallet onSelect={setAccountId} />
+        {sync.lastSyncedAt ? <Text variant="caption">Saved activity last synced {sync.lastSyncedAt}. Newer changes may be missing.</Text> : null}
+        {error ? (
           <EmptyState
             variant="setup"
             title={error}
@@ -74,16 +82,16 @@ export default function Home() {
 
         {data ? (
           <>
-            <BalanceCard balance={data.balance} nowIso={data.nowIso} />
+            {!accountId ? <BalanceCard balance={data.balance} nowIso={data.nowIso} /> : null}
 
-            <View style={styles.row}>
-              <Tile label="Received today" amountRwf={data.today.receivedRwf} />
-              <Tile label="Spent today" amountRwf={-data.today.spentRwf} />
-            </View>
+            {(data.today.byCurrency?.length ? data.today.byCurrency : [{ currency: "RWF", sentMinor: data.today.spentRwf, receivedMinor: data.today.receivedRwf }]).map((flow) => <View key={flow.currency} style={styles.row}>
+              <Tile label="Received today" amountRwf={flow.receivedMinor} currency={flow.currency} />
+              <Tile label="Spent today" amountRwf={-flow.sentMinor} currency={flow.currency} />
+            </View>)}
 
             {budget ? <BudgetStatusCard budget={budget} nowIso={data.nowIso} /> : null}
 
-            {recordingNeedsSetup || data.reviewCount > 0 ? (
+            {recordingNeedsSetup || reviewCount > 0 ? (
               <ListGroup>
                 {recordingNeedsSetup ? (
                   <ListRow
@@ -98,10 +106,10 @@ export default function Home() {
                     onPress={() => router.push("/connect")}
                   />
                 ) : null}
-                {data.reviewCount > 0 ? (
+                {reviewCount > 0 ? (
                   <ListRow
                     icon="check-circle"
-                    label={`${data.reviewCount} transaction${data.reviewCount === 1 ? "" : "s"} to review`}
+                    label={`${reviewCount} transaction${reviewCount === 1 ? "" : "s"} to review`}
                     value={
                       <Text variant="label" color="accent">
                         Review now
@@ -143,14 +151,14 @@ export default function Home() {
 }
 
 /** One of today's totals. Signed, coloured and masked like every other amount. */
-function Tile({ label, amountRwf }: { label: string; amountRwf: number }) {
+function Tile({ label, amountRwf, currency }: { label: string; amountRwf: number; currency?: string }) {
   const styles = useStyles();
   return (
     <Card style={styles.tile}>
       <Text variant="caption" color="textMuted">
         {label}
       </Text>
-      <MoneyAmount amountRwf={amountRwf} size="lg" />
+      <MoneyAmount amountRwf={amountRwf} currency={currency} size="lg" />
     </Card>
   );
 }

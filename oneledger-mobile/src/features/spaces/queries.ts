@@ -6,11 +6,12 @@ import { isSpaceKind, type Space } from "./spaces";
  * Every Space the caller is an active member of (the web's
  * `getUserWorkspaces`), oldest membership first. RLS scopes the rows.
  */
-export async function getSpaces(): Promise<Space[]> {
+export async function getSpaces(userId: string): Promise<Space[]> {
   if (!supabase) throw new Error("not configured");
   const { data, error } = await supabase
     .from("workspace_memberships")
     .select("role, workspaces(id, name, kind)")
+    .eq("user_id", userId)
     .eq("status", "active")
     .order("joined_at", { ascending: true });
   if (error) throw new Error(error.message);

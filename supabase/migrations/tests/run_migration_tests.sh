@@ -283,6 +283,7 @@ alter default privileges for role postgres in schema public
 -- simulate "signed in as user X" with
 -- set_config('request.jwt.claim.sub', '<uuid>', true).
 create schema if not exists auth;
+grant usage on schema auth to anon, authenticated, service_role;
 create table if not exists auth.users (
   id uuid primary key default extensions.gen_random_uuid(),
   email text,
@@ -856,10 +857,10 @@ AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from inform
 # OneLedger 3.0 S5 (20261226000000): SELECT on payment_requests,
 # payment_request_events and payment_requests_v (security_invoker). 172 + 3 = 175.
 # OneLedger 3.0 E4 (20261228000000): SELECT on counterparty_split_events. 175 + 1 = 176.
-if [ "$AUTHENTICATED_GRANT_COUNT" = "176" ]; then
-  pass "authenticated holds exactly the 176 table grants expected, no more"
+if [ "$AUTHENTICATED_GRANT_COUNT" = "177" ]; then
+  pass "authenticated holds exactly the 177 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 176 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 177 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -1075,16 +1076,12 @@ AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_p
 # Counterparty source visibility (20270105000000): can_view_counterparty, the
 # authorization primitive the four counterparty policies call (read-only,
 # returns a boolean, takes only an id). 139 + 1 = 140.
-# Platform Console foundation (20270120000000) adds 7 authenticated-callable
-# RPCs (console_my_access, _record_audit, _dashboard_summary, _activity_feed,
-# _audit_log, _staff_list, _health_snapshot) and 20270120000001 adds
-# console_customer_directory; 20270121000000 adds 6 more (activity_page,
-# registrations, organizations, reports_overview, security_overview,
-# customer_detail). 140 + 14 = 154.
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "154" ]; then
-  pass "authenticated holds EXECUTE on exactly the 154 functions expected, no more"
+# Financial foundations (this branch) add 10 more authenticated-callable
+# functions on top of main's 154; the 140 -> 150 step is recorded above.
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "164" ]; then
+  pass "authenticated holds EXECUTE on exactly the 164 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 154 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 164 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -8834,7 +8831,7 @@ s5_anon() { psql -d pfe_rls -t -A -F'|' -c "set role anon; $1" | grep -v '^SET$'
 S5_FUT="now() + interval '7 days'"
 
 S5_H1="$(s5h 1)"
-S5_REQ1="$(as_user "$USER_A" "select public.create_payment_request('$WORKSPACE_A', 5000, 'RWF', 'momo_phone', '+250 793 000 439', ' Samuel N ', 'Rent Nov', $S5_FUT, '$S5_H1', 'idem-key-0001');" | tail -1)"
+S5_REQ1="$(as_user_aal "$USER_A" "aal2" "select public.create_payment_request('$WORKSPACE_A', 5000, 'RWF', 'momo_phone', '+250 793 000 439', ' Samuel N ', 'Rent Nov', $S5_FUT, '$S5_H1', 'idem-key-0001');" | tail -1)"
 S5_ROW="$(psql -d pfe_rls -t -A -c "select destination_value || '|' || recipient_display || '|' || status || '|' || token_hash from public.payment_requests where id = '$S5_REQ1';")"
 if [ "$S5_ROW" = "250793000439|Samuel N|open|$S5_H1" ]; then
   pass "S5: a member creates a request; destination and name are normalised/trimmed server-side; only the digest is stored"
@@ -8842,7 +8839,7 @@ else
   fail "S5: create wrong (id='$S5_REQ1' row='$S5_ROW')"
 fi
 
-S5_REQ1B="$(as_user "$USER_A" "select public.create_payment_request('$WORKSPACE_A', 9999, 'RWF', 'momo_phone', '0793000439', 'Other', null, $S5_FUT, '$(s5h 2)', 'idem-key-0001');" | tail -1)"
+S5_REQ1B="$(as_user_aal "$USER_A" "aal2" "select public.create_payment_request('$WORKSPACE_A', 9999, 'RWF', 'momo_phone', '0793000439', 'Other', null, $S5_FUT, '$(s5h 2)', 'idem-key-0001');" | tail -1)"
 if [ "$S5_REQ1B" = "$S5_REQ1" ]; then
   pass "S5: retrying with the same idempotency key returns the original request, creating nothing new"
 else
@@ -8879,7 +8876,7 @@ fi
 
 # --- validation ---------------------------------------------------------------
 s5_bad() { # label sql
-  if as_user "$USER_A" "$2" >/dev/null 2>&1; then fail "S5: accepted invalid input: $1"; else pass "S5: rejected invalid input: $1"; fi
+  if as_user_aal "$USER_A" "aal2" "$2" >/dev/null 2>&1; then fail "S5: accepted invalid input: $1"; else pass "S5: rejected invalid input: $1"; fi
 }
 s5_bad "zero amount" "select public.create_payment_request('$WORKSPACE_A', 0, 'RWF', 'momo_phone', '0793000439', 'X', null, $S5_FUT, '$(s5h 10)');"
 s5_bad "unsupported currency" "select public.create_payment_request('$WORKSPACE_A', 100, 'GBP', 'momo_phone', '0793000439', 'X', null, $S5_FUT, '$(s5h 11)');"
@@ -8923,22 +8920,22 @@ fi
 
 # --- cancel / expiry -------------------------------------------------------------
 S5_H3="$(s5h 3)"
-S5_REQ3="$(as_user "$USER_A" "select public.create_payment_request('$WORKSPACE_A', 3000, 'RWF', 'merchant_code', '093011', 'Shop', null, $S5_FUT, '$S5_H3');" | tail -1)"
-as_user "$USER_A" "select public.cancel_payment_request('$S5_REQ3');" >/dev/null
+S5_REQ3="$(as_user_aal "$USER_A" "aal2" "select public.create_payment_request('$WORKSPACE_A', 3000, 'RWF', 'merchant_code', '093011', 'Shop', null, $S5_FUT, '$S5_H3');" | tail -1)"
+as_user_aal "$USER_A" "aal2" "select public.cancel_payment_request('$S5_REQ3');" >/dev/null
 S5_CAN="$(s5_anon "select status, amount_minor, coalesce(destination_value, 'withheld') from public.resolve_payment_request('$S5_H3');")"
 if [ "$S5_CAN" = "cancelled|3000|withheld" ]; then
   pass "S5: a cancelled request resolves as cancelled and withholds the destination"
 else
   fail "S5: cancelled resolve wrong: '$S5_CAN'"
 fi
-if as_user "$USER_A" "select public.cancel_payment_request('$S5_REQ3');" >/dev/null 2>&1; then
+if as_user_aal "$USER_A" "aal2" "select public.cancel_payment_request('$S5_REQ3');" >/dev/null 2>&1; then
   fail "S5: a cancelled request was cancelled again"
 else
   pass "S5: a terminal request cannot change state again"
 fi
 
 S5_H4="$(s5h 4)"
-S5_REQ4="$(as_user "$USER_A" "select public.create_payment_request('$WORKSPACE_A', 4000, 'RWF', 'momo_phone', '0793000439', 'Late', null, $S5_FUT, '$S5_H4');" | tail -1)"
+S5_REQ4="$(as_user_aal "$USER_A" "aal2" "select public.create_payment_request('$WORKSPACE_A', 4000, 'RWF', 'momo_phone', '0793000439', 'Late', null, $S5_FUT, '$S5_H4');" | tail -1)"
 psql -d pfe_rls -v ON_ERROR_STOP=1 -c "update public.payment_requests set created_at = now() - interval '2 days', expires_at = now() - interval '1 hour' where id = '$S5_REQ4';" >/dev/null
 S5_EXP="$(s5_anon "select status, coalesce(destination_value, 'withheld') from public.resolve_payment_request('$S5_H4');")"
 S5_EXPV="$(as_user "$USER_A" "select status from public.payment_requests_v where id = '$S5_REQ4';")"
@@ -8947,7 +8944,7 @@ if [ "$S5_EXP" = "expired|withheld" ] && [ "$S5_EXPV" = "expired" ]; then
 else
   fail "S5: expiry wrong (public='$S5_EXP' view='$S5_EXPV')"
 fi
-if as_user "$USER_A" "select public.mark_payment_request_paid_by_owner('$S5_REQ4');" >/dev/null 2>&1; then
+if as_user_aal "$USER_A" "aal2" "select public.mark_payment_request_paid_by_owner('$S5_REQ4');" >/dev/null 2>&1; then
   fail "S5: an expired request was marked paid by owner"
 else
   pass "S5: an expired request cannot be marked paid by the owner"
@@ -8955,8 +8952,8 @@ fi
 
 # --- owner assertion ---------------------------------------------------------------
 S5_H5="$(s5h 5)"
-S5_REQ5="$(as_user "$USER_A" "select public.create_payment_request('$WORKSPACE_A', 6000, 'RWF', 'momo_phone', '0793000439', 'Owner says', null, $S5_FUT, '$S5_H5');" | tail -1)"
-as_user "$USER_A" "select public.mark_payment_request_paid_by_owner('$S5_REQ5', 'cash handed over');" >/dev/null
+S5_REQ5="$(as_user_aal "$USER_A" "aal2" "select public.create_payment_request('$WORKSPACE_A', 6000, 'RWF', 'momo_phone', '0793000439', 'Owner says', null, $S5_FUT, '$S5_H5');" | tail -1)"
+as_user_aal "$USER_A" "aal2" "select public.mark_payment_request_paid_by_owner('$S5_REQ5', 'cash handed over');" >/dev/null
 S5_MP="$(s5_anon "select status, coalesce(destination_value, 'withheld') from public.resolve_payment_request('$S5_H5');")"
 S5_MPE="$(psql -d pfe_rls -t -A -c "select metadata->>'verified' from public.payment_request_events where payment_request_id = '$S5_REQ5' and event_type = 'marked_paid_by_owner';")"
 if [ "$S5_MP" = "marked_paid_by_owner|withheld" ] && [ "$S5_MPE" = "false" ]; then
@@ -8983,9 +8980,9 @@ s5_tx 03 "$WORKSPACE_A" "$S4_ACCT" send_money out 7000
 s5_tx 04 "$WORKSPACE_B" "$S4_ACCT_B" money_received in 7000
 
 S5_H6="$(s5h 6)"
-S5_REQ6="$(as_user "$USER_A" "select public.create_payment_request('$WORKSPACE_A', 7000, 'RWF', 'momo_phone', '0793000439', 'Match me', null, $S5_FUT, '$S5_H6');" | tail -1)"
+S5_REQ6="$(as_user_aal "$USER_A" "aal2" "select public.create_payment_request('$WORKSPACE_A', 7000, 'RWF', 'momo_phone', '0793000439', 'Match me', null, $S5_FUT, '$S5_H6');" | tail -1)"
 s5_link_bad() {
-  if as_user "$USER_A" "select public.link_payment_request_transaction('$S5_REQ6', '$2');" >/dev/null 2>&1; then
+  if as_user_aal "$USER_A" "aal2" "select public.link_payment_request_transaction('$S5_REQ6', '$2');" >/dev/null 2>&1; then
     fail "S5: linked a non-matching transaction ($1)"
   else
     pass "S5: refuses to link a non-matching transaction ($1)"
@@ -9000,7 +8997,7 @@ if [ "$S5_NOMATCH" = "open" ]; then
 else
   fail "S5: failed link changed status to '$S5_NOMATCH'"
 fi
-as_user "$USER_A" "select public.link_payment_request_transaction('$S5_REQ6', '$(S5_TX 01)');" >/dev/null
+as_user_aal "$USER_A" "aal2" "select public.link_payment_request_transaction('$S5_REQ6', '$(S5_TX 01)');" >/dev/null
 S5_M="$(psql -d pfe_rls -t -A -c "select status || '|' || (matched_transaction_id = '$(S5_TX 01)')::text from public.payment_requests where id = '$S5_REQ6';")"
 if [ "$S5_M" = "matched|true" ]; then
   pass "S5: a human links a settled, equal-amount incoming transaction -> matched"
@@ -9008,8 +9005,8 @@ else
   fail "S5: match wrong: '$S5_M'"
 fi
 S5_H7="$(s5h 7)"
-S5_REQ7="$(as_user "$USER_A" "select public.create_payment_request('$WORKSPACE_A', 7000, 'RWF', 'momo_phone', '0793000439', 'Second', null, $S5_FUT, '$S5_H7');" | tail -1)"
-if as_user "$USER_A" "select public.link_payment_request_transaction('$S5_REQ7', '$(S5_TX 01)');" >/dev/null 2>&1; then
+S5_REQ7="$(as_user_aal "$USER_A" "aal2" "select public.create_payment_request('$WORKSPACE_A', 7000, 'RWF', 'momo_phone', '0793000439', 'Second', null, $S5_FUT, '$S5_H7');" | tail -1)"
+if as_user_aal "$USER_A" "aal2" "select public.link_payment_request_transaction('$S5_REQ7', '$(S5_TX 01)');" >/dev/null 2>&1; then
   fail "S5: one transaction settled two requests"
 else
   pass "S5: a transaction can settle at most one request"
@@ -9654,6 +9651,194 @@ fi
 # disposable database: it plants rows in every workspace-scoped table and
 # defines a `tt` schema, neither of which any other test should ever see.
 # ===========================================================================
+echo "=== Phase 1 assurance and snapshot contracts ==="
+if as_user_aal "$USER_A" "aal1" "select public.require_sensitive_assurance();" >/dev/null 2>&1; then
+  fail "Phase 1: enrolled AAL1 passed the sensitive execution boundary"
+else pass "Phase 1: enrolled AAL1 is refused at the SQL boundary"; fi
+if as_user_aal "$USER_A" "aal2" "select public.require_sensitive_assurance();" >/dev/null 2>&1; then
+  pass "Phase 1: enrolled AAL2 passes the sensitive execution boundary"
+else fail "Phase 1: AAL2 incorrectly refused"; fi
+P1_SNAPSHOT="$(as_user "$USER_B" "select jsonb_typeof(public.sync_financial_snapshot_page(null, 1)->'rows');")"
+if [ "$P1_SNAPSHOT" = "array" ]; then pass "Phase 1: snapshot has an explicit rows envelope"; else fail "Phase 1: invalid snapshot envelope"; fi
+P1_FOREIGN="$(as_user "$USER_B" "select jsonb_array_length(public.sync_visible_transaction_ids(array['00000000-0000-0000-0000-0000000000d3']::uuid[]));")"
+if [ "$P1_FOREIGN" = "0" ]; then pass "Phase 1: visibility validation cannot disclose another tenant's id"; else fail "Phase 1: foreign id disclosed"; fi
+P1_ANON="$(psql -d pfe_rls -t -A -c "select has_function_privilege('anon','public.sync_financial_snapshot_page(uuid,integer)','execute') or has_function_privilege('anon','public.sync_visible_transaction_ids(uuid[])','execute') or has_function_privilege('anon','public.create_supported_wallet(uuid,text,text,text)','execute');")"
+if [ "$P1_ANON" = "f" ]; then pass "Phase 1: anonymous snapshot/wallet execution denied"; else fail "Phase 1: anonymous execution exposed"; fi
+
+P1_WALLET="$(as_user_aal "$USER_A" "aal2" "select public.create_supported_wallet('$WORKSPACE_A','Phase 1 USD wallet','bank','USD');" | tail -1)"
+if as_user_aal "$USER_A" "aal2" "select public.set_default_wallet('$WORKSPACE_A','$P1_WALLET');" >/dev/null 2>&1; then
+  pass "Phase 1: owner creates a sourced USD wallet and sets its default atomically"
+else fail "Phase 1: owner wallet workflow failed"; fi
+P1_DEFAULTS="$(psql -d pfe_rls -t -A -c "select count(*) from public.accounts where workspace_id='$WORKSPACE_A' and is_primary;")"
+if [ "$P1_DEFAULTS" = "1" ]; then pass "Phase 1: default selection leaves exactly one default"; else fail "Phase 1: invalid default count"; fi
+if as_user "$USER_B" "select public.set_default_wallet('$WORKSPACE_A','$P1_WALLET');" >/dev/null 2>&1; then
+  fail "Phase 1: foreign user changed a default wallet"
+else pass "Phase 1: foreign wallet mutation refused"; fi
+if as_user_aal "$USER_A" "aal1" "select public.create_supported_wallet('$WORKSPACE_A','Denied wallet','cash','RWF');" >/dev/null 2>&1; then
+  fail "Phase 1: enrolled AAL1 created a wallet"
+else pass "Phase 1: enrolled AAL1 wallet mutation refused"; fi
+
+echo "=== Wallet lifecycle ==="
+as_user_aal "$USER_A" "aal2" "select public.manage_wallet('$WORKSPACE_A','$P1_WALLET','rename','Renamed wallet'); select public.manage_wallet('$WORKSPACE_A','$P1_WALLET','archive');" >/dev/null
+WALLET_ARCHIVED="$(psql -d pfe_rls -t -A -c "select count(*) from public.accounts where id='$P1_WALLET' and name='Renamed wallet' and not is_active and not is_primary and archived_at is not null;")"
+if [ "$WALLET_ARCHIVED" = "1" ]; then pass "Wallet lifecycle: rename and archive preserve wallet identity and clear default"; else fail "Wallet lifecycle: incorrect archived state"; fi
+if as_user_aal "$USER_A" "aal2" "select public.set_default_wallet('$WORKSPACE_A','$P1_WALLET');" >/dev/null 2>&1; then
+  fail "Wallet lifecycle: archived wallet became default"
+else pass "Wallet lifecycle: default selection refuses archived wallets"; fi
+if as_user "$USER_B" "select public.manage_wallet('$WORKSPACE_A','$P1_WALLET','restore');" >/dev/null 2>&1; then
+  fail "Wallet lifecycle: foreign user restored wallet"
+else pass "Wallet lifecycle: foreign user cannot restore wallet"; fi
+if as_user_aal "$USER_A" "aal1" "select public.manage_wallet('$WORKSPACE_A','$P1_WALLET','restore');" >/dev/null 2>&1; then
+  fail "Wallet lifecycle: enrolled AAL1 restored wallet"
+else pass "Wallet lifecycle: enrolled AAL1 cannot restore wallet"; fi
+as_user_aal "$USER_A" "aal2" "select public.manage_wallet('$WORKSPACE_A','$P1_WALLET','restore');" >/dev/null
+WALLET_RESTORED="$(psql -d pfe_rls -t -A -c "select count(*) from public.accounts where id='$P1_WALLET' and name='Renamed wallet' and is_active and not is_primary and archived_at is null;")"
+if [ "$WALLET_RESTORED" = "1" ]; then pass "Wallet lifecycle: restore reactivates the same wallet without making it default"; else fail "Wallet lifecycle: incorrect restored state"; fi
+WALLET_ANON="$(psql -d pfe_rls -t -A -c "select has_function_privilege('anon','public.manage_wallet(uuid,uuid,text,text)','execute');")"
+if [ "$WALLET_ANON" = "f" ]; then pass "Wallet lifecycle: anonymous execution denied"; else fail "Wallet lifecycle: anonymous execution exposed"; fi
+
+echo "=== Native goal contributions ==="
+NATIVE_GOAL="00000000-0000-4000-8000-000000097001"
+NATIVE_GOAL_OP="00000000-0000-4000-8000-000000097002"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "insert into public.financial_goals (id,workspace_id,goal_type,name,currency,target_amount_minor) values ('$NATIVE_GOAL','$R_MATRIX_HH','general_savings','Native goal','USD',5000);" >/dev/null
+native_goal_call() { as_user "$1" "select public.record_goal_contribution('$2','$3','$NATIVE_GOAL','$4',$5,date '2026-11-18');"; }
+NATIVE_FIRST="$(native_goal_call "$R_MEMBER_USER" "$NATIVE_GOAL_OP" "$R_MATRIX_HH" "USD" 1234)"
+NATIVE_RETRY="$(native_goal_call "$R_MEMBER_USER" "$NATIVE_GOAL_OP" "$R_MATRIX_HH" "USD" 1234)"
+NATIVE_TOTAL="$(psql -d pfe_rls -t -A -c "select current_amount_minor || '|' || (select count(*) from public.goal_contributions where goal_id='$NATIVE_GOAL' and created_by='$R_MEMBER_USER') from public.financial_goals where id='$NATIVE_GOAL';")"
+if [ "$NATIVE_FIRST|$NATIVE_RETRY|$NATIVE_TOTAL" = "recorded|replayed|1234|1" ]; then
+  pass "Native goals: member records exact USD minor units; retry does not add a contribution"
+else fail "Native goals: unexpected first/retry/total result: $NATIVE_FIRST|$NATIVE_RETRY|$NATIVE_TOTAL"; fi
+if native_goal_call "$R_MEMBER_USER" "$NATIVE_GOAL_OP" "$R_MATRIX_HH" "USD" 1235 >/dev/null 2>&1; then
+  fail "Native goals: changed retry payload accepted"
+else pass "Native goals: edited retry payload refused"; fi
+if native_goal_call "$R_VIEWER_USER" "$NATIVE_GOAL_OP" "$R_MATRIX_HH" "USD" 1234 >/dev/null 2>&1; then
+  fail "Native goals: viewer replay accepted"
+else pass "Native goals: viewer cannot record or replay a contribution"; fi
+if native_goal_call "$USER_A" "00000000-0000-4000-8000-000000097003" "$WORKSPACE_A" "USD" 1 >/dev/null 2>&1; then
+  fail "Native goals: goal from another Space accepted"
+else pass "Native goals: goal must belong to the supplied Space"; fi
+if native_goal_call "$R_MEMBER_USER" "00000000-0000-4000-8000-000000097003" "$R_MATRIX_HH" "RWF" 1234 >/dev/null 2>&1; then
+  fail "Native goals: currency mismatch accepted"
+else pass "Native goals: currency mismatch refused"; fi
+native_goal_call "$R_MEMBER_USER" "00000000-0000-4000-8000-000000097004" "$R_MATRIX_HH" "USD" 2 >/dev/null &
+NATIVE_PID1=$!
+native_goal_call "$R_MEMBER_USER" "00000000-0000-4000-8000-000000097005" "$R_MATRIX_HH" "USD" 3 >/dev/null &
+NATIVE_PID2=$!
+wait "$NATIVE_PID1"
+wait "$NATIVE_PID2"
+NATIVE_TOTAL="$(psql -d pfe_rls -t -A -c "select current_amount_minor || '|' || (select sum(amount_minor) from public.goal_contributions where goal_id='$NATIVE_GOAL') from public.financial_goals where id='$NATIVE_GOAL';")"
+if [ "$NATIVE_TOTAL" = "1239|1239" ]; then pass "Native goals: concurrent contributions both appear in the authoritative total"; else fail "Native goals: incorrect concurrent total '$NATIVE_TOTAL'"; fi
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "delete from public.goal_contributions where goal_id='$NATIVE_GOAL'; update public.financial_goals set status='archived' where id='$NATIVE_GOAL';" >/dev/null
+NATIVE_RETRY="$(native_goal_call "$R_MEMBER_USER" "$NATIVE_GOAL_OP" "$R_MATRIX_HH" "USD" 1234)"
+NATIVE_TOTAL="$(psql -d pfe_rls -t -A -c "select current_amount_minor from public.financial_goals where id='$NATIVE_GOAL';")"
+if [ "$NATIVE_RETRY|$NATIVE_TOTAL" = "replayed|0" ]; then pass "Native goals: replay cannot resurrect a removed contribution"; else fail "Native goals: replay changed an archived goal"; fi
+if native_goal_call "$R_MEMBER_USER" "00000000-0000-4000-8000-000000097006" "$R_MATRIX_HH" "USD" 100 >/dev/null 2>&1; then
+  fail "Native goals: new contribution recorded on archived goal"
+else pass "Native goals: archived goals refuse new contributions"; fi
+NATIVE_ANON="$(psql -d pfe_rls -t -A -c "select has_function_privilege('anon','public.record_goal_contribution(uuid,uuid,uuid,text,bigint,date)','execute');")"
+if [ "$NATIVE_ANON" = "f" ]; then pass "Native goals: anonymous execution denied"; else fail "Native goals: anonymous execution exposed"; fi
+
+echo "=== Native goal management through existing policies ==="
+GM_ID="00000000-0000-4000-8000-000000097010"
+GM_CREATE="insert into public.financial_goals (id,workspace_id,created_by,goal_type,name,currency,target_amount_minor) values ('$GM_ID','$R_MATRIX_HH','$USER_A','general_savings','Managed goal','EUR',12345) returning id;"
+if as_user "$R_VIEWER_USER" "$GM_CREATE" >/dev/null 2>&1; then fail "Goal management: viewer created a goal"; else pass "Goal management: viewer cannot create a goal"; fi
+GM_CREATED="$(as_user "$USER_A" "$GM_CREATE")"
+if [ "$GM_CREATED" = "$GM_ID" ]; then pass "Goal management: manager can create a Space-scoped goal"; else fail "Goal management: goal creation failed"; fi
+if as_user "$USER_A" "$GM_CREATE" >/dev/null 2>&1; then fail "Goal management: repeated goal UUID created another row"; else pass "Goal management: repeated goal UUID cannot create duplicates"; fi
+GM_ENTRY_MINE="00000000-0000-4000-8000-000000097011"
+GM_ENTRY_OTHER="00000000-0000-4000-8000-000000097012"
+as_user "$R_MEMBER_USER" "insert into public.goal_contributions (id,goal_id,workspace_id,amount_minor,created_by) values ('$GM_ENTRY_MINE','$GM_ID','$R_MATRIX_HH',125,'$R_MEMBER_USER');" >/dev/null
+as_user "$USER_A" "insert into public.goal_contributions (id,goal_id,workspace_id,amount_minor,created_by) values ('$GM_ENTRY_OTHER','$GM_ID','$R_MATRIX_HH',375,'$USER_A');" >/dev/null
+GM_UNAUTHORIZED="$(as_user "$R_MEMBER_USER" "with removed as (delete from public.goal_contributions where workspace_id='$R_MATRIX_HH' and goal_id='$GM_ID' and id='$GM_ENTRY_OTHER' returning id) select count(*) from removed;")"
+if [ "$GM_UNAUTHORIZED" = "0" ]; then pass "Goal management: member cannot remove a different person's contribution"; else fail "Goal management: unauthorized contribution removed"; fi
+GM_REMOVED="$(as_user "$R_MEMBER_USER" "delete from public.goal_contributions where workspace_id='$R_MATRIX_HH' and goal_id='$GM_ID' and id='$GM_ENTRY_MINE' returning id;")"
+GM_TOTAL="$(psql -d pfe_rls -t -A -c "select current_amount_minor from public.financial_goals where id='$GM_ID';")"
+if [ "$GM_REMOVED|$GM_TOTAL" = "$GM_ENTRY_MINE|375" ]; then pass "Goal management: contributor can remove their entry and the trigger recomputes the total"; else fail "Goal management: removal or total incorrect"; fi
+as_user "$USER_A" "update public.financial_goals set status='completed',completed_at=now() where id='$GM_ID';" >/dev/null
+GM_ARCHIVE="update public.financial_goals set status='archived',completed_at=null where workspace_id='$R_MATRIX_HH' and id='$GM_ID' returning id;"
+GM_VIEWER_ARCHIVE="$(as_user "$R_VIEWER_USER" "with archived as (${GM_ARCHIVE%;}) select count(*) from archived;")"
+if [ "$GM_VIEWER_ARCHIVE" = "0" ]; then pass "Goal management: viewer cannot archive"; else fail "Goal management: viewer archived the goal"; fi
+GM_ARCHIVED="$(as_user "$USER_A" "$GM_ARCHIVE")"
+GM_HISTORY="$(as_user "$R_VIEWER_USER" "select count(*) from public.goal_contributions where workspace_id='$R_MATRIX_HH' and goal_id='$GM_ID';")"
+if [ "$GM_ARCHIVED|$GM_HISTORY" = "$GM_ID|1" ]; then pass "Goal management: archive supports completed goals and leaves history readable"; else fail "Goal management: archive failed or removed history"; fi
+
+echo "=== Native budget allocation editing ==="
+NATIVE_BUDGET="00000000-0000-4000-8000-000000098001"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "insert into public.budgets (id,workspace_id,name,currency,period_start,period_end,income_amount_minor,normalized_monthly_income_minor,normalized_annual_income_minor,income_frequency) values ('$NATIVE_BUDGET','$R_MATRIX_HH','Native allocation budget','EUR','2026-11-01','2026-11-30',101,101,1212,'monthly');
+insert into public.budget_allocations (budget_id,workspace_id,allocation_type,percentage,target_amount_minor) select '$NATIVE_BUDGET','$R_MATRIX_HH',t,25,case when t='ESSENTIALS' then 26 else 25 end from unnest(array['ESSENTIALS','INVESTING','EMERGENCY','WANTS']) t;
+update public.budgets set status='active', activated_at=now() where id='$NATIVE_BUDGET';" >/dev/null
+NB_LOOKUP="public.edit_budget_allocations('$R_MATRIX_HH','$NATIVE_BUDGET')"
+NB_REV="$(as_user "$USER_A" "select $NB_LOOKUP->>'revision';")"
+NB_PLAN='{"ESSENTIALS":10.25,"INVESTING":20.25,"EMERGENCY":30.25,"WANTS":39.25}'
+NB_CALL="public.edit_budget_allocations('$R_MATRIX_HH','$NATIVE_BUDGET','$NB_REV','$NB_PLAN'"
+NB_PREVIEW="$(as_user "$USER_A" "select string_agg(a->>'target_minor',',' order by ord) from jsonb_array_elements($NB_CALL,false)->'allocations') with ordinality as x(a,ord);")"
+if [ "$NB_PREVIEW" = "10,20,31,40" ]; then pass "Native budgets: preview distributes remainder exactly and deterministically"; else fail "Native budgets: unexpected preview '$NB_PREVIEW'"; fi
+if [ "$(as_user "$USER_A" "select $NB_LOOKUP->>'revision';")" = "$NB_REV" ]; then pass "Native budgets: preview leaves persisted allocations unchanged"; else fail "Native budgets: preview changed revision"; fi
+if as_user "$R_VIEWER_USER" "select $NB_CALL,true);" >/dev/null 2>&1; then fail "Native budgets: viewer edited allocations"; else pass "Native budgets: viewer denied allocation edit"; fi
+if as_user "$USER_A" "select public.edit_budget_allocations('$WORKSPACE_A','$NATIVE_BUDGET');" >/dev/null 2>&1; then fail "Native budgets: cross-Space editor resolved a budget"; else pass "Native budgets: budget ID must belong to the named Space"; fi
+if as_user "$USER_A" "select public.edit_budget_allocations('$R_MATRIX_HH','$NATIVE_BUDGET','$NB_REV','{"ESSENTIALS":25,"INVESTING":25,"EMERGENCY":25,"WANTS":24.99}',true);" >/dev/null 2>&1; then fail "Native budgets: accepted a non-100 active plan"; else pass "Native budgets: active allocation requires exactly 100 percent"; fi
+if as_user "$USER_A" "select public.edit_budget_allocations('$R_MATRIX_HH','$NATIVE_BUDGET','$NB_REV','{"ESSENTIALS":25.001,"INVESTING":25,"EMERGENCY":25,"WANTS":24.999}',true);" >/dev/null 2>&1; then fail "Native budgets: silently rounded allocation percentages"; else pass "Native budgets: excess decimal precision refused"; fi
+as_user "$USER_A" "select $NB_CALL,true);" >/dev/null
+NB_AFTER="$(psql -d pfe_rls -t -A -c "select sum(percentage)||'|'||sum(target_amount_minor) from public.budget_allocations where budget_id='$NATIVE_BUDGET';")"
+if [ "$NB_AFTER" = "100.00|101" ]; then pass "Native budgets: all four active allocations save atomically and total 101 minor units"; else fail "Native budgets: incorrect totals '$NB_AFTER'"; fi
+if as_user "$USER_A" "select $NB_CALL,true);" >/dev/null 2>&1; then fail "Native budgets: stale revision accepted a repeat save"; else pass "Native budgets: stale save cannot overwrite the current plan"; fi
+NB_NEW_REV="$(as_user "$USER_A" "select $NB_LOOKUP->>'revision';")"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "update public.budgets set normalized_monthly_income_minor=102 where id='$NATIVE_BUDGET';" >/dev/null
+if as_user "$USER_A" "select public.edit_budget_allocations('$R_MATRIX_HH','$NATIVE_BUDGET','$NB_NEW_REV','$NB_PLAN',true);" >/dev/null 2>&1; then fail "Native budgets: stale income accepted"; else pass "Native budgets: income change invalidates the old preview"; fi
+as_user "$USER_A" "select public.grant_space_capability('$R_MATRIX_HH','$R_MEMBER_USER','budget.manage');" >/dev/null
+NB_RACE_REV="$(as_user "$R_MEMBER_USER" "select $NB_LOOKUP->>'revision';")"
+if [ -n "$NB_RACE_REV" ]; then pass "Native budgets: delegated budget.manage can load the editor"; else fail "Native budgets: delegate cannot edit"; fi
+NB_OTHER_PLAN='{"ESSENTIALS":50,"INVESTING":20,"EMERGENCY":10,"WANTS":20}'
+as_user "$R_MEMBER_USER" "select public.edit_budget_allocations('$R_MATRIX_HH','$NATIVE_BUDGET','$NB_RACE_REV','$NB_PLAN',true);" >"$ARTIFACT_DIR/native_budget_race_a.log" 2>&1 &
+NB_RACE_A=$!
+as_user "$USER_A" "select public.edit_budget_allocations('$R_MATRIX_HH','$NATIVE_BUDGET','$NB_RACE_REV','$NB_OTHER_PLAN',true);" >"$ARTIFACT_DIR/native_budget_race_b.log" 2>&1 &
+NB_RACE_B=$!
+NB_WINS=0
+if wait "$NB_RACE_A"; then NB_WINS=$((NB_WINS + 1)); fi
+if wait "$NB_RACE_B"; then NB_WINS=$((NB_WINS + 1)); fi
+NB_RACE_TOTAL="$(psql -d pfe_rls -t -A -c "select sum(target_amount_minor) from public.budget_allocations where budget_id='$NATIVE_BUDGET';")"
+if [ "$NB_WINS|$NB_RACE_TOTAL" = "1|102" ]; then pass "Native budgets: simultaneous edits accept one revision and preserve the exact total"; else fail "Native budgets: wrong concurrent outcome '$NB_WINS|$NB_RACE_TOTAL'"; fi
+if [ "$(psql -d pfe_rls -t -A -c "select has_function_privilege('anon','public.edit_budget_allocations(uuid,uuid,text,jsonb,boolean)','execute');")" = "f" ]; then pass "Native budgets: anonymous execute denied"; else fail "Native budgets: anonymous execute exposed"; fi
+
+echo "=== Native budget lifecycle ==="
+BD1="00000000-0000-4000-8000-000000099001"
+BD2="00000000-0000-4000-8000-000000099002"
+BD_BAD="00000000-0000-4000-8000-000000099003"
+BD_PLAN='{"ESSENTIALS":50,"INVESTING":15,"EMERGENCY":5,"WANTS":30}'
+BD_PARTIAL='{"ESSENTIALS":50,"INVESTING":15,"EMERGENCY":5,"WANTS":20}'
+bd_create() { as_user "$1" "select public.create_budget_draft('$2','$R_MATRIX_HH','Native draft','USD','2026-11-01','2026-11-30',101,'weekly','$3');"; }
+if bd_create "$R_VIEWER_USER" "$BD_BAD" "$BD_PLAN" >/dev/null 2>&1; then fail "Budget lifecycle: viewer created a budget"; else pass "Budget lifecycle: viewer cannot create"; fi
+if bd_create "$USER_A" "$BD_BAD" '{"ESSENTIALS":100}' >/dev/null 2>&1; then fail "Budget lifecycle: invalid allocation accepted"; fi
+BD_ORPHANS="$(psql -d pfe_rls -t -A -c "select (select count(*) from public.budgets where id='$BD_BAD') + (select count(*) from public.budget_allocations where budget_id='$BD_BAD');")"
+if [ "$BD_ORPHANS" = "0" ]; then pass "Budget lifecycle: failed creation rolls back both tables"; else fail "Budget lifecycle: orphaned draft"; fi
+BD_CREATED="$(bd_create "$R_MEMBER_USER" "$BD1" "$BD_PLAN")"
+BD_RETRY="$(bd_create "$R_MEMBER_USER" "$BD1" "$BD_PLAN")"
+BD_FACTS="$(psql -d pfe_rls -t -A -c "select status||'|'||normalized_monthly_income_minor||'|'||normalized_annual_income_minor||'|'||(select count(*)||'|'||sum(target_amount_minor) from public.budget_allocations where budget_id='$BD1') from public.budgets where id='$BD1';")"
+if [ "$BD_CREATED|$BD_RETRY|$BD_FACTS" = "$BD1|$BD1|draft|438|5252|4|438" ]; then pass "Budget lifecycle: delegated creation saves a complete draft and replays with exact normalized amounts"; else fail "Budget lifecycle: incorrect draft '$BD_FACTS'"; fi
+if bd_create "$R_MEMBER_USER" "$BD1" "$BD_PARTIAL" >/dev/null 2>&1; then fail "Budget lifecycle: modified creation replay passed"; else pass "Budget lifecycle: altered draft retry refused"; fi
+bd_create "$USER_A" "$BD2" "$BD_PARTIAL" >/dev/null
+bd_rev() { as_user "$USER_A" "select public.edit_budget_allocations('$R_MATRIX_HH','$1')->>'revision';"; }
+bd_activate() { as_user "$1" "select public.activate_budget_draft('$R_MATRIX_HH','$2','$3');"; }
+BD_REV1="$(bd_rev "$BD1")"
+BD_REV2="$(bd_rev "$BD2")"
+if bd_activate "$USER_A" "$BD2" "$BD_REV2" >/dev/null 2>&1; then fail "Budget lifecycle: partial draft activated"; else pass "Budget lifecycle: activation requires a complete allocation"; fi
+if bd_activate "$R_VIEWER_USER" "$BD1" "$BD_REV1" >/dev/null 2>&1; then fail "Budget lifecycle: viewer activated a budget"; else pass "Budget lifecycle: viewer cannot activate"; fi
+if bd_activate "$USER_A" "$BD1" "stale" >/dev/null 2>&1; then fail "Budget lifecycle: stale activation allowed"; else pass "Budget lifecycle: stale activation refused"; fi
+as_user "$USER_A" "select public.edit_budget_allocations('$R_MATRIX_HH','$BD2','$BD_REV2','$BD_PLAN',true);" >/dev/null
+BD_REV2="$(bd_rev "$BD2")"
+bd_activate "$R_MEMBER_USER" "$BD1" "$BD_REV1" >"$ARTIFACT_DIR/native_budget_activate_a.log" 2>&1 &
+BD_PID1=$!
+bd_activate "$USER_A" "$BD2" "$BD_REV2" >"$ARTIFACT_DIR/native_budget_activate_b.log" 2>&1 &
+BD_PID2=$!
+BD_WINS=0
+if wait "$BD_PID1"; then BD_WINS=$((BD_WINS + 1)); fi
+if wait "$BD_PID2"; then BD_WINS=$((BD_WINS + 1)); fi
+BD_ACTIVE="$(psql -d pfe_rls -t -A -c "select id from public.budgets where id in ('$BD1','$BD2') and status='active' and activated_at is not null;")"
+if [ "$BD_WINS" = "1" ] && { [ "$BD_ACTIVE" = "$BD1" ] || [ "$BD_ACTIVE" = "$BD2" ]; }; then
+  pass "Budget lifecycle: concurrent activation admits one budget and preserves the other draft"
+  if [ "$(bd_activate "$USER_A" "$BD_ACTIVE" "original-revision")" = "active" ]; then pass "Budget lifecycle: repeated activation of the same budget is safe"; else fail "Budget lifecycle: activation replay failed"; fi
+else fail "Budget lifecycle: unexpected activation race result '$BD_WINS|$BD_ACTIVE'"; fi
+
 echo "=== Two-tenant isolation sweep ==="
 bootstrap_db "pfe_tt"
 apply_chain "pfe_tt"

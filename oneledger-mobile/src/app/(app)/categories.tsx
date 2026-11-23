@@ -1,6 +1,7 @@
 import { router } from "expo-router";
 import { useCallback } from "react";
-import { Pressable, View } from "react-native";
+import { View } from "react-native";
+import { PrivatePressable as Pressable } from "@/features/privacy/PrivatePressable";
 
 import { fetchCategories } from "@/api/mobile-api";
 import { Badge, Button, Card, EmptyState, ProgressBar, Screen, ScreenHeader, Text } from "@/components/ds";
@@ -18,7 +19,8 @@ export default function Categories() {
 
   return (
     <Screen>
-      <ScreenHeader title="Categories" subtitle="Where your money has gone, all time" />
+
+      <ScreenHeader title="Categories" subtitle="RWF spending, all time. Other currencies are shown separately in Insights." />
       <Button label="Categorization rules" variant="secondary" onPress={() => router.push("/categorization-rules")} />
 
       {loading && !data ? (

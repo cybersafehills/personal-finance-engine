@@ -1,3 +1,5 @@
+import { selectedWorkspaceId } from "@/features/spaces/selected-space";
+import { assertCachedAccess } from "@/offline/visibility";
 import { router } from "expo-router";
 import { useCallback, useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
@@ -32,7 +34,8 @@ export default function AddTransaction() {
   const loadAccounts = useCallback(async () => {
     const local = readableDb();
     if (local) {
-      const accounts = await listLocalAccounts(local);
+      await assertCachedAccess(local, selectedWorkspaceId());
+      const accounts = await listLocalAccounts(local, selectedWorkspaceId());
       if (accounts.length > 0) return accounts;
     }
     return listManualAccounts();

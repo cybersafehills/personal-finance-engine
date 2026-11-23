@@ -56,6 +56,15 @@ function RootNavigator() {
   );
 }
 
+function AccountProviders() {
+  const { session } = useSession();
+  const userId = session?.user.id ?? null;
+  // All financial state is remounted across identities.
+  return <PrivacyProvider key={userId ?? "signed-out"} userId={userId}>
+    <OfflineProvider><ActiveSpaceProvider><RootNavigator /></ActiveSpaceProvider></OfflineProvider>
+  </PrivacyProvider>;
+}
+
 export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({
     Geist_400Regular,
@@ -73,13 +82,7 @@ export default function RootLayout() {
       <NavigationTheme>
         <SessionProvider>
           <LockProvider>
-            <PrivacyProvider>
-              <OfflineProvider>
-                <ActiveSpaceProvider>
-                  <RootNavigator />
-                </ActiveSpaceProvider>
-              </OfflineProvider>
-            </PrivacyProvider>
+            <AccountProviders />
           </LockProvider>
         </SessionProvider>
       </NavigationTheme>

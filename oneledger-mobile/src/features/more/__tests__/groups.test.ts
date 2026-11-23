@@ -4,14 +4,16 @@ const labels = (flags: Parameters<typeof visibleGroups>[0]) =>
   visibleGroups(flags).flatMap((g) => g.links.map((l) => l.label));
 
 describe("visibleGroups", () => {
-  it("shows everything when the server's answer is unknown", () => {
+  it("keeps the old statement fallback but hides opt-in features when unknown", () => {
     expect(labels(null)).toContain("Statements");
-    expect(labels(null)).toContain("Insights");
+    expect(labels(null)).not.toContain("Insights");
+    expect(labels(null)).not.toContain("Wallets");
+    expect(labels(null)).not.toContain("Payment requests");
   });
 
   it("hides only features the server says are off", () => {
-    expect(labels({ statements: false, insights: true })).not.toContain("Statements");
-    expect(labels({ statements: false, insights: true })).toContain("Insights");
+    expect(labels({ statements: false, insightsCenter: true })).not.toContain("Statements");
+    expect(labels({ statements: false, insightsCenter: true })).toContain("Insights");
     expect(labels({})).toContain("Statements");
   });
 

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   archiveAccount,
   renameAccount,
+  restoreAccount,
   setPrimaryAccount,
 } from "../app/settings/accounts/actions";
 
@@ -46,10 +47,18 @@ export function AccountSettingsControls({
 
   if (isArchived) {
     return (
-      <p className="text-sm text-text-muted">
-        This account is archived. Its history stays in your ledger and
-        reports; it can no longer receive new transactions.
-      </p>
+      <div className="flex flex-col gap-3">
+        <p className="text-sm text-text-muted">This wallet is archived. Its transactions remain in your ledger.</p>
+        <button
+          type="button"
+          disabled={isPending}
+          onClick={() => run(() => restoreAccount(accountId))}
+          className="min-h-11 w-fit rounded-control bg-accent px-4 text-sm font-medium text-accent-foreground disabled:opacity-50"
+        >
+          Restore wallet
+        </button>
+        {error && <p role="alert" className="text-sm text-attention">{error}</p>}
+      </div>
     );
   }
 
