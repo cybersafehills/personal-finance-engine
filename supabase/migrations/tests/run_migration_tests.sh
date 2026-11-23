@@ -10092,7 +10092,6 @@ check_console "owner can read the communications overview" "$(console_call "$CON
 check_console "support agent cannot read communications" "$(console_call "$CON_SUPPORT" aal2 "select public.console_communications_overview();")" "not_authorized"
 IOUT="$(console_call "$CON_OWNER" aal2 "select public.console_integrations_overview();")"
 if printf '%s' "$IOUT" | grep -Eiq 'https?://|secret|token|endpoint'; then fail "Console: integrations overview leaked a URL or secret"; else pass "Console: integrations overview returns counts only"; fi
-=======
 
 # ===========================================================================
 # Provider tariffs (20270107000000_provider_tariffs). Clients see verified
