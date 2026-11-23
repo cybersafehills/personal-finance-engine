@@ -12,6 +12,7 @@ import { fetchWallets, fetchBudgets } from "@/api/mobile-api";
 import { useSession } from "@/features/auth/SessionProvider";
 import { HomeHeader, HeroBalance, CashFlow, Spending, WalletPanel, HomeSection, HomeLink } from "@/features/home/HomeCards";
 import { BudgetOutlook } from "@/features/home/BudgetOutlook";
+import { IntelligenceCard } from "@/features/insights/IntelligenceCard";
 import { useChromeScroll } from "@/components/shell/useChromeScroll";
 import { HomeTrends } from "@/features/home/HomeTrends";
 import { currencyBlock, loadHomeInsights, profileName } from "@/features/home/live-data";
@@ -108,6 +109,8 @@ export default function Home() {
         {recentQuery.loading ? <Text color="textMuted">Loading transactions…</Text> : !recentQuery.data?.recent.length && !recentQuery.error ? <EmptyState title="No transactions yet" description="New transactions will appear here as they are recorded." /> : <View>{recentQuery.data?.recent.slice(0, 3).map((t) => <TransactionItem key={t.id} transaction={t} showDate compact />)}</View>}
       </HomeSection>
       <BudgetOutlook result={budget.data} currency={currency} now={now} error={budget.error} />
+      {/* Forecast and spending pace are RWF-only on the server, so other currencies don't show them. */}
+      {currency === "RWF" ? <IntelligenceCard key={`insights.${activeId}`} /> : null}
       <Spending key={`spending.${session?.user.id}.${activeId}`} scope={`${session?.user.id}.${activeId}`} current={current} available={currentResult?.ok === true} message={analyticsMessage} />
       <HomeTrends key={`trends.${session?.user.id}.${activeId}`} scope={`${session?.user.id}.${activeId}`} currency={currency} nowIso={now.toISOString()} day={day}/>
       <WalletPanel wallets={wallets} message={walletsMessage} />

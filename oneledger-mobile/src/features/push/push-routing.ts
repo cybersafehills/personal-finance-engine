@@ -4,12 +4,13 @@
 
 export type PushTarget =
   | { pathname: "/transaction/[id]"; params: { id: string } }
+  | { pathname: "/forecast" }
   | { pathname: "/notifications" };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * A transaction notification opens that transaction; everything else opens
+ * A transaction notification opens that transaction, a forecast update opens the forecast; everything else opens
  * the notifications list, which shows the full text. The payload comes from
  * outside the app, so anything unexpected falls back to the list rather
  * than being used to build a route.
@@ -17,6 +18,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export function pushTarget(data: unknown): PushTarget {
   if (typeof data === "object" && data !== null) {
     const { resourceType, resourceId } = data as Record<string, unknown>;
+    // "Your forecast has been updated" (insight.forecast_update) carries no id.
+    if (resourceType === "forecast") return { pathname: "/forecast" };
     if (
       resourceType === "transaction" &&
       typeof resourceId === "string" &&
