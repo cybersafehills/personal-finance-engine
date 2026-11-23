@@ -5,9 +5,10 @@ import { PrivatePressable as Pressable } from "@/features/privacy/PrivatePressab
 
 import { Text } from "@/components/ds";
 import { formatRwf } from "@/lib/money";
-import { colors, MIN_TOUCH_TARGET, radii, space } from "@/theme/tokens";
+import { hitSlopFor, radii, space } from "@/theme/tokens";
 
 import { lifetimeInfo, type LifetimeFlow } from "./lifetime";
+import { makeStyles } from "@/theme/ThemeProvider";
 
 type Kind = "sent" | "received";
 
@@ -26,6 +27,7 @@ export function LifetimeChips({
   totals: LifetimeFlow & { byCurrency?: CurrencyFlow[] };
   accountCreatedIso: string | null;
 }) {
+  const styles = useStyles();
   const [open, setOpen] = useState<Kind | null>(null);
   if (totals.count === 0) return null;
 
@@ -35,6 +37,7 @@ export function LifetimeChips({
       accessibilityLabel={`Total ${kind} through OneLedger: ${(currency === "RWF" ? formatRwf(amountRwf) : formatAmount(amountRwf, currency, false))}. More information`}
       accessibilityState={{ expanded: open === kind }}
       onPress={() => setOpen(open === kind ? null : kind)}
+      hitSlop={hitSlopFor(22)}
       style={styles.hit}
     >
       <View style={styles.chip}>
@@ -66,11 +69,11 @@ export function LifetimeChips({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => StyleSheet.create({
   wrap: { gap: space[2] },
   row: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: space[1] },
-  // A 44pt tap area around a small visual chip.
-  hit: { minHeight: MIN_TOUCH_TARGET, justifyContent: "center" },
+  // Small visual chip; hitSlop brings the tap area up to 44pt.
+  hit: { justifyContent: "center" },
   chip: {
     flexDirection: "row",
     alignItems: "center",
@@ -99,4 +102,4 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth * 2,
     borderColor: colors.borderSubtle,
   },
-});
+}));

@@ -17,14 +17,14 @@ export const NO_FILTERS: TransactionFilters = { direction: "all", period: "all",
 
 export const DIRECTION_OPTIONS: { value: DirectionFilter; label: string }[] = [
   { value: "all", label: "All" },
-  { value: "in", label: "Money in" },
-  { value: "out", label: "Money out" },
+  { value: "in", label: "In" },
+  { value: "out", label: "Out" },
 ];
 
 export const PERIOD_OPTIONS: { value: PeriodFilter; label: string }[] = [
   { value: "all", label: "All time" },
-  { value: "7d", label: "Last 7 days" },
-  { value: "30d", label: "Last 30 days" },
+  { value: "7d", label: "7 days" },
+  { value: "30d", label: "30 days" },
   { value: "month", label: "This month" },
 ];
 

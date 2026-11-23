@@ -37,7 +37,8 @@ import { ReviewList } from "@/features/review/ReviewList";
 import { formatDateTime } from "@/lib/kigali-time";
 import { useQuery } from "@/hooks/useQuery";
 import { config } from "@/lib/config";
-import { colors, space } from "@/theme/tokens";
+import { space } from "@/theme/tokens";
+import { useTheme } from "@/theme/ThemeProvider";
 
 function runAction(action: InboxInlineAction): Promise<void> {
   switch (action.type) {
@@ -58,6 +59,7 @@ function runAction(action: InboxInlineAction): Promise<void> {
 // If the server endpoint is off, failing or unreachable the tab falls back to the
 // direct category-review queue, so a category check is never out of reach.
 export default function Inbox() {
+  const { colors } = useTheme();
   const load = useCallback(() => fetchInbox(), []);
   const { data, loading, refreshing, refresh } = useQuery(load);
   const [decided, setDecided] = useState<ReadonlySet<string>>(new Set());

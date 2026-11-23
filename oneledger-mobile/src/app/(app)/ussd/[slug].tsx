@@ -1,20 +1,25 @@
+import Feather from "@expo/vector-icons/Feather";
 import * as Linking from "expo-linking";
 import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
-import { Platform, Share, View } from "react-native";
+import { Pressable, Share, View } from "react-native";
 
-import { Badge, Button, Card, EmptyState, Screen, ScreenHeader, Text, TextField } from "@/components/ds";
+import { Button, Card, EmptyState, Screen, ScreenHeader, Text, TextField } from "@/components/ds";
 import { buildTelHref, fillUssdTemplate, type ParamSpec } from "@/features/ussd/capability";
 import { getFavouriteIds, getServiceCodeBySlug, reportServiceCode, REPORT_TYPES, toggleFavourite, type ReportType } from "@/features/ussd/queries";
+import { firstSentence } from "@/features/ussd/text";
+import { CATEGORY_LABELS } from "@/features/ussd/types";
 import { useQuery } from "@/hooks/useQuery";
-import { space } from "@/theme/tokens";
+import { hitSlopFor, radii, space } from "@/theme/tokens";
+import { useTheme } from "@/theme/ThemeProvider";
 
-const HANDOFF = "You'll authorize this with your provider, on your own phone. OneLedger never asks for your Mobile Money or banking PIN.";
-
-// One service code, as on the web's /pay/ussd/[slug]: what it does, what you'll
-// need, the code filled in, how to use it, and where it came from. It shows and
-// hands over the code; it never dials by itself and never claims anything was paid.
+// One service code, built around using it: what it is, the code (filled in when it
+// needs your details) and a button that opens your dialer with it. Everything else
+// (how it works, the source, reporting a mistake) sits below, in "About this code".
+// It never dials by itself: only your tap opens the dialer, and you approve the
+// request with your provider on your own phone.
 export default function UssdCode() {
+  const { colors } = useTheme();
   const { slug } = useLocalSearchParams<{ slug?: string }>();
   const load = useCallback(async () => {
     if (!slug) return null;
@@ -25,6 +30,7 @@ export default function UssdCode() {
 
   const [values, setValues] = useState<Record<string, string>>({});
   const [note, setNote] = useState<string | null>(null);
+  const [aboutOpen, setAboutOpen] = useState(false);
 
   const specs: ParamSpec[] = useMemo(
     () =>
@@ -39,10 +45,13 @@ export default function UssdCode() {
     [data],
   );
 
+  // The native header just says what this is; the code's own name is the heading below.
+  const header = <ScreenHeader title="USSD code" />;
 
   if (!data) {
     return (
       <Screen>
+        {header}
         {loading ? (
           <Text variant="label" color="textMuted">
             Loading…
@@ -58,28 +67,34 @@ export default function UssdCode() {
   }
 
   const { code, favourite } = data;
+  const needsDetails = code.acceptsParameters && code.parameters.length > 0;
   const filled = code.acceptsParameters
     ? fillUssdTemplate(code.template, values, specs)
     : ({ ok: true, display: code.template, dial: code.template } as const);
   const dialString = filled.ok ? filled.dial : null;
+  const touched = Object.values(values).some((v) => v.trim() !== "");
   const deprecated = code.state === "deprecated";
   const unavailable = code.state === "temporarily_unavailable";
-
-  async function onShare() {
-    if (!dialString) return;
-    try {
-      await Share.share({ message: dialString });
-    } catch {
-      setNote("Couldn't open the share sheet. Select the code above and copy it.");
-    }
-  }
+  const blocked = unavailable;
+  const summary = firstSentence(code.description);
 
   async function onDial() {
     if (!dialString) return;
+    setNote(null);
     try {
       await Linking.openURL(buildTelHref(dialString));
     } catch {
       setNote("Couldn't open the dialer. Share or copy the code and dial it yourself.");
+    }
+  }
+
+  async function onShare() {
+    if (!dialString) return;
+    setNote(null);
+    try {
+      await Share.share({ message: dialString });
+    } catch {
+      setNote("Couldn't open the share sheet. Select the code and copy it.");
     }
   }
 
@@ -94,21 +109,35 @@ export default function UssdCode() {
 
   return (
     <Screen>
-      <ScreenHeader title={code.name} subtitle={code.provider} />
+      {header}
 
-      <View style={{ flexDirection: "row", alignItems: "center", gap: space[2], flexWrap: "wrap" }}>
-        <Badge variant={code.verified ? "positive" : "attention"}>{code.verified ? "Verified" : "Not officially verified"}</Badge>
-        <Text variant="bodyStrong" tabular>
-          {code.template}
-        </Text>
+      <View style={{ flexDirection: "row", alignItems: "flex-start", gap: space[3] }}>
+        <View style={{ flex: 1, gap: space[1] }}>
+          <Text variant="title" accessibilityRole="header">
+            {code.name}
+          </Text>
+          <Text variant="label" color="textMuted">
+            {`${code.provider} · ${CATEGORY_LABELS[code.category] ?? ""}`}
+          </Text>
+        </View>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={favourite ? "Remove from favourites" : "Add to favourites"}
+          accessibilityState={{ selected: favourite }}
+          onPress={onStar}
+          hitSlop={hitSlopFor(36)}
+          style={{ width: 36, height: 36, alignItems: "center", justifyContent: "center" }}
+        >
+          <Feather name="star" size={22} color={favourite ? colors.accent : colors.textMuted} />
+        </Pressable>
       </View>
-      <Button label={favourite ? "Remove from favourites" : "Add to favourites"} variant="secondary" onPress={onStar} />
 
-      {code.description ? <Text color="textSecondary">{code.description}</Text> : null}
+      {summary ? <Text color="textSecondary">{summary}</Text> : null}
+
       {deprecated ? (
         <Notice tone="attention">
           This code is deprecated and may no longer work.
-          {code.replacementSlug ? " " : ""}
+          {code.replacementSlug ? " Use the current one instead." : ""}
         </Notice>
       ) : null}
       {deprecated && code.replacementSlug ? (
@@ -119,13 +148,12 @@ export default function UssdCode() {
         />
       ) : null}
       {unavailable ? <Notice tone="attention">This service is temporarily unavailable.</Notice> : null}
-      {code.cautionText ? <Notice>{code.cautionText}</Notice> : null}
       {code.riskText ? <Notice tone="attention">{code.riskText}</Notice> : null}
 
-      {code.acceptsParameters && code.parameters.length > 0 ? (
+      {needsDetails ? (
         <View style={{ gap: space[2] }}>
           <Text variant="bodyStrong" accessibilityRole="header">
-            You&apos;ll need
+            Your details
           </Text>
           {code.parameters.map((p) => (
             <TextField
@@ -139,57 +167,82 @@ export default function UssdCode() {
               autoCorrect={false}
             />
           ))}
-          {!filled.ok ? (
-            <Text variant="caption" color="attention" accessibilityRole="alert">
-              {filled.error}
-            </Text>
-          ) : null}
         </View>
       ) : null}
 
-      <Notice>{HANDOFF}</Notice>
+      <Card style={{ gap: space[3] }}>
+        <Text variant="caption" color="textMuted">
+          {dialString ? "Your code" : "The code"}
+        </Text>
+        <Text
+          variant="display"
+          tabular
+          selectable
+          color={dialString ? "textPrimary" : "textMuted"}
+          accessibilityLabel={dialString ? `Code to dial: ${dialString}` : `Code template: ${code.template}`}
+          style={{ fontSize: 26, lineHeight: 32 }}
+        >
+          {dialString ?? code.template}
+        </Text>
+        {!dialString ? (
+          <Text variant="label" color={touched && !filled.ok ? "attention" : "textMuted"} accessibilityLiveRegion="polite">
+            {touched && !filled.ok ? filled.error : "Fill in your details above to get your code."}
+          </Text>
+        ) : null}
 
-      {dialString ? (
-        <Card>
-          <Text variant="heading" tabular accessibilityLabel={`Code to dial: ${dialString}`}>
-            {dialString}
-          </Text>
-        </Card>
-      ) : null}
-      <View style={{ gap: space[2] }}>
+        <Button
+          label="Dial this code"
+          fullWidth
+          disabled={!dialString || blocked}
+          onPress={onDial}
+        />
         <Button label="Share or copy code" variant="secondary" fullWidth disabled={!dialString} onPress={onShare} />
-        {Platform.OS === "android" ? (
-          <Button label="Open phone dialer" fullWidth disabled={!dialString} onPress={onDial} />
-        ) : (
-          <Text variant="caption" color="textMuted">
-            On iPhone, copy the code and dial it in the Phone app.
-          </Text>
-        )}
+        <Text variant="caption" color="textMuted" style={{ textAlign: "center" }}>
+          You approve it with your provider, on your own phone. OneLedger never asks for your PIN.
+        </Text>
         {note ? (
           <Text variant="caption" color="textSecondary" accessibilityRole="alert">
             {note}
           </Text>
         ) : null}
-      </View>
+      </Card>
 
-      {code.steps.length > 0 ? (
-        <View style={{ gap: space[1] }}>
-          <Text variant="bodyStrong" accessibilityRole="header">
-            How to do this on your phone
-          </Text>
-          {code.steps.map((step, i) => (
-            <Text key={i} color="textSecondary">{`${i + 1}. ${step}`}</Text>
-          ))}
-        </View>
-      ) : null}
-
-      <View style={{ gap: space[1] }}>
-        <Text variant="bodyStrong">Source</Text>
-        <Text variant="label" color="textMuted">
-          {code.sourceLabel ?? "Not recorded"}
-        </Text>
-        {code.sourceUrl ? (
-          <Button label="Open the source" variant="ghost" onPress={() => Linking.openURL(code.sourceUrl!)} />
+      <View style={{ borderWidth: 1, borderColor: colors.borderSubtle, borderRadius: radii.control, overflow: "hidden", backgroundColor: colors.surface }}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="About this code"
+          accessibilityState={{ expanded: aboutOpen }}
+          onPress={() => setAboutOpen((open) => !open)}
+          style={({ pressed }) => [
+            { minHeight: 48, flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: space[3] },
+            pressed && { backgroundColor: colors.background },
+          ]}
+        >
+          <Text variant="bodyStrong">About this code</Text>
+          <Feather name={aboutOpen ? "chevron-up" : "chevron-down"} size={18} color={colors.textMuted} />
+        </Pressable>
+        {aboutOpen ? (
+          <View style={{ gap: space[3], padding: space[3], borderTopWidth: 1, borderTopColor: colors.borderSubtle }}>
+            {code.description ? <Text color="textSecondary">{code.description}</Text> : null}
+            {code.cautionText ? <Notice>{code.cautionText}</Notice> : null}
+            {code.steps.length > 0 ? (
+              <View style={{ gap: space[1] }}>
+                <Text variant="bodyStrong">How to use it</Text>
+                {code.steps.map((step, i) => (
+                  <Text key={i} color="textSecondary">{`${i + 1}. ${step}`}</Text>
+                ))}
+              </View>
+            ) : null}
+            <View style={{ gap: space[1] }}>
+              <Text variant="bodyStrong">Source</Text>
+              <Text variant="label" color="textMuted">
+                {code.sourceLabel ?? "Not recorded"}
+              </Text>
+              {code.sourceUrl ? (
+                <Button label="Open the source" size="sm" variant="ghost" onPress={() => Linking.openURL(code.sourceUrl!)} />
+              ) : null}
+            </View>
+          </View>
         ) : null}
       </View>
 

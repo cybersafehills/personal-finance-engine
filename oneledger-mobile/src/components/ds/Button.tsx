@@ -7,11 +7,13 @@ import {
   type PressableProps,
 } from "react-native";
 
-import { colors, CONTROL_HEIGHT, hitSlopFor, radii, space } from "@/theme/tokens";
+import { CONTROL_HEIGHT, hitSlopFor, radii, space } from "@/theme/tokens";
 
 import { Text } from "./Text";
+import { makeStyles, useTheme } from "@/theme/ThemeProvider";
 
-export type ButtonVariant = "primary" | "secondary" | "ghost";
+/** `positive` (green) is for the one action that moves money forward, such as paying someone. */
+export type ButtonVariant = "primary" | "secondary" | "ghost" | "positive";
 
 export type ButtonProps = Omit<PressableProps, "children" | "style"> & {
   label: string;
@@ -33,8 +35,10 @@ export function Button({
   ...rest
 }: ButtonProps) {
   const { fullPrivacy } = usePrivacy();
+  const styles = useStyles();
+  const { colors } = useTheme();
   const inactive = disabled || loading;
-  const foreground = variant === "primary" ? "accentForeground" : "accent";
+  const foreground = variant === "primary" || variant === "positive" ? "onSolid" : "accent";
 
   return (
     <Pressable
@@ -49,7 +53,10 @@ export function Button({
         size === "sm" && styles.small,
         fullWidth && styles.fullWidth,
         variant === "primary" && {
-          backgroundColor: pressed ? colors.accentPressed : colors.accent,
+          backgroundColor: pressed ? colors.accentSolidPressed : colors.accentSolid,
+        },
+        variant === "positive" && {
+          backgroundColor: pressed ? colors.moneyPositiveSolidPressed : colors.moneyPositiveSolid,
         },
         variant === "secondary" && [
           styles.secondary,
@@ -70,7 +77,7 @@ export function Button({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => StyleSheet.create({
   base: {
     minHeight: CONTROL_HEIGHT.md,
     alignItems: "center",
@@ -93,4 +100,4 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   inactive: { opacity: 0.5 },
-});
+}));

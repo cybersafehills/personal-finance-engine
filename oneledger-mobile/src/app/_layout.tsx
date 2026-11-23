@@ -1,10 +1,11 @@
+import { NavigationTheme } from "@/theme/NavigationTheme";
+import { ThemeProvider, useTheme } from "@/theme/ThemeProvider";
 import { Geist_400Regular } from "@expo-google-fonts/geist/400Regular";
 import { Geist_500Medium } from "@expo-google-fonts/geist/500Medium";
 import { Geist_600SemiBold } from "@expo-google-fonts/geist/600SemiBold";
 import { Geist_700Bold } from "@expo-google-fonts/geist/700Bold";
 import { useFonts } from "expo-font";
 import { Stack } from "expo-router";
-import { StatusBar } from "expo-status-bar";
 
 import { SessionProvider, useSession } from "@/features/auth/SessionProvider";
 import { ActiveSpaceProvider } from "@/features/spaces/ActiveSpaceProvider";
@@ -12,7 +13,6 @@ import { LockProvider, useLock } from "@/features/lock/LockProvider";
 import { LockScreen } from "@/features/lock/LockScreen";
 import { OfflineProvider } from "@/offline/OfflineProvider";
 import { PrivacyProvider } from "@/features/privacy/PrivacyProvider";
-import { colors } from "@/theme/tokens";
 
 // Which screens exist depends on the session:
 //   signed out            -> sign-in
@@ -21,6 +21,7 @@ import { colors } from "@/theme/tokens";
 // The lock screen is an overlay rather than a route so the navigation
 // state underneath survives a lock/unlock.
 function RootNavigator() {
+  const { colors } = useTheme();
   const { loading, session, mfaRequired } = useSession();
   const lock = useLock();
 
@@ -60,7 +61,7 @@ function AccountProviders() {
   const userId = session?.user.id ?? null;
   // All financial state is remounted across identities.
   return <PrivacyProvider key={userId ?? "signed-out"} userId={userId}>
-    <OfflineProvider><ActiveSpaceProvider><StatusBar style="dark" /><RootNavigator /></ActiveSpaceProvider></OfflineProvider>
+    <OfflineProvider><ActiveSpaceProvider><RootNavigator /></ActiveSpaceProvider></OfflineProvider>
   </PrivacyProvider>;
 }
 
@@ -77,10 +78,14 @@ export default function RootLayout() {
   if (!fontsLoaded && !fontError) return null;
 
   return (
-    <SessionProvider>
-      <LockProvider>
-        <AccountProviders />
-      </LockProvider>
-    </SessionProvider>
+    <ThemeProvider>
+      <NavigationTheme>
+        <SessionProvider>
+          <LockProvider>
+            <AccountProviders />
+          </LockProvider>
+        </SessionProvider>
+      </NavigationTheme>
+    </ThemeProvider>
   );
 }

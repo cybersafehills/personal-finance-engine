@@ -18,6 +18,16 @@ describe("parsePeopleResponse", () => {
     expect(r.people[0].currencies[0].netMinor).toBe(BigInt(-5100));
     expect(flowText(r.people[0].currencies[0])).toBe("You sent RWF 10,100 · You received RWF 5,000");
   });
+  it("reads how many can actually be sorted, never more than are unresolved, and falls back for an older server", () => {
+    const sortable = (v: unknown) => {
+      const r = parsePeopleResponse(200, list([cp()], { sortable_transactions: v }));
+      return r.ok ? r.sortable : null;
+    };
+    expect(sortable(1)).toBe(1);
+    expect(sortable(0)).toBe(0);
+    expect(sortable(99)).toBe(4);
+    expect(sortable(undefined)).toBe(4);
+  });
   it("drops malformed rows and refuses a malformed envelope", () => {
     const r = parsePeopleResponse(200, list([cp(), cp({ kind: "robot" }), cp({ confidence: "sure" }), cp({ txn_count: -1 }), cp({ display_name: "" })]));
     expect(r.ok && r.people.length).toBe(1);

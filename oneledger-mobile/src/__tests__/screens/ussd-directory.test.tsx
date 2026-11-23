@@ -1,4 +1,5 @@
 import * as Linking from "expo-linking";
+import { Platform, Share } from "react-native";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react-native";
 
 import UssdDirectory from "@/app/(app)/ussd/index";
@@ -48,11 +49,25 @@ beforeEach(() => {
 });
 
 describe("USSD directory", () => {
-  it("lists codes with their verification status", async () => {
+  it("lists the codes with no verification badges", async () => {
     await render(<UssdDirectory />);
     expect(await screen.findByText("Check balance")).toBeTruthy();
-    expect(screen.getByText("Verified")).toBeTruthy();
-    expect(screen.getByText("Unverified")).toBeTruthy();
+    expect(screen.getByText("Airtel balance")).toBeTruthy();
+    expect(screen.queryByText("Verified")).toBeNull();
+    expect(screen.queryByText("Unverified")).toBeNull();
+    expect(screen.queryByText("Not officially verified")).toBeNull();
+  });
+
+  it("puts the eKash code first, ahead of the alphabetical order", async () => {
+    mockDirectory.mockResolvedValue([
+      code({ id: "a", slug: "access-bank", name: "Access Bank Rwanda - eKash transfer" }),
+      code({ id: "b", slug: "bk", name: "Bank of Kigali - eKash transfer" }),
+      code({ id: "e", slug: "ekash-mtn-send", name: "eKash - send money to a bank account or Mobile Money wallet", template: "*182*1*2*{receiver}*{amount}#", acceptsParameters: true }),
+    ]);
+    await render(<UssdDirectory />);
+    await screen.findByText("eKash - send money to a bank account or Mobile Money wallet");
+    const names = screen.getAllByRole("link").map((n) => n.props.accessibilityLabel);
+    expect(names[0]).toBe("eKash - send money to a bank account or Mobile Money wallet");
   });
 
   it("shows favourites first when nothing is filtered", async () => {
@@ -142,10 +157,84 @@ describe("USSD code page", () => {
     expect(screen.queryByLabelText(/Code to dial/)).toBeNull();
   });
 
-  it("shows steps and the source", async () => {
+  it("puts the code first: the name, a one-line summary, and details only below", async () => {
     await render(<UssdCode />);
-    expect(await screen.findByText("1. Enter your PIN when asked.")).toBeTruthy();
+    expect(await screen.findByText("Send money")).toBeTruthy();
+    // No verification badge either way: every listed code is simply offered.
+    expect(screen.queryByText("Verified")).toBeNull();
+    expect(screen.queryByText("Not officially verified")).toBeNull();
+    expect(screen.getByText("Send to a number.")).toBeTruthy();
+    // The long-form material is tucked away until asked for.
+    expect(screen.queryByText("1. Enter your PIN when asked.")).toBeNull();
+    expect(screen.queryByText("Official MTN price list")).toBeNull();
+  });
+
+  it("opens the steps and the source under About this code", async () => {
+    await render(<UssdCode />);
+    await fireEvent.press(await screen.findByRole("button", { name: "About this code" }));
+    expect(screen.getByText("1. Enter your PIN when asked.")).toBeTruthy();
     expect(screen.getByText("Official MTN price list")).toBeTruthy();
+    await fireEvent.press(screen.getByRole("button", { name: "About this code" }));
+    expect(screen.queryByText("1. Enter your PIN when asked.")).toBeNull();
+  });
+
+  describe.each(["ios", "android"] as const)("dialing on %s", (os) => {
+    beforeEach(() => jest.replaceProperty(Platform, "OS", os));
+    afterEach(() => jest.restoreAllMocks());
+
+    it("has a Dial button that is off until the code is complete, then opens the dialer with it", async () => {
+      await render(<UssdCode />);
+      const dial = await screen.findByRole("button", { name: "Dial this code" });
+      expect(dial.props.accessibilityState.disabled).toBe(true);
+      expect(screen.getByText("Fill in your details above to get your code.")).toBeTruthy();
+
+      await fireEvent.changeText(screen.getByLabelText("Phone number"), "0781234567");
+      await fireEvent.changeText(screen.getByLabelText("Amount"), "5000");
+      await fireEvent.press(await screen.findByRole("button", { name: "Dial this code" }));
+      await waitFor(() => expect(Linking.openURL).toHaveBeenCalledWith("tel:*182*1*1*0781234567*5000%23"));
+    });
+
+    it("never dials by itself", async () => {
+      mockBySlug.mockResolvedValue(detail({ acceptsParameters: false, template: "*182*6*1#", parameters: [] }));
+      await render(<UssdCode />);
+      expect(await screen.findByLabelText("Code to dial: *182*6*1#")).toBeTruthy();
+      expect(Linking.openURL).not.toHaveBeenCalled();
+    });
+  });
+
+  it("a code with no details is ready to dial straight away", async () => {
+    mockBySlug.mockResolvedValue(detail({ acceptsParameters: false, template: "*182*6*1#", parameters: [] }));
+    await render(<UssdCode />);
+    const dial = await screen.findByRole("button", { name: "Dial this code" });
+    expect(dial.props.accessibilityState.disabled).toBe(false);
+    expect(screen.queryByText("Your details")).toBeNull();
+    await fireEvent.press(dial);
+    await waitFor(() => expect(Linking.openURL).toHaveBeenCalledWith("tel:*182*6*1%23"));
+  });
+
+  it("says so when the dialer can't open", async () => {
+    mockBySlug.mockResolvedValue(detail({ acceptsParameters: false, template: "*182*6*1#", parameters: [] }));
+    (Linking.openURL as jest.Mock).mockRejectedValue(new Error("no handler"));
+    await render(<UssdCode />);
+    await fireEvent.press(await screen.findByRole("button", { name: "Dial this code" }));
+    expect(await screen.findByText(/Couldn't open the dialer/)).toBeTruthy();
+  });
+
+  it("shares or copies the finished code", async () => {
+    const share = jest.spyOn(Share, "share").mockResolvedValue({ action: Share.sharedAction, activityType: undefined });
+    mockBySlug.mockResolvedValue(detail({ acceptsParameters: false, template: "*182*6*1#", parameters: [] }));
+    await render(<UssdCode />);
+    await fireEvent.press(await screen.findByRole("button", { name: "Share or copy code" }));
+    await waitFor(() => expect(share).toHaveBeenCalledWith({ message: "*182*6*1#" }));
+    share.mockRestore();
+  });
+
+  it("cannot be dialled while the service is unavailable", async () => {
+    mockBySlug.mockResolvedValue(detail({ state: "temporarily_unavailable", acceptsParameters: false, template: "*182*6*1#", parameters: [] }));
+    await render(<UssdCode />);
+    const dial = await screen.findByRole("button", { name: "Dial this code" });
+    expect(dial.props.accessibilityState.disabled).toBe(true);
+    expect(screen.getByText("This service is temporarily unavailable.")).toBeTruthy();
   });
 
   it("warns when a code is deprecated and links to its replacement", async () => {
@@ -185,3 +274,69 @@ describe("USSD code page", () => {
     expect(await screen.findByText("We couldn't find that service")).toBeTruthy();
   });
 });
+
+describe("eKash code: *182*1*2*{receiver}*{amount}#", () => {
+  const ekash = () =>
+    detail({
+      slug: "ekash-mtn-send",
+      name: "eKash - send money to a bank account or Mobile Money wallet",
+      template: "*182*1*2*{receiver}*{amount}#",
+      acceptsParameters: true,
+      parameters: [
+        { key: "receiver", kind: "account_reference", label: "Receiver's ID", required: true, position: 0, formatRegex: null, formatHint: "The receiver's phone number or account number (letters, digits and dashes).", minLength: null, maxLength: null },
+        { key: "amount", kind: "amount", label: "Amount (RWF)", required: true, position: 1, formatRegex: null, formatHint: "Whole RWF amount, no decimals.", minLength: null, maxLength: null },
+      ],
+      steps: [],
+    });
+
+  beforeEach(() => {
+    setParams({ slug: "ekash-mtn-send" });
+    mockBySlug.mockResolvedValue(ekash());
+  });
+
+  it("asks for the receiver's ID and the amount, and builds the code with both", async () => {
+    await render(<UssdCode />);
+    await fireEvent.changeText(await screen.findByLabelText("Receiver's ID"), "0781234567");
+    await fireEvent.changeText(screen.getByLabelText("Amount (RWF)"), "5000");
+    expect(await screen.findByLabelText("Code to dial: *182*1*2*0781234567*5000#")).toBeTruthy();
+  });
+
+  it("works for a bank account number too", async () => {
+    await render(<UssdCode />);
+    await fireEvent.changeText(await screen.findByLabelText("Receiver's ID"), "00012345678");
+    await fireEvent.changeText(screen.getByLabelText("Amount (RWF)"), "25000");
+    expect(await screen.findByLabelText("Code to dial: *182*1*2*00012345678*25000#")).toBeTruthy();
+  });
+
+  it("cannot be dialled until both are in, and then opens the dialer with the finished code", async () => {
+    await render(<UssdCode />);
+    const dial = await screen.findByRole("button", { name: "Dial this code" });
+    expect(dial.props.accessibilityState.disabled).toBe(true);
+    expect(screen.getByLabelText("Code template: *182*1*2*{receiver}*{amount}#")).toBeTruthy();
+
+    // The ID alone is not enough: the amount is part of the code.
+    await fireEvent.changeText(screen.getByLabelText("Receiver's ID"), "0781234567");
+    expect((await screen.findByRole("button", { name: "Dial this code" })).props.accessibilityState.disabled).toBe(true);
+
+    await fireEvent.changeText(screen.getByLabelText("Amount (RWF)"), "5000");
+    await fireEvent.press(await screen.findByRole("button", { name: "Dial this code" }));
+    await waitFor(() => expect(Linking.openURL).toHaveBeenCalledWith("tel:*182*1*2*0781234567*5000%23"));
+  });
+
+  it("refuses an amount with separators or decimals, and zero", async () => {
+    await render(<UssdCode />);
+    await fireEvent.changeText(await screen.findByLabelText("Receiver's ID"), "0781234567");
+    for (const bad of ["5,000", "50.5", "0"]) {
+      await fireEvent.changeText(screen.getByLabelText("Amount (RWF)"), bad);
+      expect(screen.queryByLabelText(/Code to dial/)).toBeNull();
+    }
+  });
+
+  it("refuses an ID that could rewrite the code", async () => {
+    await render(<UssdCode />);
+    await fireEvent.changeText(await screen.findByLabelText("Receiver's ID"), "078*123#");
+    expect(await screen.findByText(/can't contain spaces or the characters/)).toBeTruthy();
+    expect(screen.queryByLabelText(/Code to dial/)).toBeNull();
+  });
+});
+

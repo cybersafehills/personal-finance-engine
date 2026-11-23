@@ -1,8 +1,12 @@
 import { Pressable, StyleSheet } from "react-native";
 
-import { colors, CONTROL_HEIGHT, hitSlopFor, radii, space } from "@/theme/tokens";
+import { CONTROL_HEIGHT, hitSlopFor, radii, space } from "@/theme/tokens";
+import { fonts } from "@/theme/typography";
 
 import { Text } from "./Text";
+import { makeStyles } from "@/theme/ThemeProvider";
+
+const CHIP_COMPACT_HEIGHT = 28;
 
 /**
  * A selectable pill for filters (period, wallet). Selection is announced to
@@ -13,32 +17,41 @@ export function Chip({
   label,
   selected,
   onPress,
+  compact = false,
 }: {
   label: string;
   selected: boolean;
   onPress: () => void;
+  /** 28pt with 12px text, for dense filter rows (the hit area stays 44pt). */
+  compact?: boolean;
 }) {
+  const styles = useStyles();
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityState={{ selected }}
       accessibilityLabel={selected ? `${label}, selected` : label}
-      hitSlop={hitSlopFor(CONTROL_HEIGHT.sm)}
+      hitSlop={hitSlopFor(compact ? CHIP_COMPACT_HEIGHT : CONTROL_HEIGHT.sm)}
       onPress={onPress}
       style={({ pressed }) => [
         styles.chip,
+        compact && styles.compact,
         selected && styles.selected,
         pressed && !selected && styles.pressed,
       ]}
     >
-      <Text variant={selected ? "bodyStrong" : "label"} color={selected ? "accentForeground" : "textSecondary"}>
+      <Text
+        variant={compact ? "caption" : selected ? "bodyStrong" : "label"}
+        color={selected ? "onSolid" : "textSecondary"}
+        style={compact && selected ? { fontFamily: fonts.semibold } : undefined}
+      >
         {label}
       </Text>
     </Pressable>
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => StyleSheet.create({
   chip: {
     minHeight: CONTROL_HEIGHT.sm,
     justifyContent: "center",
@@ -48,6 +61,7 @@ const styles = StyleSheet.create({
     borderColor: colors.borderStrong,
     backgroundColor: colors.surface,
   },
-  selected: { backgroundColor: colors.accent, borderColor: colors.accent },
+  compact: { minHeight: CHIP_COMPACT_HEIGHT, paddingHorizontal: space[2] },
+  selected: { backgroundColor: colors.accentSolid, borderColor: colors.accentSolid },
   pressed: { backgroundColor: colors.background },
-});
+}));

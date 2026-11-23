@@ -18,7 +18,8 @@ import {
 } from "@/features/transactions/queries";
 import { TransactionItem } from "@/features/transactions/TransactionItem";
 import { useQuery } from "@/hooks/useQuery";
-import { colors, space } from "@/theme/tokens";
+import { space } from "@/theme/tokens";
+import { makeStyles, useTheme } from "@/theme/ThemeProvider";
 
 // Home shows the six most recent, as the web does.
 const RECENT_LIMIT = 6;
@@ -39,6 +40,8 @@ async function loadHome(accountId?: string) {
 // status, then recent transactions. Mobile shows recording setup and review
 // actions below the budget when they are needed.
 export default function Home() {
+  const styles = useStyles();
+  const { colors } = useTheme();
   // `loadHome` is a module-level function, so its identity is stable.
   const [accountId, setAccountId] = useState<string | undefined>();
   const load = useCallback(() => loadHome(accountId), [accountId]);
@@ -149,6 +152,7 @@ export default function Home() {
 
 /** One of today's totals. Signed, coloured and masked like every other amount. */
 function Tile({ label, amountRwf, currency }: { label: string; amountRwf: number; currency?: string }) {
+  const styles = useStyles();
   return (
     <Card style={styles.tile}>
       <Text variant="caption" color="textMuted">
@@ -159,7 +163,7 @@ function Tile({ label, amountRwf, currency }: { label: string; amountRwf: number
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   content: {
     paddingHorizontal: space[4],
@@ -178,4 +182,4 @@ const styles = StyleSheet.create({
     paddingLeft: space[3],
   },
   kicker: { letterSpacing: 0.6 },
-});
+}));

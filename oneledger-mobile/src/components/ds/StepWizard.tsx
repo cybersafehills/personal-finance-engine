@@ -1,8 +1,9 @@
 import { StyleSheet, View } from "react-native";
 
-import { colors, radii, space } from "@/theme/tokens";
+import { radii, space } from "@/theme/tokens";
 
 import { Text } from "./Text";
+import { makeStyles } from "@/theme/ThemeProvider";
 
 /**
  * "Step N of M" progress chrome for guided flows. Presentational: the
@@ -19,6 +20,7 @@ export function StepWizard({
   total: number;
   title: string;
 }) {
+  const styles = useStyles();
   return (
     <View
       style={styles.wrap}
@@ -42,7 +44,7 @@ export function StepWizard({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => StyleSheet.create({
   wrap: { gap: space[1] },
   track: { flexDirection: "row", gap: space[1], marginTop: space[2] },
   segment: {
@@ -51,5 +53,5 @@ const styles = StyleSheet.create({
     borderRadius: radii.pill,
     backgroundColor: colors.borderStrong,
   },
-  segmentDone: { backgroundColor: colors.accent },
-});
+  segmentDone: { backgroundColor: colors.accentSolid },
+}));

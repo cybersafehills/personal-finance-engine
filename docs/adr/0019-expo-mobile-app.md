@@ -463,3 +463,41 @@ requires the document to be in the active Space because the audit function only
 checks the document's own Space. Still not in the app: upload or capture, review
 and approval, supplier and duplicate handling, comments.
 
+### Pay: dialer on iPhone, and the live payment result
+
+- iPhone now has an explicit "Open phone dialer" on the review screen, like Android
+  and like the web (which has always offered it on iOS). It is still only ever an
+  explicit tap, never automatic; iOS shows its own "Call?" confirmation for the USSD
+  code. "Share or copy code" stays as the second option. (This reverses the earlier
+  "no dial button on iPhone" note, which was caution, not a measured failure.)
+- After the hand-off the review screen becomes **Payment status**, mirroring the web's
+  `PaymentResultStatus`: a spinner while the payment waits (`initiated`,
+  `awaiting_verification`, `processing`), a **blue tick** for `successful`, a **red
+  cross** for `failed` / `expired` / `reversed`. The app asks the server every 4
+  seconds while the app is in front. A tick is only ever drawn for the server's
+  `successful` state, which is reached by the provider's own message matching the
+  payment (`verified: true`, "Money sent") or by the person saying so ("Marked as
+  sent"); opening the dialer is never a tick. This supersedes "the review screen
+  never claims success": it still never claims it from a hand-off alone.
+- After 90 seconds with no provider message the screen asks what happened: **I sent
+  it** (the web's `manually_confirm_payment`) or **It didn't go through** (transition
+  to `failed`), via `POST /api/mobile/pay/intents/:id/settle`. A provider message
+  that arrives later still wins.
+- The Pay sheet gains **Request payment** (opens the request form) with an info
+  button that explains it in plain words, shown only where `paymentRequests` is on in
+  `GET /api/mobile/config`. Close moved to the bottom centre of the sheet.
+
+### USSD code page: built around dialing the code
+
+- The page now leads with the code and a **Dial this code** button (iPhone and
+  Android alike; iOS shows its own "Call?" prompt), a one-line summary, and the
+  verification badge. Codes that need your details show them first ("Your details")
+  and the code fills in as you type; the button stays off until it is valid, and
+  never dials by itself. Share/copy is the secondary action.
+- Everything explanatory (full description, caution, "How to use it" steps, source) is
+  in a collapsed **About this code**; reporting a mistake is a quiet link at the
+  bottom. The native header just says "USSD code"; the service's own name is the
+  heading, so long names no longer truncate in the title bar.
+- Unavailable services cannot be dialled; deprecated ones say so and link to the
+  current code.
+

@@ -13,7 +13,8 @@ import { confirmCategory, dismissSuggestion, ReviewActionError } from "@/feature
 import { ReviewCard } from "@/features/review/ReviewCard";
 import { getReviewQueue } from "@/features/transactions/queries";
 import { useQuery } from "@/hooks/useQuery";
-import { colors, space } from "@/theme/tokens";
+import { space } from "@/theme/tokens";
+import { useTheme } from "@/theme/ThemeProvider";
 
 // Direct (no server round-trip) review queue: transactions whose category OneLedger is unsure about. Each one can be
 // accepted or rejected right here (the same database functions the web calls).
@@ -27,6 +28,7 @@ export function ReviewList({
   /** When shown as a fallback: reload the full inbox. */
   onRetryFullInbox?: () => void;
 }) {
+  const { colors } = useTheme();
   const load = useCallback(() => getReviewQueue(), []);
   const { data, loading, refreshing, error, refresh } = useQuery(load);
   const [decided, setDecided] = useState<ReadonlySet<string>>(new Set());

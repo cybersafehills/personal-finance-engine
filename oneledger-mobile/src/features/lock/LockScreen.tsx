@@ -3,15 +3,17 @@ import { StyleSheet, View } from "react-native";
 
 import { Button, Text } from "@/components/ds";
 import { useSession } from "@/features/auth/SessionProvider";
-import { colors, space } from "@/theme/tokens";
+import { space } from "@/theme/tokens";
 
 import { useLock } from "./LockProvider";
+import { makeStyles } from "@/theme/ThemeProvider";
 
 /**
  * Covers the whole app while locked, and (without controls) while the app
  * is in the app switcher so balances never appear in a screenshot preview.
  */
 export function LockScreen({ mode }: { mode: "locked" | "cover" }) {
+  const styles = useStyles();
   const { unlock } = useLock();
   const { signOut } = useSession();
   const [failed, setFailed] = useState(false);
@@ -25,12 +27,12 @@ export function LockScreen({ mode }: { mode: "locked" | "cover" }) {
 
   return (
     <View style={styles.cover} accessibilityViewIsModal>
-      <Text variant="title" color="accentForeground">
+      <Text variant="title" color="onSolid">
         OneLedger
       </Text>
       {mode === "locked" ? (
         <View style={styles.actions}>
-          <Text variant="label" color="accentForeground" style={styles.hint}>
+          <Text variant="label" color="onSolid" style={styles.hint}>
             {failed
               ? "Couldn't confirm it's you. Try again."
               : "Locked to keep your money private."}
@@ -48,7 +50,7 @@ export function LockScreen({ mode }: { mode: "locked" | "cover" }) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => StyleSheet.create({
   cover: {
     position: "absolute",
     top: 0,
@@ -63,4 +65,4 @@ const styles = StyleSheet.create({
   },
   actions: { alignSelf: "stretch", gap: space[3], maxWidth: 360, width: "100%" },
   hint: { textAlign: "center", opacity: 0.85 },
-});
+}));

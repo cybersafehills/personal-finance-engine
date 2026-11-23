@@ -85,12 +85,17 @@ describe("iPhone guide: add the Shortcuts", () => {
     expect(screen.queryByText("Add “OneLedger Capture”")).toBeNull();
   });
 
-  it("says one-tap setup isn't available when the Shortcuts are not published", async () => {
+  it("walks through building the two Shortcuts by hand when none are published", async () => {
     links.connect = "";
     links.capture = "";
     await render(<ShortcutsGuide />);
-    expect(await screen.findByText(/One-tap setup isn't available yet/)).toBeTruthy();
-    expect(screen.getByText("Continue anyway")).toBeTruthy();
+    expect(await screen.findByText(/One-tap setup isn't published yet/)).toBeTruthy();
+    // Both shortcuts, under the exact names the run link and the automation use.
+    expect(screen.getByText("Shortcut 1: Connect to OneLedger")).toBeTruthy();
+    expect(screen.getByText("Shortcut 2: OneLedger Capture")).toBeTruthy();
+    expect(screen.getByText(/https:\/\/api\.oneledger\.me\/v1\/capture/)).toBeTruthy();
+    expect(screen.getByText("I've built them")).toBeTruthy();
+    expect(screen.queryByText("Add the OneLedger Shortcuts")).toBeNull();
   });
 
   it("tells the person when a link could not be opened", async () => {

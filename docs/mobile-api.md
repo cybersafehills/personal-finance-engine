@@ -134,7 +134,7 @@ All use the same guard as `/inbox` and `/budgets` (flag `MOBILE_API_ENABLED`, pe
 | `GET /api/mobile/insights/forecast?[workspace_id=…][&account_id=…][&days=7\|14\|30]` | `INSIGHTS_CENTER` and `INTELLIGENCE_ENABLED` (+ respective allowlists) | Forward-looking RWF cash-flow scenarios from today. Default horizon is 30 days. The optional Space must agree with the authenticated request scope. An account filter returns only that wallet or an empty list. Output includes the opening balance date, scheduled and estimated projections, a no-new-income scenario, and the calculation basis. The server uses the same calculation as the web forecast. Amounts are decimal strings. `422 forecast_unavailable` covers excessive history or unsafe amounts. |
 | `GET /api/mobile/insights/drilldown?kind&currency&from&to[&value][&limit<=100&offset]` | `INSIGHTS_CENTER` | The transactions behind one aggregate, classified exactly as the totals are. |
 | `GET /api/mobile/accounts` | `BALANCE_PROVENANCE` | Accounts with `balance.status` = `confirmed\|estimated\|stale\|unavailable`, `amount_minor` (null when unavailable), `as_of`, `basis`, `reasons`. |
-| `GET /api/mobile/counterparties?[q][&kind][&limit&offset]` | `COUNTERPARTIES` | People/merchants with sent/received/net/count/first/last per currency, plus `unresolved_transactions`. |
+| `GET /api/mobile/counterparties?[q][&kind][&limit&offset]` | `COUNTERPARTIES` | People/merchants with sent/received/net/count/first/last per currency, plus `unresolved_transactions` (all not yet linked) and `sortable_transactions` (the subset with a name or number that sorting can link). |
 | `GET /api/mobile/counterparties/{id}` | `COUNTERPARTIES` | One counterparty, what was merged into it, and its transactions (paged). `409 merged_into:<id>` if it was merged away. |
 | `POST /api/mobile/payment-requests` | `PAYMENT_REQUESTS` | Create a non-custodial payment request; returns `{ id, url, replayed }`. The link is returned **once** (`url` is null on an idempotent replay). Body: `amount_minor` (digit string), `currency`, `destination_type` (`momo_phone`\|`merchant_code`), `destination_value`, `recipient_display`, `reference?`, `expires_in_hours` (24/72/168/720/2160), `idempotency_key`. `422 payment_request_rejected` carries a safe `message`. |
 | `POST /api/mobile/transactions/{id}/reveal-token` | `UTILITY_TOKEN_CAPTURE_ENABLED` | Show a prepaid-electricity token (once, `no-store`). Every call is audited and limited to 20/hour/user; requires member+ and visibility of the transaction's source. `404 not_found` for anything the caller may not see (no oracle); `422 reveal_failed` with a safe `message` otherwise. Decryption uses the server-only `SENSITIVE_DATA_KEYRING`. |
@@ -433,3 +433,17 @@ balance code, nothing recorded), `amount_required`, `currency_unsupported`,
 `unsupported`, `feature_disabled` or `error`. Idempotent on the code and amount.
 Never charges anything and never dials. Recording that the user opened the
 dialer uses `POST /api/mobile/pay/intents/:id/handoff`.
+
+## `POST /api/mobile/pay/intents/:id/settle`
+
+Body `{ "outcome": "sent" | "failed" }`. The person who dialled says what happened
+when no provider message has settled a handed-off payment: `sent` runs the web's
+`manually_confirm_payment` (the intent becomes `successful` with `verified: false`),
+`failed` transitions it to `failed`. 404 for an unknown or foreign id, 409 when the
+current state does not allow it, 422 for a bad outcome. Returns the refreshed
+`intent`. Never marks a payment provider-verified.
+
+The pay intent payload now also carries `updatedAt` (when it last changed) and
+`verified` (true only when the provider's message confirmed it). `GET
+/api/mobile/config` gains `paymentRequests`.
+

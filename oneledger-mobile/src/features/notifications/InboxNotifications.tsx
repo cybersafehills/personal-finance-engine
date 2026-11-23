@@ -6,7 +6,7 @@ import { Button, Text } from "@/components/ds";
 import { pushTarget } from "@/features/push/push-routing";
 import { useQuery } from "@/hooks/useQuery";
 import { formatDateTime } from "@/lib/kigali-time";
-import { colors, radii, space } from "@/theme/tokens";
+import { radii, space } from "@/theme/tokens";
 
 import { groupByTitle } from "./grouping";
 import {
@@ -15,6 +15,7 @@ import {
   markNotificationRead,
   type NotificationRow,
 } from "./queries";
+import { makeStyles } from "@/theme/ThemeProvider";
 
 // The most recent notifications, shown above the decisions as on the web's
 // Inbox. /notifications holds the full history.
@@ -27,6 +28,7 @@ const RECENT_LIMIT = 8;
  * to load never touches the decisions below.
  */
 export function InboxNotifications() {
+  const styles = useStyles();
   const load = useCallback(() => getNotifications(RECENT_LIMIT), []);
   const { data, refresh } = useQuery(load);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
@@ -92,6 +94,7 @@ function Row({
   onOpen(): void;
   onMarkRead(): void;
 }) {
+  const styles = useStyles();
   const unread = n.readAt === null;
   return (
     <View style={[styles.card, unread && styles.cardUnread]}>
@@ -116,7 +119,7 @@ function Row({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => StyleSheet.create({
   wrap: { gap: space[2] },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   group: { gap: space[1] },
@@ -130,4 +133,4 @@ const styles = StyleSheet.create({
   },
   cardUnread: { borderColor: colors.accent },
   body: { gap: space[1] },
-});
+}));

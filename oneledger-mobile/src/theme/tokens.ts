@@ -1,41 +1,12 @@
-// Design tokens. Mirrors web/app/globals.css `:root` one-to-one; change a
-// value there and here in the same PR. Never hardcode a hex value in a
-// component (docs/design-system.md).
+// Design tokens. The light palette mirrors web/app/globals.css `:root` one-to-one;
+// change a value there and here in the same PR. Never hardcode a hex value in a
+// component (docs/design-system.md). Colours live in ./colors (light + dark), and
+// components read them through the theme (`useTheme`, `makeStyles`), never directly.
 //
 // Financial semantics are restrained: outgoing money is NOT red, it is
 // primary-coloured text with a "−" sign.
 
-export const colors = {
-  background: "#f6f6f7",
-  surface: "#ffffff",
-  borderSubtle: "#e8e8ea",
-  borderStrong: "#d4d4d8",
-
-  textPrimary: "#18181b",
-  textSecondary: "#52525b",
-  textMuted: "#6b6b73",
-
-  moneyPositive: "#067a4d",
-  moneyPositiveBg: "#e9f7f0",
-  moneyNegative: "#18181b",
-  attention: "#92620a",
-  attentionBg: "#fdf3d9",
-  needsMapBg: "#fdf1f0",
-  needsMapBorder: "#ecd0cd",
-  notificationBadge: "#c0392b",
-  lifetimeBadgeBg: "#f5c518",
-  lifetimeBadgeText: "#1a1a1a",
-
-  accent: "#33509e",
-  accentForeground: "#ffffff",
-  accentPressed: "#263c76",
-  moneyPositivePressed: "#045b39",
-
-  brandNavy: "#07143a",
-  brandBlue: "#0050f4",
-} as const;
-
-export type ColorToken = keyof typeof colors;
+export type { ColorToken, Palette } from "./colors";
 
 export const radii = {
   card: 16,

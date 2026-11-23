@@ -6,7 +6,7 @@
     "version": "2.0.0",
     "orientation": "portrait",
     "icon": "./assets/branding/ios-app-icon-1024.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "me.oneledger.app",
@@ -26,7 +26,10 @@
       "predictiveBackGestureEnabled": false,
       "allowBackup": false,
       "versionCode": 10,
-      "icon": "./assets/branding/android-legacy-icon-1024.png"
+      "icon": "./assets/branding/android-legacy-icon-1024.png",
+      "blockedPermissions": [
+        "android.permission.WRITE_CONTACTS"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -74,7 +77,17 @@
           "image": "./assets/branding/splash-logo-1024.png",
           "imageWidth": 220,
           "resizeMode": "contain",
-          "backgroundColor": "#FFFFFF"
+          "backgroundColor": "#FFFFFF",
+          "dark": {
+            "image": "./assets/branding/splash-logo-dark-1024.png",
+            "backgroundColor": "#0d0e11"
+          }
+        }
+      ],
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "OneLedger opens your contacts only when you tap the contact button, so you can pick one person to pay. It does not read or keep your address book."
         }
       ]
     ],

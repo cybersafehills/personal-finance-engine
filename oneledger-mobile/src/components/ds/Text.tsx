@@ -3,8 +3,9 @@ import { usePrivacy } from "@/features/privacy/PrivacyProvider";
 import { privateText } from "@/features/privacy/mask";
 import { Text as RNText, type TextProps as RNTextProps } from "react-native";
 
-import { colors, type ColorToken } from "@/theme/tokens";
-import { textVariants, type TextVariant } from "@/theme/typography";
+import { useTheme } from "@/theme/ThemeProvider";
+import { type ColorToken } from "@/theme/tokens";
+import { MAX_FONT_SCALE, textVariants, type TextVariant } from "@/theme/typography";
 
 export type TextProps = RNTextProps & {
   variant?: TextVariant;
@@ -24,8 +25,10 @@ export function Text({
   ...rest
 }: TextProps) {
   const { fullPrivacy } = usePrivacy();
+  const { colors } = useTheme();
   return (
     <RNText
+      maxFontSizeMultiplier={MAX_FONT_SCALE}
       {...rest}
       accessibilityLabel={privateText(accessibilityLabel, fullPrivacy)}
       style={[

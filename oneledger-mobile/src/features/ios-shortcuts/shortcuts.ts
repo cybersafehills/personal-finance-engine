@@ -74,3 +74,39 @@ export const AUTOMATION_STEPS: string[] = [
   "Tap Next, then choose the shortcut called OneLedger Capture.",
   "Tap Done.",
 ];
+
+/**
+ * Build the two Shortcuts by hand, for as long as no iCloud links are published
+ * (config.connectShortcutUrl is empty). The actions and field names are the ones
+ * in docs/oneledger-capture-shortcut.md (verified against the capture endpoint);
+ * the shortcut NAMES must match CONNECT_SHORTCUT_NAME / CAPTURE_SHORTCUT_NAME.
+ */
+export const CAPTURE_ENDPOINT = "https://api.oneledger.me/v1/capture";
+
+export const MANUAL_BUILD: { name: string; purpose: string; steps: string[] }[] = [
+  {
+    name: CONNECT_SHORTCUT_NAME,
+    purpose: "Runs once. Swaps the code shown in OneLedger for this phone's own secure key.",
+    steps: [
+      "Add Ask for Input (type Text). Prompt: Enter the pairing code from OneLedger.",
+      "Make the device key: add Text pfe_ and Set Variable Secret. Then Repeat 6 times: Random Number 100000000 to 999999999, then Text with Secret followed by the Random Number, then Set Variable Secret. Finally Set Variable DeviceSecret to Secret.",
+      "Add Dictionary: op = pair, pairing_token = Provided Input, device_secret = DeviceSecret, client_version = 1.0.0, platform = ios, device_label = Device Name.",
+      `Add Get Contents of URL: ${CAPTURE_ENDPOINT}. Method POST, Request Body JSON, using that Dictionary.`,
+      "Add Get Dictionary Value ok from the result. If it is not true: Show Result of the error value, then Stop Shortcut.",
+      "Add Get Dictionary Value capture_url from the result.",
+      "Add Dictionary: secret = DeviceSecret, url = capture_url.",
+      "Add Save File to the Shortcuts folder as OneLedger/config.json, Overwrite If File Exists on.",
+      "Add Show Notification: This iPhone is connected to OneLedger.",
+    ],
+  },
+  {
+    name: CAPTURE_SHORTCUT_NAME,
+    purpose: "Run by the Messages automation. Sends each money message to OneLedger.",
+    steps: [
+      "Add Get File OneLedger/config.json, then Get Dictionary from Input.",
+      "Add Get Dictionary Value secret, and again for url.",
+      "Add Dictionary: op = capture, message = Shortcut Input, received_at = Current Date formatted as ISO 8601, client_version = 1.0.0.",
+      "Add Get Contents of URL: the url value. Method POST, header x-device-key = the secret value, Request Body JSON, using that Dictionary.",
+    ],
+  },
+];

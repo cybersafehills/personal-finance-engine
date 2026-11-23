@@ -1,11 +1,13 @@
 import { Stack } from "expo-router";
+import { Platform } from "react-native";
 
 import { PushBridge } from "@/features/push/PushBridge";
-import { colors } from "@/theme/tokens";
 import { fonts } from "@/theme/typography";
+import { useTheme } from "@/theme/ThemeProvider";
 
 // Signed-in area: the tab shell, with detail and setup screens pushed on top.
 export default function AppLayout() {
+  const { colors } = useTheme();
   return (
     <>
       <PushBridge />
@@ -36,7 +38,9 @@ export default function AppLayout() {
             presentation: "formSheet",
             headerShown: false,
             sheetGrabberVisible: true,
-            sheetAllowedDetents: [0.7, 1],
+            // One height that fits the content (no drag between two heights: that
+            // is where the layout used to tear). Android has no "fit to contents".
+            sheetAllowedDetents: Platform.OS === "ios" ? "fitToContents" : [0.75],
             sheetCornerRadius: 20,
             contentStyle: { backgroundColor: colors.surface },
           }}

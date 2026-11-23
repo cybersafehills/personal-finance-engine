@@ -1,20 +1,27 @@
 import Feather from "@expo/vector-icons/Feather";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
 
-import { Badge, Button, Card, Chip, EmptyState, Screen, ScreenHeader, Text, TextField } from "@/components/ds";
+import { Button, Card, Chip, EmptyState, Screen, ScreenHeader, Text, TextField } from "@/components/ds";
+import { pinFeatured } from "@/features/ussd/featured";
 import { getFavouriteIds, getFavourites, getServiceDirectory, toggleFavourite } from "@/features/ussd/queries";
 import { CATEGORY_LABELS, DIRECTORY_CATEGORIES, type DirectoryCategory, type ServiceCodeListItem } from "@/features/ussd/types";
 import { useQuery } from "@/hooks/useQuery";
-import { colors, MIN_TOUCH_TARGET, space } from "@/theme/tokens";
+import { MIN_TOUCH_TARGET, space } from "@/theme/tokens";
+import { useTheme } from "@/theme/ThemeProvider";
 
-// The USSD directory, as on the web's /pay/ussd: verified codes for Mobile
+// The USSD directory, as on the web's /pay/ussd: codes for Mobile
 // Money, banking and government services, searchable, with starred favourites.
 // Nothing here dials or pays anything; a code opens its own page.
 export default function UssdDirectory() {
+  // The Pay sheet opens this on a category ("Buy airtime or data" -> airtime_data).
+  const params = useLocalSearchParams<{ category?: string; title?: string }>();
+  const initial = (DIRECTORY_CATEGORIES as readonly string[]).includes(params.category ?? "")
+    ? (params.category as DirectoryCategory)
+    : null;
   const [query, setQuery] = useState("");
-  const [category, setCategory] = useState<DirectoryCategory | null>(null);
+  const [category, setCategory] = useState<DirectoryCategory | null>(initial);
   const filtered = query.trim() !== "" || category !== null;
 
   const load = useCallback(async () => {
@@ -44,7 +51,7 @@ export default function UssdDirectory() {
 
   return (
     <Screen>
-      <ScreenHeader title="USSD directory" subtitle="Verified USSD codes for Mobile Money, banking and government services in Rwanda." />
+      <ScreenHeader title={params.title || "USSD directory"} subtitle="USSD codes for Mobile Money, banking and government services in Rwanda." />
 
       <TextField label="Search" value={query} onChangeText={setQuery} placeholder="Name, service or code" autoCapitalize="none" returnKeyType="search" />
 
@@ -74,7 +81,7 @@ export default function UssdDirectory() {
           ) : (
             <Section
               title={!filtered && data.favourites.length > 0 ? "All services" : null}
-              codes={data.codes}
+              codes={pinFeatured(data.codes)}
               favouriteIds={favouriteIds}
               onStar={star}
             />
@@ -96,6 +103,7 @@ function Section({
   favouriteIds: Set<string>;
   onStar: (code: ServiceCodeListItem, isFavourite: boolean) => void;
 }) {
+  const { colors } = useTheme();
   return (
     <View style={{ gap: space[2] }}>
       {title ? (
@@ -126,7 +134,6 @@ function Section({
                   <Text variant="bodyStrong" style={{ flexShrink: 1 }}>
                     {code.name}
                   </Text>
-                  <Badge variant={code.verified ? "positive" : "attention"}>{code.verified ? "Verified" : "Unverified"}</Badge>
                 </View>
                 <Text variant="caption" color="textMuted">
                   {`${code.template} · ${code.provider} · ${CATEGORY_LABELS[code.category] ?? ""}`}

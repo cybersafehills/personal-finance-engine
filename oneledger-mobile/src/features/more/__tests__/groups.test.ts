@@ -53,3 +53,21 @@ describe("parseMoreFlags", () => {
     expect(parseMoreFlags(200, { ok: true })).toBeNull();
   });
 });
+
+describe("Pay & Services rows", () => {
+  it("shows Payment activity, templates and the USSD directory only where the server has them on", () => {
+    for (const label of ["Payment activity", "Payment templates", "USSD directory"]) {
+      expect(labels(null)).not.toContain(label);
+      expect(labels({ assistedPay: false, ussdDirectory: false })).not.toContain(label);
+    }
+    expect(labels({ assistedPay: true, ussdDirectory: true })).toEqual(
+      expect.arrayContaining(["Payment activity", "Payment templates", "USSD directory"]),
+    );
+    expect(labels({ assistedPay: true })).not.toContain("USSD directory");
+  });
+
+  it("reads the two flags from the config", () => {
+    expect(parseMoreFlags(200, { ok: true, config: { assistedPay: true, ussdDirectory: false } })).toEqual({ assistedPay: true, ussdDirectory: false });
+  });
+});
+

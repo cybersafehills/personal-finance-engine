@@ -14,6 +14,7 @@ import {
   isUssdDirectoryEnabled,
 } from "./pay/gate";
 import { isSpacesEnabled } from "./spaces/gate";
+import { isPaymentRequestsEnabledForWorkspace } from "./payment-requests/owner";
 
 // Which optional surfaces are switched on for the caller's workspace, so the
 // mobile app can show a feature only when it will actually work (GET
@@ -24,13 +25,13 @@ import { isSpacesEnabled } from "./spaces/gate";
 export type MobileConfig = {
   wallets: boolean;
   people: boolean;
-  paymentRequests: boolean;
   insightsCenter: boolean;
   pay: boolean;
   assistedPay: boolean;
   ussdDirectory: boolean;
   scanToPay: boolean;
   trustedRecipients: boolean;
+  paymentRequests: boolean;
   statements: boolean;
   insights: boolean;
   bills: boolean;
@@ -44,13 +45,19 @@ export function mobileConfig(workspaceId: string | null): MobileConfig {
   return {
     wallets: isOneLedger3FlagEnabled(process.env, "BALANCE_PROVENANCE", workspaceId),
     people: isOneLedger3FlagEnabled(process.env, "COUNTERPARTIES", workspaceId),
-    paymentRequests: isOneLedger3FlagEnabled(process.env, "PAYMENT_REQUESTS", workspaceId),
     insightsCenter: isOneLedger3FlagEnabled(process.env, "INSIGHTS_CENTER", workspaceId),
     pay: isPayServicesEnabled(workspaceId),
     assistedPay: isAssistedPayEnabled(workspaceId),
     ussdDirectory: isUssdDirectoryEnabled(workspaceId),
     scanToPay: isScanToPayEnabled(workspaceId),
     trustedRecipients: isTrustedRecipientsEnabled(workspaceId),
+    paymentRequests: isPaymentRequestsEnabledForWorkspace(
+      {
+        PAYMENT_REQUESTS_ENABLED: process.env.PAYMENT_REQUESTS_ENABLED,
+        PAYMENT_REQUESTS_WORKSPACE_ALLOWLIST: process.env.PAYMENT_REQUESTS_WORKSPACE_ALLOWLIST,
+      },
+      workspaceId,
+    ),
     statements: isFinancialStatementsEnabled(),
     insights: isIntelligenceEnabled(workspaceId),
     bills: isBillsEnabled(workspaceId),

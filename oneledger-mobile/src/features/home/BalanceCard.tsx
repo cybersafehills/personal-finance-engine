@@ -5,7 +5,8 @@ import { Text } from "@/components/ds";
 import { usePrivacy } from "@/features/privacy/PrivacyProvider";
 import { dateGroupLabel, formatTime } from "@/lib/kigali-time";
 import { formatRwf } from "@/lib/money";
-import { colors, MIN_TOUCH_TARGET, radii, space } from "@/theme/tokens";
+import { MIN_TOUCH_TARGET, radii, space } from "@/theme/tokens";
+import { makeStyles, useTheme } from "@/theme/ThemeProvider";
 
 /**
  * Home's headline balance, as on the web (web/components/BalanceCard.tsx): a
@@ -20,13 +21,15 @@ export function BalanceCard({
   balance: { amountRwf: number; asOfIso: string; pendingEffectRwf?: number; pendingCount?: number } | null;
   nowIso: string;
 }) {
+  const styles = useStyles();
+  const { colors } = useTheme();
   const { amountsHidden, toggleAmountsHidden } = usePrivacy();
   const label = amountsHidden ? "Show current balance" : "Hide current balance";
 
   return (
     <View style={styles.card}>
       <View style={styles.top}>
-        <Text variant="label" color="accentForeground" style={styles.dim}>
+        <Text variant="label" color="onSolid" style={styles.dim}>
           Recorded balance
         </Text>
         <Pressable
@@ -38,34 +41,34 @@ export function BalanceCard({
           <Feather
             name={amountsHidden ? "eye-off" : "eye"}
             size={20}
-            color={colors.accentForeground}
+            color={colors.onSolid}
           />
         </Pressable>
       </View>
 
-      <Text variant="display" color="accentForeground" tabular style={styles.amount}>
+      <Text variant="display" color="onSolid" tabular style={styles.amount}>
         {amountsHidden ? "••••••" : balance ? formatRwf(balance.amountRwf) : "—"}
       </Text>
 
       <View style={styles.footer}>
-        <Text variant="label" color="accentForeground" style={styles.dim}>
+        <Text variant="label" color="onSolid" style={styles.dim}>
           RWF · Last captured message
         </Text>
         {balance ? (
-          <Text variant="caption" color="accentForeground" style={styles.faint}>
+          <Text variant="caption" color="onSolid" style={styles.faint}>
             {`Updated ${dateGroupLabel(balance.asOfIso, nowIso)}, ${formatTime(balance.asOfIso)}`}
           </Text>
         ) : null}
       </View>
       {balance && balance.pendingCount ? (
-        <Text variant="caption" color="accentForeground" style={styles.faint}>
+        <Text variant="caption" color="onSolid" style={styles.faint}>
           {amountsHidden
             ? `Includes ${balance.pendingCount} unsynced change${balance.pendingCount === 1 ? "" : "s"}`
             : `Provider balance. ${balance.pendingCount} change${balance.pendingCount === 1 ? "" : "s"} saved on this phone not yet confirmed (${formatRwf(balance.pendingEffectRwf ?? 0)}); estimate ${formatRwf(balance.amountRwf + (balance.pendingEffectRwf ?? 0))}.`}
         </Text>
       ) : null}
       {!balance ? (
-        <Text variant="caption" color="accentForeground" style={styles.faint}>
+        <Text variant="caption" color="onSolid" style={styles.faint}>
           No balance yet. It appears after your first recorded MoMo message.
         </Text>
       ) : null}
@@ -73,9 +76,9 @@ export function BalanceCard({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => StyleSheet.create({
   card: {
-    backgroundColor: colors.accent,
+    backgroundColor: colors.accentSolid,
     borderRadius: radii.card,
     paddingHorizontal: space[6],
     paddingVertical: space[6],
@@ -94,7 +97,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  eyePressed: { backgroundColor: colors.accentPressed },
+  eyePressed: { backgroundColor: colors.accentSolidPressed },
   footer: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -102,4 +105,4 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: space[3],
   },
-});
+}));

@@ -1,7 +1,7 @@
-import { Pressable, ScrollView, View } from "react-native";
+import { ScrollView, View } from "react-native";
 
-import { Button, Text } from "@/components/ds";
-import { colors, MIN_TOUCH_TARGET, radii, space } from "@/theme/tokens";
+import { Chip } from "@/components/ds";
+import { space } from "@/theme/tokens";
 
 import {
   activeFilterCount,
@@ -10,40 +10,12 @@ import {
   PERIOD_OPTIONS,
   type TransactionFilters,
 } from "./filters";
+import { useTheme } from "@/theme/ThemeProvider";
 
-function Chip({ label, selected, onPress }: { label: string; selected: boolean; onPress: () => void }) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityState={{ selected }}
-      onPress={onPress}
-      style={{
-        minHeight: MIN_TOUCH_TARGET,
-        justifyContent: "center",
-        paddingHorizontal: space[3],
-        borderRadius: radii.pill,
-        borderWidth: 1,
-        borderColor: selected ? colors.accent : colors.borderStrong,
-        backgroundColor: selected ? colors.accent : colors.surface,
-      }}
-    >
-      <Text variant="label" color={selected ? "accentForeground" : "textSecondary"}>
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
-function Row({ children }: { children: React.ReactNode }) {
-  return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-      <View style={{ flexDirection: "row", gap: space[2] }}>{children}</View>
-    </ScrollView>
-  );
-}
-
-// Direction, period and "needs review" for the ledger. Chips are real buttons
-// with a selected state, so screen readers announce the current choice.
+// Direction, period and "needs review" for the ledger on ONE compact row (28pt
+// chips, 12px text) that scrolls sideways if it must, instead of two tall rows.
+// Chips are real buttons with a selected state, so screen readers announce the
+// current choice. A "Clear" chip leads the row while any filter is active.
 export function FilterChips({
   value,
   onChange,
@@ -51,41 +23,42 @@ export function FilterChips({
   value: TransactionFilters;
   onChange: (next: TransactionFilters) => void;
 }) {
+  const { colors } = useTheme();
   const active = activeFilterCount(value);
   return (
-    <View style={{ gap: space[2] }}>
-      <Row>
-        {DIRECTION_OPTIONS.map((o) => (
-          <Chip
-            key={o.value}
-            label={o.label}
-            selected={value.direction === o.value}
-            onPress={() => onChange({ ...value, direction: o.value })}
-          />
-        ))}
-      </Row>
-      <Row>
-        {PERIOD_OPTIONS.map((o) => (
-          <Chip
-            key={o.value}
-            label={o.label}
-            selected={value.period === o.value}
-            onPress={() => onChange({ ...value, period: o.value })}
-          />
-        ))}
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      keyboardShouldPersistTaps="handled"
+      contentContainerStyle={{ alignItems: "center", gap: space[1] }}
+    >
+      {active > 0 ? <Chip compact label="Clear" selected={false} onPress={() => onChange(NO_FILTERS)} /> : null}
+      {DIRECTION_OPTIONS.map((o) => (
         <Chip
-          label="Needs review"
-          selected={value.needsReview}
-          onPress={() => onChange({ ...value, needsReview: !value.needsReview })}
+          compact
+          key={o.value}
+          label={o.label}
+          selected={value.direction === o.value}
+          onPress={() => onChange({ ...value, direction: o.value })}
         />
-      </Row>
-      {active > 0 ? (
-        <Button
-          label={`Clear ${active === 1 ? "filter" : `${active} filters`}`}
-          variant="ghost"
-          onPress={() => onChange(NO_FILTERS)}
+      ))}
+      <View style={{ width: 1, height: 16, backgroundColor: colors.borderStrong, marginHorizontal: space[1] }} />
+      {PERIOD_OPTIONS.map((o) => (
+        <Chip
+          compact
+          key={o.value}
+          label={o.label}
+          selected={value.period === o.value}
+          onPress={() => onChange({ ...value, period: o.value })}
         />
-      ) : null}
-    </View>
+      ))}
+      <View style={{ width: 1, height: 16, backgroundColor: colors.borderStrong, marginHorizontal: space[1] }} />
+      <Chip
+        compact
+        label="To review"
+        selected={value.needsReview}
+        onPress={() => onChange({ ...value, needsReview: !value.needsReview })}
+      />
+    </ScrollView>
   );
 }

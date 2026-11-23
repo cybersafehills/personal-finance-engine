@@ -19,7 +19,8 @@ import { canReadPoster, recognizePoster } from "@/features/scan/poster-recogniti
 import { parseMerchantPoster, type MerchantPoster } from "@/features/scan/poster";
 import { parseRecipient } from "@/features/pay/new-form";
 import type { ClassifyResult, ScanModel } from "@/features/scan/types";
-import { colors, radii, space } from "@/theme/tokens";
+import { radii, space } from "@/theme/tokens";
+import { useTheme } from "@/theme/ThemeProvider";
 
 type Phase =
   | { step: "scanning" }
@@ -38,6 +39,7 @@ type Phase =
 // dialed on detection, one tap prepares a draft, and the app never claims the
 // payment settled. Poster photos are processed on-device and deleted after OCR.
 export default function Scan() {
+  const { colors } = useTheme();
   const [permission, requestPermission] = useCameraPermissions();
   const [phase, setPhase] = useState<Phase>({ step: "scanning" });
   const [torch, setTorch] = useState(false);

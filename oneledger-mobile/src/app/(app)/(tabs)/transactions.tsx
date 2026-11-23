@@ -1,3 +1,4 @@
+import Feather from "@expo/vector-icons/Feather";
 import { subscribeRuntime } from "@/offline/runtime";
 import { useActiveSpace } from "@/features/spaces/ActiveSpaceProvider";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
@@ -26,7 +27,8 @@ import { FilterChips } from "@/features/transactions/FilterChips";
 import { activeFilterCount, NO_FILTERS, type TransactionFilters } from "@/features/transactions/filters";
 import { TransactionItem } from "@/features/transactions/TransactionItem";
 import { useQuery } from "@/hooks/useQuery";
-import { colors, space } from "@/theme/tokens";
+import { space } from "@/theme/tokens";
+import { useTheme } from "@/theme/ThemeProvider";
 
 const SEARCH_DEBOUNCE_MS = 350;
 
@@ -47,6 +49,7 @@ export default function Transactions() {
   return <TransactionLedger key={activeId ?? "no-space"} />;
 }
 function TransactionLedger() {
+  const { colors } = useTheme();
   // Set when opened from the Categories screen: show only that category (like the web's ?category=).
   const params = useLocalSearchParams<{ category?: string | string[] }>();
   const category = (Array.isArray(params.category) ? params.category[0] : params.category) || undefined;
@@ -125,6 +128,30 @@ function TransactionLedger() {
 
   return (
     <ListScreen edges={["left", "right"]}>
+      {/* Search and filters stay put above the list, so they are always one thumb away. */}
+      <View style={{ paddingHorizontal: space[4], paddingTop: space[3], paddingBottom: space[2], gap: space[2], backgroundColor: colors.background }}>
+        <TextField
+          compact
+          label="Search"
+          value={input}
+          onChangeText={setInput}
+          placeholder="Search name, reference or category"
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="search"
+          clearButtonMode="while-editing"
+          leading={<Feather name="search" size={16} color={colors.textMuted} />}
+        />
+        {category ? (
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: space[2] }}>
+            <Text variant="label" color="textSecondary" style={{ flex: 1 }}>
+              {`Category: ${category}`}
+            </Text>
+            <Button label="Clear" size="sm" variant="ghost" onPress={() => router.setParams({ category: undefined })} />
+          </View>
+        ) : null}
+        <FilterChips value={filters} onChange={setFilters} />
+      </View>
       <SectionList
         sections={groupByDay(rows, loadedAt)}
         keyExtractor={(row) => row.id}
@@ -139,52 +166,31 @@ function TransactionLedger() {
           />
         }
         ListHeaderComponent={
-          <View style={{ paddingTop: space[4], gap: space[3] }}>
+          <View style={{ gap: space[2] }}>
             <ScreenHeader
               inline
               title="Transactions"
               action={
                 <Button
-                  label="Add transaction"
+                  label="Add"
+                  size="sm"
                   variant="secondary"
+                  accessibilityLabel="Add transaction"
                   onPress={() => router.push("/add-transaction")}
                 />
               }
             />
             {stats ? (
-              <>
-                <View style={{ flexDirection: "row" }}>
-                  <Button
-                    label={stats.reviewCount !== null && stats.reviewCount > 0 ? `Review queue (${stats.reviewCount})` : "Review queue"}
-                    variant="ghost"
-                    onPress={() => router.push("/inbox")}
-                  />
-                </View>
-                <LifetimeChips
-                  totals={stats.lifetime}
-                  accountCreatedIso={stats.lifetime.accountCreatedIso}
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: space[2] }}>
+                <LifetimeChips totals={stats.lifetime} accountCreatedIso={stats.lifetime.accountCreatedIso} />
+                <Button
+                  label={stats.reviewCount !== null && stats.reviewCount > 0 ? `Review queue (${stats.reviewCount})` : "Review queue"}
+                  size="sm"
+                  variant="ghost"
+                  onPress={() => router.push("/inbox")}
                 />
-              </>
-            ) : null}
-            <TextField
-              label="Search"
-              value={input}
-              onChangeText={setInput}
-              placeholder="Name, reference or category"
-              autoCapitalize="none"
-              autoCorrect={false}
-              returnKeyType="search"
-              clearButtonMode="while-editing"
-            />
-            {category ? (
-              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: space[2] }}>
-                <Text variant="label" color="textSecondary" style={{ flex: 1 }}>
-                  {`Category: ${category}`}
-                </Text>
-                <Button label="Clear" variant="ghost" onPress={() => router.setParams({ category: undefined })} />
               </View>
             ) : null}
-            <FilterChips value={filters} onChange={setFilters} />
           </View>
         }
         renderSectionHeader={({ section }) => (

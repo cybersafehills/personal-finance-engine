@@ -1,139 +1,190 @@
 import Feather from "@expo/vector-icons/Feather";
+import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import * as Linking from "expo-linking";
 import { router } from "expo-router";
-import { Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { useState, type ReactNode } from "react";
+import { Pressable, StyleSheet, View } from "react-native";
+import Animated, { Easing, FadeOut, Keyframe, ReduceMotion } from "react-native-reanimated";
 
-import { ListGroup, ListRow, Text } from "@/components/ds";
+import { Button, PressableScale, Text } from "@/components/ds";
 import {
   actionAvailableHere,
   LAUNCHER_ACTIONS,
   LAUNCHER_LINKS,
+  opensInApp,
   type LauncherAction,
 } from "@/features/pay/launcher";
 import type { PayConfig } from "@/features/pay/types";
 import { config as appConfig } from "@/lib/config";
-import { colors, CONTROL_HEIGHT, hitSlopFor, radii, space } from "@/theme/tokens";
+import { CONTROL_HEIGHT, hitSlopFor, radii, space } from "@/theme/tokens";
+import { makeStyles, useTheme } from "@/theme/ThemeProvider";
 
 // The Pay & Services launcher, shown in a native form sheet (see
-// (app)/pay-sheet.tsx), mirroring the web's launcher
-// (web/components/pay/PayLauncher.tsx). One tap never executes a payment: person
-// and merchant payments are prepared here and reviewed before anything is
-// dialled; the rest open the web or the in-app directory.
+// (app)/pay-sheet.tsx), mirroring the web's launcher. It holds only what you need
+// to start a payment; everything else lives in More. It is a plain View, not a
+// ScrollView: the sheet sizes itself to this content, so there is no blank space
+// below and nothing to scroll or mis-lay-out. One tap never executes a payment.
+//
+// Motion: the sheet's own slide and drag-to-dismiss are the platform's native sheet.
+// Inside it, the rows rise and fade in with a short stagger, buttons scale slightly
+// under the finger, and the info dialogs fade and settle in. Everything honours
+// the system "reduce motion" setting.
 
 type FeatherName = React.ComponentProps<typeof Feather>["name"];
 
 const TILE_ICONS: Record<LauncherAction["id"], FeatherName> = {
   pay_person: "user",
   pay_merchant: "shopping-bag",
-  pay_bill: "file-text",
   buy_electricity: "zap",
   buy_airtime: "smartphone",
   government: "flag",
+  ekash: "repeat",
 };
 
-function openWeb(path: string) {
-  Linking.openURL(`${appConfig.apiBaseUrl}${path}`);
+const EASE_OUT = Easing.bezier(0.23, 1, 0.32, 1);
+
+/** A short rise-and-fade for one block of the sheet; `index` staggers them by 35ms. */
+function rise(index: number) {
+  return new Keyframe({
+    0: { opacity: 0, transform: [{ translateY: 8 }] },
+    100: { opacity: 1, transform: [{ translateY: 0 }], easing: EASE_OUT },
+  })
+    .duration(220)
+    .delay(index * 35)
+    .reduceMotion(ReduceMotion.System);
 }
+
+const dialogIn = new Keyframe({
+  0: { opacity: 0, transform: [{ scale: 0.95 }] },
+  100: { opacity: 1, transform: [{ scale: 1 }], easing: EASE_OUT },
+})
+  .duration(180)
+  .reduceMotion(ReduceMotion.System);
+
+type Info = "scan" | "request";
+
+const INFO: Record<Info, { title: string; paragraphs: string[] }> = {
+  scan: {
+    title: "When to use Scan to pay",
+    paragraphs: [
+      "Use it at a shop or business that shows a QR code. Point your camera at the code and OneLedger shows you who you are paying and how much, before anything happens.",
+      "OneLedger never pays for you. You finish the payment with your provider, on your own phone. The camera only reads the code: no photo is taken or saved.",
+    ],
+  },
+  request: {
+    title: "Why request a payment?",
+    paragraphs: [
+      "Use it when someone owes you money. Choose an amount and send them a link. They open it, see how to pay you, and pay from their own phone, so you don't have to explain your number or details again and again.",
+      "When the money arrives, it shows up in OneLedger. Nobody is charged: they choose whether to pay.",
+    ],
+  },
+};
 
 export function PayLauncher({
   config,
-  favourite = null,
   onClose,
 }: {
   config: Partial<PayConfig>;
-  /** The one starred USSD code shown under the actions (like the web); null when there is none. */
-  favourite?: { slug: string; name: string; template: string } | null;
   /** Called before navigating, so the sheet can be dismissed first. */
   onClose: () => void;
 }) {
+  const styles = useStyles();
+  const { colors } = useTheme();
+  const [info, setInfo] = useState<Info | null>(null);
+
   function pick(action: LauncherAction) {
     if (!actionAvailableHere(action, config)) return;
     onClose();
-    if (action.kind === "native") router.push({ pathname: "/pay-new", params: { type: action.id } });
-    else openWeb(action.path);
+    if (action.kind === "native") {
+      router.push({ pathname: "/pay-new", params: { type: action.id } });
+    } else if (action.kind === "ekash") {
+      router.push("/ekash");
+    } else if (opensInApp(config)) {
+      router.push({ pathname: "/ussd", params: { category: action.category, title: action.label } });
+    } else {
+      Linking.openURL(`${appConfig.apiBaseUrl}${action.webPath}`);
+    }
   }
 
-  // The directory opens in the app where the server has it on; otherwise on the web.
   function openDirectory() {
     onClose();
-    if (config.ussdDirectory) router.push("/ussd");
-    else openWeb(LAUNCHER_LINKS.ussd.path);
+    if (opensInApp(config)) router.push("/ussd");
+    else Linking.openURL(`${appConfig.apiBaseUrl}${LAUNCHER_LINKS.ussd.path}`);
   }
 
-  function web(path: string) {
-    onClose();
-    openWeb(path);
-  }
+  // Blocks enter in order, so the sheet fills top to bottom.
+  let step = 0;
 
   return (
     <View style={styles.root}>
-      <View style={styles.header}>
-        <View style={styles.badge}>
-          <Feather name="send" size={16} color={colors.accentForeground} />
-        </View>
+      <Animated.View entering={rise(step++)} style={styles.header}>
         <View style={styles.headerText}>
           <Text variant="heading" accessibilityRole="header">
             Pay & Services
           </Text>
-          <Text variant="label" color="textMuted">
-            Prepare a payment or find a verified USSD code.
+          <Text variant="label" color="textMuted" numberOfLines={1}>
+            Prepare a payment or find a USSD code.
           </Text>
         </View>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Close"
-          onPress={onClose}
-          hitSlop={hitSlopFor(CONTROL_HEIGHT.sm)}
-          style={({ pressed }) => [styles.close, pressed && { backgroundColor: colors.background }]}
-        >
-          <Feather name="x" size={18} color={colors.textSecondary} />
-        </Pressable>
-      </View>
+      </Animated.View>
 
-      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+      <View style={styles.body}>
         {config.scanToPay ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Scan to pay"
-            onPress={() => {
-              onClose();
-              router.push("/scan");
-            }}
-            style={({ pressed }) => [styles.scan, pressed && { backgroundColor: colors.moneyPositiveBg }]}
-          >
-            <View style={styles.scanIcon}>
-              <Feather name="maximize" size={16} color={colors.accentForeground} />
-            </View>
-            <View style={styles.flex}>
-              <Text variant="bodyStrong">Scan to pay</Text>
-              <Text variant="caption" color="textMuted">
-                Scan a merchant payment QR code.
-              </Text>
-            </View>
-            <Feather name="chevron-right" size={18} color={colors.textMuted} />
-          </Pressable>
+          <Animated.View entering={rise(step++)}>
+            <FeatureRow
+              tone="scan"
+              label="Scan to pay"
+              caption="Scan a merchant payment QR code."
+              icon={<Feather name="maximize" size={16} color={colors.onSolid} />}
+              infoLabel="About scan to pay"
+              onInfo={() => setInfo("scan")}
+              onPress={() => {
+                onClose();
+                router.push("/scan");
+              }}
+            />
+          </Animated.View>
         ) : null}
 
-        <View style={styles.grid}>
+        {config.paymentRequests ? (
+          <Animated.View entering={rise(step++)}>
+            <FeatureRow
+              tone="request"
+              label="Request payment"
+              caption="Ask someone to pay you with a link."
+              icon={<MaterialCommunityIcons name="hand-coin" size={18} color={colors.onSolid} />}
+              infoLabel="About requesting payment"
+              onInfo={() => setInfo("request")}
+              onPress={() => {
+                onClose();
+                router.push("/request-new");
+              }}
+            />
+          </Animated.View>
+        ) : null}
+
+        <Animated.View entering={rise(step++)} style={styles.grid}>
           {LAUNCHER_ACTIONS.map((action) => {
             const available = actionAvailableHere(action, config);
+            const brand = action.kind === "ekash";
             return (
-              <Pressable
+              <PressableScale
                 key={action.id}
                 accessibilityRole="button"
                 accessibilityLabel={action.label}
                 accessibilityState={{ disabled: !available }}
                 disabled={!available}
                 onPress={() => pick(action)}
-                style={({ pressed }) => [
+                style={(pressed) => [
                   styles.tile,
+                  brand && styles.tileEkash,
                   !available && styles.tileOff,
-                  pressed && { borderColor: colors.accent },
+                  pressed && { borderColor: brand ? colors.ekashNavy : colors.accent },
                 ]}
               >
-                <Feather name={TILE_ICONS[action.id]} size={18} color={available ? colors.accent : colors.textMuted} />
+                <Feather name={TILE_ICONS[action.id]} size={18} color={!available ? colors.textMuted : brand ? colors.ekash : colors.accent} />
                 <View style={styles.flex}>
-                  <Text variant="bodyStrong" numberOfLines={2}>
+                  <Text variant="bodyStrong" numberOfLines={2} style={brand ? { color: colors.ekashNavy } : undefined}>
                     {action.label}
                   </Text>
                   {!available ? (
@@ -142,64 +193,127 @@ export function PayLauncher({
                     </Text>
                   ) : null}
                 </View>
-                {available && action.kind === "web" ? (
-                  <Feather name="external-link" size={12} color={colors.textMuted} accessibilityElementsHidden />
-                ) : null}
-              </Pressable>
+              </PressableScale>
             );
           })}
-        </View>
+        </Animated.View>
 
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={LAUNCHER_LINKS.ussd.label}
-          onPress={openDirectory}
-          style={({ pressed }) => [styles.primary, pressed && { backgroundColor: colors.accentPressed }]}
-        >
-          <Text variant="bodyStrong" color="accentForeground" style={styles.flex}>
-            {LAUNCHER_LINKS.ussd.label}
+        <Animated.View entering={rise(step++)}>
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel={LAUNCHER_LINKS.ussd.label}
+            onPress={openDirectory}
+            style={(pressed) => [styles.primary, pressed && { backgroundColor: colors.accentSolidPressed }]}
+          >
+            <Text variant="bodyStrong" color="onSolid" style={styles.flex}>
+              {LAUNCHER_LINKS.ussd.label}
+            </Text>
+            <Feather name="arrow-right" size={16} color={colors.onSolid} />
+          </PressableScale>
+        </Animated.View>
+
+        <Animated.View entering={rise(step++)} style={styles.footer}>
+          <Text variant="caption" color="textMuted" style={styles.note}>
+            OneLedger never asks for your Mobile Money or banking PIN and can&apos;t send money for you.
           </Text>
-          <Feather name="arrow-right" size={16} color={colors.accentForeground} />
-        </Pressable>
 
-        <ListGroup>
-          {favourite ? (
-            <ListRow
-              icon="star"
-              label={favourite.name}
-              hint={favourite.template}
-              a11yLabel={`${favourite.name}, ${favourite.template}`}
-              onPress={() => {
-                onClose();
-                router.push({ pathname: "/ussd/[slug]", params: { slug: favourite.slug } });
-              }}
-            />
-          ) : null}
-          {config.trustedRecipients ? (
-            <ListRow
-              icon="users"
-              label="Saved recipients"
-              hint="People and merchants you pay often"
-              onPress={() => {
-                onClose();
-                router.push("/recipients");
-              }}
-            />
-          ) : null}
-          <ListRow icon="activity" label={LAUNCHER_LINKS.activity.label} external onPress={() => web(LAUNCHER_LINKS.activity.path)} />
-          <ListRow icon="copy" label={LAUNCHER_LINKS.templates.label} external onPress={() => web(LAUNCHER_LINKS.templates.path)} />
-        </ListGroup>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Close"
+            onPress={onClose}
+            style={({ pressed }) => [styles.close, pressed && { backgroundColor: colors.background }]}
+          >
+            <Feather name="x" size={16} color={colors.textSecondary} />
+            <Text variant="bodyStrong" color="textSecondary">
+              Close
+            </Text>
+          </Pressable>
+        </Animated.View>
+      </View>
 
-        <Text variant="caption" color="textMuted" style={styles.note}>
-          OneLedger never asks for your Mobile Money or banking PIN and can&apos;t send money for you.
-        </Text>
-      </ScrollView>
+      {info ? (
+        // A dialog over the sheet (not a Modal), so it can animate out as well as in.
+        <Animated.View
+          style={styles.scrim}
+          accessibilityViewIsModal
+          entering={rise(0)}
+          exiting={FadeOut.duration(120).reduceMotion(ReduceMotion.System)}
+        >
+          <Animated.View entering={dialogIn} style={styles.dialog}>
+            <Text variant="heading" accessibilityRole="header">
+              {INFO[info].title}
+            </Text>
+            {INFO[info].paragraphs.map((text) => (
+              <Text key={text} color="textSecondary">
+                {text}
+              </Text>
+            ))}
+            <Button label="Got it" fullWidth onPress={() => setInfo(null)} />
+          </Animated.View>
+        </Animated.View>
+      ) : null}
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.surface },
+/**
+ * The two highlighted shortcuts at the top: Scan to pay (green) and Request
+ * payment (orange). The main area opens the feature; the small (i) at the right
+ * explains it. No arrow: the colour and the icon already say "this is a feature".
+ */
+function FeatureRow({
+  tone,
+  label,
+  caption,
+  icon,
+  infoLabel,
+  onInfo,
+  onPress,
+}: {
+  tone: "scan" | "request";
+  label: string;
+  caption: string;
+  icon: ReactNode;
+  infoLabel: string;
+  onInfo: () => void;
+  onPress: () => void;
+}) {
+  const styles = useStyles();
+  const { colors } = useTheme();
+  const accent = tone === "scan" ? colors.moneyPositive : colors.moneyRequest;
+  const solid = tone === "scan" ? colors.moneyPositiveSolid : colors.moneyRequestSolid;
+  const highlight = tone === "scan" ? colors.moneyPositiveBg : colors.moneyRequestBg;
+  return (
+    <View style={[styles.feature, { borderColor: accent }]}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={label}
+        onPress={onPress}
+        style={({ pressed }) => [styles.featureMain, pressed && { backgroundColor: highlight }]}
+      >
+        <View style={[styles.featureIcon, { backgroundColor: solid }]}>{icon}</View>
+        <View style={styles.flex}>
+          <Text variant="bodyStrong">{label}</Text>
+          <Text variant="caption" color="textMuted" numberOfLines={1}>
+            {caption}
+          </Text>
+        </View>
+      </Pressable>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={infoLabel}
+        onPress={onInfo}
+        hitSlop={hitSlopFor(CONTROL_HEIGHT.sm)}
+        style={({ pressed }) => [styles.info, { borderLeftColor: accent }, pressed && { backgroundColor: highlight }]}
+      >
+        <Feather name="info" size={16} color={colors.textSecondary} />
+      </Pressable>
+    </View>
+  );
+}
+
+const useStyles = makeStyles((colors) => StyleSheet.create({
+  root: { backgroundColor: colors.surface },
   flex: { flex: 1 },
   header: {
     flexDirection: "row",
@@ -209,41 +323,31 @@ const styles = StyleSheet.create({
     paddingTop: space[4],
     paddingBottom: space[3],
   },
-  badge: {
-    width: 32,
-    height: 32,
-    borderRadius: radii.pill,
-    backgroundColor: colors.accent,
-    alignItems: "center",
-    justifyContent: "center",
-  },
   headerText: { flex: 1 },
-  close: {
-    width: CONTROL_HEIGHT.sm,
-    height: CONTROL_HEIGHT.sm,
-    borderRadius: radii.pill,
-    alignItems: "center",
-    justifyContent: "center",
-  },
   body: { paddingHorizontal: space[4], paddingBottom: space[6], gap: space[3] },
-  scan: {
+  feature: {
     flexDirection: "row",
     alignItems: "center",
-    gap: space[3],
-    minHeight: 52,
-    paddingHorizontal: space[3],
     borderRadius: radii.control,
     borderCurve: "continuous",
     borderWidth: 1,
-    borderColor: colors.moneyPositive,
+    overflow: "hidden",
   },
-  scanIcon: {
+  featureMain: { flex: 1, flexDirection: "row", alignItems: "center", gap: space[3], minHeight: 52, paddingHorizontal: space[3] },
+  featureIcon: {
     width: 32,
     height: 32,
     borderRadius: radii.pill,
-    backgroundColor: colors.moneyPositive,
     alignItems: "center",
     justifyContent: "center",
+  },
+  info: {
+    width: 44,
+    alignSelf: "stretch",
+    minHeight: 52,
+    alignItems: "center",
+    justifyContent: "center",
+    borderLeftWidth: StyleSheet.hairlineWidth,
   },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: space[2] },
   tile: {
@@ -261,6 +365,8 @@ const styles = StyleSheet.create({
     borderColor: colors.borderSubtle,
     backgroundColor: colors.background,
   },
+  // The eKash shortcut wears eKash's own teal (from its logo) so it stands apart from the other tiles.
+  tileEkash: { borderColor: colors.ekash, backgroundColor: colors.ekashBg },
   tileOff: { opacity: 0.55 },
   primary: {
     flexDirection: "row",
@@ -270,7 +376,34 @@ const styles = StyleSheet.create({
     paddingHorizontal: space[4],
     borderRadius: radii.control,
     borderCurve: "continuous",
-    backgroundColor: colors.accent,
+    backgroundColor: colors.accentSolid,
   },
+  footer: { gap: space[2] },
   note: { textAlign: "center" },
-});
+  // "Close" sits below the content, centred, so it is the last thing under the thumb.
+  close: {
+    alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space[1],
+    minHeight: CONTROL_HEIGHT.md,
+    paddingHorizontal: space[5],
+    borderRadius: radii.pill,
+  },
+  scrim: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: "rgba(0,0,0,0.4)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: space[6],
+  },
+  dialog: {
+    width: "100%",
+    maxWidth: 360,
+    gap: space[3],
+    padding: space[5],
+    borderRadius: radii.card,
+    borderCurve: "continuous",
+    backgroundColor: colors.surface,
+  },
+}));

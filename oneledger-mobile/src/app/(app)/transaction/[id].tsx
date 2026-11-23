@@ -40,9 +40,11 @@ import { useQuery } from "@/hooks/useQuery";
 import { config } from "@/lib/config";
 import { formatFullDateTime } from "@/lib/kigali-time";
 import { formatMoney, formatRwf } from "@/lib/money";
-import { colors, space } from "@/theme/tokens";
+import { space } from "@/theme/tokens";
+import { useTheme } from "@/theme/ThemeProvider";
 
 export default function TransactionDetail() {
+  const { colors } = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { active } = useActiveSpace();
   const load = useCallback(() => getTransactionById(id), [id]);

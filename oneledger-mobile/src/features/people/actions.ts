@@ -18,9 +18,17 @@ async function call<T>(fn: string, args: Record<string, unknown>, pick: (data: u
 
 const asId = (d: unknown): string => (typeof d === "string" ? d : "");
 
+/** How many transactions a sort linked to people and merchants (and how many new people that made). */
+export type SortOutcome = { linked: number; created: number };
+
+const count = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+
 /** Sort not-yet-sorted transactions into people and merchants. Safe to repeat. */
 export const sortTransactions = (workspaceId: string) =>
-  call("backfill_counterparties", { p_workspace_id: workspaceId }, () => null);
+  call<SortOutcome>("backfill_counterparties", { p_workspace_id: workspaceId }, (data) => {
+    const d = (data && typeof data === "object" ? data : {}) as Record<string, unknown>;
+    return { linked: count(d.linked), created: count(d.created) };
+  });
 
 export const renamePerson = (id: string, name: string, kind: PersonKind) =>
   call("update_counterparty", { p_id: id, p_display_name: name.trim(), p_kind: kind }, () => null);

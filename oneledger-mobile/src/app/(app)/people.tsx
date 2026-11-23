@@ -3,10 +3,12 @@ import { useCallback, useEffect, useState } from "react";
 import { Pressable, View } from "react-native";
 
 import { fetchPeople } from "@/api/mobile-api";
-import { Badge, Button, Card, Chip, EmptyState, Screen, ScreenHeader, Text, TextField } from "@/components/ds";
+import { Badge, Button, Card, Chip, EmptyState, ListGroup, ListRow, Screen, ScreenHeader, Text, TextField } from "@/components/ds";
 import { sortTransactions } from "@/features/people/actions";
 import { KIND_LABEL, KIND_VARIANT, flowText, personSummary } from "@/features/people/display";
 import type { PersonKind } from "@/features/people/types";
+import { getTrustedRecipients } from "@/features/pay/recipients";
+import { formatLocalMsisdn } from "@/features/pay/target";
 import { useQuery } from "@/hooks/useQuery";
 import { space } from "@/theme/tokens";
 
@@ -27,6 +29,7 @@ export default function People() {
   const [kind, setKind] = useState<PersonKind | "all">("all");
   const [sorting, setSorting] = useState(false);
   const [sortError, setSortError] = useState<string | null>(null);
+  const [sortDone, setSortDone] = useState<string | null>(null);
 
   // Search as you type, but only ask the server once typing pauses.
   useEffect(() => {
@@ -40,16 +43,32 @@ export default function People() {
     [key, q, kind],
   );
   const { data, loading, refresh } = useQuery(load);
+
+  // Contacts you saved from the Pay form. They are not in the list below until
+  // your first payment to them is recorded, so they get their own section here.
+  const loadSaved = useCallback(() => getTrustedRecipients().catch(() => []), []);
+  const { data: savedAll } = useQuery(loadSaved);
+  const needle = q.trim().toLowerCase();
+  const saved = (savedAll ?? []).filter((r) => {
+    if (kind === "unknown") return false;
+    if (kind === "person" && r.kind !== "phone") return false;
+    if (kind === "merchant" && r.kind !== "merchant") return false;
+    if (!(r.kind === "phone" ? r.msisdn : r.merchantCode)) return false;
+    return !needle || r.name.toLowerCase().includes(needle) || (r.msisdn ?? r.merchantCode ?? "").includes(needle);
+  });
   const switching = data !== null && data.key !== key;
   const result = data && !switching ? data.result : null;
 
   async function sortNow(workspaceId: string) {
     setSorting(true);
     setSortError(null);
+    setSortDone(null);
     const res = await sortTransactions(workspaceId);
     setSorting(false);
-    if (!res.ok) setSortError(res.message);
-    else refresh();
+    if (!res.ok) return setSortError(res.message);
+    const n = res.value.linked;
+    setSortDone(n > 0 ? `Sorted ${n} ${n === 1 ? "transaction" : "transactions"} into people and merchants.` : "Nothing more could be sorted.");
+    refresh();
   }
 
   return (
@@ -63,6 +82,23 @@ export default function People() {
         ))}
       </View>
 
+      {saved.length > 0 ? (
+        <ListGroup title="Saved contacts" footer="Saved from the Pay form. Tap one to pay again.">
+          {saved.map((r) => (
+            <ListRow
+              key={r.id}
+              icon={r.kind === "phone" ? "user" : "shopping-bag"}
+              label={r.name}
+              hint={r.msisdn ? formatLocalMsisdn(r.msisdn) : `Merchant code ${r.merchantCode}`}
+              value={<Badge variant={r.kind === "phone" ? "accent" : "neutral"}>{r.kind === "phone" ? "Person" : "Merchant"}</Badge>}
+              onPress={() =>
+                router.push({ pathname: "/pay-new", params: { type: r.kind === "phone" ? "pay_person" : "pay_merchant", saved: r.id } })
+              }
+            />
+          ))}
+        </ListGroup>
+      ) : null}
+
       {(loading && !data) || switching ? (
         <Text variant="label" color="textMuted" accessibilityLiveRegion="polite">
           Loading…
@@ -74,10 +110,10 @@ export default function People() {
         />
       ) : result && result.ok ? (
         <>
-          {result.unresolved > 0 ? (
+          {result.sortable > 0 ? (
             <Card style={{ gap: space[2] }}>
               <Text variant="label" color="textSecondary">
-                {result.unresolved} {result.unresolved === 1 ? "transaction isn't" : "transactions aren't"} sorted into people yet.
+                {result.sortable} {result.sortable === 1 ? "transaction isn't" : "transactions aren't"} sorted into people yet.
               </Text>
               <Button label="Sort them now" variant="secondary" loading={sorting} onPress={() => sortNow(result.workspaceId)} />
               {sortError ? (
@@ -86,6 +122,17 @@ export default function People() {
                 </Text>
               ) : null}
             </Card>
+          ) : null}
+          {sortDone ? (
+            <Text variant="label" color="textSecondary" accessibilityLiveRegion="polite">
+              {sortDone}
+            </Text>
+          ) : null}
+          {result.unresolved - result.sortable > 0 ? (
+            <Text variant="caption" color="textMuted">
+              {result.unresolved - result.sortable} {result.unresolved - result.sortable === 1 ? "transaction has" : "transactions have"} no name or number
+              (fees or imported rows, for example), so {result.unresolved - result.sortable === 1 ? "it" : "they"} can&apos;t be grouped into people.
+            </Text>
           ) : null}
 
           {result.people.length === 0 ? (

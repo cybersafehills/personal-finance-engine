@@ -2,6 +2,7 @@ import { assertEquals } from "jsr:@std/assert@1";
 import {
   parseCreateIntent,
   parseHandoff,
+  parseSettle,
   toMobileIntent,
 } from "./mobile-pay.ts";
 
@@ -182,3 +183,37 @@ Deno.test("a handoff never accepts a mismatched method/outcome, qr, or anything 
     assertEquals(parseHandoff(body).ok, false, JSON.stringify(body));
   }
 });
+
+Deno.test("parseSettle: only 'sent' or 'failed'", () => {
+  assertEquals(parseSettle({ outcome: "sent" }), { ok: true, value: { outcome: "sent" } });
+  assertEquals(parseSettle({ outcome: "failed" }), { ok: true, value: { outcome: "failed" } });
+  for (const bad of [{ outcome: "paid" }, { outcome: "" }, {}, null, "sent", { outcome: 1 }]) {
+    assertEquals(parseSettle(bad).ok, false);
+  }
+});
+
+Deno.test("toMobileIntent: carries when it changed and whether a provider verified it", () => {
+  const base = {
+    id: "i", state: "awaiting_verification", payment_type: "pay_person", provider: "mtn", currency: "RWF",
+    amount_minor: 5000, recipient_name: null, recipient_msisdn_masked: null, merchant_code: null,
+    billing_reference: null, expires_at: null, created_at: "2026-11-19T10:00:00Z",
+  };
+  assertEquals(toMobileIntent(base, null).verified, false);
+  assertEquals(toMobileIntent(base, null).updatedAt, "2026-11-19T10:00:00Z");
+  const verified = toMobileIntent({ ...base, verified_at: "2026-11-19T10:01:00Z", updated_at: "2026-11-19T10:01:00Z" }, null);
+  assertEquals(verified.verified, true);
+  assertEquals(verified.updatedAt, "2026-11-19T10:01:00Z");
+});
+
+Deno.test("toMobileIntent: carries the full recipient number for the payer, not only the masked one", () => {
+  const base = {
+    id: "i", state: "draft", payment_type: "pay_person", provider: "mtn", currency: "RWF",
+    amount_minor: 1000, recipient_name: "Mum", recipient_msisdn_masked: "•••• ••• 3866",
+    recipient_msisdn_normalized: "250786983866", merchant_code: null,
+    billing_reference: null, expires_at: null, created_at: "2026-11-19T10:00:00Z",
+  };
+  assertEquals(toMobileIntent(base, null).recipientMsisdn, "250786983866");
+  assertEquals(toMobileIntent(base, null).recipientMasked, "•••• ••• 3866");
+  assertEquals(toMobileIntent({ ...base, recipient_msisdn_normalized: undefined }, null).recipientMsisdn, null);
+});
+

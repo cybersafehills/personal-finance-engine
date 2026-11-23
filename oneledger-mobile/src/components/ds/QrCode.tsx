@@ -2,7 +2,6 @@ import { memo, useMemo } from "react";
 import { View } from "react-native";
 
 import { qrMatrix } from "@/lib/qr";
-import { colors } from "@/theme/tokens";
 
 const QUIET = 4; // modules of white border a scanner needs
 
@@ -25,7 +24,7 @@ function QrCodeBase({ value, size = 220, label }: { value: string; size?: number
       {matrix.map((row, y) => (
         <View key={y} style={{ flexDirection: "row", position: "absolute", top: (y + QUIET) * cell, left: QUIET * cell }}>
           {row.map((dark, x) => (
-            <View key={x} style={{ width: cell, height: cell, backgroundColor: dark ? colors.textPrimary : "#ffffff" }} />
+            <View key={x} style={{ width: cell, height: cell, backgroundColor: dark ? "#000000" : "#ffffff" }} />
           ))}
         </View>
       ))}

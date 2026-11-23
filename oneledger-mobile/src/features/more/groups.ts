@@ -4,7 +4,7 @@
 // answer (offline, older server) hides nothing, so nothing that worked
 // before disappears.
 
-export type MoreFlag = "wallets" | "people" | "paymentRequests" | "insightsCenter" | "statements" | "insights" | "spaces" | "bills" | "integrations" | "developer";
+export type MoreFlag = "wallets" | "people" | "paymentRequests" | "insightsCenter" | "statements" | "insights" | "spaces" | "bills" | "integrations" | "developer" | "assistedPay" | "ussdDirectory";
 
 export type MoreFlags = Partial<Record<MoreFlag, boolean>>;
 
@@ -18,6 +18,9 @@ export type MoreRoute =
   | "/wallets"
   | "/goals"
   | "/requests"
+  | "/payment-activity"
+  | "/payment-templates"
+  | "/ussd"
   | "/space-members"
   | "/notifications"
   | "/security"
@@ -57,6 +60,9 @@ export const MORE_GROUPS: readonly MoreGroup[] = [
     title: "Pay & Services",
     links: [
       { route: "/requests", label: "Payment requests", hint: "Ask someone to pay you with a link.", requires: "paymentRequests", onlyWhenOn: true },
+      { route: "/payment-activity", label: "Payment activity", hint: "Payments you prepared, and where each one stands.", requires: "assistedPay", onlyWhenOn: true },
+      { route: "/payment-templates", label: "Payment templates", hint: "Saved payments you can reuse.", requires: "assistedPay", onlyWhenOn: true },
+      { route: "/ussd", label: "USSD directory", hint: "Verified codes for Mobile Money, banking and government services.", requires: "ussdDirectory", onlyWhenOn: true },
     ],
   },
   {
@@ -86,7 +92,7 @@ export function parseMoreFlags(status: number, body: unknown): MoreFlags | null 
   if (b.ok !== true || typeof b.config !== "object" || b.config === null) return null;
   const c = b.config as Record<string, unknown>;
   const flags: MoreFlags = {};
-  for (const key of ["statements", "insights", "spaces", "bills", "integrations", "developer", "wallets", "people", "paymentRequests", "insightsCenter"] as const) {
+  for (const key of ["statements", "insights", "spaces", "bills", "integrations", "developer", "wallets", "people", "paymentRequests", "insightsCenter", "assistedPay", "ussdDirectory"] as const) {
     if (typeof c[key] === "boolean") flags[key] = c[key];
   }
   return flags;

@@ -1,0 +1,250 @@
+@import "tailwindcss";
+
+/*
+ * Platform Console design tokens (v2).
+ *
+ * Principles
+ *  - OneLedger brand: navy (#07143a) + blue accent. No competing identity.
+ *  - Semantic colour is reserved for STATUS (positive / attention / danger /
+ *    info). Nothing is coloured decoratively.
+ *  - Every text/background pair below meets WCAG 2.1 AA (>= 4.5:1 body,
+ *    >= 3:1 large/UI). Soft status fills pair with a dark ink of the same hue.
+ *  - Light by default, dark on request or when the OS asks and the user has
+ *    not chosen (html[data-theme] wins over the media query).
+ */
+:root {
+  color-scheme: light;
+
+  /* Surfaces */
+  --canvas: #f3f4f7;
+  --surface: #ffffff;
+  --surface-muted: #f6f7fa;
+  --surface-hover: #eef0f5;
+  --border: #e3e5ec;
+  --border-strong: #c9cdd8;
+
+  /* Text */
+  --text: #12141c;
+  --text-2: #444a5c;
+  --text-3: #5c6376;
+
+  /* Brand + interactive */
+  --accent: #2748a8;
+  --accent-hover: #1e3a8a;
+  --accent-soft: #e6ecfb;
+  --accent-ink: #1b3278;
+  --accent-fg: #ffffff;
+  --ring: #5b7fe0;
+
+  /* Sidebar (always dark navy, both themes) */
+  --side-bg: #0a1330;
+  --side-bg-2: #101b40;
+  --side-text: #c5cbe0;
+  --side-text-strong: #ffffff;
+  --side-muted: #8791b3;
+  --side-border: #1b2750;
+  --side-active-bg: #1b2a5e;
+  --side-active-bar: #7f9cf5;
+
+  /* Status */
+  --positive: #0b7a4b;
+  --positive-soft: #e3f6ec;
+  --positive-ink: #075e39;
+  --attention: #8a5a00;
+  --attention-soft: #fdf1d2;
+  --attention-ink: #6b4500;
+  --danger: #b42318;
+  --danger-soft: #fdeceb;
+  --danger-ink: #8f1c13;
+  --info: #1d4ed8;
+  --info-soft: #e6eeff;
+  --info-ink: #1a3fae;
+
+  /* Chart palette (colour-blind safe ordering) */
+  --chart-1: #2748a8;
+  --chart-2: #0e9aa7;
+  --chart-3: #d97706;
+  --chart-4: #7c3aed;
+  --chart-5: #64748b;
+  --chart-grid: #e3e5ec;
+
+  --radius-card: 0.875rem;
+  --radius-control: 0.5rem;
+  --shadow-card: 0 1px 2px rgb(16 24 40 / 0.05), 0 1px 3px rgb(16 24 40 / 0.04);
+  --shadow-pop: 0 12px 32px rgb(16 24 40 / 0.18), 0 2px 6px rgb(16 24 40 / 0.08);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --canvas: #0b0d13;
+  --surface: #131722;
+  --surface-muted: #181d2a;
+  --surface-hover: #1f2535;
+  --border: #252c3d;
+  --border-strong: #38415a;
+  --text: #f1f3f9;
+  --text-2: #c0c6d6;
+  --text-3: #98a0b6;
+  --accent: #8aa6ff;
+  --accent-hover: #a7bcff;
+  --accent-soft: #1b2650;
+  --accent-ink: #c9d6ff;
+  --accent-fg: #0b0d13;
+  --ring: #8aa6ff;
+  --side-bg: #080c1c;
+  --side-bg-2: #0d1330;
+  --side-border: #172043;
+  --side-active-bg: #172457;
+  --positive: #4fd69c;
+  --positive-soft: #0e2a1f;
+  --positive-ink: #8ff0c3;
+  --attention: #f2c05c;
+  --attention-soft: #2c2410;
+  --attention-ink: #f7d98f;
+  --danger: #ff8f85;
+  --danger-soft: #331816;
+  --danger-ink: #ffb9b2;
+  --info: #8fb0ff;
+  --info-soft: #17224a;
+  --info-ink: #b9ceff;
+  --chart-1: #8aa6ff;
+  --chart-2: #3dc9d6;
+  --chart-3: #f5a524;
+  --chart-4: #b79cff;
+  --chart-5: #94a3b8;
+  --chart-grid: #252c3d;
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-pop: 0 12px 32px rgb(0 0 0 / 0.55);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+    --canvas: #0b0d13;
+    --surface: #131722;
+    --surface-muted: #181d2a;
+    --surface-hover: #1f2535;
+    --border: #252c3d;
+    --border-strong: #38415a;
+    --text: #f1f3f9;
+    --text-2: #c0c6d6;
+    --text-3: #98a0b6;
+    --accent: #8aa6ff;
+    --accent-hover: #a7bcff;
+    --accent-soft: #1b2650;
+    --accent-ink: #c9d6ff;
+    --accent-fg: #0b0d13;
+    --ring: #8aa6ff;
+    --side-bg: #080c1c;
+    --side-bg-2: #0d1330;
+    --side-border: #172043;
+    --side-active-bg: #172457;
+    --positive: #4fd69c;
+    --positive-soft: #0e2a1f;
+    --positive-ink: #8ff0c3;
+    --attention: #f2c05c;
+    --attention-soft: #2c2410;
+    --attention-ink: #f7d98f;
+    --danger: #ff8f85;
+    --danger-soft: #331816;
+    --danger-ink: #ffb9b2;
+    --info: #8fb0ff;
+    --info-soft: #17224a;
+    --info-ink: #b9ceff;
+    --chart-1: #8aa6ff;
+    --chart-2: #3dc9d6;
+    --chart-3: #f5a524;
+    --chart-4: #b79cff;
+    --chart-5: #94a3b8;
+    --chart-grid: #252c3d;
+    --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4);
+    --shadow-pop: 0 12px 32px rgb(0 0 0 / 0.55);
+  }
+}
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-surface-hover: var(--surface-hover);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-text: var(--text);
+  --color-text-2: var(--text-2);
+  --color-text-3: var(--text-3);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-fg: var(--accent-fg);
+  --color-side-bg: var(--side-bg);
+  --color-side-bg-2: var(--side-bg-2);
+  --color-side-text: var(--side-text);
+  --color-side-strong: var(--side-text-strong);
+  --color-side-muted: var(--side-muted);
+  --color-side-border: var(--side-border);
+  --color-side-active: var(--side-active-bg);
+  --color-side-bar: var(--side-active-bar);
+  --color-positive: var(--positive);
+  --color-positive-soft: var(--positive-soft);
+  --color-positive-ink: var(--positive-ink);
+  --color-attention: var(--attention);
+  --color-attention-soft: var(--attention-soft);
+  --color-attention-ink: var(--attention-ink);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-ink: var(--danger-ink);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-info-ink: var(--info-ink);
+  --radius-card: var(--radius-card);
+  --radius-control: var(--radius-control);
+  --shadow-card: var(--shadow-card);
+  --shadow-pop: var(--shadow-pop);
+  --font-sans: var(--font-geist-sans);
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+body {
+  background: var(--canvas);
+  color: var(--text);
+  font-feature-settings: "tnum" 1, "cv11" 1;
+}
+
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Native <dialog> as drawer / modal */
+dialog {
+  color: var(--text);
+}
+dialog::backdrop {
+  background: rgb(8 12 28 / 0.55);
+  backdrop-filter: blur(2px);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .skeleton {
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    50% {
+      opacity: 0.55;
+    }
+  }
+}
+
+/* Theme toggle icon: show the sun in dark mode (click -> light), the moon in light. */
+.theme-sun { display: none; }
+.theme-moon { display: inline-flex; }
+:root[data-theme="dark"] .theme-sun { display: inline-flex; }
+:root[data-theme="dark"] .theme-moon { display: none; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) .theme-sun { display: inline-flex; }
+  :root:not([data-theme]) .theme-moon { display: none; }
+}

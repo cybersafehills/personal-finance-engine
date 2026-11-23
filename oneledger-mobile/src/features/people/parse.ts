@@ -42,7 +42,7 @@ export function parsePerson(raw: unknown): Person | null {
 }
 
 export type PeopleResult =
-  | { ok: true; workspaceId: string; total: number; unresolved: number; people: Person[] }
+  | { ok: true; workspaceId: string; total: number; unresolved: number; sortable: number; people: Person[] }
   | ({ ok: false } & BearerFailure);
 
 export function parsePeopleResponse(status: number, body: unknown): PeopleResult {
@@ -56,6 +56,8 @@ export function parsePeopleResponse(status: number, body: unknown): PeopleResult
     workspaceId: body.workspace_id,
     total,
     unresolved,
+    // An older server doesn't send it: then every unresolved one is offered, as before.
+    sortable: Math.min(unresolved, int(body.sortable_transactions) ?? unresolved),
     people: body.counterparties.map(parsePerson).filter((p): p is Person => p !== null),
   };
 }
