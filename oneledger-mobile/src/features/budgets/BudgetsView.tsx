@@ -3,9 +3,14 @@ import { GuideSuggestion } from "@/features/guides/GuideSuggestion";
 import { GuideAnchor } from "@/features/guides/GuideAnchor";
 import * as Linking from "expo-linking";
 import { router } from "expo-router";
-import { useCallback } from "react";
-import { View } from "react-native";
+import { useCallback, type ReactNode } from "react";
+import { Platform, View } from "react-native";
 
+import { useSession } from "@/features/auth/SessionProvider";
+import { useActiveSpace } from "@/features/spaces/ActiveSpaceProvider";
+import { BudgetDrafts } from "./BudgetDrafts";
+import { AllocationEditor } from "./AllocationEditor";
+import { canEditAllocations } from "./allocation-editor";
 import { fetchBudgets } from "@/api/mobile-api";
 import {
   Badge,
@@ -39,21 +44,30 @@ const tone = (status: BudgetAllocation["status"]): ProgressTone =>
   status === "healthy" ? "positive" : status === "insufficient_data" ? "accent" : "attention";
 
 // Your active budget, with how each part of it is going. The figures come
-// from the web's budget maths (the app only displays them); creating or
-// editing a budget stays on the web.
+// from the web's canonical budget actuals.
 export function BudgetsView({ embedded = false }: { embedded?: boolean }) {
   const load = useCallback(() => fetchBudgets(), []);
-  const { data, loading, refresh } = useQuery(load);
+  const { data, loading, error, refresh } = useQuery(load);
+  const { activeId } = useActiveSpace();
+  const { session } = useSession();
+  const loadPermission = useCallback(() => activeId ? canEditAllocations(activeId) : Promise.resolve(false), [activeId]);
+  const { data: canEdit } = useQuery(loadPermission, "budget-edit");
+  const showDrafts = Platform.OS !== "web" && canEdit === true && !!activeId && !!session;
 
   return (
     <Screen edges={embedded ? ["left", "right"] : undefined}>
       <ScreenHeader title={embedded ? "Plan" : "Budget"} subtitle="How this period is going" inline={embedded} />
+      {showDrafts && activeId && session ? (
+        <BudgetDrafts key={`${session.user.id}:${activeId}`} scope={{ userId: session.user.id, workspaceId: activeId }} onActivated={refresh} />
+      ) : null}
 
       <GuideSuggestion id="plan" enabled={data?.ok === true && data.budgets.length > 0} />
       {loading && !data ? (
         <Text variant="label" color="textMuted">
           Loading…
         </Text>
+      ) : error ? (
+        <EmptyState title="Couldn’t load your budget." action={<Button label="Try again" variant="secondary" onPress={refresh} />} />
       ) : data && !data.ok ? (
         <EmptyState
           title={data.message}
@@ -67,9 +81,9 @@ export function BudgetsView({ embedded = false }: { embedded?: boolean }) {
         <EmptyState
           variant="setup"
           title="No active budget"
-          description="Set one up on the web and its progress shows here."
+          description={showDrafts ? "Activate a draft to track your spending here." : "Set one up on the web and its progress shows here."}
           action={
-            config.apiBaseUrl ? (
+            !showDrafts && config.apiBaseUrl ? (
               <Button
                 label="Create a budget on the web"
                 variant="secondary"
@@ -79,14 +93,20 @@ export function BudgetsView({ embedded = false }: { embedded?: boolean }) {
           }
         />
       ) : data ? (
-        data.budgets.map((budget, index) => <BudgetCard key={budget.id} budget={budget} guideEnabled={index === 0} />)
+        data.budgets.map((budget, index) => (
+          <BudgetCard key={`${activeId}:${budget.id}`} budget={budget} guideEnabled={index === 0}>
+            {canEdit && activeId && session ? (
+              <AllocationEditor userId={session.user.id} workspaceId={activeId} budgetId={budget.id} onSaved={refresh} />
+            ) : null}
+          </BudgetCard>
+        ))
       ) : null}
       {embedded ? <PartnerPlacement id="plan" ready={data?.ok === true && data.budgets.length > 0}/> : null}
     </Screen>
   );
 }
 
-function BudgetCard({ budget, guideEnabled = false }: { budget: Budget; guideEnabled?: boolean }) {
+function BudgetCard({ budget, children, guideEnabled = false }: { budget: Budget; children?: ReactNode; guideEnabled?: boolean }) {
   const sum = totals(budget.allocations);
   const worst = statusDisplay(worstStatus(budget.allocations));
   const pace = paceLabel(budget.elapsedFraction);
@@ -118,6 +138,7 @@ function BudgetCard({ budget, guideEnabled = false }: { budget: Budget; guideEna
             ? `${money(sum.remainingMinor, budget.currency)} left`
             : `${money(-sum.remainingMinor, budget.currency)} over`}
         </Text>
+        {children}
       </Card>
 
       </GuideAnchor>

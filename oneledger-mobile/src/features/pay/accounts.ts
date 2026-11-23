@@ -1,3 +1,4 @@
+import { selectedWorkspaceId } from "@/features/spaces/selected-space";
 import { supabase } from "@/api/supabase";
 
 // The accounts a payment can be made from, with the `provider` the app needs to
@@ -23,6 +24,7 @@ export async function listPayerAccounts(): Promise<PayerAccount[]> {
   const { data, error } = await supabase
     .from("accounts")
     .select("id, name, currency, workspace_id, provider, financial_sources(owner_user_id)")
+    .eq("workspace_id", selectedWorkspaceId())
     .eq("is_active", true)
     .is("archived_at", null)
     .order("is_primary", { ascending: false })

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { View } from "react-native";
+import { Platform, View } from "react-native";
 import { Card, Text } from "@/components/ds";
 import { MenuGroup, MenuRow, MenuScreen } from "@/features/settings/MenuUI";
 import { useLock } from "@/features/lock/LockProvider";
@@ -29,7 +29,7 @@ export default function Security() {
         <MenuRow icon="lock" label="App lock" toggle={enabled} onToggle={toggle} toggleDisabled={!available || busy} />
       </MenuGroup>
       <View style={{ gap: space[3] }}>
-        {!available ? <Text variant="label" color="attention">App lock needs a fingerprint, face or passcode set up on this phone. It isn&apos;t available in the web preview.</Text> : null}
+        {!available ? <Text variant="label" color="attention">App lock needs a fingerprint, face or passcode set up on this phone.{Platform.OS === "web" ? " It isn&apos;t available in the web preview." : " Set one up in your phone's settings, then come back."}</Text> : null}
         {message ? <Text variant="label" color="attention" accessibilityRole="alert">{message}</Text> : null}
         <Text variant="label" color="textMuted">Recording your MoMo messages keeps working while the app is locked.</Text>
       </View>

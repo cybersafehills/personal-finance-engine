@@ -46,7 +46,7 @@ function GlobalPayButton({config}:{config:Awaited<ReturnType<typeof fetchPayConf
  if(!payOn||hidden)return null;
  return <View pointerEvents="box-none" style={StyleSheet.absoluteFill}><Animated.View testID="global-pay-position" style={[styles.floating,animated]}><GuideAnchor persistent id="pay-launcher"><PayTabButton floating onPress={()=>{Keyboard.dismiss();router.push("/pay-sheet");}} onHold={target?()=>{Keyboard.dismiss();router.push(target);}:undefined} holdMs={prefs.durationMs} hint={holdHint(prefs,ready)}/></GuideAnchor>{onTabs?<Animated.View accessibilityElementsHidden style={[{position:"absolute",top:54,width:48,alignItems:"center"},labelStyle]}><Text variant="caption" color="textPrimary" style={{fontSize:10,lineHeight:12}}>Pay</Text></Animated.View>:null}</Animated.View></View>;
 }
-const styles=StyleSheet.create({floating:{position:"absolute",width:48,height:48,zIndex:100}});
+const styles=StyleSheet.create({floating:{position:"absolute",width:48,height:48,zIndex:100,elevation:20}});
 
 function GlobalNavigation() {
  const path = usePathname();

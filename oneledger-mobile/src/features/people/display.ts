@@ -3,12 +3,14 @@ import { formatMoney } from "@/lib/money";
 import type { Person, PersonConfidence, PersonCurrency, PersonKind } from "./types";
 
 export const KIND_LABEL: Record<PersonKind, string> = {
+  self: "My account",
   person: "Person",
   merchant: "Merchant",
   unknown: "Not sure yet",
 };
 
 export const KIND_VARIANT: Record<PersonKind, "accent" | "positive" | "neutral"> = {
+  self: "neutral",
   person: "accent",
   merchant: "positive",
   unknown: "neutral",

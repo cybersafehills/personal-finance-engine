@@ -58,6 +58,7 @@ export function TransactionItem({
       </div>
       <MoneyAmount
         amountRwf={isFailed ? 0 : signedAmount}
+        currency={transaction.currency}
         size="sm"
         masked={masked}
       />

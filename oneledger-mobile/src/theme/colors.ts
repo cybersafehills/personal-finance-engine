@@ -1,3 +1,13 @@
+// The two palettes. Every token exists in both (the `Palette` type makes a missing
+// or extra key a compile error), and tests check contrast for the pairs that carry
+// text. Naming is by ROLE, not by hue, so a token can change colour per theme:
+//
+//   textPrimary / Secondary / Muted   text and icons on `surface` or `background`
+//   accent                            interactive text, icons, links and small fills
+//   accentSolid / *Solid              a strong fill that carries white content (`onSolid`)
+//   moneyPositive / attention / danger  text-and-icon colours for meaning on a surface
+//   *Bg                               a quiet tint behind that meaning
+
 // Creative surfaces intentionally retain their art direction in both themes.
 const creativeColors = {
   iconMoneyStart: "#075c54",
@@ -34,16 +44,6 @@ const creativeColors = {
   partnerBankingEnd: "#251627",
   partnerOnMuted: "#f0edf9",
 } as const;
-
-// The two palettes. Every token exists in both (the `Palette` type makes a missing
-// or extra key a compile error), and tests check contrast for the pairs that carry
-// text. Naming is by ROLE, not by hue, so a token can change colour per theme:
-//
-//   textPrimary / Secondary / Muted   text and icons on `surface` or `background`
-//   accent                            interactive text, icons, links and small fills
-//   accentSolid / *Solid              a strong fill that carries white content (`onSolid`)
-//   moneyPositive / attention / danger  text-and-icon colours for meaning on a surface
-//   *Bg                               a quiet tint behind that meaning
 
 export const lightColors = {
   ...creativeColors,

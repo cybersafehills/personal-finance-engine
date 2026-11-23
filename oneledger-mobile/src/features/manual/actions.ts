@@ -1,3 +1,4 @@
+import { selectedWorkspaceId } from "@/features/spaces/selected-space";
 import { supabase } from "@/api/supabase";
 import type { SupportedCurrency } from "@/lib/money";
 
@@ -17,6 +18,7 @@ export async function listManualAccounts(): Promise<ManualAccount[]> {
   const { data, error } = await supabase
     .from("accounts")
     .select("id, name, currency, workspace_id")
+    .eq("workspace_id", selectedWorkspaceId())
     .eq("is_active", true)
     .is("archived_at", null)
     .order("is_primary", { ascending: false })

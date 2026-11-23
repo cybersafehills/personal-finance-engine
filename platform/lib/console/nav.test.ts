@@ -41,3 +41,10 @@ test("every nav label is unique", () => {
   const labels = flat(owner).map((i) => i.label);
   assert.equal(new Set(labels).size, labels.length);
 });
+
+test("Partners & Placements is a link only for roles holding view_partners", () => {
+  const withIt = flat({ role: "platform_admin", permissions: ["view_partners"] });
+  assert.equal(withIt.find((i) => i.label === "Partners & Placements")?.href, "/platform/partners");
+  const without = flat({ role: "support_agent", permissions: ["view_aggregate_metrics"] });
+  assert.equal(without.find((i) => i.label === "Partners & Placements"), undefined);
+});

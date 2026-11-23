@@ -16,6 +16,9 @@ const mockRevoke = jest.fn();
 const mockShare = jest.fn();
 
 jest.mock("expo-router", () => jest.requireActual("@/test/router-mock"));
+jest.mock("@/features/auth/SessionProvider", () => ({
+  useSession: () => ({ session: { user: { id: "u-me" } } }),
+}));
 jest.mock("@/features/spaces/ActiveSpaceProvider", () => ({
   useActiveSpace: () => ({ spaces: [], active: mockActive, activeId: mockActive?.id ?? null, setActive: () => {}, activateCreated: async () => {} }),
 }));

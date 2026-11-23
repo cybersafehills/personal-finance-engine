@@ -54,6 +54,9 @@ describe.each(Object.entries(palettes))("%s palette: contrast", (_name, p) => {
   it("the Request-payment tint text is readable on its tint (3:1 for the brand orange)", () => {
     expect(contrastRatio(p.moneyRequest, p.moneyRequestBg)).toBeGreaterThanOrEqual(3);
   });
+});
+
+describe.each(Object.entries(palettes))("%s palette: creative, nav and icon contrast", (_name, p) => {
   it("keeps selected navigation strokes and labels visible", () => {
     for (const endpoint of [p.homeGradientStart, p.homeGradientEnd]) expect(contrastRatio(endpoint, p.navSelectedBg)).toBeGreaterThanOrEqual(3);
     expect(contrastRatio(p.navSelectedInk, p.surface)).toBeGreaterThanOrEqual(4.5);
@@ -66,5 +69,4 @@ describe.each(Object.entries(palettes))("%s palette: contrast", (_name, p) => {
   it("keeps white menu icons visible across semantic gradients", () => {
     for (const endpoint of [p.iconMoneyStart, p.iconMoneyEnd, p.iconLearningStart, p.iconLearningEnd, p.iconCommunicationStart, p.iconCommunicationEnd, p.iconNeutralStart, p.iconNeutralEnd]) expect(contrastRatio(p.onSolid, endpoint)).toBeGreaterThanOrEqual(3);
   });
-
 });

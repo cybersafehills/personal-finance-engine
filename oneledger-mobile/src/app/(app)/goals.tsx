@@ -1,6 +1,5 @@
-import * as Linking from "expo-linking";
-import { useCallback } from "react";
-import { View } from "react-native";
+import { useCallback, type ReactNode } from "react";
+import { Platform, View } from "react-native";
 
 import { Badge, Button, Card, EmptyState, ProgressBar, Screen, ScreenHeader, Text } from "@/components/ds";
 import {
@@ -8,24 +7,38 @@ import {
   isReached,
   paceNotes,
   percentComplete,
-  sortGoals } from "@/features/goals/display";
+  sortGoals,
+} from "@/features/goals/display";
+import { useSession } from "@/features/auth/SessionProvider";
+import { ArchiveGoalControl, NewGoalControl } from "@/features/goals/GoalManagement";
+import { canManageGoals } from "@/features/goals/management";
+import { GoalContributions } from "@/features/goals/GoalContributions";
+import { useActiveSpace } from "@/features/spaces/ActiveSpaceProvider";
 import { getGoals } from "@/features/goals/queries";
 import type { Goal } from "@/features/goals/types";
 import { useQuery } from "@/hooks/useQuery";
-import { config } from "@/lib/config";
-import { formatMoney } from "@/lib/money";
+import { formatAmount } from "../../../../web/shared/financial";
 import { space } from "@/theme/tokens";
 
 // Your savings goals and how each is going. Progress and the pace lines come
-// from the database's goal_progress(); adding goals and contributions stays on
-// the web.
+// from the database's goal_progress().
 export default function Goals() {
+  const { active } = useActiveSpace();
+  const { session } = useSession();
+  const canContribute = active?.role === "owner" || active?.role === "admin" || active?.role === "member";
   const load = useCallback(async () => sortGoals(await getGoals()), []);
   const { data, loading, error, refresh } = useQuery(load);
+  const workspaceId = active?.id;
+  const loadPermission = useCallback(() => workspaceId ? canManageGoals(workspaceId) : Promise.resolve(false), [workspaceId]);
+  const { data: canManage } = useQuery(loadPermission, "goal-management");
+  const scope = workspaceId && session ? { workspaceId, userId: session.user.id } : null;
 
   return (
     <Screen>
       <ScreenHeader title="Goals" subtitle="Emergency funds, investing, purchases and debt" />
+      {scope && canManage ? (
+        <NewGoalControl key={`${scope.userId}:${scope.workspaceId}`} scope={scope} onSaved={refresh} />
+      ) : null}
 
       {loading && !data ? (
         <Text variant="label" color="textMuted">
@@ -40,26 +53,27 @@ export default function Goals() {
         <EmptyState
           variant="setup"
           title="No goals yet"
-          description="Create one on the web and its progress shows here."
-          action={
-            config.apiBaseUrl ? (
-              <Button
-                label="Create a goal on the web"
-                variant="secondary"
-                onPress={() => Linking.openURL(`${config.apiBaseUrl}/budgets/goals/new`)}
-              />
-            ) : undefined
-          }
+          description={canManage ? "Create a goal to start tracking your progress." : undefined}
         />
       ) : data ? (
-        data.map((goal) => <GoalCard key={goal.id} goal={goal} />)
+        data.map((goal) => (
+          <GoalCard key={`${active?.id}:${goal.id}`} goal={goal}>
+            {scope ? (
+              <>
+                <GoalContributions goal={goal} {...scope} canManage={canManage === true}
+                  canContribute={Platform.OS !== "web" && canContribute && goal.status === "active"} onSaved={refresh} />
+                {canManage && goal.status !== "archived" ? <ArchiveGoalControl scope={scope} goalId={goal.id} onSaved={refresh} /> : null}
+              </>
+            ) : null}
+          </GoalCard>
+        ))
       ) : null}
     </Screen>
   );
 }
 
-function GoalCard({ goal }: { goal: Goal }) {
-  const money = (minor: number) => formatMoney(BigInt(Math.round(minor)), goal.currency);
+function GoalCard({ goal, children }: { goal: Goal; children?: ReactNode }) {
+  const money = (minor: number) => Number.isSafeInteger(minor) ? formatAmount(minor, goal.currency, false) : "Amount unavailable";
   const percent = percentComplete(goal);
   const reached = goal.status === "completed" || isReached(goal);
   const notes = paceNotes(goal, money);
@@ -98,6 +112,7 @@ function GoalCard({ goal }: { goal: Goal }) {
           {note}
         </Text>
       ))}
+      {children}
     </Card>
   );
 }

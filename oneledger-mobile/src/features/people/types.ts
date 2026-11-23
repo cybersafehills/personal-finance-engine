@@ -1,7 +1,7 @@
 import type { DrilldownTransaction } from "@/features/insights/types";
 import type { SupportedCurrency } from "@/lib/money";
 
-export type PersonKind = "person" | "merchant" | "unknown";
+export type PersonKind = "person" | "merchant" | "unknown" | "self";
 export type PersonConfidence = "user_confirmed" | "high" | "low";
 
 export type PersonCurrency = {
