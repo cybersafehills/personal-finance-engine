@@ -2,7 +2,7 @@ import {
   Activity, AlertTriangle, ArrowRight, BarChart3, Building2, Check, CheckCheck, ChevronDown,
   ChevronLeft, ChevronRight, CreditCard, Flag, Gavel, HeartPulse, Info, Key, LayoutDashboard,
   LifeBuoy, LineChart, Mail, Menu, Moon, Plug, Receipt, Repeat, ScrollText, Search,
-  ShieldCheck, Siren, SlidersHorizontal, Sun, UserPlus, Users, X, type LucideIcon,
+  ShieldCheck, Siren, SlidersHorizontal, Sun, UserPlus, Users, X, Gift, type LucideIcon,
 } from "lucide-react";
 
 const MAP: Record<string, LucideIcon> = {
@@ -12,7 +12,7 @@ const MAP: Record<string, LucideIcon> = {
   heart: HeartPulse, plug: Plug, mail: Mail, flag: Flag, sliders: SlidersHorizontal,
   check: CheckCheck, gavel: Gavel, search: Search, menu: Menu, close: X, sun: Sun, moon: Moon,
   alert: AlertTriangle, info: Info, ok: Check, right: ArrowRight, down: ChevronDown,
-  prev: ChevronLeft, next: ChevronRight,
+  prev: ChevronLeft, next: ChevronRight, gift: Gift,
 };
 
 export function Icon({

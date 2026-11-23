@@ -719,8 +719,10 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # Platform Console foundation (20270120000000) adds 3 RPC-only tables (RLS on, no
 # authenticated grants): console_staff, console_role_permissions,
 # console_audit_events. 140 + 3 = 143; 20270123000000 adds 5 more (tickets, ticket events,
-# incidents, incident events, approval requests) = 148.
-if [ "$TABLE_COUNT" = "148" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# incidents, incident events, approval requests) = 148. Platform partners
+# (20270126000000) adds 5 RPC-only tables (advertisers, offers, offer events,
+# placements, delivery switch) = 153.
+if [ "$TABLE_COUNT" = "153" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -1093,10 +1095,11 @@ AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_p
 # top of the Platform Console's 154 (140 + 14): 164.
 # Platform Console workflows (20270123000000) add 18 (support x7, incidents x5,
 # approvals x4, integrations/communications x2). 164 + 18 = 182.
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "182" ]; then
-  pass "authenticated holds EXECUTE on exactly the 182 functions expected, no more"
+# Platform partners (20270126000000) add 9 (8 console_partner* RPCs + partner_feed). 182 + 9 = 191.
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "191" ]; then
+  pass "authenticated holds EXECUTE on exactly the 191 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 182 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 191 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -10090,6 +10093,45 @@ check_console "owner can read the communications overview" "$(console_call "$CON
 check_console "support agent cannot read communications" "$(console_call "$CON_SUPPORT" aal2 "select public.console_communications_overview();")" "not_authorized"
 IOUT="$(console_call "$CON_OWNER" aal2 "select public.console_integrations_overview();")"
 if printf '%s' "$IOUT" | grep -Eiq 'https?://|secret|token|endpoint'; then fail "Console: integrations overview leaked a URL or secret"; else pass "Console: integrations overview returns counts only"; fi
+
+
+# Partners & placements
+check_console "support agent cannot read partners" "$(console_call "$CON_SUPPORT" aal2 "select public.console_partners_overview();")" "not_authorized"
+check_console "support agent cannot submit an offer" "$(console_call "$CON_SUPPORT" aal2 "select public.console_partner_offer_create('Acme','brand','Learning','A course','Learn a skill','Adults','Fictional terms apply here','https://example.com/x','2099-12-31');")" "not_authorized"
+check_console "owner overview reports delivery OFF by default" "$(console_call "$CON_OWNER" aal2 "select public.console_partners_overview();")" '"delivery_enabled": false'
+check_console "an expired end date is rejected" "$(console_call "$CON_OWNER" aal2 "select public.console_partner_offer_create('Acme','brand','Learning','A course','Learn a skill','Adults','Fictional terms apply here','https://example.com/x','2000-01-01');")" "invalid_end_date"
+check_console "a non-https destination is rejected" "$(console_call "$CON_OWNER" aal2 "select public.console_partner_offer_create('Acme','brand','Learning','A course','Learn a skill','Adults','Fictional terms apply here','http://example.com/x','2099-12-31');")" "violates check"
+check_console "a financial offer must pair provider and Banking" "$(console_call "$CON_OWNER" aal2 "select public.console_partner_offer_create('Acme','brand','Banking','Accounts','Explore','Adults','Fictional terms apply here','https://example.com/x','2099-12-31', false, 'This paid placement is not a recommendation and promises no return.');")" "financial_pairing"
+check_console "a Banking offer without a disclosure is rejected" "$(console_call "$CON_OWNER" aal2 "select public.console_partner_offer_create('Bank X','financial_provider','Banking','Accounts','Explore','Adults','Fictional terms apply here','https://example.com/x','2099-12-31');")" "violates check"
+PO1="$(console_call "$CON_OWNER" aal2 "select public.console_partner_offer_create('Acme Learning','brand','Learning','Build a skill','Intro course','Adults in Rwanda','Fictional terms apply here','https://example.com/learn','2099-12-31', true);" | uuid_of)"
+if [ -n "$PO1" ]; then pass "Console: owner can submit an offer"; else fail "Console: partner offer create failed"; fi
+check_console "a new offer starts in review" "$(console_call "$CON_OWNER" aal2 "select public.console_partner_offer_get('$PO1');")" '"status": "in_review"'
+check_console "approving needs a review note" "$(console_call "$CON_OWNER" aal2 "select public.console_partner_offer_decide('$PO1', 'approve');")" "note_required"
+check_console "the feed is empty while delivery is off" "$(console_call "$USER_A" aal1 "select public.partner_feed();")" '"enabled": false'
+check_console "an in-review offer cannot be paused" "$(console_call "$CON_OWNER" aal2 "select public.console_partner_offer_decide('$PO1', 'pause');")" "invalid_transition"
+check_console "owner approves the offer" "$(console_call "$CON_OWNER" aal2 "select public.console_partner_offer_decide('$PO1', 'approve', 'identity and creative checked');")" "approved"
+check_console "approving twice is idempotent" "$(console_call "$CON_OWNER" aal2 "select public.console_partner_offer_decide('$PO1', 'approve', 'identity and creative checked');")" "approved"
+check_console "placement rejects an unapproved offer id" "$(console_call "$CON_OWNER" aal2 "select public.console_partner_placement_set('home', true, 'wide', 'carousel', 5, true, array['00000000-0000-0000-0000-000000000001']::uuid[]);")" "offer_not_approved"
+check_console "placement rejects a bad interval" "$(console_call "$CON_OWNER" aal2 "select public.console_partner_placement_set('home', true, 'wide', 'carousel', 1, true);")" "invalid_setting"
+check_console_ok "owner can configure a placement" "$(console_call "$CON_OWNER" aal2 "select public.console_partner_placement_set('home', true, 'wide', 'carousel', 5, true, array['$PO1']::uuid[]);")"
+check_console "delivery switch needs the owner permission" "$(console_call "$CON_SUPPORT" aal2 "select public.console_partner_delivery_set(true);")" "not_authorized"
+check_console "owner turns delivery on" "$(console_call "$CON_OWNER" aal2 "select public.console_partner_delivery_set(true);")" "t"
+FEED="$(console_call "$USER_A" aal1 "select public.partner_feed();")"
+check_console "the feed now serves the approved offer to a normal user" "$FEED" "Acme Learning"
+check_console "the feed carries the owner's placement settings" "$FEED" '"intervalSec": 5'
+if printf '%s' "$FEED" | grep -Eiq 'reviewed_by|created_by|review_note|auth\.users|email'; then fail "Console: partner feed leaked a review or staff field"; else pass "Console: partner feed carries no review or staff fields"; fi
+check_console "a paused offer leaves the feed" "$(console_call "$CON_OWNER" aal2 "select public.console_partner_offer_decide('$PO1', 'pause');")" "paused"
+if console_call "$USER_A" aal1 "select public.partner_feed();" | grep -q "Acme Learning"; then fail "Console: paused offer is still in the feed"; else pass "Console: paused offer is not in the feed"; fi
+check_console "authenticated cannot read partner offers directly" "$(console_call "$CON_OWNER" aal2 "select count(*) from public.partner_offers;")" "permission denied"
+check_console "authenticated cannot flip the delivery table directly" "$(console_call "$CON_OWNER" aal2 "update public.partner_delivery set enabled = false;")" "permission denied"
+check_console "offer history is append-only" "$(psql -d pfe_rls -t -A -c "delete from public.partner_offer_events;" 2>&1)" "append-only"
+# Financial provider: stricter approval
+check_console "admin can submit a financial provider offer" "$(console_call "$CON_ADMIN" aal2 "select public.console_partner_offer_create('First Bank','financial_provider','Banking','Understand accounts','Explore features and fees','Adults in Rwanda','Fictional financial promotion terms','https://example.com/bank','2099-12-31', false, 'This paid placement is not a OneLedger recommendation or a guarantee.');")" "-"
+PO2="$(psql -d pfe_rls -t -A -c "select id from public.partner_offers where category = 'Banking' limit 1;")"
+check_console "an admin without the financial permission cannot approve a Banking offer" "$(console_call "$CON_ADMIN" aal2 "select public.console_partner_offer_decide('$PO2', 'approve', 'authorisation evidence seen');")" "not_authorized"
+check_console "the owner can approve a Banking offer" "$(console_call "$CON_OWNER" aal2 "select public.console_partner_offer_decide('$PO2', 'approve', 'authorisation evidence seen');")" "approved"
+PARTNER_AUDIT="$(psql -d pfe_rls -t -A -c "select count(*) from public.console_audit_events where action like 'partners.%';")"
+if [ "$PARTNER_AUDIT" -ge 6 ]; then pass "Console: partner changes are audited"; else fail "Console: too few partner audit rows ($PARTNER_AUDIT)"; fi
 
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="
