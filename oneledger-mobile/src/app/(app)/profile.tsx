@@ -14,7 +14,7 @@ import { config } from '@/lib/config';
 import { useTheme } from '@/theme/ThemeProvider';
 export default function ProfileScreen(){
   const state=useProfile();
-  return <Screen><ScreenHeader title="Your profile"/>{state?.profile?<ProfileEditor key={state.profile.id} profile={state.profile} refresh={state.refresh}/>:<Card><Text>{state?.error || 'Loading your profile…'}</Text>{state?.error?<Button label="Try again" onPress={()=>void state.refresh()}/>:null}</Card>}</Screen>;
+  return <Screen><ScreenHeader title="Your profile" subtitle="Personal details and regional preferences" guideId="profile-page"/>{state?.profile?<ProfileEditor key={state.profile.id} profile={state.profile} refresh={state.refresh}/>:<Card><Text>{state?.error || 'Loading your profile…'}</Text>{state?.error?<Button label="Try again" onPress={()=>void state.refresh()}/>:null}</Card>}</Screen>;
 }
 export function ProfileEditor({profile,refresh}:{profile:Profile;refresh():Promise<void>}){
   const {colors}=useTheme();

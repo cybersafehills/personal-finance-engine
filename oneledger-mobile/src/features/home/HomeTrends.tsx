@@ -26,7 +26,7 @@ export function HomeTrends({currency,scope,nowIso,day}:{currency:SupportedCurren
  const block=currencyBlock(data?.result,currency);const points=data?.result.ok&&block?.trend?fillTrendWindow(block.trend,data.window):[];
  function apply(){try{const next:TrendRange={kind:"custom",from,to};trendWindow(next,now);setRange(next);setOpen(false);setError(null);}catch(e){setError(e instanceof Error?e.message:"Check your dates.");}}
  const action=<Pressable accessibilityRole="button" accessibilityLabel="Choose trend date range" onPress={()=>{setError(null);setOpen(true);}} style={{minHeight:44,paddingHorizontal:5,justifyContent:"center"}}><Text variant="caption" color="accent">{window.label} ⌄</Text></Pressable>;
- return <><HomeSection title="Cash flow trends" subtitle={`Income and expenses · ${currency}`} collapsible pinScope={scope} sectionId="trends" action={action} dense>
+ return <><HomeSection guideId="home-trends" title="Cash flow trends" subtitle={`Income and expenses · ${currency}`} collapsible pinScope={scope} sectionId="trends" action={action} dense>
   {data?.result.ok?<TrendChart points={points} currency={currency} granularity={data.window.granularity}/>:<Text variant="caption" color="textMuted">{data&&!data.result.ok?data.result.message:query.error??"Loading your trend…"}</Text>}
   <Text variant="caption" color="textMuted" style={{fontSize:10,lineHeight:14}}>{kigaliDateKey(window.from)} – {kigaliDateKey(new Date(Date.parse(window.to)-1).toISOString())} · {window.granularity} buckets · selected dates only</Text>
  </HomeSection>

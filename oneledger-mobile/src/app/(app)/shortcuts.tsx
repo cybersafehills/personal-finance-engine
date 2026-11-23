@@ -1,3 +1,4 @@
+import { GuideAnchor } from "@/features/guides/GuideAnchor";
 import { AutomationGuide } from "@/features/ios-shortcuts/AutomationGuide";
 import { ShortcutInstaller } from "@/features/ios-shortcuts/ShortcutInstaller";
 import { router } from "expo-router";
@@ -115,11 +116,11 @@ export default function ShortcutsGuide() {
         <Badge variant="attention">Walkthrough only: this isn&apos;t an iPhone</Badge>
       ) : null}
 
-      <StepWizard
+      <GuideAnchor id="recording-page"><StepWizard
         current={iosGuideStepNumber(step)}
         total={IOS_GUIDE_STEPS.length}
         title={step === "install" && config.combinedShortcutUrl ? "Add OneLedger Capture" : title}
-      />
+      /></GuideAnchor>
 
       {step === "install" ? <Install onNext={() => setStep("connect")} /> : null}
       {step === "connect" ? (

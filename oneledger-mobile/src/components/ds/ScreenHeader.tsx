@@ -1,3 +1,4 @@
+import { GuideAnchor } from "@/features/guides/GuideAnchor";
 import { Stack } from "expo-router";
 import type { ReactNode } from "react";
 import { StyleSheet, View } from "react-native";
@@ -18,18 +19,20 @@ export function ScreenHeader({
   subtitle,
   action,
   inline = false,
+  guideId,
 }: {
   title: string;
   subtitle?: string;
   action?: ReactNode;
   inline?: boolean;
+  guideId?: string;
 }) {
   const hasBody = inline || !!subtitle || !!action;
   return (
     <>
       {inline ? null : <Stack.Screen options={{ title }} />}
       {hasBody ? (
-        <View style={styles.row}>
+        <GuideAnchor id={guideId ?? `page-${title.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"")}`}><View style={styles.row}>
           <View style={styles.titles}>
             {inline ? (
               <Text variant="title" accessibilityRole="header">
@@ -43,7 +46,7 @@ export function ScreenHeader({
             ) : null}
           </View>
           {action}
-        </View>
+        </View></GuideAnchor>
       ) : null}
     </>
   );

@@ -1,3 +1,4 @@
+import { GuideAnchor } from "@/features/guides/GuideAnchor";
 import Feather from "@expo/vector-icons/Feather";
 import { Tabs } from "expo-router";
 import type { ComponentProps } from "react";
@@ -26,7 +27,7 @@ function MotionTab({item,position,width,state,emitter,navigateToTab}:TabProps&{i
  const style=useAnimatedStyle(()=>{return {left:width*(payOn?item.home:position)};});
  const labelStyle=useAnimatedStyle(()=>({opacity:1-(compactProgress?.get()??0),height:14*(1-(compactProgress?.get()??0))}));
  if(!route)return null;
- return <Animated.View style={[{position:"absolute",top:0,width},style]}><Pressable accessibilityRole="tab" accessibilityLabel={item.label} accessibilityState={{selected:focused}} onPress={()=>{const e=emitter.emit({type:"tabPress",target:route.key,canPreventDefault:true});if(!focused&&!e.defaultPrevented)navigateToTab(route.key);}} onLongPress={()=>emitter.emit({type:"tabLongPress",target:route.key})} style={{minHeight:44,alignItems:"center",justifyContent:"center",paddingTop:5,gap:3}}><Feather name={item.icon} size={20} color={focused?colors.accent:colors.textMuted}/><Animated.View style={labelStyle} accessibilityElementsHidden={compact}><Text variant="caption" style={{fontSize:10,lineHeight:14}} color={focused?"accent":"textMuted"}>{item.label}</Text></Animated.View></Pressable></Animated.View>;
+ return <Animated.View style={[{position:"absolute",top:0,width},style]}><GuideAnchor persistent id={`nav-${item.name}`}><Pressable accessibilityRole="tab" accessibilityLabel={item.label} accessibilityState={{selected:focused}} onPress={()=>{const e=emitter.emit({type:"tabPress",target:route.key,canPreventDefault:true});if(!focused&&!e.defaultPrevented)navigateToTab(route.key);}} onLongPress={()=>emitter.emit({type:"tabLongPress",target:route.key})} style={{minHeight:44,alignItems:"center",justifyContent:"center",paddingTop:5,gap:3}}><Feather name={item.icon} size={20} color={focused?colors.accent:colors.textMuted}/><Animated.View style={labelStyle} accessibilityElementsHidden={compact}><Text variant="caption" style={{fontSize:10,lineHeight:14}} color={focused?"accent":"textMuted"}>{item.label}</Text></Animated.View></Pressable></GuideAnchor></Animated.View>;
 }
 
 /** A continuous contour follows the raised Pay circle; a straight divider when Pay is unavailable. */

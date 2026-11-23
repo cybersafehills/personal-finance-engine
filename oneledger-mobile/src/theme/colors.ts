@@ -10,6 +10,7 @@
 
 export const lightColors = {
   background: "#f6f6f7",
+  guideScrim: "#151a38",
   surface: "#ffffff",
   borderSubtle: "#e8e8ea",
   borderStrong: "#d4d4d8",
@@ -67,6 +68,7 @@ export type Palette = { readonly [K in ColorToken]: string };
 
 export const darkColors: Palette = {
   background: "#0d0e11",
+  guideScrim: "#000000",
   surface: "#16181d",
   borderSubtle: "#26282f",
   borderStrong: "#3b3e48",

@@ -1,8 +1,8 @@
+import { GuideScrollView } from "@/features/guides/GuideScrollView";
 import type { ReactNode } from "react";
 import {
   KeyboardAvoidingView,
   Platform,
-  ScrollView,
   StyleSheet,
   type StyleProp,
   type ViewStyle,
@@ -44,7 +44,7 @@ export function Screen({
         style={styles.flex}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        <ScrollView
+        <GuideScrollView
           onScroll={onScroll}
           scrollEventThrottle={32}
           keyboardShouldPersistTaps="handled"
@@ -53,7 +53,7 @@ export function Screen({
           contentContainerStyle={[styles.content, centered && styles.centered, contentStyle,payOn&&!onTabs&&{paddingBottom:88}]}
         >
           {children}
-        </ScrollView>
+        </GuideScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );

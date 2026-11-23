@@ -1,3 +1,4 @@
+import { GuideAnchor } from "@/features/guides/GuideAnchor";
 import { router,usePathname } from "expo-router";
 import { useCallback,useEffect,useMemo,useState,type ReactNode } from "react";
 import { Keyboard,Platform,StyleSheet,useWindowDimensions,View } from "react-native";
@@ -38,6 +39,6 @@ function GlobalPayButton({config}:{config:Awaited<ReturnType<typeof fetchPayConf
  const labelStyle=useAnimatedStyle(()=>({opacity:1-(compactProgress?.get()??0)}));
  const hidden=["/pay-sheet","/scan","/connect"].includes(path)||path.startsWith("/pay-new")||path.startsWith("/pay-again");
  if(!payOn||hidden)return null;
- return <View pointerEvents="box-none" style={StyleSheet.absoluteFill}><Animated.View testID="global-pay-position" style={[styles.floating,animated]}><PayTabButton floating onPress={()=>{Keyboard.dismiss();router.push("/pay-sheet");}} onHold={target?()=>{Keyboard.dismiss();router.push(target);}:undefined} holdMs={prefs.durationMs} hint={holdHint(prefs,ready)}/>{onTabs?<Animated.View accessibilityElementsHidden style={[{position:"absolute",top:49,width:48,alignItems:"center"},labelStyle]}><Text variant="caption" color="textMuted" style={{fontSize:10,lineHeight:12}}>Pay</Text></Animated.View>:null}</Animated.View></View>;
+ return <View pointerEvents="box-none" style={StyleSheet.absoluteFill}><Animated.View testID="global-pay-position" style={[styles.floating,animated]}><GuideAnchor persistent id="pay-launcher"><PayTabButton floating onPress={()=>{Keyboard.dismiss();router.push("/pay-sheet");}} onHold={target?()=>{Keyboard.dismiss();router.push(target);}:undefined} holdMs={prefs.durationMs} hint={holdHint(prefs,ready)}/></GuideAnchor>{onTabs?<Animated.View accessibilityElementsHidden style={[{position:"absolute",top:49,width:48,alignItems:"center"},labelStyle]}><Text variant="caption" color="textMuted" style={{fontSize:10,lineHeight:12}}>Pay</Text></Animated.View>:null}</Animated.View></View>;
 }
 const styles=StyleSheet.create({floating:{position:"absolute",width:48,height:48,zIndex:100,elevation:20}});

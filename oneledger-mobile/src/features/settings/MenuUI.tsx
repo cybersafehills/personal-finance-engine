@@ -1,3 +1,4 @@
+import { GuideAnchor } from "@/features/guides/GuideAnchor";
 import { AccountAvatar } from "@/features/profile/Avatar";
 import { useProfile } from "@/features/profile/ProfileProvider";
 import Feather from "@expo/vector-icons/Feather";
@@ -21,10 +22,10 @@ export function MenuScreen({ title, subtitle, root = false, action, children }: 
   return (
     <Screen edges={root ? ["top", "left", "right"] : ["left", "right", "bottom"]} contentStyle={layout.content}>
       {root ? null : <Stack.Screen options={{ title, headerTitle: "", headerStyle: { backgroundColor: colors.background } }} />}
-      <View style={layout.heading}>
+      <GuideAnchor id={`page-${title.toLowerCase().replace(/[^a-z0-9]+/g,"-")}`}><View style={layout.heading}>
         <Text variant="display" accessibilityRole="header" style={layout.headingText}>{title}</Text>
         {action}
-      </View>
+      </View></GuideAnchor>
       {subtitle ? <Text color="textMuted" style={layout.subtitle}>{subtitle}</Text> : null}
       {children}
     </Screen>

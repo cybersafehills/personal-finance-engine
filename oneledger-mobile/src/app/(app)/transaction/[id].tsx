@@ -1,3 +1,4 @@
+import { GuideAnchor } from "@/features/guides/GuideAnchor";
 import * as Linking from "expo-linking";
 import { router, useLocalSearchParams } from "expo-router";
 import { useCallback } from "react";
@@ -194,7 +195,7 @@ export default function TransactionDetail() {
 
       <ReceiptCard transactionId={transaction.id} />
 
-      <Card style={{ gap: space[2] }}>
+      <GuideAnchor id="transaction-category"><Card style={{ gap: space[2] }}>
         <Text variant="caption" color="textMuted" accessibilityRole="header">
           CATEGORY
         </Text>
@@ -237,6 +238,7 @@ export default function TransactionDetail() {
         ) : null}
       </Card>
 
+      </GuideAnchor>
       {context || (extras?.tags.length ?? 0) > 0 ? (
         <TransactionTags
           // A fresh editor per transaction (and per load), so edits never leak across.

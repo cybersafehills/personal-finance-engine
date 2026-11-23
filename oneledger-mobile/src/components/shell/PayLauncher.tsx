@@ -1,3 +1,4 @@
+import { GuideAnchor } from "@/features/guides/GuideAnchor";
 import Feather from "@expo/vector-icons/Feather";
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import * as Linking from "expo-linking";
@@ -118,20 +119,20 @@ export function PayLauncher({
   return (
     <View style={styles.root}>
       <Animated.View entering={rise(step++)} style={styles.header}>
-        <View style={styles.headerText}>
+        <GuideAnchor id="pay-overview" style={styles.headerText}>
           <Text variant="heading" accessibilityRole="header">
             Pay & Services
           </Text>
           <Text variant="label" color="textMuted" numberOfLines={1}>
             Prepare a payment or find a USSD code.
           </Text>
-        </View>
+        </GuideAnchor>
       </Animated.View>
 
       <View style={styles.body}>
         {config.scanToPay ? (
           <Animated.View entering={rise(step++)}>
-            <FeatureRow
+            <GuideAnchor id="pay-scan"><FeatureRow
               tone="scan"
               label="Scan to pay"
               caption="Scan a payment QR code or merchant poster."
@@ -142,13 +143,13 @@ export function PayLauncher({
                 onClose();
                 router.push("/scan");
               }}
-            />
+            /></GuideAnchor>
           </Animated.View>
         ) : null}
 
         {config.paymentRequests ? (
           <Animated.View entering={rise(step++)}>
-            <FeatureRow
+            <GuideAnchor id="pay-request"><FeatureRow
               tone="request"
               label="Request payment"
               caption="Ask someone to pay you with a link."
@@ -159,11 +160,11 @@ export function PayLauncher({
                 onClose();
                 router.push("/request-new");
               }}
-            />
+            /></GuideAnchor>
           </Animated.View>
         ) : null}
 
-        <Animated.View entering={rise(step++)} style={styles.grid}>
+        <GuideAnchor id="pay-services"><Animated.View entering={rise(step++)} style={styles.grid}>
           {LAUNCHER_ACTIONS.map((action) => {
             const available = actionAvailableHere(action, config);
             const brand = action.kind === "ekash";
@@ -196,7 +197,7 @@ export function PayLauncher({
               </PressableScale>
             );
           })}
-        </Animated.View>
+        </Animated.View></GuideAnchor>
 
         <Animated.View entering={rise(step++)}>
           <PressableScale

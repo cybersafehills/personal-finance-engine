@@ -1,3 +1,4 @@
+import { GuideAnchor } from "@/features/guides/GuideAnchor";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import { AppState, Linking, Platform, View } from "react-native";
@@ -145,7 +146,7 @@ export default function Connect() {
 
 function Header() {
   return (
-    <View
+    <GuideAnchor id="recording-page"><View
       style={{
         flexDirection: "row",
         alignItems: "center",
@@ -156,7 +157,7 @@ function Header() {
         Record MoMo automatically
       </Text>
       <Button label="Close" variant="ghost" onPress={() => router.back()} />
-    </View>
+    </View></GuideAnchor>
   );
 }
 

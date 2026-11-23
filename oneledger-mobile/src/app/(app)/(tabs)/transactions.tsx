@@ -1,3 +1,5 @@
+import { GuideSuggestion } from "@/features/guides/GuideSuggestion";
+import { GuideAnchor } from "@/features/guides/GuideAnchor";
 import Feather from "@expo/vector-icons/Feather";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -58,6 +60,9 @@ function TransactionsList({ category, initialPeriod, accountId, walletName, focu
   const onScroll=useChromeScroll();
   const { activeId } = useActiveSpace();
   const { syncNow } = useOffline();
+  const listRef = useRef<SectionList<TransactionRow>>(null);
+  const revealFirst = useCallback(() => listRef.current?.scrollToLocation({ sectionIndex: 0, itemIndex: 0, animated: false, viewPosition: 0 }), []);
+  const revealReview = useCallback(() => listRef.current?.getScrollResponder()?.scrollTo({ y: 0, animated: false }), []);
   const searchRef=useRef<TextInputInstance>(null);
   useFocusEffect(useCallback(()=>{
     if (!focusSearch) return;
@@ -155,7 +160,7 @@ function TransactionsList({ category, initialPeriod, accountId, walletName, focu
     <ListScreen edges={["left", "right"]}>
       {/* Search and filters stay put above the list, so they are always one thumb away. */}
       <View style={{ paddingHorizontal: space[4], paddingTop: space[3], paddingBottom: space[2], gap: space[2], backgroundColor: colors.background }}>
-        <TextField
+        <GuideAnchor id="transactions-search"><TextField
           compact
           label="Search"
           inputRef={searchRef}
@@ -168,7 +173,7 @@ function TransactionsList({ category, initialPeriod, accountId, walletName, focu
           returnKeyType="search"
           clearButtonMode="while-editing"
           leading={<Feather name="search" size={16} color={colors.textMuted} />}
-        />
+        /></GuideAnchor>
         {accountId ? <View style={{flexDirection:"row",alignItems:"center",gap:8}}><Text variant="label" style={{flex:1}}>{walletName || "Selected wallet"}</Text><Button label="All wallets" size="sm" variant="ghost" onPress={() => router.setParams({accountId:undefined,walletName:undefined})} /></View> : null}
         {category ? (
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: space[2] }}>
@@ -178,9 +183,10 @@ function TransactionsList({ category, initialPeriod, accountId, walletName, focu
             <Button label="Clear" size="sm" variant="ghost" onPress={() => router.setParams({ category: undefined })} />
           </View>
         ) : null}
-        <FilterChips value={filters} onChange={setFilters} />
+        <GuideAnchor id="transactions-filters"><FilterChips value={filters} onChange={setFilters} /></GuideAnchor>
       </View>
       <SectionList
+        ref={listRef}
         onScroll={onScroll}
         scrollEventThrottle={32}
         sections={groupByDay(displayedRows, loadedAt)}
@@ -210,16 +216,17 @@ function TransactionsList({ category, initialPeriod, accountId, walletName, focu
                 />
               }
             />
+            <GuideSuggestion id={stats && stats.reviewCount > 0 && !accountId ? "inbox" : "transaction"} enabled={!loading && !error && displayedRows.length > 0} />
             {error && displayedRows.length > 0 ? <View style={{ gap: 8 }}><Text color="attention">{error} Showing previously loaded transactions.</Text><Button label="Try again" onPress={() => void loadFirstPage(true)} variant="secondary" /></View> : null}
             {stats && !accountId ? (
               <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: space[2] }}>
                 <LifetimeChips totals={stats.lifetime} accountCreatedIso={stats.lifetime.accountCreatedIso} />
-                <Button
+                <GuideAnchor id="review-queue" reveal={revealReview}><Button
                   label={stats.reviewCount > 0 ? `Review queue (${stats.reviewCount})` : "Review queue"}
                   size="sm"
                   variant="ghost"
                   onPress={() => router.push("/inbox")}
-                />
+                /></GuideAnchor>
               </View>
             ) : null}
           </View>
@@ -236,7 +243,7 @@ function TransactionsList({ category, initialPeriod, accountId, walletName, focu
         )}
         renderItem={({ item }) => (
           <View style={{ backgroundColor: colors.surface }}>
-            <TransactionItem transaction={item} masked={false} />
+            <GuideAnchor id="first-transaction" enabled={item.id === displayedRows[0]?.id} reveal={revealFirst} follow={() => router.push({ pathname: "/transaction/[id]", params: { id: item.id } })}><TransactionItem transaction={item} masked={false} /></GuideAnchor>
           </View>
         )}
         ListEmptyComponent={

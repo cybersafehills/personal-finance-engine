@@ -39,7 +39,7 @@ export default function SpaceMembers() {
   if (!active || active.kind === "personal") {
     return (
       <Screen>
-        <ScreenHeader title="Space & members" subtitle="Personal is yours alone. Create a shared Space to collaborate." />
+        <ScreenHeader guideId="spaces-page" title="Space & members" subtitle="Personal is yours alone. Create a shared Space to collaborate." />
         <EmptyState
           variant="setup"
           title="Nobody else is in your Personal Space"
@@ -85,7 +85,7 @@ function SpaceMembersFor({ space: sp }: { space: Space }) {
 
   return (
     <Screen>
-      <ScreenHeader title={sp.name} subtitle={`${kindLabel(sp.kind)} · members and invites`} />
+      <ScreenHeader guideId="spaces-page" title={sp.name} subtitle={`${kindLabel(sp.kind)} · members and invites`} />
 
       {sp.kind === "household" ? <HowHouseholdsWork /> : null}
 

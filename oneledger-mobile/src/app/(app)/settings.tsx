@@ -1,3 +1,4 @@
+import { GuideAnchor } from "@/features/guides/GuideAnchor";
 import * as Linking from "expo-linking";
 import { router } from "expo-router";
 import { useCallback, useState } from "react";
@@ -31,9 +32,9 @@ export default function Settings() {
       {visibleSettingsGroups(flags ?? null).map((group) => (
         <MenuGroup key={group.title} title={group.title}>
           {group.rows.map((row) => (
-            <MenuRow key={row.label} role="link" icon={row.icon} label={row.label}
+            <GuideAnchor key={row.label} id={row.route ? `setting-${row.route.slice(1)}` : row.webPath === "/settings/accounts" ? "setting-accounts" : `setting-${row.label.toLowerCase().replace(/[^a-z0-9]+/g,"-")}`}><MenuRow role="link" icon={row.icon} label={row.label}
               value={row.route === "/appearance" ? (preference === "system" ? "Automatic" : preference === "dark" ? "Dark" : "Light") : row.route === "/security" ? (loading ? "Checking…" : !available ? "Unavailable" : enabled ? "On" : "Off") : undefined}
-              external={!!row.webPath} onPress={() => void open(row)} />
+              external={!!row.webPath} onPress={() => void open(row)} /></GuideAnchor>
           ))}
         </MenuGroup>
       ))}

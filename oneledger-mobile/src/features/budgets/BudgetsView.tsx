@@ -1,3 +1,5 @@
+import { GuideSuggestion } from "@/features/guides/GuideSuggestion";
+import { GuideAnchor } from "@/features/guides/GuideAnchor";
 import * as Linking from "expo-linking";
 import { router } from "expo-router";
 import { useCallback, type ReactNode } from "react";
@@ -58,6 +60,7 @@ export function BudgetsView({ embedded = false }: { embedded?: boolean }) {
         <BudgetDrafts key={`${session.user.id}:${activeId}`} scope={{ userId: session.user.id, workspaceId: activeId }} onActivated={refresh} />
       ) : null}
 
+      <GuideSuggestion id="plan" enabled={data?.ok === true && data.budgets.length > 0} />
       {loading && !data ? (
         <Text variant="label" color="textMuted">
           Loading…
@@ -89,8 +92,8 @@ export function BudgetsView({ embedded = false }: { embedded?: boolean }) {
           }
         />
       ) : data ? (
-        data.budgets.map((budget) => (
-          <BudgetCard key={`${activeId}:${budget.id}`} budget={budget}>
+        data.budgets.map((budget, index) => (
+          <BudgetCard key={`${activeId}:${budget.id}`} budget={budget} guideEnabled={index === 0}>
             {canEdit && activeId && session ? (
               <AllocationEditor userId={session.user.id} workspaceId={activeId} budgetId={budget.id} onSaved={refresh} />
             ) : null}
@@ -101,14 +104,14 @@ export function BudgetsView({ embedded = false }: { embedded?: boolean }) {
   );
 }
 
-function BudgetCard({ budget, children }: { budget: Budget; children?: ReactNode }) {
+function BudgetCard({ budget, children, guideEnabled = false }: { budget: Budget; children?: ReactNode; guideEnabled?: boolean }) {
   const sum = totals(budget.allocations);
   const worst = statusDisplay(worstStatus(budget.allocations));
   const pace = paceLabel(budget.elapsedFraction);
 
   return (
     <>
-      <Card style={{ gap: space[3] }}>
+      <GuideAnchor id="budget-progress" enabled={guideEnabled}><Card style={{ gap: space[3] }}>
         <View style={{ gap: 2 }}>
           <Text variant="heading">{budget.name}</Text>
           <Text variant="label" color="textMuted">
@@ -136,6 +139,7 @@ function BudgetCard({ budget, children }: { budget: Budget; children?: ReactNode
         {children}
       </Card>
 
+      </GuideAnchor>
       {budget.alerts.length > 0 ? (
         <Card style={{ gap: space[2] }}>
           <Text variant="label" color="textSecondary">

@@ -1,6 +1,8 @@
+import { GuideScrollView } from "@/features/guides/GuideScrollView";
+import { GuidesHomeCard } from "@/features/guides/GuidesHomeCard";
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
-import { AppState, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
+import { AppState, RefreshControl, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Button, Chip, EmptyState, Text } from "@/components/ds";
 import { fetchWallets, fetchBudgets } from "@/api/mobile-api";
@@ -73,14 +75,15 @@ export default function Home() {
   if (!activeId) return <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}><View style={styles.content}><Text color="textMuted">Loading your workspace. Connect to load your Spaces if this is your first launch.</Text></View></SafeAreaView>;
   return <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
     <View testID="home-fixed-toolbar" style={styles.toolbar}><HomeHeader name={name} unread={unread.data ?? 0} /></View>
-    <ScrollView testID="home-content-scroll" style={{flex:1}} onScroll={onScroll} scrollEventThrottle={32} contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={pulling || walletsQuery.refreshing || recentQuery.refreshing || analytics.refreshing} onRefresh={() => void refresh()} tintColor={colors.accent} />}>
+    <GuideScrollView testID="home-content-scroll" style={{flex:1}} onScroll={onScroll} scrollEventThrottle={32} contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={pulling || walletsQuery.refreshing || recentQuery.refreshing || analytics.refreshing} onRefresh={() => void refresh()} tintColor={colors.accent} />}>
       {offline.status.kind === "offline" ? <Text variant="caption" color="attention">Offline · Showing saved transactions. Wallet and analytics updates need a connection.</Text> : null}
       {walletsQuery.error && wallets ? <Text variant="caption" color="attention">Couldn&apos;t refresh wallet balances. Showing the last fetched figures.</Text> : null}
       {analytics.error && analytics.data ? <Text variant="caption" color="attention">Couldn&apos;t refresh analytics. Showing the last fetched summary.</Text> : null}
       {currencyOptions.length > 1 ? <View style={styles.currencies}>{currencyOptions.map((c) => <Chip key={c} label={c} selected={currency === c} onPress={() => setChoice({ space: activeId, currency: c })} />)}</View> : null}
       <HeroBalance key={`${session?.user.id}:${activeId}`} preferenceScope={`${session?.user.id ?? "unknown"}.${activeId}`} wallets={wallets} currency={currency} fallback={recentQuery.data?.balance ?? null} loading={walletsQuery.loading || recentQuery.loading} />
+      <GuidesHomeCard loaded={!walletsQuery.loading && !recentQuery.loading && !walletsQuery.error && !recentQuery.error} />
       <CashFlow currency={currency} current={current} previous={currencyBlock(analytics.data?.previous,currency)} previousAvailable={analytics.data?.previous.ok===true} today={currencyBlock(analytics.data?.today,currency)} todayAvailable={analytics.data?.today.ok === true} available={currentResult?.ok === true} message={analyticsMessage} />
-      <HomeSection title="Recent transactions" dense action={<HomeLink label="View all" onPress={() => router.navigate({ pathname: "/transactions", params: { focusSearch:"", category: "", accountId:"", walletName:"", period: "all", reset: String(Date.now()) } })} />}>
+      <HomeSection guideId="home-recent" title="Recent transactions" dense action={<HomeLink label="View all" onPress={() => router.navigate({ pathname: "/transactions", params: { focusSearch:"", category: "", accountId:"", walletName:"", period: "all", reset: String(Date.now()) } })} />}>
         {recentQuery.error ? <View style={{ gap: 8 }}><Text color="attention">Couldn&apos;t refresh transactions.</Text><Button label="Try again" variant="secondary" onPress={recentQuery.refresh} /></View> : null}
         {recentQuery.loading ? <Text color="textMuted">Loading transactions…</Text> : !recentQuery.data?.recent.length && !recentQuery.error ? <EmptyState title="No transactions yet" description="New transactions will appear here as they are recorded." /> : <View>{recentQuery.data?.recent.slice(0, 3).map((t) => <TransactionItem key={t.id} transaction={t} showDate compact />)}</View>}
       </HomeSection>
@@ -88,7 +91,7 @@ export default function Home() {
       <Spending key={`spending.${session?.user.id}.${activeId}`} scope={`${session?.user.id}.${activeId}`} current={current} available={currentResult?.ok === true} message={analyticsMessage} />
       <HomeTrends key={`trends.${session?.user.id}.${activeId}`} scope={`${session?.user.id}.${activeId}`} currency={currency} nowIso={now.toISOString()} day={day}/>
       <WalletPanel wallets={wallets} message={walletsMessage} />
-    </ScrollView>
+    </GuideScrollView>
   </SafeAreaView>;
 }
 const useStyles = makeStyles((c) => StyleSheet.create({
