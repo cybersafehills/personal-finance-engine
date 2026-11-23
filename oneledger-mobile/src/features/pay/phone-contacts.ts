@@ -8,6 +8,11 @@ import { normalizeRwandaMsisdn } from "./target";
 export type PickedContact = { name: string; number: string };
 export type PickResult = { ok: true; contact: PickedContact } | { ok: false; cancelled: boolean; message: string };
 
+/** `+250 788 123 456` -> `+### ### ### ###`: the format of a number, never the number. */
+export function numberShape(n: string): string {
+  return n.replace(/\d/g, "#");
+}
+
 // Why a pick failed is logged (development only, and never the number or the name) so a
 // phone that misbehaves can be diagnosed from the dev server's log.
 function logWhy(why: string) {
@@ -56,7 +61,7 @@ export async function pickPhoneContact(load: () => Promise<ContactsModule> = () 
   }
   const number = chooseRwandanNumber(phones.map((p) => p.number ?? ""));
   if (!number) {
-    logWhy(`the chosen contact has ${phones.length} number(s), none a Rwandan mobile`);
+    logWhy(`the chosen contact has ${phones.length} number(s), none a Rwandan mobile (shapes: ${phones.map((p) => numberShape(p.number ?? "")).join(" | ") || "none"})`);
     return { ok: false, cancelled: false, message: "That contact has no Rwandan mobile number." };
   }
   return { ok: true, contact: { name: fullName.trim(), number } };
