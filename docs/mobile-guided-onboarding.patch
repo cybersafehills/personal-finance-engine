@@ -1,0 +1,1803 @@
+diff --git a/oneledger-mobile/src/app/(app)/(tabs)/index.tsx b/oneledger-mobile/src/app/(app)/(tabs)/index.tsx
+index a5e8961..fe5df1a 100644
+--- a/oneledger-mobile/src/app/(app)/(tabs)/index.tsx
++++ b/oneledger-mobile/src/app/(app)/(tabs)/index.tsx
+@@ -1,6 +1,8 @@
++import { GuideScrollView } from "@/features/guides/GuideScrollView";
++import { GuidesHomeCard } from "@/features/guides/GuidesHomeCard";
+ import { router, useFocusEffect } from "expo-router";
+ import { useCallback, useEffect, useState } from "react";
+-import { AppState, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
++import { AppState, RefreshControl, StyleSheet, View } from "react-native";
+ import { SafeAreaView } from "react-native-safe-area-context";
+ import { Button, Chip, EmptyState, Text } from "@/components/ds";
+ import { fetchWallets, fetchBudgets } from "@/api/mobile-api";
+@@ -73,14 +75,15 @@ export default function Home() {
+   if (!activeId) return <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}><View style={styles.content}><Text color="textMuted">Loading your workspace. Connect to load your Spaces if this is your first launch.</Text></View></SafeAreaView>;
+   return <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
+     <View testID="home-fixed-toolbar" style={styles.toolbar}><HomeHeader name={name} unread={unread.data ?? 0} /></View>
+-    <ScrollView testID="home-content-scroll" style={{flex:1}} onScroll={onScroll} scrollEventThrottle={32} contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={pulling || walletsQuery.refreshing || recentQuery.refreshing || analytics.refreshing} onRefresh={() => void refresh()} tintColor={colors.accent} />}>
++    <GuideScrollView testID="home-content-scroll" style={{flex:1}} onScroll={onScroll} scrollEventThrottle={32} contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={pulling || walletsQuery.refreshing || recentQuery.refreshing || analytics.refreshing} onRefresh={() => void refresh()} tintColor={colors.accent} />}>
+       {offline.status.kind === "offline" ? <Text variant="caption" color="attention">Offline · Showing saved transactions. Wallet and analytics updates need a connection.</Text> : null}
+       {walletsQuery.error && wallets ? <Text variant="caption" color="attention">Couldn&apos;t refresh wallet balances. Showing the last fetched figures.</Text> : null}
+       {analytics.error && analytics.data ? <Text variant="caption" color="attention">Couldn&apos;t refresh analytics. Showing the last fetched summary.</Text> : null}
+       {currencyOptions.length > 1 ? <View style={styles.currencies}>{currencyOptions.map((c) => <Chip key={c} label={c} selected={currency === c} onPress={() => setChoice({ space: activeId, currency: c })} />)}</View> : null}
+       <HeroBalance key={`${session?.user.id}:${activeId}`} preferenceScope={`${session?.user.id ?? "unknown"}.${activeId}`} wallets={wallets} currency={currency} fallback={recentQuery.data?.balance ?? null} loading={walletsQuery.loading || recentQuery.loading} />
++      <GuidesHomeCard loaded={!walletsQuery.loading && !recentQuery.loading && !walletsQuery.error && !recentQuery.error} />
+       <CashFlow currency={currency} current={current} previous={currencyBlock(analytics.data?.previous,currency)} previousAvailable={analytics.data?.previous.ok===true} today={currencyBlock(analytics.data?.today,currency)} todayAvailable={analytics.data?.today.ok === true} available={currentResult?.ok === true} message={analyticsMessage} />
+-      <HomeSection title="Recent transactions" dense action={<HomeLink label="View all" onPress={() => router.navigate({ pathname: "/transactions", params: { focusSearch:"", category: "", accountId:"", walletName:"", period: "all", reset: String(Date.now()) } })} />}>
++      <HomeSection guideId="home-recent" title="Recent transactions" dense action={<HomeLink label="View all" onPress={() => router.navigate({ pathname: "/transactions", params: { focusSearch:"", category: "", accountId:"", walletName:"", period: "all", reset: String(Date.now()) } })} />}>
+         {recentQuery.error ? <View style={{ gap: 8 }}><Text color="attention">Couldn&apos;t refresh transactions.</Text><Button label="Try again" variant="secondary" onPress={recentQuery.refresh} /></View> : null}
+         {recentQuery.loading ? <Text color="textMuted">Loading transactions…</Text> : !recentQuery.data?.recent.length && !recentQuery.error ? <EmptyState title="No transactions yet" description="New transactions will appear here as they are recorded." /> : <View>{recentQuery.data?.recent.slice(0, 3).map((t) => <TransactionItem key={t.id} transaction={t} showDate compact />)}</View>}
+       </HomeSection>
+@@ -88,7 +91,7 @@ export default function Home() {
+       <Spending key={`spending.${session?.user.id}.${activeId}`} scope={`${session?.user.id}.${activeId}`} current={current} available={currentResult?.ok === true} message={analyticsMessage} />
+       <HomeTrends key={`trends.${session?.user.id}.${activeId}`} scope={`${session?.user.id}.${activeId}`} currency={currency} nowIso={now.toISOString()} day={day}/>
+       <WalletPanel wallets={wallets} message={walletsMessage} />
+-    </ScrollView>
++    </GuideScrollView>
+   </SafeAreaView>;
+ }
+ const useStyles = makeStyles((c) => StyleSheet.create({
+diff --git a/oneledger-mobile/src/app/(app)/(tabs)/more.tsx b/oneledger-mobile/src/app/(app)/(tabs)/more.tsx
+index 25301e4..2ed97ca 100644
+--- a/oneledger-mobile/src/app/(app)/(tabs)/more.tsx
++++ b/oneledger-mobile/src/app/(app)/(tabs)/more.tsx
+@@ -1,6 +1,8 @@
+ import { ThemeCycleButton } from "@/features/settings/ThemeCycleButton";
++import { GuideSuggestion } from "@/features/guides/GuideSuggestion";
++import { GuideAnchor } from "@/features/guides/GuideAnchor";
+ import Feather from "@expo/vector-icons/Feather";
+-import { router } from "expo-router";
++import { router, useLocalSearchParams } from "expo-router";
+ import { useCallback, useState } from "react";
+ import { Platform, Pressable, StyleSheet, View } from "react-native";
+ import { fetchMoreFlags } from "@/api/mobile-api";
+@@ -21,11 +23,15 @@ export default function More() {
+   const load = useCallback(() => fetchMoreFlags(), []);
+   const { data: flags } = useQuery(load);
+   const { data: unread } = useQuery(getUnreadNotificationCount);
+-  const [search, setSearch] = useState("");
++  const { guideReset } = useLocalSearchParams<{ guideReset?: string }>();
++  const [searchState, setSearchState] = useState({ reset: guideReset, value: "" });
++  const search = searchState.reset === guideReset ? searchState.value : "";
++  const setSearch = (value: string) => setSearchState({ reset: guideReset, value });
+   const query = search.trim().toLocaleLowerCase();
+   const groups = visibleGroups(flags ?? null).map((group) => ({
+     ...group, links: group.links.filter((link) => !query || `${link.label} ${link.hint}`.toLocaleLowerCase().includes(query)),
+   })).filter((group) => group.links.length > 0);
++  const showGuides = !query || "guides help tutorial onboarding tour".includes(query);
+   const showRecording = !query || "automatic recording this phone iphone shortcuts setup".includes(query);
+   return (
+     <MenuScreen title="More" root action={
+@@ -36,20 +42,22 @@ export default function More() {
+     }>
+       <ProfileSummary onPress={() => router.push("/profile")} />
+       <TextField compact label="Search tools" placeholder="Search tools" value={search} onChangeText={setSearch} autoCapitalize="none" autoCorrect={false} returnKeyType="search" leading={<Feather name="search" size={19} color={colors.textMuted} />} />
++      <GuideSuggestion id="documents" enabled={flags?.statements === true && !query} />
+       {groups.map((group) => (
+         <MenuGroup key={group.title} title={group.title}>
+-          {group.links.map((link) => <MenuRow key={link.route} role="link" icon={MORE_ICONS[link.route]} label={link.label} onPress={() => router.push(link.route)} />)}
++          {group.links.map((link) => <GuideAnchor key={link.route} enabled={link.route !== "/statements" || flags?.statements === true} id={link.route === "/reports" ? "reports-entry" : link.route === "/statements" ? "statements-entry" : `tool-${link.route}`}><MenuRow role="link" icon={MORE_ICONS[link.route]} label={link.label} onPress={() => router.push(link.route)} /></GuideAnchor>)}
+           {group.title === "Account" && showRecording ? <RecordingRow /> : null}
+         </MenuGroup>
+       ))}
+       {showRecording && !groups.some((group) => group.title === "Account") ? <MenuGroup title="This phone"><RecordingRow /></MenuGroup> : null}
+-      {!groups.length && !showRecording ? <View style={styles.empty}><Feather name="search" size={32} color={colors.textMuted} /><Text variant="heading">No tools found</Text><Text color="textMuted">Try “wallet”, “report” or “settings”.</Text></View> : null}
++      {showGuides ? <MenuGroup title="Here to help"><GuideAnchor id="guides-entry"><MenuRow role="link" icon="help-circle" label="Guides & help" hint="Start, resume or replay a quick guide" onPress={() => router.push("/guides")} /></GuideAnchor></MenuGroup> : null}
++      {!groups.length && !showRecording && !showGuides ? <View style={styles.empty}><Feather name="search" size={32} color={colors.textMuted} /><Text variant="heading">No tools found</Text><Text color="textMuted">Try “wallet”, “report” or “settings”.</Text></View> : null}
+     </MenuScreen>
+   );
+ }
+ function RecordingRow() {
+   if (captureSupported) return <AndroidRecordingRow />;
+-  if (Platform.OS === "ios") return <IosStatusCard compact />;
++  if (Platform.OS === "ios") return <GuideAnchor id="recording" follow={() => router.push("/shortcuts")}><IosStatusCard compact /></GuideAnchor>;
+   if (Platform.OS === "web") return <MenuRow role="link" icon="smartphone" label="Set up on iPhone" onPress={() => router.push("/shortcuts")} />;
+   return <MenuRow role="link" icon="smartphone" label="Automatic recording" value="Unavailable" onPress={() => router.push("/capture")} />;
+ }
+@@ -57,7 +65,7 @@ function AndroidRecordingRow() {
+   const { data, error, loading } = useQuery(getCaptureHealth);
+   const display = data ? healthDisplay(data.state) : null;
+   const needsSetup = !!display && display.action !== "none";
+-  return <MenuRow role="link" icon="smartphone" label="Automatic recording" value={needsSetup ? "Set it up" : display?.label ?? (loading ? "Checking…" : "Check status")} hint={error ? "Status unavailable. Tap to check." : undefined} onPress={() => router.push(needsSetup ? "/connect" : "/capture")} />;
++  return <GuideAnchor id="recording" enabled={!!data && !error} follow={() => router.push(needsSetup ? "/connect" : "/capture")}><MenuRow role="link" icon="smartphone" label="Automatic recording" value={needsSetup ? "Set it up" : display?.label ?? (loading ? "Checking…" : "Check status")} hint={error ? "Status unavailable. Tap to check." : undefined} onPress={() => router.push(needsSetup ? "/connect" : "/capture")} /></GuideAnchor>;
+ }
+ const useStyles = makeStyles((c) => StyleSheet.create({
+   inbox: { minWidth: 44, minHeight: 44, borderRadius: 22, paddingHorizontal: 8, flexDirection: "row", gap: 6, alignItems: "center", justifyContent: "center" },
+diff --git a/oneledger-mobile/src/app/(app)/(tabs)/transactions.tsx b/oneledger-mobile/src/app/(app)/(tabs)/transactions.tsx
+index 754b33e..0324640 100644
+--- a/oneledger-mobile/src/app/(app)/(tabs)/transactions.tsx
++++ b/oneledger-mobile/src/app/(app)/(tabs)/transactions.tsx
+@@ -1,3 +1,5 @@
++import { GuideSuggestion } from "@/features/guides/GuideSuggestion";
++import { GuideAnchor } from "@/features/guides/GuideAnchor";
+ import Feather from "@expo/vector-icons/Feather";
+ import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+ import { useCallback, useEffect, useRef, useState } from "react";
+@@ -58,6 +60,9 @@ function TransactionsList({ category, initialPeriod, accountId, walletName, focu
+   const onScroll=useChromeScroll();
+   const { activeId } = useActiveSpace();
+   const { syncNow } = useOffline();
++  const listRef = useRef<SectionList<TransactionRow>>(null);
++  const revealFirst = useCallback(() => listRef.current?.scrollToLocation({ sectionIndex: 0, itemIndex: 0, animated: false, viewPosition: 0 }), []);
++  const revealReview = useCallback(() => listRef.current?.getScrollResponder()?.scrollTo({ y: 0, animated: false }), []);
+   const searchRef=useRef<TextInputInstance>(null);
+   useFocusEffect(useCallback(()=>{
+     if (!focusSearch) return;
+@@ -155,7 +160,7 @@ function TransactionsList({ category, initialPeriod, accountId, walletName, focu
+     <ListScreen edges={["left", "right"]}>
+       {/* Search and filters stay put above the list, so they are always one thumb away. */}
+       <View style={{ paddingHorizontal: space[4], paddingTop: space[3], paddingBottom: space[2], gap: space[2], backgroundColor: colors.background }}>
+-        <TextField
++        <GuideAnchor id="transactions-search"><TextField
+           compact
+           label="Search"
+           inputRef={searchRef}
+@@ -168,7 +173,7 @@ function TransactionsList({ category, initialPeriod, accountId, walletName, focu
+           returnKeyType="search"
+           clearButtonMode="while-editing"
+           leading={<Feather name="search" size={16} color={colors.textMuted} />}
+-        />
++        /></GuideAnchor>
+         {accountId ? <View style={{flexDirection:"row",alignItems:"center",gap:8}}><Text variant="label" style={{flex:1}}>{walletName || "Selected wallet"}</Text><Button label="All wallets" size="sm" variant="ghost" onPress={() => router.setParams({accountId:undefined,walletName:undefined})} /></View> : null}
+         {category ? (
+           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: space[2] }}>
+@@ -178,9 +183,10 @@ function TransactionsList({ category, initialPeriod, accountId, walletName, focu
+             <Button label="Clear" size="sm" variant="ghost" onPress={() => router.setParams({ category: undefined })} />
+           </View>
+         ) : null}
+-        <FilterChips value={filters} onChange={setFilters} />
++        <GuideAnchor id="transactions-filters"><FilterChips value={filters} onChange={setFilters} /></GuideAnchor>
+       </View>
+       <SectionList
++        ref={listRef}
+         onScroll={onScroll}
+         scrollEventThrottle={32}
+         sections={groupByDay(displayedRows, loadedAt)}
+@@ -210,16 +216,17 @@ function TransactionsList({ category, initialPeriod, accountId, walletName, focu
+                 />
+               }
+             />
++            <GuideSuggestion id={stats && stats.reviewCount > 0 && !accountId ? "inbox" : "transaction"} enabled={!loading && !error && displayedRows.length > 0} />
+             {error && displayedRows.length > 0 ? <View style={{ gap: 8 }}><Text color="attention">{error} Showing previously loaded transactions.</Text><Button label="Try again" onPress={() => void loadFirstPage(true)} variant="secondary" /></View> : null}
+             {stats && !accountId ? (
+               <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: space[2] }}>
+                 <LifetimeChips totals={stats.lifetime} accountCreatedIso={stats.lifetime.accountCreatedIso} />
+-                <Button
++                <GuideAnchor id="review-queue" reveal={revealReview}><Button
+                   label={stats.reviewCount > 0 ? `Review queue (${stats.reviewCount})` : "Review queue"}
+                   size="sm"
+                   variant="ghost"
+                   onPress={() => router.push("/inbox")}
+-                />
++                /></GuideAnchor>
+               </View>
+             ) : null}
+           </View>
+@@ -236,7 +243,7 @@ function TransactionsList({ category, initialPeriod, accountId, walletName, focu
+         )}
+         renderItem={({ item }) => (
+           <View style={{ backgroundColor: colors.surface }}>
+-            <TransactionItem transaction={item} masked={false} />
++            <GuideAnchor id="first-transaction" enabled={item.id === displayedRows[0]?.id} reveal={revealFirst} follow={() => router.push({ pathname: "/transaction/[id]", params: { id: item.id } })}><TransactionItem transaction={item} masked={false} /></GuideAnchor>
+           </View>
+         )}
+         ListEmptyComponent={
+diff --git a/oneledger-mobile/src/app/(app)/_layout.tsx b/oneledger-mobile/src/app/(app)/_layout.tsx
+index 8604e9a..02fadec 100644
+--- a/oneledger-mobile/src/app/(app)/_layout.tsx
++++ b/oneledger-mobile/src/app/(app)/_layout.tsx
+@@ -1,3 +1,4 @@
++import { GuidesProvider } from "@/features/guides/GuidesProvider";
+ import { ProfileProvider } from "@/features/profile/ProfileProvider";
+ import { Stack } from "expo-router";
+ import { NavigationChromeProvider } from "@/components/shell/NavigationChrome";
+@@ -11,7 +12,7 @@ import { useTheme } from "@/theme/ThemeProvider";
+ export default function AppLayout() {
+   const { colors } = useTheme();
+   return (
+-    <ProfileProvider><NavigationChromeProvider><View style={{flex:1}}>
++    <ProfileProvider><GuidesProvider><NavigationChromeProvider><View style={{flex:1}}>
+       <PushBridge />
+       <Stack
+         screenOptions={{
+@@ -48,6 +49,6 @@ export default function AppLayout() {
+           }}
+         />
+       </Stack>
+-    </View></NavigationChromeProvider></ProfileProvider>
++    </View></NavigationChromeProvider></GuidesProvider></ProfileProvider>
+   );
+ }
+diff --git a/oneledger-mobile/src/app/(app)/connect.tsx b/oneledger-mobile/src/app/(app)/connect.tsx
+index b44926a..16a69af 100644
+--- a/oneledger-mobile/src/app/(app)/connect.tsx
++++ b/oneledger-mobile/src/app/(app)/connect.tsx
+@@ -1,3 +1,4 @@
++import { GuideAnchor } from "@/features/guides/GuideAnchor";
+ import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+ import { useCallback, useEffect, useState } from "react";
+ import { AppState, Linking, Platform, View } from "react-native";
+@@ -145,7 +146,7 @@ export default function Connect() {
+ 
+ function Header() {
+   return (
+-    <View
++    <GuideAnchor id="recording-page"><View
+       style={{
+         flexDirection: "row",
+         alignItems: "center",
+@@ -156,7 +157,7 @@ function Header() {
+         Record MoMo automatically
+       </Text>
+       <Button label="Close" variant="ghost" onPress={() => router.back()} />
+-    </View>
++    </View></GuideAnchor>
+   );
+ }
+ 
+diff --git a/oneledger-mobile/src/app/(app)/profile.tsx b/oneledger-mobile/src/app/(app)/profile.tsx
+index 1286c0a..6205cf9 100644
+--- a/oneledger-mobile/src/app/(app)/profile.tsx
++++ b/oneledger-mobile/src/app/(app)/profile.tsx
+@@ -14,7 +14,7 @@ import { config } from '@/lib/config';
+ import { useTheme } from '@/theme/ThemeProvider';
+ export default function ProfileScreen(){
+   const state=useProfile();
+-  return <Screen><ScreenHeader title="Your profile"/>{state?.profile?<ProfileEditor key={state.profile.id} profile={state.profile} refresh={state.refresh}/>:<Card><Text>{state?.error || 'Loading your profile…'}</Text>{state?.error?<Button label="Try again" onPress={()=>void state.refresh()}/>:null}</Card>}</Screen>;
++  return <Screen><ScreenHeader title="Your profile" subtitle="Personal details and regional preferences" guideId="profile-page"/>{state?.profile?<ProfileEditor key={state.profile.id} profile={state.profile} refresh={state.refresh}/>:<Card><Text>{state?.error || 'Loading your profile…'}</Text>{state?.error?<Button label="Try again" onPress={()=>void state.refresh()}/>:null}</Card>}</Screen>;
+ }
+ export function ProfileEditor({profile,refresh}:{profile:Profile;refresh():Promise<void>}){
+   const {colors}=useTheme();
+diff --git a/oneledger-mobile/src/app/(app)/settings.tsx b/oneledger-mobile/src/app/(app)/settings.tsx
+index 2e16d9f..f19a89f 100644
+--- a/oneledger-mobile/src/app/(app)/settings.tsx
++++ b/oneledger-mobile/src/app/(app)/settings.tsx
+@@ -1,3 +1,4 @@
++import { GuideAnchor } from "@/features/guides/GuideAnchor";
+ import * as Linking from "expo-linking";
+ import { router } from "expo-router";
+ import { useCallback, useState } from "react";
+@@ -31,9 +32,9 @@ export default function Settings() {
+       {visibleSettingsGroups(flags ?? null).map((group) => (
+         <MenuGroup key={group.title} title={group.title}>
+           {group.rows.map((row) => (
+-            <MenuRow key={row.label} role="link" icon={row.icon} label={row.label}
++            <GuideAnchor key={row.label} id={row.route ? `setting-${row.route.slice(1)}` : row.webPath === "/settings/accounts" ? "setting-accounts" : `setting-${row.label.toLowerCase().replace(/[^a-z0-9]+/g,"-")}`}><MenuRow role="link" icon={row.icon} label={row.label}
+               value={row.route === "/appearance" ? (preference === "system" ? "Automatic" : preference === "dark" ? "Dark" : "Light") : row.route === "/security" ? (loading ? "Checking…" : !available ? "Unavailable" : enabled ? "On" : "Off") : undefined}
+-              external={!!row.webPath} onPress={() => void open(row)} />
++              external={!!row.webPath} onPress={() => void open(row)} /></GuideAnchor>
+           ))}
+         </MenuGroup>
+       ))}
+diff --git a/oneledger-mobile/src/app/(app)/shortcuts.tsx b/oneledger-mobile/src/app/(app)/shortcuts.tsx
+index e6dda47..45c03e4 100644
+--- a/oneledger-mobile/src/app/(app)/shortcuts.tsx
++++ b/oneledger-mobile/src/app/(app)/shortcuts.tsx
+@@ -1,3 +1,4 @@
++import { GuideAnchor } from "@/features/guides/GuideAnchor";
+ import { AutomationGuide } from "@/features/ios-shortcuts/AutomationGuide";
+ import { ShortcutInstaller } from "@/features/ios-shortcuts/ShortcutInstaller";
+ import { router } from "expo-router";
+@@ -115,11 +116,11 @@ export default function ShortcutsGuide() {
+         <Badge variant="attention">Walkthrough only: this isn&apos;t an iPhone</Badge>
+       ) : null}
+ 
+-      <StepWizard
++      <GuideAnchor id="recording-page"><StepWizard
+         current={iosGuideStepNumber(step)}
+         total={IOS_GUIDE_STEPS.length}
+         title={step === "install" && config.combinedShortcutUrl ? "Add OneLedger Capture" : title}
+-      />
++      /></GuideAnchor>
+ 
+       {step === "install" ? <Install onNext={() => setStep("connect")} /> : null}
+       {step === "connect" ? (
+diff --git a/oneledger-mobile/src/app/(app)/space-members.tsx b/oneledger-mobile/src/app/(app)/space-members.tsx
+index 306d5b4..dd5f1aa 100644
+--- a/oneledger-mobile/src/app/(app)/space-members.tsx
++++ b/oneledger-mobile/src/app/(app)/space-members.tsx
+@@ -39,7 +39,7 @@ export default function SpaceMembers() {
+   if (!active || active.kind === "personal") {
+     return (
+       <Screen>
+-        <ScreenHeader title="Space & members" subtitle="Personal is yours alone. Create a shared Space to collaborate." />
++        <ScreenHeader guideId="spaces-page" title="Space & members" subtitle="Personal is yours alone. Create a shared Space to collaborate." />
+         <EmptyState
+           variant="setup"
+           title="Nobody else is in your Personal Space"
+@@ -85,7 +85,7 @@ function SpaceMembersFor({ space: sp }: { space: Space }) {
+ 
+   return (
+     <Screen>
+-      <ScreenHeader title={sp.name} subtitle={`${kindLabel(sp.kind)} · members and invites`} />
++      <ScreenHeader guideId="spaces-page" title={sp.name} subtitle={`${kindLabel(sp.kind)} · members and invites`} />
+ 
+       {sp.kind === "household" ? <HowHouseholdsWork /> : null}
+ 
+diff --git a/oneledger-mobile/src/app/(app)/transaction/[id].tsx b/oneledger-mobile/src/app/(app)/transaction/[id].tsx
+index f2bcb6e..f1f5c24 100644
+--- a/oneledger-mobile/src/app/(app)/transaction/[id].tsx
++++ b/oneledger-mobile/src/app/(app)/transaction/[id].tsx
+@@ -1,3 +1,4 @@
++import { GuideAnchor } from "@/features/guides/GuideAnchor";
+ import * as Linking from "expo-linking";
+ import { router, useLocalSearchParams } from "expo-router";
+ import { useCallback } from "react";
+@@ -194,7 +195,7 @@ export default function TransactionDetail() {
+ 
+       <ReceiptCard transactionId={transaction.id} />
+ 
+-      <Card style={{ gap: space[2] }}>
++      <GuideAnchor id="transaction-category"><Card style={{ gap: space[2] }}>
+         <Text variant="caption" color="textMuted" accessibilityRole="header">
+           CATEGORY
+         </Text>
+@@ -237,6 +238,7 @@ export default function TransactionDetail() {
+         ) : null}
+       </Card>
+ 
++      </GuideAnchor>
+       {context || (extras?.tags.length ?? 0) > 0 ? (
+         <TransactionTags
+           // A fresh editor per transaction (and per load), so edits never leak across.
+diff --git a/oneledger-mobile/src/app/(app)/ussd/index.tsx b/oneledger-mobile/src/app/(app)/ussd/index.tsx
+index a79f709..9ed6558 100644
+--- a/oneledger-mobile/src/app/(app)/ussd/index.tsx
++++ b/oneledger-mobile/src/app/(app)/ussd/index.tsx
+@@ -51,7 +51,7 @@ export default function UssdDirectory() {
+ 
+   return (
+     <Screen>
+-      <ScreenHeader title={params.title || "USSD directory"} subtitle="USSD codes for Mobile Money, banking and government services in Rwanda." />
++      <ScreenHeader guideId="ussd-page" title={params.title || "USSD directory"} subtitle="USSD codes for Mobile Money, banking and government services in Rwanda." />
+ 
+       <TextField label="Search" value={query} onChangeText={setQuery} placeholder="Name, service or code" autoCapitalize="none" returnKeyType="search" />
+ 
+diff --git a/oneledger-mobile/src/components/ds/Screen.tsx b/oneledger-mobile/src/components/ds/Screen.tsx
+index d121999..8f17a1d 100644
+--- a/oneledger-mobile/src/components/ds/Screen.tsx
++++ b/oneledger-mobile/src/components/ds/Screen.tsx
+@@ -1,8 +1,8 @@
++import { GuideScrollView } from "@/features/guides/GuideScrollView";
+ import type { ReactNode } from "react";
+ import {
+   KeyboardAvoidingView,
+   Platform,
+-  ScrollView,
+   StyleSheet,
+   type StyleProp,
+   type ViewStyle,
+@@ -44,7 +44,7 @@ export function Screen({
+         style={styles.flex}
+         behavior={Platform.OS === "ios" ? "padding" : undefined}
+       >
+-        <ScrollView
++        <GuideScrollView
+           onScroll={onScroll}
+           scrollEventThrottle={32}
+           keyboardShouldPersistTaps="handled"
+@@ -53,7 +53,7 @@ export function Screen({
+           contentContainerStyle={[styles.content, centered && styles.centered, contentStyle,payOn&&!onTabs&&{paddingBottom:88}]}
+         >
+           {children}
+-        </ScrollView>
++        </GuideScrollView>
+       </KeyboardAvoidingView>
+     </SafeAreaView>
+   );
+diff --git a/oneledger-mobile/src/components/ds/ScreenHeader.tsx b/oneledger-mobile/src/components/ds/ScreenHeader.tsx
+index 2eba2a6..0d2fb4d 100644
+--- a/oneledger-mobile/src/components/ds/ScreenHeader.tsx
++++ b/oneledger-mobile/src/components/ds/ScreenHeader.tsx
+@@ -1,3 +1,4 @@
++import { GuideAnchor } from "@/features/guides/GuideAnchor";
+ import { Stack } from "expo-router";
+ import type { ReactNode } from "react";
+ import { StyleSheet, View } from "react-native";
+@@ -18,18 +19,20 @@ export function ScreenHeader({
+   subtitle,
+   action,
+   inline = false,
++  guideId,
+ }: {
+   title: string;
+   subtitle?: string;
+   action?: ReactNode;
+   inline?: boolean;
++  guideId?: string;
+ }) {
+   const hasBody = inline || !!subtitle || !!action;
+   return (
+     <>
+       {inline ? null : <Stack.Screen options={{ title }} />}
+       {hasBody ? (
+-        <View style={styles.row}>
++        <GuideAnchor id={guideId ?? `page-${title.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"")}`}><View style={styles.row}>
+           <View style={styles.titles}>
+             {inline ? (
+               <Text variant="title" accessibilityRole="header">
+@@ -43,7 +46,7 @@ export function ScreenHeader({
+             ) : null}
+           </View>
+           {action}
+-        </View>
++        </View></GuideAnchor>
+       ) : null}
+     </>
+   );
+diff --git a/oneledger-mobile/src/components/shell/MotionTabBar.tsx b/oneledger-mobile/src/components/shell/MotionTabBar.tsx
+index e40a857..6ba058d 100644
+--- a/oneledger-mobile/src/components/shell/MotionTabBar.tsx
++++ b/oneledger-mobile/src/components/shell/MotionTabBar.tsx
+@@ -1,3 +1,4 @@
++import { GuideAnchor } from "@/features/guides/GuideAnchor";
+ import Feather from "@expo/vector-icons/Feather";
+ import { Tabs } from "expo-router";
+ import type { ComponentProps } from "react";
+@@ -26,7 +27,7 @@ function MotionTab({item,position,width,state,emitter,navigateToTab}:TabProps&{i
+  const style=useAnimatedStyle(()=>{return {left:width*(payOn?item.home:position)};});
+  const labelStyle=useAnimatedStyle(()=>({opacity:1-(compactProgress?.get()??0),height:14*(1-(compactProgress?.get()??0))}));
+  if(!route)return null;
+- return <Animated.View style={[{position:"absolute",top:0,width},style]}><Pressable accessibilityRole="tab" accessibilityLabel={item.label} accessibilityState={{selected:focused}} onPress={()=>{const e=emitter.emit({type:"tabPress",target:route.key,canPreventDefault:true});if(!focused&&!e.defaultPrevented)navigateToTab(route.key);}} onLongPress={()=>emitter.emit({type:"tabLongPress",target:route.key})} style={{minHeight:44,alignItems:"center",justifyContent:"center",paddingTop:5,gap:3}}><Feather name={item.icon} size={20} color={focused?colors.accent:colors.textMuted}/><Animated.View style={labelStyle} accessibilityElementsHidden={compact}><Text variant="caption" style={{fontSize:10,lineHeight:14}} color={focused?"accent":"textMuted"}>{item.label}</Text></Animated.View></Pressable></Animated.View>;
++ return <Animated.View style={[{position:"absolute",top:0,width},style]}><GuideAnchor persistent id={`nav-${item.name}`}><Pressable accessibilityRole="tab" accessibilityLabel={item.label} accessibilityState={{selected:focused}} onPress={()=>{const e=emitter.emit({type:"tabPress",target:route.key,canPreventDefault:true});if(!focused&&!e.defaultPrevented)navigateToTab(route.key);}} onLongPress={()=>emitter.emit({type:"tabLongPress",target:route.key})} style={{minHeight:44,alignItems:"center",justifyContent:"center",paddingTop:5,gap:3}}><Feather name={item.icon} size={20} color={focused?colors.accent:colors.textMuted}/><Animated.View style={labelStyle} accessibilityElementsHidden={compact}><Text variant="caption" style={{fontSize:10,lineHeight:14}} color={focused?"accent":"textMuted"}>{item.label}</Text></Animated.View></Pressable></GuideAnchor></Animated.View>;
+ }
+ 
+ /** A continuous contour follows the raised Pay circle; a straight divider when Pay is unavailable. */
+diff --git a/oneledger-mobile/src/components/shell/NavigationChrome.tsx b/oneledger-mobile/src/components/shell/NavigationChrome.tsx
+index ec5854e..973c021 100644
+--- a/oneledger-mobile/src/components/shell/NavigationChrome.tsx
++++ b/oneledger-mobile/src/components/shell/NavigationChrome.tsx
+@@ -1,3 +1,4 @@
++import { GuideAnchor } from "@/features/guides/GuideAnchor";
+ import { router,usePathname } from "expo-router";
+ import { useCallback,useEffect,useMemo,useState,type ReactNode } from "react";
+ import { Keyboard,Platform,StyleSheet,useWindowDimensions,View } from "react-native";
+@@ -38,6 +39,6 @@ function GlobalPayButton({config}:{config:Awaited<ReturnType<typeof fetchPayConf
+  const labelStyle=useAnimatedStyle(()=>({opacity:1-(compactProgress?.get()??0)}));
+  const hidden=["/pay-sheet","/scan","/connect"].includes(path)||path.startsWith("/pay-new")||path.startsWith("/pay-again");
+  if(!payOn||hidden)return null;
+- return <View pointerEvents="box-none" style={StyleSheet.absoluteFill}><Animated.View testID="global-pay-position" style={[styles.floating,animated]}><PayTabButton floating onPress={()=>{Keyboard.dismiss();router.push("/pay-sheet");}} onHold={target?()=>{Keyboard.dismiss();router.push(target);}:undefined} holdMs={prefs.durationMs} hint={holdHint(prefs,ready)}/>{onTabs?<Animated.View accessibilityElementsHidden style={[{position:"absolute",top:49,width:48,alignItems:"center"},labelStyle]}><Text variant="caption" color="textMuted" style={{fontSize:10,lineHeight:12}}>Pay</Text></Animated.View>:null}</Animated.View></View>;
++ return <View pointerEvents="box-none" style={StyleSheet.absoluteFill}><Animated.View testID="global-pay-position" style={[styles.floating,animated]}><GuideAnchor persistent id="pay-launcher"><PayTabButton floating onPress={()=>{Keyboard.dismiss();router.push("/pay-sheet");}} onHold={target?()=>{Keyboard.dismiss();router.push(target);}:undefined} holdMs={prefs.durationMs} hint={holdHint(prefs,ready)}/></GuideAnchor>{onTabs?<Animated.View accessibilityElementsHidden style={[{position:"absolute",top:49,width:48,alignItems:"center"},labelStyle]}><Text variant="caption" color="textMuted" style={{fontSize:10,lineHeight:12}}>Pay</Text></Animated.View>:null}</Animated.View></View>;
+ }
+ const styles=StyleSheet.create({floating:{position:"absolute",width:48,height:48,zIndex:100,elevation:20}});
+diff --git a/oneledger-mobile/src/components/shell/PayLauncher.tsx b/oneledger-mobile/src/components/shell/PayLauncher.tsx
+index b6ad79d..b39cd0d 100644
+--- a/oneledger-mobile/src/components/shell/PayLauncher.tsx
++++ b/oneledger-mobile/src/components/shell/PayLauncher.tsx
+@@ -1,3 +1,4 @@
++import { GuideAnchor } from "@/features/guides/GuideAnchor";
+ import Feather from "@expo/vector-icons/Feather";
+ import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
+ import * as Linking from "expo-linking";
+@@ -118,20 +119,20 @@ export function PayLauncher({
+   return (
+     <View style={styles.root}>
+       <Animated.View entering={rise(step++)} style={styles.header}>
+-        <View style={styles.headerText}>
++        <GuideAnchor id="pay-overview" style={styles.headerText}>
+           <Text variant="heading" accessibilityRole="header">
+             Pay & Services
+           </Text>
+           <Text variant="label" color="textMuted" numberOfLines={1}>
+             Prepare a payment or find a USSD code.
+           </Text>
+-        </View>
++        </GuideAnchor>
+       </Animated.View>
+ 
+       <View style={styles.body}>
+         {config.scanToPay ? (
+           <Animated.View entering={rise(step++)}>
+-            <FeatureRow
++            <GuideAnchor id="pay-scan"><FeatureRow
+               tone="scan"
+               label="Scan to pay"
+               caption="Scan a payment QR code or merchant poster."
+@@ -142,13 +143,13 @@ export function PayLauncher({
+                 onClose();
+                 router.push("/scan");
+               }}
+-            />
++            /></GuideAnchor>
+           </Animated.View>
+         ) : null}
+ 
+         {config.paymentRequests ? (
+           <Animated.View entering={rise(step++)}>
+-            <FeatureRow
++            <GuideAnchor id="pay-request"><FeatureRow
+               tone="request"
+               label="Request payment"
+               caption="Ask someone to pay you with a link."
+@@ -159,11 +160,11 @@ export function PayLauncher({
+                 onClose();
+                 router.push("/request-new");
+               }}
+-            />
++            /></GuideAnchor>
+           </Animated.View>
+         ) : null}
+ 
+-        <Animated.View entering={rise(step++)} style={styles.grid}>
++        <GuideAnchor id="pay-services"><Animated.View entering={rise(step++)} style={styles.grid}>
+           {LAUNCHER_ACTIONS.map((action) => {
+             const available = actionAvailableHere(action, config);
+             const brand = action.kind === "ekash";
+@@ -196,7 +197,7 @@ export function PayLauncher({
+               </PressableScale>
+             );
+           })}
+-        </Animated.View>
++        </Animated.View></GuideAnchor>
+ 
+         <Animated.View entering={rise(step++)}>
+           <PressableScale
+diff --git a/oneledger-mobile/src/features/budgets/BudgetsView.tsx b/oneledger-mobile/src/features/budgets/BudgetsView.tsx
+index 442d4d8..2223961 100644
+--- a/oneledger-mobile/src/features/budgets/BudgetsView.tsx
++++ b/oneledger-mobile/src/features/budgets/BudgetsView.tsx
+@@ -1,3 +1,5 @@
++import { GuideSuggestion } from "@/features/guides/GuideSuggestion";
++import { GuideAnchor } from "@/features/guides/GuideAnchor";
+ import * as Linking from "expo-linking";
+ import { router } from "expo-router";
+ import { useCallback } from "react";
+@@ -46,6 +48,7 @@ export function BudgetsView({ embedded = false }: { embedded?: boolean }) {
+     <Screen edges={embedded ? ["left", "right"] : undefined}>
+       <ScreenHeader title={embedded ? "Plan" : "Budget"} subtitle="How this period is going" inline={embedded} />
+ 
++      <GuideSuggestion id="plan" enabled={data?.ok === true && data.budgets.length > 0} />
+       {loading && !data ? (
+         <Text variant="label" color="textMuted">
+           Loading…
+@@ -75,20 +78,20 @@ export function BudgetsView({ embedded = false }: { embedded?: boolean }) {
+           }
+         />
+       ) : data ? (
+-        data.budgets.map((budget) => <BudgetCard key={budget.id} budget={budget} />)
++        data.budgets.map((budget, index) => <BudgetCard key={budget.id} budget={budget} guideEnabled={index === 0} />)
+       ) : null}
+     </Screen>
+   );
+ }
+ 
+-function BudgetCard({ budget }: { budget: Budget }) {
++function BudgetCard({ budget, guideEnabled = false }: { budget: Budget; guideEnabled?: boolean }) {
+   const sum = totals(budget.allocations);
+   const worst = statusDisplay(worstStatus(budget.allocations));
+   const pace = paceLabel(budget.elapsedFraction);
+ 
+   return (
+     <>
+-      <Card style={{ gap: space[3] }}>
++      <GuideAnchor id="budget-progress" enabled={guideEnabled}><Card style={{ gap: space[3] }}>
+         <View style={{ gap: 2 }}>
+           <Text variant="heading">{budget.name}</Text>
+           <Text variant="label" color="textMuted">
+@@ -115,6 +118,7 @@ function BudgetCard({ budget }: { budget: Budget }) {
+         </Text>
+       </Card>
+ 
++      </GuideAnchor>
+       {budget.alerts.length > 0 ? (
+         <Card style={{ gap: space[2] }}>
+           <Text variant="label" color="textSecondary">
+diff --git a/oneledger-mobile/src/features/home/HomeCards.tsx b/oneledger-mobile/src/features/home/HomeCards.tsx
+index 83bd655..84f4ef6 100644
+--- a/oneledger-mobile/src/features/home/HomeCards.tsx
++++ b/oneledger-mobile/src/features/home/HomeCards.tsx
+@@ -1,3 +1,4 @@
++import { GuideAnchor } from "@/features/guides/GuideAnchor";
+ import { AccountAvatar } from "@/features/profile/Avatar";
+ import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
+ import Feather from "@expo/vector-icons/Feather";
+@@ -32,15 +33,16 @@ export function HomeHeader({ name, unread }: { name: string; unread: number }) {
+   </View>;
+ }
+ 
+-export function HomeSection({ title, subtitle, action, children, collapsible = false, dense = false, pinScope, sectionId }: { title: string; subtitle?: string; action?: ReactNode; children: ReactNode; collapsible?: boolean; dense?: boolean; pinScope?:string; sectionId?:string }) {
++export function HomeSection({ title, subtitle, action, children, collapsible = false, dense = false, pinScope, sectionId, guideId }: { title: string; subtitle?: string; action?: ReactNode; children: ReactNode; collapsible?: boolean; dense?: boolean; pinScope?:string; sectionId?:string; guideId?:string }) {
+   const styles=useStyles();const {colors}=useTheme();
+   const [localExpanded,setLocalExpanded]=useState(false);
+   const pin=usePinnedSection(pinScope,sectionId);
+   const expanded=pinScope ? pin.expanded : localExpanded;
+   const toggle=()=>pinScope ? pin.toggle() : setLocalExpanded(!localExpanded);
+   const heading=<View style={{flex:1,gap:3}}><Text variant="heading" style={styles.sectionTitle}>{title}</Text>{subtitle?<Text variant="caption" color="textMuted" style={styles.small}>{subtitle}</Text>:null}</View>;
++  const guideHeading=guideId?<GuideAnchor id={guideId} style={{flex:1}}>{heading}</GuideAnchor>:heading;
+   return <Card style={[styles.section,dense&&styles.denseSection]}>
+-    {collapsible ? <View style={styles.sectionHeading}><Pressable accessibilityRole="button" accessibilityLabel={title} accessibilityState={{expanded}} onPress={toggle} style={styles.collapseTitle}>{heading}</Pressable>{action}{pinScope?<Pressable accessibilityRole="button" accessibilityLabel={`${pin.pinned?"Unpin":"Pin"} ${title}`} accessibilityState={{selected:pin.pinned}} onPress={()=>pin.pin(!pin.pinned)} hitSlop={{left:4,right:4}} style={styles.sectionControl}><MaterialCommunityIcons name={pin.pinned?"pin":"pin-off"} size={17} color={colors.accent}/></Pressable>:null}<Pressable accessibilityRole="button" accessibilityLabel={`${expanded?"Collapse":"Expand"} ${title}`} onPress={toggle} hitSlop={{left:4,right:4}} style={styles.sectionControl}><Feather name={expanded?"chevron-up":"chevron-down"} size={17} color={colors.textMuted}/></Pressable></View>:<View style={styles.sectionHeading}>{heading}{action}</View>}
++    {collapsible ? <View style={styles.sectionHeading}><Pressable accessibilityRole="button" accessibilityLabel={title} accessibilityState={{expanded}} onPress={toggle} style={styles.collapseTitle}>{guideHeading}</Pressable>{action}{pinScope?<Pressable accessibilityRole="button" accessibilityLabel={`${pin.pinned?"Unpin":"Pin"} ${title}`} accessibilityState={{selected:pin.pinned}} onPress={()=>pin.pin(!pin.pinned)} hitSlop={{left:4,right:4}} style={styles.sectionControl}><MaterialCommunityIcons name={pin.pinned?"pin":"pin-off"} size={17} color={colors.accent}/></Pressable>:null}<Pressable accessibilityRole="button" accessibilityLabel={`${expanded?"Collapse":"Expand"} ${title}`} onPress={toggle} hitSlop={{left:4,right:4}} style={styles.sectionControl}><Feather name={expanded?"chevron-up":"chevron-down"} size={17} color={colors.textMuted}/></Pressable></View>:<View style={styles.sectionHeading}>{guideHeading}{action}</View>}
+     {pinScope&&pin.error?<Text variant="caption" color="attention">{pin.error}</Text>:null}
+     {!collapsible||expanded?children:null}
+   </Card>;
+@@ -58,7 +60,7 @@ export function CashFlow({ currency, current, previous, previousAvailable = fals
+   const money = (amount: bigint, ready: boolean) => amountsHidden ? "••••••" : ready ? compactMoney(amount,currency) : "—";
+   const income=current?.moneyInMinor ?? 0n, expense=current?.moneyOutMinor ?? 0n;
+   const retained=retainedPercent(income,expense);
+-  return <HomeSection title="Cash flow" dense action={<Text variant="caption" color="textMuted">{currency}</Text>}>
++  return <HomeSection guideId="home-cash-flow" title="Cash flow" dense action={<Text variant="caption" color="textMuted">{currency}</Text>}>
+     <View style={styles.dailyPrimary}>{[{label:"Received today",amount:today?.moneyInMinor ?? 0n,positive:true},{label:"Spent today",amount:today?.moneyOutMinor ?? 0n,positive:false}].map(item => <View key={item.label} style={{flex:1,gap:5}}><Text variant="caption" color="textMuted">{item.label}</Text><Text variant="title" style={styles.dailyAmount} color={item.positive ? "moneyPositive" : "moneyRequest"} tabular adjustsFontSizeToFit numberOfLines={1}>{money(item.amount,todayAvailable)}</Text></View>)}</View>
+     {!todayAvailable ? <Text variant="caption" color="textMuted">Today’s activity is unavailable.</Text> : null}
+     <View style={styles.monthlyFooter}><Text variant="caption" color="textMuted" style={styles.small}>This month · Settled activity</Text>
+@@ -86,7 +88,7 @@ export function Spending({ current, available, message, scope }: { current: Curr
+   const slices = rows.length > 4 ? [...rows.slice(0, 3).map((r) => ({ label: r.category, amount: r.amountMinor, category: r.category })), { label: "Other", amount: rows.slice(3).reduce((s, r) => s + r.amountMinor, 0n), category: null }] : rows.map((r) => ({ label: r.category, amount: r.amountMinor, category: r.category }));
+   const palette = [colors.chartIncome, colors.chartExpense, colors.chartFood, colors.chartOther];
+   const sum = slices.reduce((s, p) => s + p.amount, 0n);
+-  return <HomeSection title="Spending breakdown" subtitle="Where your money goes" collapsible pinScope={scope} sectionId="spending" dense>
++  return <HomeSection guideId="home-spending" title="Spending breakdown" subtitle="Where your money goes" collapsible pinScope={scope} sectionId="spending" dense>
+     {!available ? <Text color="textMuted">{message}</Text> : !rows.length ? <Text color="textMuted">Your spending categories appear after your first settled expense.</Text> : negative ? <><Text color="textMuted">Net spending includes refunds.</Text>{rows.map((r) => <View key={r.category} style={styles.walletRow}><Text>{r.category}</Text><Text>{amountsHidden ? "••••••" : formatMoney(r.amountMinor, currency)}</Text></View>)}</> : <View style={styles.breakdown}>
+       <Donut slices={slices.map((s, i) => ({ ...s, color: palette[i] }))} total={<><Text variant="heading" tabular>{amountsHidden ? "••••" : compactMoney(current?.moneyOutMinor ?? sum, currency).replace(currency + " ", "")}</Text><Text variant="caption" color="textMuted">Total spent</Text></>} />
+       <View style={styles.categoryGrid}>{slices.map((s, i) => <Pressable key={s.label} accessibilityRole="button" accessibilityLabel={`${s.label}, ${amountsHidden ? "amount hidden" : formatMoney(s.amount, currency)}`} onPress={() => router.navigate({ pathname: "/transactions", params: { focusSearch:"", category: s.category ?? "", accountId:"", walletName:"", period: "month", reset: String(Date.now()) } })} style={styles.category}>
+@@ -100,7 +102,7 @@ export function WalletPanel({ wallets, message, manage = true }: { wallets: Wall
+   const { colors } = useTheme();
+   const { amountsHidden } = usePrivacy();
+   const styles = useStyles();
+-  return <HomeSection title="Your wallets" action={manage ? <HomeLink label="Manage" onPress={() => router.push("/wallets")} /> : undefined}>
++  return <HomeSection guideId="home-wallets" title="Your wallets" action={manage ? <GuideAnchor id="home-wallets-manage"><HomeLink label="Manage" onPress={() => router.push("/wallets")} /></GuideAnchor> : undefined}>
+     {wallets === null ? <Text color="textMuted">{message}</Text> : !wallets.length ? <Text color="textMuted">No wallets yet. Add an account to start.</Text> : wallets.map((w) => <Pressable accessibilityRole="button" accessibilityLabel={`Open ${w.name}`} key={w.id} style={styles.walletRow} onPress={() => router.push({pathname:"/wallet/[id]",params:{id:w.id}})}>
+       <View style={styles.walletIcon}><Feather name={w.provider === "cash" ? "dollar-sign" : w.provider.includes("money") || w.provider.includes("momo") ? "smartphone" : "credit-card"} size={18} color={colors.accent} /></View>
+       <View style={{ flex: 1, gap: 5 }}><View style={styles.walletTop}><Text variant="bodyStrong" numberOfLines={2} style={styles.walletName}>{w.name}</Text><Text variant="bodyStrong" tabular style={styles.walletAmount}>{amountsHidden ? "••••••" : w.balance.amountMinor === null ? "—" : formatMoney(w.balance.amountMinor, w.currency)}</Text></View><Text variant="caption" color="textMuted" style={styles.small}>{PROVIDER_LABEL[w.provider] ?? w.provider} · {STATUS_LABEL[w.balance.status]}</Text></View>
+diff --git a/oneledger-mobile/src/features/home/HomeSpaceSwitcher.tsx b/oneledger-mobile/src/features/home/HomeSpaceSwitcher.tsx
+index f48a643..ee711d2 100644
+--- a/oneledger-mobile/src/features/home/HomeSpaceSwitcher.tsx
++++ b/oneledger-mobile/src/features/home/HomeSpaceSwitcher.tsx
+@@ -1,3 +1,4 @@
++import { GuideAnchor } from "@/features/guides/GuideAnchor";
+ import Feather from "@expo/vector-icons/Feather";
+ import { useState } from "react";
+ import { Modal, Pressable, StyleSheet, View } from "react-native";
+@@ -12,9 +13,9 @@ export function HomeSpaceSwitcher() {
+   const {colors}=useTheme();
+   const styles=useStyles();
+   return <View style={styles.wrapper}>
+-    <Pressable accessibilityRole="button" accessibilityLabel={`Change Space, ${active?.name ?? "Workspace"}`} disabled={spaces.length===0} onPress={()=>setOpen(true)} style={styles.trigger}>
++    <GuideAnchor id="space-switcher" enabled={spaces.length > 1} follow={() => setOpen(true)}><Pressable accessibilityRole="button" accessibilityLabel={`Change Space, ${active?.name ?? "Workspace"}`} disabled={spaces.length===0} onPress={()=>setOpen(true)} style={styles.trigger}>
+       <View style={styles.pill}><Text variant="caption" color="accent" numberOfLines={1} style={{flexShrink:1}}>{active?.name ?? "Workspace"}</Text><Feather name="chevron-down" size={12} color={colors.accent}/></View>
+-    </Pressable>
++    </Pressable></GuideAnchor>
+     <Modal transparent animationType="fade" visible={open} onRequestClose={()=>setOpen(false)}><View style={styles.scrim}><View style={styles.sheet} accessibilityViewIsModal>
+       <MenuGroup title="Choose a Space">{spaces.map(s=><MenuRow key={s.id} label={s.name} selected={active?.id===s.id} role="radio" onPress={()=>{setActive(s.id);setOpen(false);}}/>)}</MenuGroup>
+       <Pressable accessibilityRole="button" accessibilityLabel="Close Space picker" onPress={()=>setOpen(false)} style={styles.close}><Text color="accent">Close</Text></Pressable>
+diff --git a/oneledger-mobile/src/features/home/HomeTrends.tsx b/oneledger-mobile/src/features/home/HomeTrends.tsx
+index 9b96c78..605c352 100644
+--- a/oneledger-mobile/src/features/home/HomeTrends.tsx
++++ b/oneledger-mobile/src/features/home/HomeTrends.tsx
+@@ -26,7 +26,7 @@ export function HomeTrends({currency,scope,nowIso,day}:{currency:SupportedCurren
+  const block=currencyBlock(data?.result,currency);const points=data?.result.ok&&block?.trend?fillTrendWindow(block.trend,data.window):[];
+  function apply(){try{const next:TrendRange={kind:"custom",from,to};trendWindow(next,now);setRange(next);setOpen(false);setError(null);}catch(e){setError(e instanceof Error?e.message:"Check your dates.");}}
+  const action=<Pressable accessibilityRole="button" accessibilityLabel="Choose trend date range" onPress={()=>{setError(null);setOpen(true);}} style={{minHeight:44,paddingHorizontal:5,justifyContent:"center"}}><Text variant="caption" color="accent">{window.label} ⌄</Text></Pressable>;
+- return <><HomeSection title="Cash flow trends" subtitle={`Income and expenses · ${currency}`} collapsible pinScope={scope} sectionId="trends" action={action} dense>
++ return <><HomeSection guideId="home-trends" title="Cash flow trends" subtitle={`Income and expenses · ${currency}`} collapsible pinScope={scope} sectionId="trends" action={action} dense>
+   {data?.result.ok?<TrendChart points={points} currency={currency} granularity={data.window.granularity}/>:<Text variant="caption" color="textMuted">{data&&!data.result.ok?data.result.message:query.error??"Loading your trend…"}</Text>}
+   <Text variant="caption" color="textMuted" style={{fontSize:10,lineHeight:14}}>{kigaliDateKey(window.from)} – {kigaliDateKey(new Date(Date.parse(window.to)-1).toISOString())} · {window.granularity} buckets · selected dates only</Text>
+  </HomeSection>
+diff --git a/oneledger-mobile/src/features/home/WalletCarousel.tsx b/oneledger-mobile/src/features/home/WalletCarousel.tsx
+index 2ccd59d..0a789b5 100644
+--- a/oneledger-mobile/src/features/home/WalletCarousel.tsx
++++ b/oneledger-mobile/src/features/home/WalletCarousel.tsx
+@@ -1,3 +1,4 @@
++import { GuideAnchor } from "@/features/guides/GuideAnchor";
+ import Feather from "@expo/vector-icons/Feather";
+ import { router } from "expo-router";
+ import { useEffect, useId, useRef, useState } from "react";
+@@ -60,13 +61,13 @@ export function WalletCarousel({ wallets, fallback, loading, preferenceScope }:
+   return <View style={{gap:4}} onLayout={({nativeEvent:{layout}}) => setWidth(Math.max(1,layout.width))}>
+     {ordered.length>1?<View testID="wallet-controls" style={styles.controls}><Pressable accessibilityRole="button" accessibilityLabel="Next wallet" accessibilityHint="Swipe the card or tap to switch wallets" accessibilityValue={{text:`${selectedIndex+1} of ${ordered.length}: ${selected.name}`}} onPress={()=>choose((selectedIndex+1)%ordered.length)} hitSlop={{top:8,bottom:8}} style={styles.dots}>{visibleDots.map((w,i)=><View key={w.id} style={[styles.dot,i+dotStart===selectedIndex&&styles.activeDot]}/>)}</Pressable></View>:null}
+     {ordered.length ? <ScrollView testID="wallet-carousel" ref={pager} horizontal pagingEnabled directionalLockEnabled showsHorizontalScrollIndicator={false} onScrollBeginDrag={() => {interacted.current=true;}} contentOffset={{x:selectedIndex*width,y:0}} onMomentumScrollEnd={({nativeEvent}) => {interacted.current=true;const index=Math.max(0,Math.min(ordered.length-1,Math.round(nativeEvent.contentOffset.x/width)));setSelectedId(ordered[index].id);}}>
+-      {ordered.map((wallet,i) => <View key={wallet.id} style={{width}} accessibilityElementsHidden={i!==selectedIndex} importantForAccessibility={i===selectedIndex ? "auto" : "no-hide-descendants"}><WalletBalanceCard wallet={wallet} loading={loading} defaultOnLaunch={i===0} saving={saving} onMakeDefault={preferenceScope?()=>void saveDefault(wallet.id):undefined} /></View>)}
++      {ordered.map((wallet,i) => <View key={wallet.id} style={{width}} accessibilityElementsHidden={i!==selectedIndex} importantForAccessibility={i===selectedIndex ? "auto" : "no-hide-descendants"}><WalletBalanceCard guideEnabled={i === selectedIndex} wallet={wallet} loading={loading} defaultOnLaunch={i===0} saving={saving} onMakeDefault={preferenceScope?()=>void saveDefault(wallet.id):undefined} /></View>)}
+     </ScrollView> : <WalletBalanceCard fallback={wallets === null ? fallback : null} loading={loading} />}
+     {error ? <Text variant="caption" color="attention">{error}</Text> : null}
+   </View>;
+ }
+ 
+-function WalletBalanceCard({wallet,fallback,loading,defaultOnLaunch=false,saving=false,onMakeDefault}:{wallet?:Wallet;fallback?:CurrentBalance|null;loading:boolean;defaultOnLaunch?:boolean;saving?:boolean;onMakeDefault?:()=>void}) {
++function WalletBalanceCard({wallet,fallback,loading,defaultOnLaunch=false,saving=false,onMakeDefault,guideEnabled=true}:{guideEnabled?:boolean;wallet?:Wallet;fallback?:CurrentBalance|null;loading:boolean;defaultOnLaunch?:boolean;saving?:boolean;onMakeDefault?:()=>void}) {
+   const styles=useStyles();
+   const {colors}=useTheme();
+   const {amountsHidden,toggleAmountsHidden}=usePrivacy();
+@@ -76,15 +77,15 @@ function WalletBalanceCard({wallet,fallback,loading,defaultOnLaunch=false,saving
+   const asOf=wallet ? wallet.balance.asOf : fallback?.asOfIso;
+   const label=wallet?.name ?? (fallback ? "Last reported balance" : "Your wallet");
+   return <View style={{gap:5}}>
+-    <View testID="balance-card" style={styles.card} onLayout={({nativeEvent:{layout}})=>setSize(old=>old.width===layout.width&&old.height===layout.height?old:{width:layout.width,height:layout.height})}>
++    <GuideAnchor id="overview" enabled={guideEnabled}><View testID="balance-card" style={styles.card} onLayout={({nativeEvent:{layout}})=>setSize(old=>old.width===layout.width&&old.height===layout.height?old:{width:layout.width,height:layout.height})}>
+       <Svg testID="balance-card-background" width={size.width} height={size.height} viewBox="0 0 360 190" preserveAspectRatio="none" style={StyleSheet.absoluteFill} accessible={false} pointerEvents="none"><Defs><LinearGradient id={id} x1="0" y1="0" x2="1" y2="1"><Stop offset="0" stopColor={colors.homeGradientStart}/><Stop offset="1" stopColor={colors.homeGradientEnd}/></LinearGradient></Defs><Rect width={360} height={190} fill={`url(#${id})`}/><Circle cx={300} cy={-30} r={210} fill="none" stroke={colors.onSolid} strokeOpacity={0.07} strokeWidth={40}/><Circle cx={300} cy={-30} r={180} fill="none" stroke={colors.onSolid} strokeOpacity={0.12}/></Svg>
+       <View style={styles.cardTop}><Text variant="bodyStrong" color="onSolid" numberOfLines={2} style={{flex:1,fontSize:13,lineHeight:18}}>{label}</Text><Pressable accessibilityRole="button" accessibilityLabel={amountsHidden ? "Show balances" : "Hide balances"} onPress={toggleAmountsHidden} style={styles.eye}><Feather name={amountsHidden ? "eye-off" : "eye"} size={18} color={colors.onSolid}/></Pressable>{wallet?<Pressable accessibilityRole="button" accessibilityLabel={defaultOnLaunch?`${wallet.name} is the default landing wallet`:`Use ${wallet.name} on launch`} disabled={defaultOnLaunch||saving||!onMakeDefault} onPress={onMakeDefault} style={styles.defaultButton}><Feather name="star" size={13} color={colors.onSolid}/><Text variant="caption" color="onSolid" style={{fontSize:10,lineHeight:14}}>{saving?"Saving…":defaultOnLaunch?"Default":"Set default"}</Text></Pressable>:null}</View>
+       <Text variant="display" color="onSolid" tabular adjustsFontSizeToFit numberOfLines={1} style={styles.amount}>{amountsHidden ? "••••••" : amount !== null ? formatMoney(amount,wallet?.currency ?? "RWF") : loading ? "Loading…" : "—"}</Text>
+       {wallet?.balance.status === "confirmed" ? null : <Text variant="caption" color="onSolid">{wallet ? STATUS_LABEL[wallet.balance.status] : fallback ? "Single provider snapshot" : "No wallet balance available"}</Text>}
+       {wallet ? <BalanceTrend wallet={wallet} hidden={amountsHidden}/> : null}
+-      <View style={styles.actions}><Pressable accessibilityRole="button" accessibilityLabel={wallet ? `Add transaction to ${wallet.name}` : "Add transaction"} onPress={()=>router.push(wallet ? {pathname:"/add-transaction",params:{accountId:wallet.id}} : "/add-transaction")} style={styles.add}><Text variant="label" style={{color:colors.homeGradientStart}}>+ Add transaction</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel={wallet ? `View ${wallet.name}` : "View wallets"} onPress={()=>router.push(wallet ? {pathname:"/wallet/[id]",params:{id:wallet.id}} : "/wallets")} style={styles.details}><Text variant="label" color="onSolid">{wallet ? "View wallet ↗" : "View wallets ↗"}</Text></Pressable></View>
++      <View style={styles.actions}><GuideAnchor id="add-transaction" enabled={guideEnabled} style={{flex:1.2}}><Pressable accessibilityRole="button" accessibilityLabel={wallet ? `Add transaction to ${wallet.name}` : "Add transaction"} onPress={()=>router.push(wallet ? {pathname:"/add-transaction",params:{accountId:wallet.id}} : "/add-transaction")} style={styles.add}><Text variant="label" style={{color:colors.homeGradientStart}}>+ Add transaction</Text></Pressable></GuideAnchor><Pressable accessibilityRole="button" accessibilityLabel={wallet ? `View ${wallet.name}` : "View wallets"} onPress={()=>router.push(wallet ? {pathname:"/wallet/[id]",params:{id:wallet.id}} : "/wallets")} style={styles.details}><Text variant="label" color="onSolid">{wallet ? "View wallet ↗" : "View wallets ↗"}</Text></Pressable></View>
+     </View>
+-    <Text variant="caption" color="textMuted" style={styles.updatedAt}>{asOf ? `Last updated on ${formatDateTime(asOf)}` : "Balance freshness unavailable"}</Text>
++    </GuideAnchor><Text variant="caption" color="textMuted" style={styles.updatedAt}>{asOf ? `Last updated on ${formatDateTime(asOf)}` : "Balance freshness unavailable"}</Text>
+     {!wallet && fallback?.pendingCount ? <Text variant="caption" color="attention">{fallback.pendingCount} local changes not yet confirmed</Text> : null}
+   </View>;
+ }
+diff --git a/oneledger-mobile/src/features/settings/MenuUI.tsx b/oneledger-mobile/src/features/settings/MenuUI.tsx
+index f6b432c..1560104 100644
+--- a/oneledger-mobile/src/features/settings/MenuUI.tsx
++++ b/oneledger-mobile/src/features/settings/MenuUI.tsx
+@@ -1,3 +1,4 @@
++import { GuideAnchor } from "@/features/guides/GuideAnchor";
+ import { AccountAvatar } from "@/features/profile/Avatar";
+ import { useProfile } from "@/features/profile/ProfileProvider";
+ import Feather from "@expo/vector-icons/Feather";
+@@ -21,10 +22,10 @@ export function MenuScreen({ title, subtitle, root = false, action, children }:
+   return (
+     <Screen edges={root ? ["top", "left", "right"] : ["left", "right", "bottom"]} contentStyle={layout.content}>
+       {root ? null : <Stack.Screen options={{ title, headerTitle: "", headerStyle: { backgroundColor: colors.background } }} />}
+-      <View style={layout.heading}>
++      <GuideAnchor id={`page-${title.toLowerCase().replace(/[^a-z0-9]+/g,"-")}`}><View style={layout.heading}>
+         <Text variant="display" accessibilityRole="header" style={layout.headingText}>{title}</Text>
+         {action}
+-      </View>
++      </View></GuideAnchor>
+       {subtitle ? <Text color="textMuted" style={layout.subtitle}>{subtitle}</Text> : null}
+       {children}
+     </Screen>
+diff --git a/oneledger-mobile/src/theme/colors.ts b/oneledger-mobile/src/theme/colors.ts
+index e02dd00..14c5266 100644
+--- a/oneledger-mobile/src/theme/colors.ts
++++ b/oneledger-mobile/src/theme/colors.ts
+@@ -10,6 +10,7 @@
+ 
+ export const lightColors = {
+   background: "#f6f6f7",
++  guideScrim: "#151a38",
+   surface: "#ffffff",
+   borderSubtle: "#e8e8ea",
+   borderStrong: "#d4d4d8",
+@@ -67,6 +68,7 @@ export type Palette = { readonly [K in ColorToken]: string };
+ 
+ export const darkColors: Palette = {
+   background: "#0d0e11",
++  guideScrim: "#000000",
+   surface: "#16181d",
+   borderSubtle: "#26282f",
+   borderStrong: "#3b3e48",
+diff --git a/oneledger-mobile/src/app/(app)/guides.tsx b/oneledger-mobile/src/app/(app)/guides.tsx
+new file mode 100644
+index 0000000..6223374
+--- /dev/null
++++ b/oneledger-mobile/src/app/(app)/guides.tsx
+@@ -0,0 +1,37 @@
++import { Platform, Pressable, View } from "react-native";
++import { useState } from "react";
++import { Button, Text, TextField } from "@/components/ds";
++import { useGuides } from "@/features/guides/context";
++import { GUIDE_GROUPS } from "@/features/guides/definitions";
++import { MenuGroup, MenuRow, MenuScreen } from "@/features/settings/MenuUI";
++import { useActiveSpace } from "@/features/spaces/ActiveSpaceProvider";
++import { useNavigationChrome } from "@/components/shell/NavigationChromeContext";
++import { captureSupported } from "@/features/capture/capture";
++export default function Guides() {
++  const guides = useGuides();
++  const { spaces } = useActiveSpace();
++  const { payOn } = useNavigationChrome();
++  const [query, setQuery] = useState("");
++  const [expanded, setExpanded] = useState<string[]>(["Start here"]);
++  const term = query.trim().toLocaleLowerCase();
++  const definitions = guides?.definitions.filter(guide => !term || `${guide.title} ${guide.description} ${guide.group}`.toLocaleLowerCase().includes(term)) ?? [];
++  return <MenuScreen title="Guides & help" subtitle="What would you like to do? Each guide takes just a few steps.">
++    <TextField compact label="Find a guide" placeholder="Search a task or feature" value={query} onChangeText={setQuery} autoCapitalize="none"/>
++    {guides?.notice ? <Text variant="label" color="textMuted" accessibilityLiveRegion="polite">{guides.notice}</Text> : null}
++    {!guides?.ready ? <Text color="textMuted">Loading your guides…</Text> : GUIDE_GROUPS.map(group => {
++      const items = definitions.filter(guide => guide.group === group);
++      if (!items.length) return null;
++      const open = !!term || expanded.includes(group);
++      return <View key={group} style={{gap:8}}>
++        <Pressable accessibilityRole="button" accessibilityState={{expanded:open}} accessibilityLabel={group} onPress={() => setExpanded(previous => previous.includes(group) ? previous.filter(item => item !== group) : [...previous,group])} style={{minHeight:44,flexDirection:"row",alignItems:"center",justifyContent:"space-between"}}><Text variant="bodyStrong">{group}</Text><Text color="textMuted">{open ? "−" : "+"}</Text></Pressable>
++        {open ? <MenuGroup>{items.map(guide => {
++          const unavailable = ["pay","scan"].includes(guide.id) && !payOn ? "Pay is unavailable in this Space" : guide.id === "spaces" && spaces.length < 2 ? "Available when you join another Space" : guide.id === "recording" && !captureSupported && Platform.OS !== "ios" ? "Requires a supported phone" : null;
++          const progress = guides.state.progress[guide.id];
++          return <MenuRow key={guide.id} icon={guide.icon} label={guide.title} hint={unavailable ?? `${guide.steps.length} steps · ${guide.description}`} value={unavailable ? undefined : progress?.status === "completed" ? "Replay" : progress?.status === "paused" ? "Resume" : "Start"} onPress={unavailable ? undefined : () => guides.start(guide.id)}/>;
++        })}</MenuGroup> : null}
++      </View>;
++    })}
++    {guides?.ready && !definitions.length ? <Text color="textMuted">No guides match. Try “transaction”, “budget” or “statement”.</Text> : null}
++    {guides?.ready ? <Button label="Replay the welcome" variant="ghost" onPress={guides.offerWelcome}/> : null}
++  </MenuScreen>;
++}
+diff --git a/oneledger-mobile/src/features/guides/GuideAnchor.tsx b/oneledger-mobile/src/features/guides/GuideAnchor.tsx
+new file mode 100644
+index 0000000..dacc935
+--- /dev/null
++++ b/oneledger-mobile/src/features/guides/GuideAnchor.tsx
+@@ -0,0 +1,32 @@
++import { useFocusEffect } from "expo-router";
++import { cloneElement, isValidElement, useCallback, useContext, useEffect, useRef, type ReactNode } from "react";
++import { View, type StyleProp, type ViewStyle, type ViewInstance } from "react-native";
++import { GuideScrollContext, useGuides, type GuidesContextValue } from "./context";
++
++type Props = { id: string; children: ReactNode; follow?: () => void; reveal?: () => void; style?: StyleProp<ViewStyle>; divider?: boolean; enabled?: boolean; persistent?: boolean };
++export function GuideAnchor(props: Props) {
++  const guides = useGuides();
++  const children = props.divider !== undefined && isValidElement<{ divider?: boolean }>(props.children) ? cloneElement(props.children, { divider: props.divider }) : props.children;
++  // Screens can also render without the guide host (isolated tests, auth).
++  if (!guides || props.enabled === false) return <View style={props.style}>{children}</View>;
++  return props.persistent ? <PersistentAnchor {...props} guides={guides}>{children}</PersistentAnchor> : <RegisteredAnchor {...props} guides={guides}>{children}</RegisteredAnchor>;
++}
++function RegisteredAnchor({ id, children, follow, reveal, style, guides }: Props & { guides: GuidesContextValue }) {
++  const ref = useRef<ViewInstance>(null);
++  const scroll = useContext(GuideScrollContext);
++  const { register } = guides;
++  useFocusEffect(useCallback(() => register(id, {
++    measure: (callback) => ref.current?.measureInWindow(callback),
++    reveal: () => { if (reveal) reveal(); else scroll?.(ref); },
++    follow,
++  }), [register, id, follow, reveal, scroll]));
++  return <View ref={ref} collapsable={false} style={style}>{children}</View>;
++}
++
++/** Global navigation lives outside any focused screen but still has a live layout. */
++function PersistentAnchor({ id, children, follow, style, guides }: Props & { guides: GuidesContextValue }) {
++  const ref = useRef<ViewInstance>(null);
++  const { register } = guides;
++  useEffect(() => register(id, { measure: callback => ref.current?.measureInWindow(callback), follow }), [register, id, follow]);
++  return <View ref={ref} collapsable={false} style={style}>{children}</View>;
++}
+diff --git a/oneledger-mobile/src/features/guides/GuideOverlay.tsx b/oneledger-mobile/src/features/guides/GuideOverlay.tsx
+new file mode 100644
+index 0000000..700c6b2
+--- /dev/null
++++ b/oneledger-mobile/src/features/guides/GuideOverlay.tsx
+@@ -0,0 +1,75 @@
++import Feather from "@expo/vector-icons/Feather";
++import { useEffect, useRef, useState } from "react";
++import { AccessibilityInfo, ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, useWindowDimensions, View, type ViewInstance } from "react-native";
++import Svg, { Path } from "react-native-svg";
++import { useSafeAreaInsets } from "react-native-safe-area-context";
++import { Button, Text } from "@/components/ds";
++import { makeStyles, useTheme } from "@/theme/ThemeProvider";
++import { coachPlacement, guidePanelLimits, type Rect } from "./model";
++
++type Props = {
++  mode: "welcome" | "complete" | "coach" | "missing" | "loading";
++  title: string; body: string; label: string; action: string; step: number; total: number;
++  visible?: boolean; onDismiss?: () => void; onShow?: () => void;
++  target: Rect | null; onNext(): void; onBack(): void; onClose(): void; onGuides(): void;
++};
++export function GuideOverlay({ mode, title, body, label, action, step, total, target, onNext, onBack, onClose, visible = true, onDismiss, onShow }: Props) {
++  const root = useRef<ViewInstance>(null);
++  const styles = useStyles(), { colors } = useTheme(), window = useWindowDimensions(), insets = useSafeAreaInsets();
++  const [height, setHeight] = useState(210), [origin, setOrigin] = useState({ x: 0, y: 0 });
++  const viewport = { width: window.width, height: window.height, top: insets.top, bottom: insets.bottom };
++  const limits = guidePanelLimits(viewport);
++  const adjusted = target ? { ...target, x: target.x - origin.x, y: target.y - origin.y } : null;
++  const placement = adjusted ? coachPlacement(adjusted, viewport, height) : null;
++  const anchored = mode === "coach" && placement && placement.side !== "sheet";
++  const left = placement?.left ?? Math.max(12, (window.width - limits.width) / 2);
++  const top = placement?.top ?? Math.max(insets.top + 12, window.height - insets.bottom - Math.min(height, limits.maxHeight) - 12);
++  const horizontal = anchored && ["left", "right"].includes(placement.side);
++  useEffect(() => {
++    if (visible && mode !== "loading") AccessibilityInfo.announceForAccessibility(`${title}. ${total ? `Step ${step + 1} of ${total}. ` : ""}${body}`);
++  }, [title, body, mode, step, total, visible]);
++  return <Modal transparent visible={visible} onDismiss={onDismiss} onShow={onShow} animationType="none" statusBarTranslucent navigationBarTranslucent onRequestClose={onClose}>
++    <View ref={root} style={styles.fill} onLayout={() => root.current?.measureInWindow((x, y) => setOrigin(old => old.x === x && old.y === y ? old : { x, y }))}>
++      <Pressable accessible={false} style={StyleSheet.absoluteFill} onPress={onClose}/>
++      <Svg accessible={false} pointerEvents="none" width={window.width} height={window.height} style={StyleSheet.absoluteFill}>
++        <Path fillRule="evenodd" fillOpacity={mode === "loading" ? 0 : 0.24} fill={colors.guideScrim} d={`M0 0H${window.width}V${window.height}H0Z${anchored ? `M${placement.spot.x} ${placement.spot.y}v${placement.spot.height}h${placement.spot.width}v-${placement.spot.height}Z` : ""}`} />
++      </Svg>
++      {anchored ? <View pointerEvents="none" style={[styles.spot, { left: placement.spot.x, top: placement.spot.y, width: placement.spot.width, height: placement.spot.height }]} /> : null}
++      <View accessibilityViewIsModal onAccessibilityEscape={onClose} testID="guide-dialog" onLayout={event => setHeight(event.nativeEvent.layout.height)} style={[styles.card, { maxHeight: limits.maxHeight, left, top, width: limits.width }]}>
++        {anchored ? <View pointerEvents="none" style={[styles.pointer, horizontal ? {
++          top: Math.max(18, Math.min(height - 24, placement.spot.y + placement.spot.height / 2 - top - 5)),
++          ...(placement.side === "left" ? { right: -5 } : { left: -5 }),
++        } : {
++          left: Math.max(18, Math.min(limits.width - 24, placement.spot.x + placement.spot.width / 2 - left - 5)),
++          ...(placement.side === "below" ? { top: -5 } : { bottom: -5 }),
++        }]} /> : null}
++        <View style={styles.heading}>
++          <Text variant="caption" color="textMuted" style={styles.kicker}>{mode === "welcome" ? label : `${label} · ${step + 1}/${total}`}</Text>
++          <Pressable accessibilityRole="button" accessibilityLabel={mode === "welcome" ? "Dismiss introduction" : "Close and pause guide"} onPress={onClose} style={styles.close}><Feather name="x" color={colors.textMuted} size={17}/></Pressable>
++        </View>
++        {mode === "loading" ? <View style={styles.loading}><ActivityIndicator size="small" color={colors.accent}/><Text variant="label" color="textMuted">Finding the next item…</Text></View> : <ScrollView style={{flexGrow:0,flexShrink:1}} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.copy}>
++          <Text variant="heading" accessibilityRole="header" style={styles.title}>{title}</Text>
++          <Text color="textSecondary" style={styles.body}>{body}</Text>
++        </ScrollView>}
++        <View style={styles.actions}>
++          {mode === "welcome" ? <Button label="Not now" variant="ghost" size="sm" onPress={onClose}/> : step > 0 ? <Button label="Back" variant="ghost" size="sm" onPress={onBack}/> : <View/>}
++          <Button label={mode === "loading" ? "Loading…" : action} variant="primary" size="sm" disabled={mode === "loading"} onPress={onNext}/>
++        </View>
++      </View>
++    </View>
++  </Modal>;
++}
++const useStyles = makeStyles(c => StyleSheet.create({
++  fill: { flex: 1 },
++  spot: { position: "absolute", borderWidth: 2, borderColor: c.accent, borderRadius: 10 },
++  card: { position: "absolute", padding: 14, borderRadius: 16, backgroundColor: c.surface, borderWidth: 1, borderColor: c.borderSubtle, boxShadow: "0 6px 24px rgba(0,0,0,0.16)" },
++  heading: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 6, paddingBottom: 6 },
++  kicker: { fontSize: 11, lineHeight: 16, flex: 1 },
++  close: { width: 44, height: 44, alignItems: "center", justifyContent: "center", marginTop: -12, marginBottom: -12, marginRight: -10 },
++  copy: { gap: 6, paddingBottom: 8 },
++  title: { fontSize: 17, lineHeight: 22 },
++  body: { fontSize: 13, lineHeight: 19 },
++  pointer: { position: "absolute", width: 10, height: 10, transform: [{ rotate: "45deg" }], backgroundColor: c.surface },
++  actions: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, paddingTop: 6, minHeight: 44 },
++  loading: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 8 },
++}));
+diff --git a/oneledger-mobile/src/features/guides/GuideScrollView.tsx b/oneledger-mobile/src/features/guides/GuideScrollView.tsx
+new file mode 100644
+index 0000000..7173b6e
+--- /dev/null
++++ b/oneledger-mobile/src/features/guides/GuideScrollView.tsx
+@@ -0,0 +1,17 @@
++import { useCallback, useRef, type ComponentProps, type RefObject } from "react";
++import { ScrollView, type ViewInstance, type ScrollViewInstance } from "react-native";
++import { GuideScrollContext } from "./context";
++
++/** Reveal a live anchor inside the nearest scrolling screen without guessed offsets. */
++export function GuideScrollView({ children, onScroll, ...props }: ComponentProps<typeof ScrollView>) {
++  const ref = useRef<ScrollViewInstance>(null);
++  const offset = useRef(0);
++  const reveal = useCallback((target: RefObject<ViewInstance | null>) => {
++    const scroll = ref.current;
++    if (!scroll || !target.current) return;
++    scroll.measureInWindow((_sx, sy) => target.current?.measureInWindow((_x, y) => {
++      scroll.scrollTo({ y: Math.max(0, offset.current + y - sy - 16), animated: false });
++    }));
++  }, []);
++  return <GuideScrollContext.Provider value={reveal}><ScrollView {...props} ref={ref} onScroll={event => { offset.current = event.nativeEvent.contentOffset.y; onScroll?.(event); }} scrollEventThrottle={props.scrollEventThrottle ?? 32}>{children}</ScrollView></GuideScrollContext.Provider>;
++}
+diff --git a/oneledger-mobile/src/features/guides/GuideSuggestion.tsx b/oneledger-mobile/src/features/guides/GuideSuggestion.tsx
+new file mode 100644
+index 0000000..6b0f5f9
+--- /dev/null
++++ b/oneledger-mobile/src/features/guides/GuideSuggestion.tsx
+@@ -0,0 +1,19 @@
++import { useEffect, useState } from "react";
++import { View } from "react-native";
++import { Button, Card, Text } from "@/components/ds";
++import { useGuides } from "./context";
++import type { GuideId } from "./model";
++/** One non-blocking invitation per session, only after the real data is ready. */
++export function GuideSuggestion({ id, enabled = true }: { id: GuideId; enabled?: boolean }) {
++  const guides = useGuides();
++  const [offered, setOffered] = useState(false);
++  const claim = guides?.claimSuggestion;
++  const ready = guides?.ready && !guides.active;
++  useEffect(() => { if (!enabled || !ready || !claim) return; const timer = setTimeout(() => setOffered(claim(id)), 0); return () => clearTimeout(timer); }, [enabled, ready, claim, id]);
++  if (!guides || !ready || !enabled || !offered || guides.state.progress[id] || guides.state.dismissed.includes(id)) return null;
++  const guide = guides.definitions.find(g => g.id === id)!;
++  return <Card style={{ padding: 14, gap: 6 }}>
++    <Text variant="bodyStrong">{guide.title}</Text><Text variant="label" color="textMuted">{guide.description}. Want a quick pointer?</Text>
++    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}><Button label="Show me" size="sm" onPress={() => guides.start(id)}/><Button label="Not now" size="sm" variant="ghost" onPress={() => guides.dismissSuggestion(id)}/></View>
++  </Card>;
++}
+diff --git a/oneledger-mobile/src/features/guides/GuidesHomeCard.tsx b/oneledger-mobile/src/features/guides/GuidesHomeCard.tsx
+new file mode 100644
+index 0000000..b7ddca7
+--- /dev/null
++++ b/oneledger-mobile/src/features/guides/GuidesHomeCard.tsx
+@@ -0,0 +1,20 @@
++import { router } from "expo-router";
++import { useEffect } from "react";
++import { View } from "react-native";
++import { Button, Card, Text } from "@/components/ds";
++import { GUIDE_REVISION } from "./definitions";
++import { useGuides } from "./context";
++export function GuidesHomeCard({ loaded }: { loaded: boolean }) {
++  const guides = useGuides();
++  const consider = guides?.considerWelcome;
++  useEffect(() => { if (loaded) consider?.(); }, [loaded, consider]);
++  if (!guides?.ready || (guides.state.progress.orientation?.status === "completed" && guides.state.progress.orientation.revision === GUIDE_REVISION)) return null;
++  return <Card style={{ padding: 16, gap: 8 }}>
++    <Text variant="bodyStrong">A good place to start</Text>
++    <Text variant="label" color="textMuted">Start with three essentials. Choose a short task guide whenever you need it.</Text>
++    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
++      <Button label={guides.state.progress.orientation?.status === "paused" ? "Resume introduction" : "Show essentials"} onPress={() => guides.start("orientation")}/>
++      <Button label="All guides" variant="ghost" onPress={() => router.push("/guides")}/>
++    </View>
++  </Card>;
++}
+diff --git a/oneledger-mobile/src/features/guides/GuidesProvider.tsx b/oneledger-mobile/src/features/guides/GuidesProvider.tsx
+new file mode 100644
+index 0000000..1f0ac33
+--- /dev/null
++++ b/oneledger-mobile/src/features/guides/GuidesProvider.tsx
+@@ -0,0 +1,257 @@
++import { router, usePathname, type Href } from "expo-router";
++import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
++import { AppState, Keyboard, Platform, View } from "react-native";
++import { useSession } from "@/features/auth/SessionProvider";
++import { useLock } from "@/features/lock/LockProvider";
++import { useActiveSpace } from "@/features/spaces/ActiveSpaceProvider";
++import { deviceStore } from "@/lib/device-store";
++import { GUIDE_REVISION, guideDefinitions, guideStepIndex, nextStepIndex, stepMatchesPath, type GuideStep } from "./definitions";
++import { GuidesContext, type Anchor } from "./context";
++import { GuideOverlay } from "./GuideOverlay";
++import { canOfferWelcome, emptyGuides, guideStorageKey, readGuides, type GuideId, type GuideState, type Rect } from "./model";
++
++function navigateGuideRoute(route: string, currentPath: string) {
++  const destination: Href = route === "/transactions"
++    ? { pathname: "/transactions", params: { reset: String(Date.now()), focusSearch: "", category: "", accountId: "", walletName: "", period: "all" } }
++    : route === "/more"
++      ? { pathname: "/more", params: { guideReset: String(Date.now()) } }
++      : route as Href;
++  // A native form sheet must leave the stack before another tour page can appear.
++  if (["/pay-sheet", "/connect"].includes(currentPath) && route !== currentPath) router.dismissTo(destination);
++  else router.navigate(destination);
++}
++type Running = { id: GuideId; index: number };
++const progressFor = (steps: GuideStep[], index: number, status: "paused" | "completed") => ({ status, step: index, revision: GUIDE_REVISION, stepId: steps[index].id });
++
++export function GuidesProvider({ children }: { children: ReactNode }) {
++  const { session } = useSession();
++  if (!session) return children;
++  return <UserGuidesProvider key={session.user.id} userId={session.user.id} createdAt={session.user.created_at}>{children}</UserGuidesProvider>;
++}
++function UserGuidesProvider({ userId, createdAt, children }: { userId: string; createdAt?: string; children: ReactNode }) {
++  const pathname = usePathname();
++  const pathRef = useRef(pathname);
++  useEffect(() => { pathRef.current = pathname; }, [pathname]);
++  const { activeId } = useActiveSpace();
++  const lock = useLock();
++  const blocked = lock.locked || lock.obscured;
++  const anchors = useRef(new Map<string, Anchor>());
++  // Dynamic detail routes live only in this run's memory, never in saved progress.
++  const visitedRoutes = useRef(new Map<string, string>());
++  const [state, setState] = useState<GuideState>(emptyGuides);
++  const stateRef = useRef(state);
++  const [ready, setReady] = useState(false);
++  const [running, setRunning] = useState<Running | null>(null);
++  const [mode, setMode] = useState<"welcome" | null>(null);
++  const [target, setTarget] = useState<Rect | null>(null);
++  const [missing, setMissing] = useState(false);
++  const [transitioning, setTransitioning] = useState(false);
++  const presented = useRef(false);
++  const pendingNavigation = useRef<(() => void) | null>(null);
++  const transitionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
++  const [notice, setNotice] = useState<string | null>(null);
++  const writes = useRef(Promise.resolve());
++  const offered = useRef<GuideId | null>(null);
++  const runningRef = useRef(running);
++  useEffect(() => { runningRef.current = running; }, [running]);
++  const modeRef = useRef(mode);
++  useEffect(() => { modeRef.current = mode; }, [mode]);
++  const definitions = useMemo(() => guideDefinitions(Platform.OS === "ios"), []);
++  const current = definitions.find(guide => guide.id === running?.id);
++  const currentStep = current && running ? current.steps[running.index] : null;
++
++  useEffect(() => {
++    let cancelled = false;
++    void deviceStore.get(guideStorageKey(userId)).then(raw => {
++      if (cancelled) return;
++      const value = readGuides(raw);
++      stateRef.current = value; setState(value); setReady(true);
++    }).catch(() => {
++      if (!cancelled) { setReady(true); setNotice("Guide progress could not be loaded. You can still explore the guides."); }
++    });
++    return () => { cancelled = true; };
++  }, [userId]);
++  const update = useCallback((transform: (previous: GuideState) => GuideState) => {
++    const next = transform(stateRef.current); stateRef.current = next; setState(next);
++    writes.current = writes.current.then(() => deviceStore.set(guideStorageKey(userId), JSON.stringify(next))).catch(() => {
++      setNotice("Your guide progress is saved for this session. Device storage is unavailable.");
++    });
++  }, [userId]);
++  const register = useCallback((id: string, entry: Anchor) => {
++    anchors.current.set(id, entry);
++    return () => { if (anchors.current.get(id) === entry) anchors.current.delete(id); };
++  }, []);
++  const flushNavigation = useCallback(() => {
++    presented.current = false;
++    const pending = pendingNavigation.current; pendingNavigation.current = null; pending?.();
++  }, []);
++  const navigate = useCallback((route: string, after?: () => void) => {
++    const nativeSheet = ["/pay-sheet", "/connect"].some(path => path === route || path === pathRef.current);
++    if (!nativeSheet || route === pathRef.current) {
++      navigateGuideRoute(route, pathRef.current); after?.(); return;
++    }
++    // UIKit cannot present a form sheet while the tutorial Modal is presented.
++    // Hide it first and navigate on onDismiss; Android has no onDismiss callback.
++    setTransitioning(true);
++    pendingNavigation.current = () => {
++      navigateGuideRoute(route, pathRef.current);
++      transitionTimer.current = setTimeout(() => { setTransitioning(false); after?.(); }, 450);
++    };
++    if (!presented.current) flushNavigation();
++    else if (Platform.OS !== "ios") transitionTimer.current = setTimeout(flushNavigation, 16);
++  }, [flushNavigation]);
++  useEffect(() => () => { if (transitionTimer.current) clearTimeout(transitionTimer.current); pendingNavigation.current = null; }, []);
++  const pause = useCallback(() => {
++    if (transitionTimer.current) clearTimeout(transitionTimer.current);
++    pendingNavigation.current = null; presented.current = false; setTransitioning(false);
++    setRunning(null); setTarget(null); setMissing(false); setMode(null);
++    visitedRoutes.current.clear();
++    if (runningRef.current || modeRef.current) setNotice("Guide paused. Resume in More → Guides & help.");
++  }, []);
++  const start = useCallback((id: GuideId, replay = false) => {
++    if (!ready || blocked) return;
++    const definition = definitions.find(guide => guide.id === id)!;
++    let index = guideStepIndex(definition, stateRef.current.progress[id], replay);
++    // Re-select a currently accessible record after resuming away from its detail page.
++    if (!definition.steps[index].route && !stepMatchesPath(definition.steps[index], pathRef.current)) {
++      while (index > 0 && !definition.steps[index].route) index--;
++    }
++    Keyboard.dismiss(); setNotice(null); setMode(null); setMissing(false); setTarget(null);
++    visitedRoutes.current.clear(); offered.current = id;
++    update(previous => ({ ...previous, welcomeSeen: true, progress: { ...previous.progress, [id]: progressFor(definition.steps, index, "paused") } }));
++    setRunning({ id, index });
++    const route = definition.steps[index].route;
++    if (route) navigate(route);
++  }, [ready, blocked, definitions, update, navigate]);
++  const offerWelcome = useCallback(() => {
++    if (!ready || blocked) return;
++    Keyboard.dismiss(); setRunning(null); setTarget(null); setMode("welcome"); offered.current = "orientation";
++    update(previous => ({ ...previous, welcomeSeen: true }));
++  }, [ready, blocked, update]);
++  const considerWelcome = useCallback(() => {
++    if (ready && !blocked && pathname === "/" && !stateRef.current.welcomeSeen && canOfferWelcome(createdAt, Date.now())) offerWelcome();
++  }, [ready, blocked, pathname, createdAt, offerWelcome]);
++  useEffect(() => {
++    const app = AppState.addEventListener("change", value => { if (value !== "active") pause(); });
++    const keyboard = Keyboard.addListener("keyboardDidShow", pause);
++    return () => { app.remove(); keyboard.remove(); };
++  }, [pause]);
++  const previousSpace = useRef(activeId);
++  useEffect(() => {
++    if (previousSpace.current !== activeId) { pause(); previousSpace.current = activeId; }
++  }, [activeId, pause]);
++  useEffect(() => {
++    if (!blocked) return;
++    const timer = setTimeout(pause, 0); return () => clearTimeout(timer);
++  }, [blocked, pause]);
++
++  useEffect(() => {
++    if (!running || !currentStep || blocked) return;
++    let alive = true, revealed: Anchor | undefined, measured = false;
++    let begun = 0;
++    function measure() {
++      if (!alive || !currentStep) return;
++      if (!begun) begun = Date.now();
++      // Keep the tour alive through route transitions, native sheets and data loading.
++      // A failed navigation gets a Continue action instead of ending the walkthrough.
++      if (!stepMatchesPath(currentStep, pathRef.current)) {
++        if (Date.now() - begun > 8000) setMissing(true);
++        return;
++      }
++      const anchor = anchors.current.get(currentStep.anchor);
++      if (anchor) {
++        if (revealed !== anchor) {
++          try { anchor.reveal?.(); } catch { /* A list may still be settling. */ }
++          revealed = anchor;
++        }
++        anchor.measure((x, y, width, height) => {
++          if (!alive || !Number.isFinite(x + y + width + height) || width <= 0 || height <= 0) return;
++          measured = true; setMissing(false);
++          visitedRoutes.current.set(currentStep.id, pathRef.current);
++          setTarget(old => old && Math.abs(old.x - x) < 1 && Math.abs(old.y - y) < 1 && old.width === width && old.height === height ? old : { x, y, width, height });
++        });
++      } else { setTarget(null); }
++      if (Date.now() - begun > 3000 && (!anchor || !measured)) setMissing(true);
++    }
++    const first = requestAnimationFrame(measure), timer = setInterval(measure, 160);
++    return () => { alive = false; cancelAnimationFrame(first); clearInterval(timer); };
++  }, [running, currentStep, blocked]);
++
++  function finish() {
++    if (!running || !current) return;
++    update(previous => ({ ...previous, progress: { ...previous.progress, [running.id]: progressFor(current.steps, running.index, "completed") } }));
++    setRunning(null); setTarget(null); setMissing(false); setMode(null); presented.current = false;
++    setNotice(`${current.title} complete. You can replay it in Guides & help.`);
++  }
++  function enter(index: number, follow?: () => void) {
++    if (!running || !current) return;
++    if (index >= current.steps.length) { finish(); return; }
++    const step = current.steps[index];
++    update(previous => ({ ...previous, progress: { ...previous.progress, [running.id]: progressFor(current.steps, index, "paused") } }));
++    setTarget(null); setMissing(false); setRunning({ ...running, index });
++    if (step.route) {
++      // Re-measure on the same page; don't reset filters or remount a tab per pointer.
++      if (step.route !== pathRef.current) navigate(step.route);
++    } else if (follow) follow();
++    else {
++      const visited = visitedRoutes.current.get(step.id);
++      if (visited) navigate(visited);
++    }
++  }
++  function next() {
++    if (!running || !current || !currentStep) return;
++    const anchor = anchors.current.get(currentStep.anchor);
++    if (!anchor || !stepMatchesPath(currentStep, pathname)) { setMissing(true); return; }
++    const index = running.index + 1;
++    if (index < current.steps.length && !current.steps[index].route && !anchor.follow) {
++      enter(nextStepIndex(current.steps, running.index));
++    } else enter(index, currentStep.follow ? anchor.follow : undefined);
++  }
++  function skipItem() {
++    if (!running || !current) return;
++    const index = nextStepIndex(current.steps, running.index);
++    if (index >= current.steps.length) { pause(); setNotice("This guide will be ready when the item is available."); }
++    else enter(index);
++  }
++  function back() {
++    if (!running || !current || running.index === 0) return;
++    let index = running.index - 1;
++    if (!current.steps[index].route && !visitedRoutes.current.has(current.steps[index].id)) {
++      while (index > 0 && !current.steps[index].route) index--;
++    }
++    enter(index);
++  }
++  function showGuides() { navigate("/guides", () => { setRunning(null); setMode(null); setTarget(null); }); }
++  const claimSuggestion = useCallback((id: GuideId) => {
++    if (stateRef.current.progress[id] || stateRef.current.dismissed.includes(id)) return false;
++    if (offered.current && offered.current !== id) return false;
++    offered.current = id; return true;
++  }, []);
++  const dismissSuggestion = useCallback((id: GuideId) => update(previous => ({ ...previous, dismissed: [...new Set([...previous.dismissed, id])] })), [update]);
++  const visible = !blocked && (!!mode || !!running);
++  const overlayVisible = visible && !transitioning;
++  const lastStep = !!running && !!current && running.index === current.steps.length - 1;
++  const action = mode === "welcome" ? "Show essentials" : missing ? "Skip item" : !target ? "Skip item" : lastStep ? "Done" : currentStep?.action ?? "Next";
++  const title = mode === "welcome" ? "Start with the essentials."
++    : missing ? "Nothing to show here yet" : !target ? "Finding the next item…" : currentStep?.title ?? "";
++  const body = mode === "welcome" ? "Three quick pointers to get started. Choose a short task guide whenever you need help later."
++    : missing ? current?.missing ?? "You can skip this item and return later."
++      : !target ? "Your place is saved." : currentStep?.body ?? "";
++
++  return <GuidesContext.Provider value={{ ready, state, definitions, active: !!running || !!mode, notice, register, start, offerWelcome, considerWelcome, pause, claimSuggestion, dismissSuggestion }}>
++    <View style={{ flex: 1 }} accessibilityElementsHidden={overlayVisible} importantForAccessibility={overlayVisible ? "no-hide-descendants" : "auto"}>{children}</View>
++    {visible ? <GuideOverlay
++      visible={overlayVisible} onShow={() => { presented.current = true; }} onDismiss={flushNavigation}
++      mode={mode ?? (missing ? "missing" : target ? "coach" : "loading")}
++      title={title} body={body} action={action}
++      label={mode === "welcome" ? "Welcome to OneLedger" : current?.title ?? "Guide"}
++      step={running?.index ?? 0} total={current?.steps.length ?? 0} target={target}
++      onClose={() => { if (mode) { presented.current = false; setMode(null); } else pause(); }} onBack={back} onGuides={showGuides}
++      onNext={() => {
++        if (mode === "welcome") start("orientation", true);
++        else if (missing || !target) skipItem();
++        else next();
++      }}
++    /> : null}
++  </GuidesContext.Provider>;
++}
+diff --git a/oneledger-mobile/src/features/guides/__tests__/center.test.tsx b/oneledger-mobile/src/features/guides/__tests__/center.test.tsx
+new file mode 100644
+index 0000000..91c27a8
+--- /dev/null
++++ b/oneledger-mobile/src/features/guides/__tests__/center.test.tsx
+@@ -0,0 +1,46 @@
++import { fireEvent, render, screen } from "@testing-library/react-native";
++import { Platform } from "react-native";
++import Guides from "@/app/(app)/guides";
++import { GuidesContext, type GuidesContextValue } from "../context";
++import { guideDefinitions } from "../definitions";
++import { emptyGuides } from "../model";
++const mockStart=jest.fn(),mockWelcome=jest.fn(),mockSetCompact=jest.fn();
++let mockPay=false;
++jest.mock('expo-router',()=>jest.requireActual('@/test/router-mock'));
++jest.mock('@/features/auth/SessionProvider',()=>({useSession:()=>({session:null})}));
++jest.mock('@/features/capture/capture',()=>({captureSupported:false}));
++jest.mock('@/components/shell/NavigationChromeContext',()=>({useNavigationChrome:()=>({payOn:mockPay,setCompact:mockSetCompact,onTabs:false})}));
++jest.mock('@/features/spaces/ActiveSpaceProvider',()=>({useActiveSpace:()=>({spaces:[{id:'personal'}]})}));
++const context=():GuidesContextValue=>({ready:true,state:{...emptyGuides(),progress:{orientation:{status:'paused',step:1},transaction:{status:'completed',step:1}}},definitions:guideDefinitions(false),active:false,notice:null,register:()=>()=>{},start:mockStart,offerWelcome:mockWelcome,considerWelcome:()=>{},pause:()=>{},claimSuggestion:()=>false,dismissSuggestion:()=>{}});
++afterEach(()=>jest.restoreAllMocks());
++beforeEach(()=>{jest.replaceProperty(Platform,"OS","android");mockStart.mockReset();mockWelcome.mockReset();mockPay=false;});
++it('offers a resume and a replay without resetting account setup',async()=>{
++  await render(<GuidesContext.Provider value={context()}><Guides/></GuidesContext.Provider>);
++  expect(screen.getByText('Resume')).toBeTruthy();
++  await fireEvent.press(screen.getByText('Your first look'));expect(mockStart).toHaveBeenCalledWith('orientation');
++  await fireEvent.press(screen.getByRole('button',{name:'Track & understand'}));
++  await fireEvent.press(screen.getByText('Find a transaction'));expect(mockStart).toHaveBeenCalledWith('transaction');
++});
++it('does not activate unavailable Pay, recording or shared-Space guides',async()=>{
++  await render(<GuidesContext.Provider value={context()}><Guides/></GuidesContext.Provider>);
++  await fireEvent.press(screen.getByRole('button',{name:'Pay & request'}));
++  await fireEvent.press(screen.getByRole('button',{name:'Records & preferences'}));
++  expect(screen.getAllByText('Pay is unavailable in this Space').length).toBeGreaterThan(0);
++  expect(screen.getByText('Requires a supported phone')).toBeTruthy();
++  expect(screen.getByText('Available when you join another Space')).toBeTruthy();
++  await fireEvent.press(screen.getByText('Find the Pay tools'));expect(mockStart).not.toHaveBeenCalled();
++});
++it('allows an explicitly enabled Pay guide and welcome replay',async()=>{
++  mockPay=true;
++  await render(<GuidesContext.Provider value={context()}><Guides/></GuidesContext.Provider>);
++  await fireEvent.press(screen.getByRole('button',{name:'Pay & request'}));
++  await fireEvent.press(screen.getByText('Find the Pay tools'));expect(mockStart).toHaveBeenCalledWith('pay');
++  await fireEvent.press(screen.getByText('Replay the welcome'));expect(mockWelcome).toHaveBeenCalled();
++});
++
++it('filters the task catalog and expands matching groups without starting a guide',async()=>{
++  await render(<GuidesContext.Provider value={context()}><Guides/></GuidesContext.Provider>);
++  expect(screen.queryByText('Find an activity statement')).toBeNull();
++  await fireEvent.changeText(screen.getByPlaceholderText('Search a task or feature'),'statement');
++  expect(screen.getByText('Find an activity statement')).toBeTruthy();expect(mockStart).not.toHaveBeenCalled();
++});
+diff --git a/oneledger-mobile/src/features/guides/__tests__/model.test.ts b/oneledger-mobile/src/features/guides/__tests__/model.test.ts
+new file mode 100644
+index 0000000..49690f8
+--- /dev/null
++++ b/oneledger-mobile/src/features/guides/__tests__/model.test.ts
+@@ -0,0 +1,76 @@
++import { canOfferWelcome, coachPlacement, emptyGuides, guidePanelLimits, guideStorageKey, readGuides } from "../model";
++import { GUIDE_GROUPS, GUIDE_REVISION, guideDefinitions, guideStepIndex, nextStepIndex } from "../definitions";
++describe("task guide structure and progress", () => {
++  const definitions = guideDefinitions(false);
++  it("keeps every guide focused on one task with two to four steps", () => {
++    expect(definitions[0].id).toBe("orientation"); expect(definitions[0].steps).toHaveLength(3);
++    for (const guide of definitions) {
++      expect(guide.steps.length).toBeGreaterThanOrEqual(2);
++      expect(guide.steps.length).toBeLessThanOrEqual(4);
++      expect(GUIDE_GROUPS).toContain(guide.group);
++      expect(new Set(guide.steps.map(step => step.id)).size).toBe(guide.steps.length);
++    }
++    expect(definitions.some(guide => /whole app|full tour|complete platform/i.test(guide.description))).toBe(false);
++  });
++  it("splits reports from statements and finding activity from understanding its details", () => {
++    expect(definitions.find(g => g.id === "documents")!.steps.map(s => s.route)).toEqual(["/more", "/reports"]);
++    expect(definitions.find(g => g.id === "statements")!.steps.map(s => s.route)).toEqual(["/more", "/statements"]);
++    expect(definitions.find(g => g.id === "transaction")!.steps).toHaveLength(3);
++    expect(definitions.find(g => g.id === "details")!.steps).toHaveLength(2);
++  });
++  it("uses device-appropriate recording setup without installing or enabling anything", () => {
++    expect(guideDefinitions(true).find(g => g.id === "recording")!.steps[1].route).toBe("/shortcuts");
++    expect(definitions.find(g => g.id === "recording")!.steps[1].route).toBe("/connect");
++  });
++  it("discards corrupt state and reads stable task progress without adopting a long-tour position", () => {
++    for (const raw of ["null", "{", JSON.stringify({version:2})]) expect(readGuides(raw)).toEqual(emptyGuides());
++    const guide = definitions.find(g => g.id === "statements")!;
++    const progress = { status: "paused", revision: GUIDE_REVISION, step: 1, stepId: guide.steps[1].id };
++    const value = readGuides(JSON.stringify({...emptyGuides(),progress:{statements:progress}}));
++    expect(guideStepIndex(guide,value.progress.statements,false)).toBe(1);
++    expect(guideStepIndex(definitions[0],{status:"paused",revision:2,step:54,stepId:"appearance-page"},false)).toBe(0);
++    expect(guideStepIndex(guide,progress,true)).toBe(0);
++  });
++  it("isolates identity and only automatically invites new accounts", () => {
++    expect(guideStorageKey("a")).not.toBe(guideStorageKey("b"));
++    const now=Date.parse("2026-11-22T10:00:00Z");
++    expect(canOfferWelcome("2026-11-21T10:00:00Z",now)).toBe(true);
++    for(const date of [undefined,"bad","2020-01-01","2030-01-01"]) expect(canOfferWelcome(date,now)).toBe(false);
++  });
++  it("skips a detail pointer if no actual record can be opened", () => {
++    const detail = definitions.find(g=>g.id==='details')!;
++    expect(nextStepIndex(detail.steps,0)).toBe(detail.steps.length);
++  });
++});
++describe("compact coach placement", () => {
++  const viewport={width:375,height:812,top:44,bottom:34};
++  it("caps width and height so the page stays visible",()=>{
++    for(const height of [480,640,812,1024]){
++      const limits=guidePanelLimits({...viewport,height});
++      expect(limits.width).toBeLessThanOrEqual(320);
++      expect(limits.maxHeight).toBeLessThanOrEqual((height-44-34-24)*.44);
++      expect(limits.maxHeight).toBeLessThanOrEqual(300);
++    }
++  });
++  it("places above a bottom control and below a header control",()=>{
++    const above=coachPlacement({x:80,y:700,width:60,height:44},viewport,210);
++    expect(above.side).toBe('above');expect(above.top+210).toBeLessThan(above.spot.y);
++    const below=coachPlacement({x:250,y:50,width:44,height:44},viewport,210);
++    expect(below.side).toBe('below');expect(below.top).toBeGreaterThan(below.spot.y+below.spot.height);
++  });
++  it("can sit beside an item on a wide viewport",()=>{
++    const result=coachPlacement({x:650,y:200,width:50,height:44},{width:1000,height:450,top:24,bottom:24},180);
++    expect(result.side).toBe('left');
++    expect(result.left+result.width).toBeLessThan(result.spot.x);
++  });
++  it("focuses the heading of a large section instead of blanketing it",()=>{
++    const result=coachPlacement({x:16,y:150,width:340,height:480},viewport,210);
++    expect(result.side).toBe('below');expect(result.spot.height).toBe(64);
++  });
++  it("keeps a clipped-target fallback compact and within safe bounds",()=>{
++    const result=coachPlacement({x:16,y:-100,width:340,height:180},viewport,800);
++    const limits=guidePanelLimits(viewport);
++    expect(result.side).toBe('sheet');
++    expect(result.top+limits.maxHeight).toBeLessThanOrEqual(viewport.height-viewport.bottom);
++  });
++});
+diff --git a/oneledger-mobile/src/features/guides/__tests__/provider.test.tsx b/oneledger-mobile/src/features/guides/__tests__/provider.test.tsx
+new file mode 100644
+index 0000000..3f140f0
+--- /dev/null
++++ b/oneledger-mobile/src/features/guides/__tests__/provider.test.tsx
+@@ -0,0 +1,150 @@
++import { useEffect } from "react";
++import { Text } from "react-native";
++import { act, fireEvent, render, screen, waitFor } from "@testing-library/react-native";
++import { GuidesProvider } from "../GuidesProvider";
++import { useGuides, type GuidesContextValue } from "../context";
++import { emptyGuides, guideStorageKey } from "../model";
++import { GUIDE_REVISION, guideDefinitions } from "../definitions";
++
++type Overlay = { mode: string; title: string; body: string; action: string; step: number; total: number; onNext(): void; onClose(): void; onBack(): void; onSkip?(): void; visible?: boolean; onShow?():void; onDismiss?():void };
++let mockPath = "/", mockUser = "u1", mockSpace = "s1", mockCreated = "2020-01-01", mockLocked = false;
++let mockOverlay: Overlay;
++let mockAutoDismiss = true;
++const mockGet = jest.fn(), mockSet = jest.fn(), mockNavigate = jest.fn(), mockDismissTo = jest.fn(), mockFollow = jest.fn();
++let guides: GuidesContextValue;
++jest.mock("expo-router", () => ({ usePathname: () => mockPath, router: { navigate: (p: unknown) => mockNavigate(p), dismissTo: (p: unknown) => mockDismissTo(p) } }));
++jest.mock("@/features/auth/SessionProvider", () => ({ useSession: () => ({ session: { user: { id: mockUser, created_at: mockCreated } } }) }));
++jest.mock("@/features/lock/LockProvider", () => ({ useLock: () => ({ locked: mockLocked, obscured: false }) }));
++jest.mock("@/features/spaces/ActiveSpaceProvider", () => ({ useActiveSpace: () => ({ activeId: mockSpace }) }));
++jest.mock("@/lib/device-store", () => ({ deviceStore: { get: (key: string) => mockGet(key), set: (key: string, value: string) => mockSet(key, value) } }));
++jest.mock("../GuideOverlay", () => {
++  const { Text, Pressable } = jest.requireActual("react-native");
++  const { useEffect } = jest.requireActual("react");
++  return { GuideOverlay: (props: Overlay) => {
++    useEffect(() => { mockOverlay = props; if (props.visible) props.onShow?.(); else if (mockAutoDismiss) props.onDismiss?.(); }, [props]);
++    if (!props.visible) return null;
++    return <><Text>{props.title}</Text><Text>{props.body}</Text><Pressable accessibilityRole="button" accessibilityLabel={props.action} onPress={props.onNext}/><Pressable accessibilityRole="button" accessibilityLabel="Pause" onPress={props.onClose}/><Pressable accessibilityRole="button" accessibilityLabel="Previous" onPress={props.onBack}/>{props.onSkip ? <Pressable accessibilityRole="button" accessibilityLabel="Skip section" onPress={props.onSkip}/> : null}</>;
++  } };
++});
++function Probe({ exclude = [] }: { exclude?: string[] }) {
++  const value = useGuides()!;
++  useEffect(() => { guides = value; }, [value]);
++  const register = value.register;
++  const excluded = exclude.join(",");
++  useEffect(() => {
++    const ids = [...new Set(guideDefinitions(false).flatMap(guide => guide.steps.map(step => step.anchor)))];
++    const entries = ids.filter(id => !excluded.split(",").includes(id)).map(id => register(id, { measure: cb => cb(20, 150, 250, 70), follow: mockFollow }));
++    return () => entries.forEach(remove => remove());
++  }, [register, excluded]);
++  return <Text>Underlying app</Text>;
++}
++const mount = (exclude?: string[]) => render(<GuidesProvider><Probe exclude={exclude}/></GuidesProvider>);
++const loaded = () => waitFor(() => expect(guides.ready).toBe(true));
++const coach = () => waitFor(() => { expect(mockOverlay.mode).toBe("coach"); expect(mockOverlay.visible).toBe(true); });
++const start = async (id: Parameters<GuidesContextValue["start"]>[0]) => { await act(() => guides.start(id)); await coach(); };
++const next = async () => { await coach(); await fireEvent.press(screen.getByRole("button", { name: mockOverlay.action })); };
++const saved = (id: Parameters<GuidesContextValue["start"]>[0], stepId: string) => {
++  const definition = guideDefinitions(false).find(guide => guide.id === id)!;
++  return JSON.stringify({ ...emptyGuides(), welcomeSeen: true, progress: { [id]: { status: "paused", revision: GUIDE_REVISION, stepId, step: definition.steps.findIndex(step => step.id === stepId) } } });
++};
++beforeEach(() => {
++  mockAutoDismiss = true;
++  mockPath = "/"; mockUser = "u1"; mockSpace = "s1"; mockCreated = "2020-01-01"; mockLocked = false;
++  mockGet.mockReset().mockResolvedValue(null); mockSet.mockReset().mockResolvedValue(undefined);
++  const navigate = (destination: string | { pathname: string }) => { mockPath = typeof destination === "string" ? destination : destination.pathname; };
++  mockNavigate.mockReset().mockImplementation(navigate); mockDismissTo.mockReset().mockImplementation(navigate);
++  mockFollow.mockReset().mockImplementation(() => { mockPath = "/transaction/current-record"; });
++});
++it("keeps the introduction to three pointers and ends on the relevant page", async () => {
++  await mount(); await loaded(); await start("orientation");
++  for (let i=0;i<3;i++) { await coach(); expect(mockOverlay.total).toBe(3); expect(mockOverlay.step).toBe(i); await next(); }
++  expect(guides.active).toBe(false);
++  expect(mockPath).toBe("/transactions");
++  expect(guides.state.progress.orientation?.status).toBe("completed");
++  expect(Object.keys(guides.state.progress)).toEqual(["orientation"]);
++});
++it("finishes each task independently without starting another task or a global tour", async () => {
++  await mount(); await loaded();
++  for(const definition of guideDefinitions(true)) {
++    await start(definition.id);
++    for(let i=0;i<definition.steps.length;i++) await next();
++    expect(guides.active).toBe(false);
++    expect(guides.state.progress[definition.id]?.status).toBe("completed");
++  }
++  const visited=[...mockNavigate.mock.calls,...mockDismissTo.mock.calls].map(([p])=>typeof p==='string'?p:p.pathname);
++  expect(visited).not.toContain('/guides');
++});
++it("resumes a task by its stable step and restarts obsolete long-tour progress", async () => {
++  mockGet.mockResolvedValue(saved("statements","statements-page"));
++  await mount(); await loaded(); await start("statements");
++  expect(mockOverlay.title).toBe("Check coverage before exporting");
++  await act(()=>guides.pause()); await start("statements"); expect(mockOverlay.step).toBe(1);
++});
++it("does not treat an old 60-step position as part of the new introduction", async () => {
++  mockGet.mockResolvedValue(JSON.stringify({...emptyGuides(),progress:{orientation:{status:'paused',revision:2,step:50,stepId:'appearance-page'}}}));
++  await mount(); await loaded(); await start("orientation");
++  expect(mockOverlay.step).toBe(0); expect(mockOverlay.total).toBe(3);
++});
++it("moves between the list and details within a focused two-step guide", async () => {
++  await mount(); await loaded(); await start("details");
++  await next(); await coach(); expect(mockPath).toBe('/transaction/current-record');
++  await fireEvent.press(screen.getByRole('button',{name:'Previous'})); await coach();
++  expect(mockPath).toBe('/transactions'); expect(mockOverlay.step).toBe(0);
++  await next(); await coach(); await next(); expect(guides.active).toBe(false);
++});
++it("handles an empty record without inventing data or launching another guide", async () => {
++  await mount(['first-transaction']); await loaded();
++  jest.useFakeTimers();
++  try {
++    await act(()=>guides.start('details')); await act(()=>jest.advanceTimersByTime(3300));
++    expect(mockOverlay.mode).toBe('missing'); expect(mockOverlay.action).toBe('Skip item');
++    await act(()=>mockOverlay.onNext());
++    expect(guides.active).toBe(false); expect(guides.state.progress.details?.status).toBe('paused');
++    expect(mockFollow).not.toHaveBeenCalled();
++  } finally {jest.useRealTimers();}
++});
++it("does not navigate behind an unavailable Pay entry", async () => {
++  await mount(['pay-launcher']); await loaded();
++  jest.useFakeTimers();
++  try {
++    await act(()=>guides.start('pay')); await act(()=>jest.advanceTimersByTime(3300));
++    await act(()=>mockOverlay.onNext()); expect(guides.active).toBe(false);
++    expect(mockNavigate.mock.calls.some(([p])=>p==='/pay-sheet')).toBe(false);
++  } finally {jest.useRealTimers();}
++});
++it("offers a short introduction once to a new account", async () => {
++  mockCreated=new Date(Date.now()-3600000).toISOString();
++  await mount(); await loaded(); await act(()=>guides.considerWelcome());
++  expect(mockOverlay.title).toBe('Start with the essentials.'); expect(mockOverlay.action).toBe('Show essentials');
++  await act(()=>mockOverlay.onNext()); await coach(); expect(mockOverlay.total).toBe(3);
++});
++it("ignores a late storage response from a different identity", async () => {
++  let resolveFirst:(raw:string)=>void=()=>{};
++  mockGet.mockImplementation((key:string)=>key.endsWith('u1')?new Promise<string>(resolve=>{resolveFirst=resolve}):Promise.resolve(null));
++  const ui=await mount();mockUser='u2';await ui.rerender(<GuidesProvider><Probe/></GuidesProvider>);await loaded();
++  await act(()=>resolveFirst(saved('statements','statements-page')));
++  expect(guides.state.progress).toEqual({});
++});
++it("retains the task step when Space changes or app lock engages", async () => {
++  const ui=await mount();await loaded();await start('transaction');await next();await coach();
++  mockSpace='s2';await ui.rerender(<GuidesProvider><Probe/></GuidesProvider>);await waitFor(()=>expect(guides.active).toBe(false));
++  expect(guides.state.progress.transaction?.stepId).toBe('transactions-search');
++  await start('transaction');mockLocked=true;await ui.rerender(<GuidesProvider><Probe/></GuidesProvider>);
++  await waitFor(()=>expect(guides.active).toBe(false));
++});
++it("selects a current transaction when resuming detail guidance away from its page", async () => {
++  mockGet.mockResolvedValue(saved('details','transaction-category'));await mount();await loaded();await start('details');
++  expect(mockPath).toBe('/transactions');expect(guides.state.progress.details?.step).toBe(0);expect(mockFollow).not.toHaveBeenCalled();
++});
++it("dismisses the native tutorial before opening Pay and cancels a paused handoff", async () => {
++  mockAutoDismiss=false;await mount();await loaded();await start('pay');await next();
++  expect(mockOverlay.visible).toBe(false);expect(mockNavigate.mock.calls.some(([p])=>p==='/pay-sheet')).toBe(false);
++  const dismissed=mockOverlay.onDismiss;await act(()=>guides.pause());await act(()=>dismissed?.());
++  expect(mockNavigate.mock.calls.some(([p])=>p==='/pay-sheet')).toBe(false);
++});
++it("keeps contextual invitations task-specific after the introduction is completed", async () => {
++  mockGet.mockResolvedValue(JSON.stringify({...emptyGuides(),progress:{orientation:{status:'completed',step:2,revision:GUIDE_REVISION,stepId:'orientation-search'}}}));
++  await mount();await loaded();expect(guides.claimSuggestion('details')).toBe(true);expect(guides.claimSuggestion('plan')).toBe(false);
++  await act(()=>guides.dismissSuggestion('details'));expect(guides.claimSuggestion('details')).toBe(false);
++  await start('transaction');await waitFor(()=>expect(mockSet).toHaveBeenCalledWith(guideStorageKey('u1'),expect.any(String)));
++});
+diff --git a/oneledger-mobile/src/features/guides/context.ts b/oneledger-mobile/src/features/guides/context.ts
+new file mode 100644
+index 0000000..6cf27bf
+--- /dev/null
++++ b/oneledger-mobile/src/features/guides/context.ts
+@@ -0,0 +1,18 @@
++import { createContext, useContext, type RefObject } from "react";
++import type { ViewInstance } from "react-native";
++import type { GuideDefinition } from "./definitions";
++import type { GuideId, GuideState } from "./model";
++export type Anchor = { measure: (callback: (x: number, y: number, w: number, h: number) => void) => void; reveal?: () => void; follow?: () => void };
++export type GuidesContextValue = {
++  ready: boolean; state: GuideState; definitions: GuideDefinition[]; active: boolean; notice: string | null;
++  register(id: string, entry: Anchor): () => void;
++  start(id: GuideId, replay?: boolean): void;
++  offerWelcome(): void;
++  considerWelcome(): void;
++  pause(): void;
++  claimSuggestion(id: GuideId): boolean;
++  dismissSuggestion(id: GuideId): void;
++};
++export const GuidesContext = createContext<GuidesContextValue | null>(null);
++export const useGuides = () => useContext(GuidesContext);
++export const GuideScrollContext = createContext<((target: RefObject<ViewInstance | null>) => void) | undefined>(undefined);
+diff --git a/oneledger-mobile/src/features/guides/definitions.ts b/oneledger-mobile/src/features/guides/definitions.ts
+new file mode 100644
+index 0000000..31cd0bc
+--- /dev/null
++++ b/oneledger-mobile/src/features/guides/definitions.ts
+@@ -0,0 +1,158 @@
++import type { GuideId } from "./model";
++
++export const GUIDE_REVISION = 3;
++export type GuideStep = {
++  id: string;
++  anchor: string;
++  route?: string;
++  section: string;
++  sectionTitle: string;
++  title: string;
++  body: string;
++  action: string;
++  follow?: boolean;
++  /** If an entry is hidden, never navigate to the feature behind it. */
++  entry?: boolean;
++};
++export const GUIDE_GROUPS = ["Start here", "Track & understand", "Plan your money", "Pay & request", "Records & preferences"] as const;
++export type GuideGroup = typeof GUIDE_GROUPS[number];
++export type GuideDefinition = {
++  group: GuideGroup;
++  id: GuideId;
++  title: string;
++  description: string;
++  icon: "compass" | "radio" | "list" | "inbox" | "target" | "file-text" | "send" | "users";
++  missing: string;
++  steps: GuideStep[];
++};
++type StepInput = Omit<GuideStep, "section" | "sectionTitle" | "action"> & { action?: string };
++function section(id: string, title: string, steps: StepInput[]): GuideStep[] {
++  return steps.map(step => ({ ...step, section: id, sectionTitle: title, action: step.action ?? "Next" }));
++}
++function tool(id: string, title: string, route: string, pageAnchor: string, body: string): GuideStep[] {
++  return section(id, title, [
++    { id: `${id}-entry`, anchor: `tool-${route}`, route: "/more", title: `Find ${title.toLowerCase()} here`, body: `Open ${title} from More.`, action: `Open ${title}`, entry: true },
++    { id: `${id}-page`, anchor: pageAnchor, route, title, body },
++  ]);
++}
++export function guideDefinitions(ios: boolean): GuideDefinition[] {
++  const home = section("home", "Home", [
++    { id: "home-wallet", anchor: "overview", route: "/", title: "Your money at a glance", body: "See your balances and recent activity here. Tap the eye on a wallet to hide its amount." },
++    { id: "home-add", anchor: "add-transaction", route: "/", title: "Cash counts, too", body: "Use Add transaction for cash or missing activity. Recording it does not send money." },
++    { id: "home-cash-flow", anchor: "home-cash-flow", route: "/", title: "Follow money in and money out", body: "Compare money received and spent. A monthly comparison needs enough recorded activity." },
++    { id: "home-recent", anchor: "home-recent", route: "/", title: "Your latest activity", body: "Recent transactions give you a quick check. View all opens the full list, where you can search and filter." },
++    { id: "home-spending", anchor: "home-spending", route: "/", title: "Understand your spending", body: "Expand this section to see spending by category. Pin it to keep it open." },
++    { id: "home-trends", anchor: "home-trends", route: "/", title: "Look beyond today", body: "Expand Trends to compare activity over time. New accounts may not have enough data yet." },
++  ]);
++  const wallets = section("wallets", "Wallets", [
++    { id: "wallets-entry", anchor: "home-wallets-manage", route: "/", title: "Keep your accounts together", body: "Manage opens the accounts you can see in this Space.", action: "Open Wallets" },
++    { id: "wallets-page", anchor: "page-wallets", route: "/wallets", title: "A place for each balance", body: "Open a wallet for its balance and activity. Check the source and last-update time." },
++  ]);
++  const transaction = section("transaction", "Transactions", [
++    { id: "transactions-entry", anchor: "nav-transactions", route: "/", title: "Every transaction lives here", body: "Open Transactions to find your recorded activity.", action: "Show transactions" },
++    { id: "transactions-search", anchor: "transactions-search", route: "/transactions", title: "Find a particular transaction", body: "Search by name, reference or category. You can use this even when you have months of activity." },
++    { id: "transactions-filters", anchor: "transactions-filters", route: "/transactions", title: "Narrow the list", body: "Use filters to narrow your activity. Clear them to see the complete list again." },
++    { id: "transaction-open", anchor: "first-transaction", route: "/transactions", title: "There is more behind each row", body: "Open a recorded transaction to inspect its details. No example records are created.", action: "Open transaction", follow: true },
++    { id: "transaction-category", anchor: "transaction-category", title: "Give your spending some meaning", body: "Check that the category matches what happened. Categories feed your spending summaries and budgets." },
++  ]);
++  const inbox = section("inbox", "Inbox & reviews", [
++    { id: "review-entry", anchor: "review-queue", route: "/transactions", title: "Know what needs attention", body: "Open Inbox to check items awaiting review. They are separate from confirmed activity.", action: "Open Inbox" },
++    { id: "review-page", anchor: "page-inbox", route: "/inbox", title: "Review before deciding", body: "Check the source before making a decision. An empty queue means nothing needs review." },
++  ]);
++  const plan = section("plan", "Plan", [
++    { id: "plan-entry", anchor: "nav-plan", route: "/", title: "Make room for what matters", body: "Open Plan to follow your current budget.", action: "Show Plan" },
++    { id: "plan-page", anchor: "page-plan", route: "/plan", title: "Your plan starts here", body: "Your current budget appears here. Use the setup option when you are ready to create one." },
++    { id: "plan-progress", anchor: "budget-progress", route: "/plan", title: "See how much room is left", body: "Compare spending with your budget. Check the remaining amount and any data-coverage notices." },
++  ]);
++  const documents = section("documents", "Reports & statements", [
++    { id: "reports-entry", anchor: "reports-entry", route: "/more", title: "Find your daily summaries", body: "Open Reports in More to find your saved daily summaries.", action: "Open Reports", entry: true },
++    { id: "reports-page", anchor: "page-reports", route: "/reports", title: "Read a saved snapshot", body: "Open an available report to read or download it. A new account may have no reports yet." },
++    { id: "statements-entry", anchor: "statements-entry", route: "/more", title: "Find a record for a period", body: "Open Statements for activity records covering selected accounts and dates.", action: "Open Statements", entry: true },
++    { id: "statements-page", anchor: "page-statements", route: "/statements", title: "Check coverage before exporting", body: "Check the accounts, dates and coverage notes before downloading. These are OneLedger records, not provider statements." },
++  ]);
++  const pay = section("pay", "Pay & Services", [
++    { id: "pay-entry", anchor: "pay-launcher", route: "/", title: "Your payment tools start here", body: "Open Pay to see available options. This guide never starts a payment.", action: "Show Pay", entry: true },
++    { id: "pay-page", anchor: "pay-overview", route: "/pay-sheet", title: "Choose the right payment tool", body: "Choose a payment or service here. You confirm with your provider; never share your PIN." },
++    { id: "pay-scan", anchor: "pay-scan", route: "/pay-sheet", title: "Scan when a merchant shows a code", body: "Scan reads a supported code or merchant poster. You review the details next; this guide keeps the camera closed." },
++    { id: "pay-request", anchor: "pay-request", route: "/pay-sheet", title: "Ask someone to pay you", body: "Request payment prepares a link to share. The other person chooses whether to pay. This guide creates no requests and shares no links." },
++    { id: "pay-services", anchor: "pay-services", route: "/pay-sheet", title: "Find payments and services", body: "Use the available tiles for payments or services. Review every detail before confirming with your provider." },
++  ]);
++  const recording = section("recording", "Automatic recording", [
++    { id: "recording-entry", anchor: "recording", route: "/more", title: "Let your phone help", body: ios ? "Find iPhone Shortcut setup here. You choose what to enable." : "Find phone recording setup here. Notification access remains your choice.", action: "Open recording", follow: true, entry: true },
++    { id: "recording-page", anchor: "recording-page", route: ios ? "/shortcuts" : "/connect", title: "Understand the setup before enabling it", body: ios ? "Read the pairing and Shortcut instructions first. This guide installs nothing and changes no device settings." : "Read what OneLedger receives before granting access. This guide changes no permissions." },
++  ]);
++  const spaces = section("spaces", "Spaces", [
++    { id: "spaces-entry", anchor: "space-switcher", route: "/", title: "Check which Space you are in", body: "This is your active Space. Switching changes the activity you see, without automatically sharing an account." },
++    { id: "spaces-settings", anchor: "setting-space-members", route: "/settings", title: "Find members and access", body: "Open Spaces & members to inspect membership and roles.", action: "Open Spaces & members" },
++    { id: "spaces-page", anchor: "spaces-page", route: "/space-members", title: "Know who belongs to this Space", body: "Check members and roles here. Invites and access changes always require a separate action." },
++  ]);
++  const settings = section("settings", "Settings & privacy", [
++    { id: "settings-entry", anchor: "tool-/settings", route: "/more", title: "Personalize OneLedger", body: "Settings groups profile, accounts, appearance, privacy and security controls.", action: "Open Settings", entry: true },
++    { id: "settings-page", anchor: "page-settings", route: "/settings", title: "Your preferences in one place", body: "Use these groups to find the setting you need. A browser arrow identifies tools that open on the web; the tour keeps you inside the app." },
++    { id: "profile-entry", anchor: "setting-profile", route: "/settings", title: "Your profile and regional defaults", body: "Profile & region holds your personal details and regional preferences. You decide whether to edit and save them.", action: "Open Profile" },
++    { id: "profile-page", anchor: "profile-page", route: "/profile", title: "Review before saving profile changes", body: "Check your profile details here. Fields and photo actions stay under your control; moving through this tour saves nothing." },
++    { id: "appearance-entry", anchor: "setting-appearance", route: "/settings", title: "Choose a comfortable appearance", body: "Appearance lets you use a light theme, a dark theme or your phone’s setting.", action: "Open Appearance" },
++    { id: "appearance-page", anchor: "page-appearance", route: "/appearance", title: "Follow your phone or choose a theme", body: "Select a theme here when you want to change it. The tour leaves your current preference in place." },
++    { id: "security-entry", anchor: "setting-security", route: "/settings", title: "Protect access on this phone", body: "App lock helps protect the app when you return to it. Its availability depends on your device.", action: "Open App lock" },
++    { id: "security-page", anchor: "page-app-lock", route: "/security", title: "App lock is your choice", body: "Read the available lock options here. Enabling or disabling protection requires its own action and device verification; the tour changes nothing." },
++    { id: "accounts-entry", anchor: "setting-accounts", route: "/settings", title: "Accounts, imports and sharing", body: "Financial accounts and Import a statement open their management tools on the web. Use those actions later to add accounts or historical activity. The tour does not open a browser or alter your data." },
++  ]);
++  const short = (id: GuideId, title: string, group: GuideGroup, description: string, icon: GuideDefinition["icon"], steps: GuideStep[]): GuideDefinition => ({
++    id, title, group, description, icon, steps,
++    missing: "This item needs data or setup first. Skip it now, or return later.",
++  });
++  return [
++    short("orientation", "Your first look", "Start here", "Home, activity and where to find your tools", "compass", [home[0], transaction[0], { ...transaction[1], id: "orientation-search", body: "Search your activity here. Other tools and short guides are always available in More." }]),
++    short("wallets", "Check a wallet balance", "Start here", "Find your accounts and check balance freshness", "compass", wallets),
++    short("add", "Record cash or missing activity", "Start here", "Find manual entry and review before saving", "list", section("add", "Record a transaction", [
++      { ...home[1], id: "add-entry", action: "Open manual entry" },
++      { id: "add-page", anchor: "page-add-a-transaction", route: "/add-transaction", title: "Choose the account and amount", body: "Enter the details, then review before saving. This guide records nothing and never sends money." },
++    ])),
++    short("recording", "Record automatically", "Start here", ios ? "Find iPhone Shortcut setup" : "Find phone recording setup", "radio", recording),
++    short("transaction", "Find a transaction", "Track & understand", "Open activity, search and filter", "list", transaction.slice(0, 3)),
++    short("details", "Understand a transaction", "Track & understand", "Open a record and check its category", "list", transaction.slice(3)),
++    short("inbox", "Know what needs attention", "Track & understand", "Find reviews and inspect the source", "inbox", inbox),
++    short("spending", "Understand your spending", "Track & understand", "Read cash flow, categories and trends", "target", [home[2], home[4], home[5]]),
++    short("people", "Find a person or merchant", "Track & understand", "Find the activity linked to someone", "users", tool("people", "People & merchants", "/people", "page-people-and-merchants", "Choose a person or merchant to see related activity. The guide does not change your contacts.")),
++    short("insights", "Explore money patterns", "Track & understand", "Find income and spending insights", "target", tool("insights", "Insights", "/insights", "page-insights", "Review patterns for the selected period. Insights need enough recorded activity.")),
++    short("plan", "Make a simple plan", "Plan your money", "Find Plan and read budget progress", "target", plan),
++    short("goals", "Follow a savings goal", "Plan your money", "Find your goals and their progress", "target", tool("goals", "Goals", "/goals", "page-goals", "Follow progress toward a goal here. If none exist yet, use the setup option when you are ready.")),
++    short("categories", "Explore a spending category", "Plan your money", "Find categories and related activity", "list", tool("categories", "Categories", "/categories", "page-categories", "Choose a category to inspect its activity. Available editing actions depend on your access.")),
++    short("bills", "Find an invoice or receipt", "Plan your money", "Find bills available in this Space", "file-text", tool("bills", "Bills", "/bills", "page-bills", "Open an available bill to inspect its details. Actions depend on your access.")),
++    short("pay", "Find the Pay tools", "Pay & request", "Open Pay and understand the available services", "send", [pay[0], pay[1], pay[4]]),
++    short("scan", "Understand Scan to pay", "Pay & request", "Find Scan and learn what happens next", "send", [pay[0], pay[2]]),
++    short("requests", "Request a payment", "Pay & request", "Find requests and check their status", "send", tool("requests", "Payment requests", "/requests", "page-payment-requests", "Create a request when you are ready, then share its link. This guide creates or shares nothing.")),
++    short("activity", "Check a prepared payment", "Pay & request", "Find a payment and read its status", "send", tool("payment-activity", "Payment activity", "/payment-activity", "page-payment-activity", "Check prepared payments here. A prepared payment is not proof of provider completion.")),
++    short("templates", "Reuse payment details", "Pay & request", "Find saved payment templates", "send", tool("payment-templates", "Payment templates", "/payment-templates", "page-payment-templates", "Choose a template when preparing a payment. Review its details again before confirming anything.")),
++    short("ussd", "Find a service code", "Pay & request", "Browse the USSD directory", "send", tool("ussd", "USSD directory", "/ussd", "ussd-page", "Find a supported service and read its instructions. This guide never dials a code.")),
++    short("documents", "Read daily reports", "Records & preferences", "Find and open saved daily summaries", "file-text", documents.slice(0, 2)),
++    short("statements", "Find an activity statement", "Records & preferences", "Find statements and check coverage", "file-text", documents.slice(2)),
++    short("profile", "Manage your profile", "Records & preferences", "Find your details and regional preferences", "users", settings.slice(2, 4)),
++    short("appearance", "Change the appearance", "Records & preferences", "Find light, dark and automatic themes", "compass", settings.slice(4, 6)),
++    short("security", "Protect the app on this phone", "Records & preferences", "Find app-lock settings", "compass", settings.slice(6, 8)),
++    short("spaces", "Keep your Spaces clear", "Records & preferences", "Understand the active Space and membership", "users", spaces),
++  ];
++}
++export function stepMatchesPath(step: GuideStep, path: string) {
++  return step.route ? path === step.route : /^\/transaction\/[^/]+$/.test(path);
++}
++export function sectionProgress(steps: GuideStep[], index: number) {
++  const ids = [...new Set(steps.map(step => step.section))];
++  const current = steps[index];
++  const local = steps.filter(step => step.section === current.section);
++  return { title: current.sectionTitle, index: ids.indexOf(current.section) + 1, total: ids.length, step: local.findIndex(step => step.id === current.id) + 1, steps: local.length };
++}
++/** Missing entry points skip their guarded pages; dynamic detail steps need a real row. */
++export function nextStepIndex(steps: GuideStep[], index: number, skip: "item" | "section" = "item") {
++  let next = index + 1;
++  if (skip === "section" || steps[index].entry) {
++    while (next < steps.length && steps[next].section === steps[index].section) next++;
++  }
++  while (next < steps.length && !steps[next].route) next++;
++  return next;
++}
++export function guideStepIndex(definition: GuideDefinition, progress: { revision?: number; stepId?: string; step: number; status: string } | undefined, replay: boolean) {
++  if (replay || progress?.status !== "paused" || progress.revision !== GUIDE_REVISION) return 0;
++  const stable = definition.steps.findIndex(step => step.id === progress.stepId);
++  return stable >= 0 ? stable : 0;
++}
+diff --git a/oneledger-mobile/src/features/guides/model.ts b/oneledger-mobile/src/features/guides/model.ts
+new file mode 100644
+index 0000000..3da85dd
+--- /dev/null
++++ b/oneledger-mobile/src/features/guides/model.ts
+@@ -0,0 +1,59 @@
++export const GUIDE_IDS = ["orientation", "recording", "transaction", "inbox", "plan", "documents", "pay", "spaces", "wallets", "add", "details", "spending", "people", "goals", "categories", "scan", "requests", "statements", "profile", "appearance", "security", "insights", "bills", "activity", "templates", "ussd"] as const;
++export type GuideId = typeof GUIDE_IDS[number];
++export type GuideProgress = { status: "paused" | "completed"; step: number; revision?: number; stepId?: string };
++export type GuideState = { version: 1; welcomeSeen: boolean; dismissed: GuideId[]; progress: Partial<Record<GuideId, GuideProgress>> };
++export const emptyGuides = (): GuideState => ({ version: 1, welcomeSeen: false, dismissed: [], progress: {} });
++export const guideStorageKey = (userId: string) => `oneledger.guides.v1.${userId}`;
++export function readGuides(raw: string | null): GuideState {
++  try {
++    const value = raw ? JSON.parse(raw) : null;
++    if (!value || value.version !== 1) return emptyGuides();
++    const next = emptyGuides();
++    next.welcomeSeen = value.welcomeSeen === true;
++    next.dismissed = GUIDE_IDS.filter(id => Array.isArray(value.dismissed) && value.dismissed.includes(id));
++    for (const id of GUIDE_IDS) {
++      const entry = value.progress?.[id];
++      if (entry && ["paused", "completed"].includes(entry.status) && Number.isInteger(entry.step) && entry.step >= 0 && entry.step < 1000) {
++        next.progress[id] = { status: entry.status, step: entry.step, ...([2, 3].includes(entry.revision) && typeof entry.stepId === "string" && entry.stepId.length < 100 ? { revision: entry.revision, stepId: entry.stepId } : {}) };
++      }
++    }
++    return next;
++  } catch { return emptyGuides(); }
++}
++export function canOfferWelcome(createdAt: string | undefined, now: number): boolean {
++  const created = createdAt ? Date.parse(createdAt) : NaN;
++  return Number.isFinite(created) && created <= now && now - created < 7 * 86400000;
++}
++export type Rect = { x: number; y: number; width: number; height: number };
++/** Keep the coach below half the usable screen, including at large text sizes. */
++export function guidePanelLimits(viewport: { width: number; height: number; top: number; bottom: number }) {
++  return { width: Math.min(320, Math.max(0, viewport.width - 24)), maxHeight: Math.max(0, Math.min(300, Math.floor((viewport.height - viewport.top - viewport.bottom - 24) * 0.44))) };
++}
++/** Prefer a clear side of the anchor; a large section focuses on its heading. */
++export function coachPlacement(target: Rect, viewport: { width: number; height: number; top: number; bottom: number }, cardHeight: number) {
++  const { width, height, top, bottom } = viewport;
++  const edge = 12, gap = 12, pad = 4;
++  const limits = guidePanelLimits(viewport), panelHeight = Math.min(cardHeight, limits.maxHeight);
++  const x = Math.max(8, target.x - pad), y = Math.max(top + 4, target.y - pad);
++  const right = Math.min(width - 8, target.x + target.width + pad), end = Math.min(height - bottom - 4, target.y + target.height + pad);
++  const spot = { x, y, width: Math.max(0, right - x), height: Math.max(0, end - y) };
++  const left = Math.max(edge, Math.min(width - limits.width - edge, x + spot.width / 2 - limits.width / 2));
++  const safeEnd = height - bottom - edge;
++  const result = (side: "above" | "below" | "left" | "right" | "sheet", px: number, py: number) => ({ spot, side, left: px, top: py, width: limits.width });
++  const fullyVisible = target.y >= top && target.y + target.height <= height - bottom && target.x >= 0 && target.x + target.width <= width;
++  if (fullyVisible && spot.height > 0 && spot.width > 0) {
++    if (y + spot.height + gap + panelHeight <= safeEnd) return result("below", left, y + spot.height + gap);
++    if (y - gap - panelHeight >= top + edge) return result("above", left, y - gap - panelHeight);
++    const py = Math.max(top + edge, Math.min(safeEnd - panelHeight, y + spot.height / 2 - panelHeight / 2));
++    if (x - gap - limits.width >= edge) return result("left", x - gap - limits.width, py);
++    if (x + spot.width + gap + limits.width <= width - edge) return result("right", x + spot.width + gap, py);
++    if (spot.height > 80) {
++      spot.height = 64;
++      if (y + spot.height + gap + panelHeight <= safeEnd) return result("below", left, y + spot.height + gap);
++    }
++  }
++  // Unavoidable clipping uses the same compact card, never a full-height sheet.
++  const topDock = top + edge, bottomDock = Math.max(topDock, safeEnd - panelHeight);
++  const py = Math.abs(y - topDock) > Math.abs(y - bottomDock) ? topDock : bottomDock;
++  return result("sheet", Math.max(edge, (width - limits.width) / 2), py);
++}

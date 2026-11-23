@@ -1,7 +1,7 @@
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Linking from "expo-linking";
 import { router } from "expo-router";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Platform, Share, View } from "react-native";
 
 import { classifyScan, prepareScan, recordPayHandoff } from "@/api/mobile-api";
@@ -15,12 +15,17 @@ import {
   parseUserAmount,
   REASON_MESSAGES,
 } from "@/features/scan/review";
+import { canReadPoster, recognizePoster } from "@/features/scan/poster-recognition";
+import { parseMerchantPoster, type MerchantPoster } from "@/features/scan/poster";
+import { parseRecipient } from "@/features/pay/new-form";
 import type { ClassifyResult, ScanModel } from "@/features/scan/types";
 import { colors, radii, space } from "@/theme/tokens";
 
 type Phase =
   | { step: "scanning" }
   | { step: "checking" }
+  | { step: "readingPoster" }
+  | { step: "posterReview"; poster: MerchantPoster }
   | { step: "notice"; message: string; disabled?: boolean }
   | { step: "review"; raw: string; model: ScanModel }
   | { step: "preparing"; raw: string; model: ScanModel }
@@ -31,17 +36,46 @@ type Phase =
 // (a verified USSD code, an approved link or a OneLedger merchant code), review
 // it, then hand it over. The scan is data, never authorization: nothing is
 // dialed on detection, one tap prepares a draft, and the app never claims the
-// payment settled. The camera only reads the code; nothing is photographed or kept.
+// payment settled. Poster photos are processed on-device and deleted after OCR.
 export default function Scan() {
   const [permission, requestPermission] = useCameraPermissions();
   const [phase, setPhase] = useState<Phase>({ step: "scanning" });
   const [torch, setTorch] = useState(false);
+  const [mode, setMode] = useState<"qr" | "poster">("qr");
+  const [cameraReady, setCameraReady] = useState(false);
+  const camera = useRef<CameraView>(null);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   const handled = useRef(false);
 
 
   function scanAgain() {
     handled.current = false;
+    setCameraReady(false);
     setPhase({ step: "scanning" });
+  }
+
+  async function readPoster() {
+    if (handled.current || !cameraReady || !camera.current || !canReadPoster) return;
+    handled.current = true;
+    setPhase({ step: "readingPoster" });
+    try {
+      const photo = await camera.current.takePictureAsync({ quality: 1, exif: false });
+      if (!photo?.uri) throw new Error("No photo");
+      // Finish recognition even after leaving, so the native module deletes the photo.
+      const text = await recognizePoster(photo.uri);
+      if (!mounted.current) return;
+      const poster = parseMerchantPoster(text);
+      setPhase(poster ? { step: "posterReview", poster } : {
+        step: "notice",
+        message: "Couldn't read one clear MTN merchant code. Include the full *182*8*1*code# line, move closer and avoid glare. You can also enter the code yourself.",
+      });
+    } catch {
+      if (mounted.current) setPhase({ step: "notice", message: "Couldn't read the poster. Hold steady and try again, or enter the merchant code yourself." });
+    }
   }
 
   async function onScanned(raw: string) {
@@ -78,11 +112,11 @@ export default function Scan() {
   if (!permission.granted) {
     return (
       <Screen>
-        <ScreenHeader title="Scan to pay" subtitle="Scan a merchant payment QR code." />
+        <ScreenHeader title="Scan to pay" subtitle="Scan a payment QR code or an MTN merchant poster." />
         <EmptyState
           variant="setup"
-          title="OneLedger needs the camera to read a QR code"
-          description="The camera only reads the code. Nothing is photographed or saved. You can still use the other payment options."
+          title="OneLedger needs the camera to read a payment code"
+          description="QR codes are read directly. Poster photos are read on your phone and deleted after reading. You can still enter a merchant code yourself."
           action={
             permission.canAskAgain ? (
               <Button label="Allow camera" onPress={requestPermission} />
@@ -95,27 +129,41 @@ export default function Scan() {
     );
   }
 
-  if (phase.step === "scanning" || phase.step === "checking") {
+  if (phase.step === "scanning" || phase.step === "checking" || phase.step === "readingPoster") {
     return (
       <Screen>
-        <ScreenHeader title="Scan to pay" subtitle="Point your camera at the merchant's payment QR code and hold steady inside the frame." />
+        <ScreenHeader title="Scan to pay" subtitle={mode === "qr" ? "Point your camera at the merchant’s payment QR code." : "Fit the merchant name and full *182*8*1*code# line inside the frame."} />
+        <View style={{ flexDirection: "row", gap: space[2] }}>
+          <Button label="QR code" variant={mode === "qr" ? "primary" : "secondary"} disabled={phase.step !== "scanning"} onPress={() => setMode("qr")} />
+          <Button label="Merchant poster" variant={mode === "poster" ? "primary" : "secondary"} disabled={phase.step !== "scanning"} onPress={() => setMode("poster")} />
+        </View>
         <View
           style={{ height: 320, borderRadius: radii.card, overflow: "hidden", backgroundColor: colors.surface }}
           accessible
           accessibilityLabel="Camera viewfinder"
         >
           <CameraView
+            ref={camera}
+            onCameraReady={() => setCameraReady(true)}
             style={{ flex: 1 }}
             facing="back"
+            autofocus="on"
             enableTorch={torch}
             barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
-            onBarcodeScanned={phase.step === "scanning" ? ({ data }) => void onScanned(data) : undefined}
+            onBarcodeScanned={mode === "qr" && phase.step === "scanning" ? ({ data }) => void onScanned(data) : undefined}
           />
         </View>
         <Text variant="label" color="textSecondary" accessibilityRole="alert">
-          {phase.step === "checking" ? "Checking the code…" : "Camera is on. Position the QR code inside the frame."}
+          {phase.step === "readingPoster" ? "Reading the poster…" : phase.step === "checking" ? "Checking the code…" : mode === "poster" ? "Hold steady, then tap Read merchant poster." : "Camera is on. Position the QR code inside the frame."}
         </Text>
+        {mode === "poster" ? <>
+          <Text variant="caption" color="textMuted">The photo is read on your phone and deleted after reading. Check handwritten digits carefully.</Text>
+          {canReadPoster ? <Button label="Read merchant poster" accessibilityLabel="Read merchant poster" loading={phase.step === "readingPoster"} disabled={!cameraReady || phase.step !== "scanning"} onPress={() => void readPoster()} /> :
+            <Text accessibilityRole="alert">Poster reading is unavailable in this build. Enter the merchant code below.</Text>}
+          <Button label="Enter merchant code" variant="secondary" disabled={phase.step !== "scanning"} onPress={() => router.replace({ pathname: "/pay-new", params: { type: "pay_merchant" } })} />
+        </> : null}
         <Button
+          disabled={phase.step !== "scanning"}
           label={torch ? "Turn off flashlight" : "Turn on flashlight"}
           variant="secondary"
           onPress={() => setTorch((t) => !t)}
@@ -131,6 +179,7 @@ export default function Scan() {
         <Card style={{ gap: space[3] }}>
           <Text accessibilityRole="alert">{phase.message}</Text>
           {phase.disabled ? null : <Button label="Scan again" onPress={scanAgain} />}
+          {mode === "poster" && !phase.disabled ? <Button label="Enter merchant code" variant="secondary" onPress={() => router.replace({ pathname: "/pay-new", params: { type: "pay_merchant" } })} /> : null}
         </Card>
       </Screen>
     );
@@ -151,6 +200,8 @@ export default function Scan() {
       </Screen>
     );
   }
+
+  if (phase.step === "posterReview") return <PosterReview poster={phase.poster} onScanAgain={scanAgain} />;
 
   return <ReviewStep phase={phase} setPhase={setPhase} onScanAgain={scanAgain} />;
 }
@@ -359,6 +410,25 @@ function ReviewStep({
         />
       )}
       {again}
+    </Screen>
+  );
+}
+
+function PosterReview({ poster, onScanAgain }: { poster: MerchantPoster; onScanAgain: () => void }) {
+  const [code, setCode] = useState(poster.merchantCode);
+  const [name, setName] = useState(poster.name);
+  const recipient = parseRecipient("pay_merchant", code);
+  return (
+    <Screen>
+      <ScreenHeader title="Check merchant details" subtitle="MTN MoMoPay poster" />
+      <Text>Compare every digit with the poster, including any leading zero. The name was read from the poster and has not been verified by MTN.</Text>
+      <TextField label="Merchant code" value={code} onChangeText={setCode} keyboardType="number-pad" error={recipient.ok ? undefined : recipient.message} />
+      <TextField label="Merchant name (optional)" value={name} onChangeText={setName} maxLength={100} />
+      <Button label="Continue to merchant payment" disabled={!recipient.ok} onPress={() => {
+        if (!recipient.ok) return;
+        router.replace({ pathname: "/pay-new", params: { type: "pay_merchant", merchantCode: recipient.merchantCode, merchantName: name.trim() } });
+      }} />
+      <Button label="Scan again" variant="secondary" onPress={onScanAgain} />
     </Screen>
   );
 }

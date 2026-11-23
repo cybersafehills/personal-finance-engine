@@ -4,6 +4,7 @@ import { View } from "react-native";
 
 import { createPayIntent } from "@/api/mobile-api";
 import { Button, Card, Chip, EmptyState, Screen, ScreenHeader, Text, TextField } from "@/components/ds";
+import { posterPrefill } from "@/features/scan/poster";
 import { createKeyTracker } from "@/features/pay/key";
 import { PAY_COPY } from "@/features/pay/messages";
 import { parseRecipient, type PayKind } from "@/features/pay/new-form";
@@ -27,7 +28,7 @@ function parseAmountRwf(text: string): number | null {
 // and nothing is charged or sent from here. The type is read from the route but
 // anything other than the two supported kinds shows nothing to pay.
 export default function PayNew() {
-  const params = useLocalSearchParams<{ type?: string }>();
+  const params = useLocalSearchParams<{ type?: string; merchantCode?: string; merchantName?: string }>();
   const kind: PayKind | null =
     params.type === "pay_person" || params.type === "pay_merchant" ? params.type : null;
 
@@ -47,8 +48,8 @@ export default function PayNew() {
 
   const tracker = useRef(createKeyTracker()).current;
   const inFlight = useRef(false);
-  const [recipientText, setRecipientText] = useState("");
-  const [name, setName] = useState("");
+  const [recipientText, setRecipientText] = useState(() => posterPrefill(params).merchantCode);
+  const [name, setName] = useState(() => posterPrefill(params).name);
   const [amountText, setAmountText] = useState("");
   const [accountId, setAccountId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);

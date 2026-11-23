@@ -3,7 +3,15 @@ import { Platform } from "react-native";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react-native";
 
 import Scan from "@/app/(app)/scan";
-import { resetRouterMock } from "@/test/router-mock";
+import { resetRouterMock, router } from "@/test/router-mock";
+
+const mockRecognize = jest.fn();
+const mockTakePicture = jest.fn();
+const mockPoster = { available: true };
+jest.mock("@/features/scan/poster-recognition", () => ({
+  get canReadPoster() { return mockPoster.available; },
+  recognizePoster: (uri: string) => mockRecognize(uri),
+}));
 
 const mockClassify = jest.fn();
 const mockPrepare = jest.fn();
@@ -14,7 +22,11 @@ jest.mock("expo-router", () => jest.requireActual("@/test/router-mock"));
 jest.mock("expo-linking", () => ({ openURL: jest.fn(), openSettings: jest.fn() }));
 jest.mock("expo-camera", () => ({
   useCameraPermissions: () => [mockCamera.permission, mockCamera.request],
-  CameraView: (props: { onBarcodeScanned?: (e: { data: string }) => void }) => {
+  CameraView: (props: { ref?: { current: unknown }; onCameraReady?: () => void; onBarcodeScanned?: (e: { data: string }) => void }) => {
+    const React = jest.requireActual("react");
+    React.useImperativeHandle(props.ref, () => ({ takePictureAsync: mockTakePicture }), []);
+    const notifyReady = React.useRef(props.onCameraReady);
+    React.useEffect(() => { notifyReady.current?.(); }, []);
     mockCamera.onScanned = props.onBarcodeScanned;
     return null;
   },
@@ -47,6 +59,9 @@ async function scan(raw = "*182*1*1*0788123456*1500#") {
 
 beforeEach(() => {
   resetRouterMock();
+  mockPoster.available = true;
+  mockRecognize.mockReset().mockResolvedValue("Izina ry’Umucuruzi:\nAIMEE\nKanda\n*182*8*1* 0 2 5 4 0 6 #");
+  mockTakePicture.mockReset().mockResolvedValue({ uri: "file:///cache/poster.jpg" });
   [mockClassify, mockPrepare, mockHandoff, mockCamera.request, Linking.openURL as jest.Mock].forEach((m) => m.mockReset());
   mockCamera.permission = { granted: true, canAskAgain: true };
   mockCamera.onScanned = undefined;
@@ -60,7 +75,7 @@ describe("Scan to pay", () => {
   it("asks for camera access first, and explains that nothing is saved", async () => {
     mockCamera.permission = { granted: false, canAskAgain: true };
     await render(<Scan />);
-    expect(await screen.findByText(/Nothing is photographed or saved/)).toBeTruthy();
+    expect(await screen.findByText(/deleted after reading/)).toBeTruthy();
     await fireEvent.press(screen.getByRole("button", { name: "Allow camera" }));
     expect(mockCamera.request).toHaveBeenCalled();
   });
@@ -173,5 +188,70 @@ describe("Scan to pay", () => {
   it("puts its title in the navigation header (the back arrow is native)", async () => {
     await render(<Scan />);
     expect(screen.getByRole("header", { name: "Scan to pay" })).toBeTruthy();
+  });
+});
+
+describe("merchant posters", () => {
+  async function capture() {
+    await render(<Scan />);
+    await fireEvent.press(screen.getByRole("button", { name: "Merchant poster" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Read merchant poster" }));
+  }
+
+  it("reads locally, preserves leading zero, and requires review before prefilling payment", async () => {
+    await capture();
+    expect(await screen.findByLabelText("Merchant code")).toHaveProp("value", "025406");
+    expect(screen.getByLabelText("Merchant name (optional)")).toHaveProp("value", "AIMEE");
+    expect(mockRecognize).toHaveBeenCalledWith("file:///cache/poster.jpg");
+    expect(mockClassify).not.toHaveBeenCalled();
+    expect(mockPrepare).not.toHaveBeenCalled();
+    expect(Linking.openURL).not.toHaveBeenCalled();
+    expect(router.replace).not.toHaveBeenCalled();
+    await fireEvent.changeText(screen.getByLabelText("Merchant code"), "025408");
+    await fireEvent.press(screen.getByRole("button", { name: "Continue to merchant payment" }));
+    expect(router.replace).toHaveBeenCalledWith({ pathname: "/pay-new", params: { type: "pay_merchant", merchantCode: "025408", merchantName: "AIMEE" } });
+  });
+
+  it("rejects unreadable or unsupported codes and offers retry or manual entry", async () => {
+    mockRecognize.mockResolvedValue("*182*1*1*0781234567#");
+    await capture();
+    expect(await screen.findByText(/Couldn't read one clear MTN/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Enter merchant code" })).toBeTruthy();
+    expect(router.replace).not.toHaveBeenCalled();
+  });
+
+  it("recovers from a camera or recognizer failure", async () => {
+    mockRecognize.mockRejectedValue(new Error("OCR failed"));
+    await capture();
+    expect(await screen.findByText(/Couldn't read the poster/)).toBeTruthy();
+    await fireEvent.press(screen.getByRole("button", { name: "Scan again" }));
+    expect(await screen.findByRole("button", { name: "Read merchant poster" })).toBeTruthy();
+  });
+
+  it("blocks an invalid correction before leaving review", async () => {
+    await capture();
+    await fireEvent.changeText(await screen.findByLabelText("Merchant code"), "O25406");
+    expect(screen.getByRole("button", { name: "Continue to merchant payment" })).toBeDisabled();
+    expect(router.replace).not.toHaveBeenCalled();
+  });
+
+  it("captures only once while recognition is pending", async () => {
+    let finish!: (text: string) => void;
+    mockRecognize.mockReturnValue(new Promise<string>((resolve) => { finish = resolve; }));
+    await capture();
+    expect(screen.getByRole("button", { name: "Read merchant poster" })).toBeDisabled();
+    await fireEvent.press(screen.getByRole("button", { name: "Read merchant poster" }));
+    expect(mockTakePicture).toHaveBeenCalledTimes(1);
+    await act(async () => { finish("*182*8*1*025406#"); });
+    expect(await screen.findByLabelText("Merchant code")).toHaveProp("value", "025406");
+  });
+
+  it("offers manual entry when the native module is unavailable", async () => {
+    mockPoster.available = false;
+    await render(<Scan />);
+    await fireEvent.press(screen.getByRole("button", { name: "Merchant poster" }));
+    expect(screen.queryByRole("button", { name: "Read merchant poster" })).toBeNull();
+    await fireEvent.press(screen.getByRole("button", { name: "Enter merchant code" }));
+    expect(router.replace).toHaveBeenCalledWith({ pathname: "/pay-new", params: { type: "pay_merchant" } });
   });
 });
