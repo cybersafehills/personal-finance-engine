@@ -9,7 +9,7 @@ const KINDS = ["brand", "agency", "organization", "financial_provider"];
 const CATS = ["Connectivity", "Learning", "Banking"];
 const DECISIONS = ["approve", "request_changes", "reject", "pause", "resume", "end"];
 const FORMATS = ["wide", "square", "tall", "bar"];
-const PLACEMENTS = ["home", "pay-person", "pay-merchant", "plan"];
+const PLACEMENTS = ["home", "pay-person", "pay-merchant", "plan", "transactions"];
 const str = (f: FormData, k: string, max = 1000) => String(f.get(k) ?? "").slice(0, max);
 
 export async function submitOffer(form: FormData) {

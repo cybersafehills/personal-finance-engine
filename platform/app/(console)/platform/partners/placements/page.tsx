@@ -15,7 +15,8 @@ const NAMES: Record<string, { label: string; where: string }> = {
   home: { label: "Home", where: "Above Recent transactions" },
   "pay-person": { label: "Pay a person", where: "Below the Prepare payment button" },
   "pay-merchant": { label: "Pay a merchant", where: "Below the Prepare payment button" },
-  plan: { label: "Plan", where: "Below the planning content" },
+  plan: { label: "Plan", where: "Under the header" },
+  transactions: { label: "Transactions", where: "Under the header, above the list" },
 };
 const FORMATS = [["wide", "Wide banner (medium-widget proportions)"], ["square", "Square pair (two small-widget cards)"], ["tall", "Tall card"], ["bar", "Slim bar"]];
 
