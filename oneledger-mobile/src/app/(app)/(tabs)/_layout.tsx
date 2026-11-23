@@ -48,8 +48,11 @@ export default function TabsLayout() {
         options={{ title: "Transactions", tabBarIcon: icon("list") }}
       />
       <Tabs.Screen name="pay" options={{title:"Pay",href:null}}/>
-      {/* Inbox is opened from the header icon (as on the web), not the bar. */}
-      <Tabs.Screen name="inbox" options={{ title: "Inbox", href: null }} />
+      {/* Inbox is opened from the header icon (as on the web), not the bar. Hidden with
+          tabBarButton, not href: null: with href: null the router bounced /inbox straight
+          back to Home on Android (the screen never rendered). MotionTabBar draws its own
+          fixed tabs, so this only matters for any default bar. */}
+      <Tabs.Screen name="inbox" options={{ title: "Inbox", tabBarButton: () => null }} />
       <Tabs.Screen name="plan" options={{ title: "Plan", tabBarIcon: icon("target") }} />
       <Tabs.Screen name="more" options={{ title: "More", headerShown: false, tabBarIcon: icon("grid") }} />
     </Tabs>
