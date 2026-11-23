@@ -52,7 +52,7 @@ it("advances a carousel and stops at the end when not looping", () => {
 
 it("uses Apple-widget formats and a five second loop by default, and only loops when more than one offer", () => {
   const p = initialPlacements();
-  expect([p.home.format, p["pay-person"].format, p["pay-merchant"].format, p.plan.format]).toEqual(["wide", "square", "square", "bar"]);
+  expect([p.home.format, p["pay-person"].format, p["pay-merchant"].format, p.plan.format, p.transactions.format]).toEqual(["wide", "square", "square", "bar", "bar"]);
   expect(p.home.intervalSec).toBe(5);
   expect(p.home.loop).toBe(true);
   expect(nextIndex(0, 1, true)).toBe(0);
@@ -79,4 +79,11 @@ it("labels real offers Sponsored and only fictional ones as examples", () => {
   const [real] = parsePartnerFeed({ enabled: true, offers: [offerRow] }).offers;
   expect(sponsorLabel(real)).toBe("Sponsored");
   expect(sponsorLabel({ ...real, id: "example-x" })).toBe("Sponsored · example");
+});
+
+it("the Transactions placement shows every eligible offer and honours the owner's switch", () => {
+  const state = active();
+  expect(placementOffers(state, "transactions", today)).toHaveLength(3);
+  const off = { ...state, placements: { ...initialPlacements(), transactions: { ...initialPlacements().transactions, enabled: false } } };
+  expect(placementOffers(off, "transactions", today)).toEqual([]);
 });

@@ -50,7 +50,7 @@ export function BrandNavIcon({ name, selected }: { name: "home" | "list" | "targ
   const id = `nav-${useId().replace(/:/g, "")}`;
   const stroke = selected ? `url(#${id})` : colors.textPrimary;
   return <Svg width={24} height={24} viewBox="0 0 24 24" accessible={false} pointerEvents="none">
-    <Defs><LinearGradient id={id} x1="0" y1="0" x2="1" y2="1"><Stop offset="0" stopColor={colors.homeGradientStart}/><Stop offset="1" stopColor={colors.homeGradientEnd}/></LinearGradient></Defs>
+    <Defs><LinearGradient id={id} x1="0" y1="0" x2="1" y2="1"><Stop offset="0" stopColor={colors.navIconStart}/><Stop offset="1" stopColor={colors.navIconEnd}/></LinearGradient></Defs>
     <G fill="none" stroke={stroke} strokeWidth={2.3} strokeLinecap="round" strokeLinejoin="round">
       {name === "home" ? <Path d="M3 10 12 3 21 10V21H15V14H9V21H3Z"/> : null}
       {name === "list" ? <><Path d="M9 5H21M9 12H21M9 19H21"/><Circle cx={3} cy={5} r={0.8}/><Circle cx={3} cy={12} r={0.8}/><Circle cx={3} cy={19} r={0.8}/></> : null}

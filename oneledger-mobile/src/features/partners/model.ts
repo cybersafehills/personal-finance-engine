@@ -14,7 +14,7 @@ export const PREVIEW_OFFERS: readonly PartnerOffer[] = [
   { id: "example-bank", homeFeatured: true, brandId: "example-bank", brand: "Example Bank", category: "Banking", title: "Understand your account options", benefit: "Explore the provider’s account features, eligibility and fees.", eligibility: "Adults in Rwanda; provider identity and eligibility checks would apply.", terms: "Fictional financial promotion. No real account is offered. Review fees and eligibility before choosing a provider.", destination: "https://example.com/accounts", endsOn: "2026-12-31", country: "Rwanda", language: "English", financialDisclosure: "This paid placement is not a OneLedger recommendation or a guarantee. No return is promised. Financial-provider identity, authorization and claims require separate review before any real campaign can run." },
 ];
 export type PreviewScenario = "returning" | "first-visit" | "daily-cap" | "weekly-cap";
-export const PLACEMENT_IDS = ["home", "pay-person", "pay-merchant", "plan"] as const;
+export const PLACEMENT_IDS = ["home", "pay-person", "pay-merchant", "plan", "transactions"] as const;
 export type PlacementId = typeof PLACEMENT_IDS[number];
 /**
  * Creative formats, sized like Apple's own widgets so they sit naturally on iPhone:
@@ -30,7 +30,8 @@ export const PLACEMENT_LABELS: Record<PlacementId, { label: string; where: strin
   home: { label: "Home", where: "Above Recent transactions" },
   "pay-person": { label: "Pay a person", where: "Below the Prepare payment button" },
   "pay-merchant": { label: "Pay a merchant", where: "Below the Prepare payment button" },
-  plan: { label: "Plan", where: "Below the planning content" },
+  plan: { label: "Plan", where: "Under the header" },
+  transactions: { label: "Transactions", where: "Under the header, above the list" },
 };
 export const DEFAULT_ROTATION_SECONDS = 5;
 export const INTERVAL_CHOICES = [3, 5, 8, 12] as const;
@@ -39,7 +40,7 @@ export type PlacementPosition = "top" | "bottom";
 export type PlacementConfig = { enabled: boolean; format: PlacementFormat; mode: "static" | "carousel"; intervalSec: number; loop: boolean; offerIds: string[]; position: PlacementPosition };
 export function initialPlacements(): Record<PlacementId, PlacementConfig> {
   const base = (format: PlacementFormat): PlacementConfig => ({ enabled: true, format, mode: "carousel", intervalSec: DEFAULT_ROTATION_SECONDS, loop: true, offerIds: [], position: "bottom" });
-  return { home: base("wide"), "pay-person": base("square"), "pay-merchant": base("square"), plan: base("bar") };
+  return { home: base("wide"), "pay-person": base("square"), "pay-merchant": base("square"), plan: base("bar"), transactions: base("bar") };
 }
 export type PartnerPreviewState = {
   placements: Record<PlacementId, PlacementConfig>;

@@ -184,7 +184,10 @@ export function PayLauncher({
                   pressed && { borderColor: brand ? colors.ekashNavy : colors.accent },
                 ]}
               >
-                {!available ? <Feather name={TILE_ICONS[action.id]} size={20} color={colors.textMuted} /> : <IconTile name={TILE_ICONS[action.id]} size={30} deep/>}
+                {brand && available
+                  ? <IconTile name={TILE_ICONS[action.id]} size={30} deep/>
+                  // Plain monochrome glyph: textPrimary is near-black on light and near-white on dark.
+                  : <View style={styles.mono}><Feather name={TILE_ICONS[action.id]} size={24} color={available ? colors.textPrimary : colors.textMuted} /></View>}
                 <View style={styles.flex}>
                   <Text variant="bodyStrong" numberOfLines={2} style={brand ? { color: colors.ekashNavy } : undefined}>
                     {action.label}
@@ -371,6 +374,7 @@ const useStyles = makeStyles((colors) => StyleSheet.create({
   // The eKash shortcut wears eKash's own teal (from its logo) so it stands apart from the other tiles.
   tileEkash: { borderColor: colors.ekash, backgroundColor: colors.ekashBg },
   tileOff: { opacity: 0.55 },
+  mono: { width: 30, height: 30, alignItems: "center", justifyContent: "center" },
   primary: {
     flexDirection: "row",
     alignItems: "center",

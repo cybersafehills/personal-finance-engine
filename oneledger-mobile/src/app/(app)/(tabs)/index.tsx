@@ -1,3 +1,4 @@
+import { insightsCacheKey, mergeInsights, readCachedInsights, writeCachedInsights, type HomeInsights } from "@/features/home/insights-cache";
 import { PartnerHomePlacement } from "@/features/partners/PartnerOfferCard";
 import { useDockClearance } from "@/components/shell/dockClearance";
 import { GuideScrollView } from "@/features/guides/GuideScrollView";
@@ -53,6 +54,18 @@ export default function Home() {
   const balanceQuery = useQuery(loadBalance, { refreshIntervalMs: 60000 });
   const loadAnalytics = useCallback(() => { if (!activeId || !day) throw new Error("Space is loading"); return loadHomeInsights(new Date()); }, [activeId, day]);
   const analytics = useQuery(loadAnalytics, { refreshIntervalMs: 60000 });
+  // Cash flow opens with what was there last time, then switches to fresh numbers when they arrive.
+  const cacheKey = session && activeId ? insightsCacheKey(session.user.id, activeId) : null;
+  const [remembered, setRemembered] = useState<{ key: string; value: HomeInsights } | null>(null);
+  useEffect(() => {
+    if (!cacheKey) return;
+    let off = false;
+    void readCachedInsights(cacheKey).then(value => { if (!off && value) setRemembered({ key: cacheKey, value }); });
+    return () => { off = true; };
+  }, [cacheKey]);
+  useEffect(() => { if (cacheKey && analytics.data) void writeCachedInsights(cacheKey, analytics.data); }, [cacheKey, analytics.data]);
+  const merged = mergeInsights(analytics.data, remembered && remembered.key === cacheKey ? remembered.value : null, now);
+  const insights = merged.data;
   const loadBudget = useCallback(() => { if (!activeId) throw new Error("Space is loading"); return fetchBudgets(); }, [activeId]);
   const budget = useQuery(loadBudget, { refreshIntervalMs: 60000 });
   const profile = useQuery(profileName);
@@ -63,10 +76,10 @@ export default function Home() {
   const name = profile.data ?? fallbackName;
   const wallets = walletsQuery.data?.ok ? walletsQuery.data.wallets : null;
   const currency = choice?.space === activeId ? choice.currency : wallets?.find((w) => w.isPrimary)?.currency ?? "RWF";
-  const currencyOptions = [...new Set<SupportedCurrency>([...(wallets ?? []).map((w) => w.currency), ...(analytics.data?.current.ok ? analytics.data.current.overview.currencies.map((c) => c.currency) : []), currency])];
-  const currentResult = analytics.data?.current;
+  const currencyOptions = [...new Set<SupportedCurrency>([...(wallets ?? []).map((w) => w.currency), ...(insights?.current.ok ? insights.current.overview.currencies.map((c) => c.currency) : []), currency])];
+  const currentResult = insights?.current;
   const current = currencyBlock(currentResult, currency);
-  const analyticsMessage = currentResult && !currentResult.ok ? currentResult.message : analytics.error ?? (analytics.loading ? "Loading your monthly activity…" : "No summary is available.");
+  const analyticsMessage = currentResult && !currentResult.ok ? currentResult.message : analytics.error ?? (analytics.loading || merged.usingRemembered ? "Loading your monthly activity…" : "No summary is available.");
   const walletsMessage = walletsQuery.data && !walletsQuery.data.ok ? walletsQuery.data.message : walletsQuery.error ?? (walletsQuery.loading ? "Loading your wallets…" : "Your wallets are unavailable.");
   const homeBlock = walletsQuery.loading || recentQuery.loading ? "Home is still loading"
     : walletsQuery.error || recentQuery.error ? "Home couldn’t refresh wallets or transactions"
@@ -88,7 +101,7 @@ export default function Home() {
       {currencyOptions.length > 1 ? <View style={styles.currencies}>{currencyOptions.map((c) => <Chip key={c} label={c} selected={currency === c} onPress={() => setChoice({ space: activeId, currency: c })} />)}</View> : null}
       <HeroBalance key={`${session?.user.id}:${activeId}`} preferenceScope={`${session?.user.id ?? "unknown"}.${activeId}`} wallets={wallets} currency={currency} fallback={balanceQuery.data ?? null} loading={!wallets && balanceQuery.loading} />
       <GuidesHomeCard loaded={!walletsQuery.loading && !recentQuery.loading && !walletsQuery.error && !recentQuery.error} />
-      <CashFlow currency={currency} current={current} previous={currencyBlock(analytics.data?.previous,currency)} previousAvailable={analytics.data?.previous.ok===true} today={currencyBlock(analytics.data?.today,currency)} todayAvailable={analytics.data?.today.ok === true} available={currentResult?.ok === true} message={analyticsMessage} />
+      <CashFlow currency={currency} current={current} previous={currencyBlock(insights?.previous,currency)} previousAvailable={insights?.previous.ok===true} today={currencyBlock(insights?.today,currency)} todayAvailable={insights?.today.ok === true} todayPending={merged.todayPending && !analytics.error} available={currentResult?.ok === true} message={analyticsMessage} />
       <PartnerHomePlacement ready={!homeBlock} blockedBy={homeBlock}/>
       <HomeSection guideId="home-recent" title="Recent transactions" dense action={<HomeLink label="View all" onPress={() => router.navigate({ pathname: "/transactions", params: { focusSearch:"", category: "", accountId:"", walletName:"", period: "all", reset: String(Date.now()) } })} />}>
         {recentQuery.error ? <View style={{ gap: 8 }}><Text color="attention">Couldn&apos;t refresh transactions.</Text><Button label="Try again" variant="secondary" onPress={recentQuery.refresh} /></View> : null}

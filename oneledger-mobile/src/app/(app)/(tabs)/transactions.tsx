@@ -16,6 +16,7 @@ import {
 } from "@/components/ds";
 import { useChromeScroll } from "@/components/shell/useChromeScroll";
 import { groupByDay } from "@/features/transactions/display";
+import { PartnerPlacement } from "@/features/partners/PartnerOfferCard";
 import { LifetimeChips } from "@/features/transactions/LifetimeChips";
 import {
   getLifetimeFlowTotals,
@@ -241,6 +242,7 @@ function TransactionsList({ category, initialPeriod, accountId, walletName, focu
                 /></GuideAnchor>
               </View>
             ) : null}
+            <PartnerPlacement id="transactions" ready={!loading && !error && displayedRows.length > 0} />
           </View>
         }
         renderSectionHeader={({ section }) => (

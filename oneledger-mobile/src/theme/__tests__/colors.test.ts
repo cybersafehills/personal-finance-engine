@@ -58,7 +58,9 @@ describe.each(Object.entries(palettes))("%s palette: contrast", (_name, p) => {
 
 describe.each(Object.entries(palettes))("%s palette: creative, nav and icon contrast", (_name, p) => {
   it("keeps selected navigation strokes and labels visible", () => {
-    for (const endpoint of [p.homeGradientStart, p.homeGradientEnd]) expect(contrastRatio(endpoint, p.navSelectedBg)).toBeGreaterThanOrEqual(3);
+    for (const endpoint of [p.navIconStart, p.navIconEnd]) expect(contrastRatio(endpoint, p.navSelectedBg)).toBeGreaterThanOrEqual(3);
+    // Unselected tabs sit on the dock surface in the primary text colour.
+    expect(contrastRatio(p.navSelectedBg, p.surface)).toBeGreaterThanOrEqual(1.1);
     expect(contrastRatio(p.navSelectedInk, p.surface)).toBeGreaterThanOrEqual(4.5);
   });
   it("keeps sponsored copy readable across every creative gradient", () => {

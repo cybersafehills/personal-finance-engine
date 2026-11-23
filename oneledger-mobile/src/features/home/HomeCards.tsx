@@ -55,7 +55,7 @@ export function HomeLink({ label, onPress }: { label: string; onPress(): void })
 
 export { WalletCarousel as HeroBalance } from "./WalletCarousel";
 
-export function CashFlow({ currency, current, previous, previousAvailable = false, today, todayAvailable, available, message }: { previous?: CurrencyOverview | null; previousAvailable?: boolean; today: CurrencyOverview | null; todayAvailable: boolean; currency: SupportedCurrency; current: CurrencyOverview | null; available: boolean; message: string }) {
+export function CashFlow({ currency, current, previous, previousAvailable = false, today, todayAvailable, todayPending = false, available, message }: { previous?: CurrencyOverview | null; previousAvailable?: boolean; today: CurrencyOverview | null; todayAvailable: boolean; todayPending?: boolean; currency: SupportedCurrency; current: CurrencyOverview | null; available: boolean; message: string }) {
   const { amountsHidden } = usePrivacy();
   const styles = useStyles();
   const money = (amount: bigint, ready: boolean) => amountsHidden ? "••••••" : ready ? compactMoney(amount,currency) : "—";
@@ -63,7 +63,7 @@ export function CashFlow({ currency, current, previous, previousAvailable = fals
   const retained=retainedPercent(income,expense);
   return <HomeSection guideId="home-cash-flow" title="Cash flow" dense action={<Text variant="caption" color="textMuted">{currency}</Text>}>
     <View style={styles.dailyPrimary}>{[{label:"Received today",amount:today?.moneyInMinor ?? 0n,positive:true},{label:"Spent today",amount:today?.moneyOutMinor ?? 0n,positive:false}].map(item => <View key={item.label} style={{flex:1,gap:5}}><Text variant="caption" color="textMuted">{item.label}</Text><Text variant="title" style={styles.dailyAmount} color={item.positive ? "moneyPositive" : "moneyRequest"} tabular adjustsFontSizeToFit numberOfLines={1}>{money(item.amount,todayAvailable)}</Text></View>)}</View>
-    {!todayAvailable ? <Text variant="caption" color="textMuted">Today’s activity is unavailable.</Text> : null}
+    {!todayAvailable ? <Text variant="caption" color="textMuted">{todayPending ? "Updating today’s activity…" : "Today’s activity is unavailable."}</Text> : null}
     <View style={styles.monthlyFooter}><Text variant="caption" color="textMuted" style={styles.small}>This month · Settled activity</Text>
       {available ? <>
         <View style={styles.cashColumns}>{[{label:"Income",amount:income,prior:previous?.moneyInMinor ?? 0n,income:true},{label:"Expenses",amount:expense,prior:previous?.moneyOutMinor ?? 0n,income:false}].map(item => {
