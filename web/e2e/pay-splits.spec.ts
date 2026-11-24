@@ -122,10 +122,25 @@ test.describe("Pay: splits (eKash over capacity)", () => {
     await expect(page).toHaveURL(/\/pay\/[0-9a-f-]{36}$/);
     await expect(page.getByText("Draft", { exact: true })).toBeVisible();
 
-    // Stopping ends the plan: nothing more can be prepared.
-    await page.getByRole("button", { name: "Stop here" }).click();
-    await expect(page.getByText("This split was stopped.")).toBeVisible();
+    // Both parts are now prepared: the plan is complete, so there is nothing left to prepare
+    // and nothing left to stop.
+    await expect(page.getByText("Every part is prepared.")).toBeVisible();
     await expect(page.getByRole("button", { name: /Prepare part/ })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Stop here" })).toHaveCount(0);
+  });
+
+  test("stopping a split ends it: nothing more can be prepared", async ({ page }) => {
+    await openPersonForm(page);
+    await enterAmount(page, "25000000");
+    await offerCard(page).getByRole("button", { name: "Split into 3 parts" }).click();
+    await expect(page).toHaveURL(/\/pay\/[0-9a-f-]{36}$/);
+    const plan = page.getByRole("region", { name: "Sending in 3 parts" });
+    await expect(plan).toBeVisible();
+
+    await plan.getByRole("button", { name: "Stop here" }).click();
+    await expect(plan.getByText("This split was stopped.")).toBeVisible();
+    await expect(plan.getByRole("button", { name: /Prepare part/ })).toHaveCount(0);
+    await expect(plan.getByRole("button", { name: "Stop here" })).toHaveCount(0);
   });
 
   test("the offer and the plan panel have no serious/critical accessibility violations", async ({
