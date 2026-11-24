@@ -6,6 +6,7 @@ import { useCallback, useState } from "react";
 import { Image, Modal, Pressable, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { GuideAnchor } from "@/features/guides/GuideAnchor";
 import { ListGroup, ListRow, Text } from "@/components/ds";
 import { useSession } from "@/features/auth/SessionProvider";
 import { useActiveSpace } from "@/features/spaces/ActiveSpaceProvider";
@@ -78,12 +79,14 @@ export function AppHeader() {
               </Text>
             </Pressable>
           ) : null}
-          <IconButton
-            icon="inbox"
-            label={inboxAccessibilityLabel(count ?? 0)}
-            onPress={() => router.navigate("/inbox")}
-            badge={badge}
-          />
+          <GuideAnchor id="review-queue">
+            <IconButton
+              icon="inbox"
+              label={inboxAccessibilityLabel(count ?? 0)}
+              onPress={() => router.navigate("/inbox")}
+              badge={badge}
+            />
+          </GuideAnchor>
           <IconButton
             icon="file-text"
             label="Statements"

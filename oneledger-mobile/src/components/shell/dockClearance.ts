@@ -5,8 +5,8 @@ import { useNavigationChrome } from "./NavigationChromeContext";
 
 /** The dock pill (64) plus the 8 above it. */
 export const DOCK_BODY = 72;
-/** Space between the dock and the screen's bottom edge: it sits just above the home indicator, never lower than 8. */
-export const dockBottomGap = (bottomInset: number) => Math.max(bottomInset - 18, 8);
+/** Space between the dock and the screen's bottom edge: it sits just above the home indicator, never lower than 12. */
+export const dockBottomGap = (bottomInset: number) => Math.max(bottomInset - 12, 12);
 /** The Pay button grows by this much while it sits in the middle of the dock. */
 export const PAY_CENTRE_SCALE = 56 / 48;
 

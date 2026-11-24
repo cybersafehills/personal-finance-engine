@@ -90,13 +90,14 @@ describe("Transactions screen", () => {
     expect(screen.queryByLabelText(/through OneLedger/)).toBeNull();
   });
 
-  it("links to the review queue with its count", async () => {
+  it("links to the categories page, and no longer carries a review-queue button", async () => {
     mockReviewCount.mockResolvedValue(3);
     mockGetTransactions.mockResolvedValue([row("1", "Kigali Fresh")]);
     await render(<Transactions />);
 
-    await fireEvent.press(await screen.findByText("Review queue (3)"));
-    expect(router.push).toHaveBeenCalledWith("/inbox");
+    await fireEvent.press(await screen.findByLabelText("Manage categories"));
+    expect(router.push).toHaveBeenCalledWith("/categories");
+    expect(screen.queryByText(/Review queue/)).toBeNull();
   });
 
   it("still lists transactions when the totals cannot load", async () => {

@@ -64,7 +64,6 @@ function TransactionsList({ category, initialPeriod, accountId, walletName, focu
   const { syncNow } = useOffline();
   const listRef = useRef<SectionList<TransactionRow>>(null);
   const revealFirst = useCallback(() => listRef.current?.scrollToLocation({ sectionIndex: 0, itemIndex: 0, animated: false, viewPosition: 0 }), []);
-  const revealReview = useCallback(() => listRef.current?.getScrollResponder()?.scrollTo({ y: 0, animated: false }), []);
   const searchRef=useRef<TextInputInstance>(null);
   useFocusEffect(useCallback(()=>{
     if (!focusSearch) return;
@@ -170,33 +169,6 @@ function TransactionsList({ category, initialPeriod, accountId, walletName, focu
 
   return (
     <ListScreen edges={["left", "right"]}>
-      {/* Search and filters stay put above the list, so they are always one thumb away. */}
-      <View style={{ paddingHorizontal: space[4], paddingTop: space[3], paddingBottom: space[2], gap: space[2], backgroundColor: colors.background }}>
-        <GuideAnchor id="transactions-search"><TextField
-          compact
-          label="Search"
-          inputRef={searchRef}
-          autoFocus={!!focusSearch}
-          value={input}
-          onChangeText={setInput}
-          placeholder="Search name, reference or category"
-          autoCapitalize="none"
-          autoCorrect={false}
-          returnKeyType="search"
-          clearButtonMode="while-editing"
-          leading={<Feather name="search" size={16} color={colors.textMuted} />}
-        /></GuideAnchor>
-        {accountId ? <View style={{flexDirection:"row",alignItems:"center",gap:8}}><Text variant="label" style={{flex:1}}>{walletName || "Selected wallet"}</Text><Button label="All wallets" size="sm" variant="ghost" onPress={() => router.setParams({accountId:undefined,walletName:undefined})} /></View> : null}
-        {category ? (
-          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: space[2] }}>
-            <Text variant="label" color="textSecondary" style={{ flex: 1 }}>
-              {`Category: ${category}`}
-            </Text>
-            <Button label="Clear" size="sm" variant="ghost" onPress={() => router.setParams({ category: undefined })} />
-          </View>
-        ) : null}
-        <GuideAnchor id="transactions-filters"><FilterChips value={filters} onChange={setFilters} /></GuideAnchor>
-      </View>
       <SectionList
         testID="transactions-list"
         ref={listRef}
@@ -231,18 +203,39 @@ function TransactionsList({ category, initialPeriod, accountId, walletName, focu
             />
             <GuideSuggestion id={stats && stats.reviewCount > 0 && !accountId ? "inbox" : "transaction"} enabled={!loading && !error && displayedRows.length > 0} />
             {error && displayedRows.length > 0 ? <View style={{ gap: 8 }}><Text color="attention">{error} Showing previously loaded transactions.</Text><Button label="Try again" onPress={() => void loadFirstPage(true)} variant="secondary" /></View> : null}
-            {stats && !accountId ? (
-              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: space[2] }}>
-                <LifetimeChips totals={stats.lifetime} accountCreatedIso={stats.lifetime.accountCreatedIso} />
-                <GuideAnchor id="review-queue" reveal={revealReview}><Button
-                  label={stats.reviewCount > 0 ? `Review queue (${stats.reviewCount})` : "Review queue"}
-                  size="sm"
-                  variant="ghost"
-                  onPress={() => router.push("/inbox")}
-                /></GuideAnchor>
-              </View>
-            ) : null}
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: space[2] }}>
+              {stats && !accountId ? <LifetimeChips totals={stats.lifetime} accountCreatedIso={stats.lifetime.accountCreatedIso} /> : <View />}
+              {/* Where categories are made and applied to past and new transactions. Review items live in Inbox (header). */}
+              <Button label="Categories" size="sm" variant="ghost" accessibilityLabel="Manage categories" onPress={() => router.push("/categories")} />
+            </View>
             <PartnerPlacement id="transactions" ready={!loading && !error && displayedRows.length > 0} />
+            {/* Search and filters sit under the sponsored banner. */}
+            <View style={{ gap: space[2], paddingTop: space[1] }}>
+              <GuideAnchor id="transactions-search"><TextField
+          compact
+          label="Search"
+          inputRef={searchRef}
+          autoFocus={!!focusSearch}
+          value={input}
+          onChangeText={setInput}
+          placeholder="Search name, reference or category"
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="search"
+          clearButtonMode="while-editing"
+          leading={<Feather name="search" size={16} color={colors.textMuted} />}
+        /></GuideAnchor>
+        {accountId ? <View style={{flexDirection:"row",alignItems:"center",gap:8}}><Text variant="label" style={{flex:1}}>{walletName || "Selected wallet"}</Text><Button label="All wallets" size="sm" variant="ghost" onPress={() => router.setParams({accountId:undefined,walletName:undefined})} /></View> : null}
+        {category ? (
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: space[2] }}>
+            <Text variant="label" color="textSecondary" style={{ flex: 1 }}>
+              {`Category: ${category}`}
+            </Text>
+            <Button label="Clear" size="sm" variant="ghost" onPress={() => router.setParams({ category: undefined })} />
+          </View>
+        ) : null}
+        <GuideAnchor id="transactions-filters"><FilterChips value={filters} onChange={setFilters} /></GuideAnchor>
+            </View>
           </View>
         }
         renderSectionHeader={({ section }) => (
