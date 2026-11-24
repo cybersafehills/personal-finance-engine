@@ -5,6 +5,7 @@ import { PageHeader } from "../../../components/PageHeader";
 import { ForecastChart } from "../../../components/ForecastChart";
 import { WhyThisInsight } from "../../../components/ds/WhyThisInsight";
 import { kigaliDateKey } from "../../../lib/kigali-time";
+import { aboutDays, runOutInDays } from "../../../lib/intelligence/run-out";
 import { formatSignedRwf } from "../../../lib/format";
 import { loadOwnAccountCandidates } from "../../../lib/counterparties/directory-data";
 import { isCounterpartiesEnabledFor } from "../../../lib/counterparties/directory";
@@ -15,6 +16,13 @@ import { supabaseSession } from "../../../lib/supabase-session-server";
 export const dynamic = "force-dynamic";
 
 const rwf = (minor: number) => formatSignedRwf(minor);
+function runOutText(forecast: Parameters<typeof runOutInDays>[0]): string {
+  const days = runOutInDays(forecast);
+  if (days === null) return "At your recent pace, your balance could go below zero.";
+  return days <= 0
+    ? "Your balance is already below zero at your recent pace."
+    : `At your recent pace, your money could run out ${aboutDays(days)}.`;
+}
 const title = (key: string) => key.replace(/\b\w/g, (c) => c.toUpperCase());
 
 export default async function ForecastPage() {
@@ -93,10 +101,10 @@ export default async function ForecastPage() {
 
         {forecast.mayGoNegative && (
           <p className="rounded-control bg-attention-bg p-2 text-xs text-attention">
-            Your balance could dip below zero around day{" "}
-            {forecast.projectedLow.dayOffset} if spending continues at your
-            recent pace ({rwf(forecast.projectedLow.estimatedBalanceMinor)} at
-            the low).
+            {runOutText(forecast)} If spending carries on at this pace, the
+            balance would be {rwf(forecast.projectedLow.estimatedBalanceMinor)}{" "}
+            by day {forecast.projectedLow.dayOffset}. Money that arrives sooner
+            would stretch it.
           </p>
         )}
         <p className="text-xs text-text-muted">{forecast.disclaimer}</p>
