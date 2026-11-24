@@ -116,8 +116,10 @@ test.describe("Pay: splits (eKash over capacity)", () => {
     await expect(plan.getByRole("button", { name: "Prepare part 2" })).toBeVisible();
     const firstUrl = page.url();
     await plan.getByRole("button", { name: "Prepare part 2" }).click();
+    // Wait for the navigation itself: the old page is already a /pay/<id> URL, so a pattern match alone
+    // would pass before the next part opens.
+    await expect(page).not.toHaveURL(firstUrl);
     await expect(page).toHaveURL(/\/pay\/[0-9a-f-]{36}$/);
-    expect(page.url()).not.toBe(firstUrl);
     await expect(page.getByText("Draft", { exact: true })).toBeVisible();
 
     // Stopping ends the plan: nothing more can be prepared.
