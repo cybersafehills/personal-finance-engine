@@ -8,7 +8,7 @@ import {
   THRESHOLD_MIN_SAVING_PER_EXTRA_PART,
 } from "./split-math.ts";
 import { feeForAmount } from "./rules.ts";
-import SQL from "../../../../supabase/migrations/20270126000000_save_on_published_tariffs.sql" with { type: "text" };
+import SQL from "../../../../supabase/migrations/20270128000000_save_on_published_tariffs.sql" with { type: "text" };
 
 // Save On is only as right as the fee tables behind it. These tests read the real
 // tariff migration (generated from MTN's and Airtel's own fee pages) and run the

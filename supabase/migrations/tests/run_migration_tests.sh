@@ -875,7 +875,7 @@ AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from inform
 # Provider tariffs (20270124000000): SELECT on provider_tariffs and provider_tariff_tiers. 177 + 2 = 179.
 # Payment splits (20270125000000): SELECT on payment_split_plans; SELECT, INSERT, UPDATE on
 # pay_split_preferences (own row only, by RLS). 179 + 4 = 183.
-# Save On savings (20270127000000): SELECT on save_on_plan_outcomes_v (security_invoker). 183 + 1 = 184.
+# Save On savings (20270129000000): SELECT on save_on_plan_outcomes_v (security_invoker). 183 + 1 = 184.
 if [ "$AUTHENTICATED_GRANT_COUNT" = "184" ]; then
   pass "authenticated holds exactly the 184 table grants expected, no more"
 else
@@ -1101,7 +1101,7 @@ AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_p
 # approvals x4, integrations/communications x2). 164 + 18 = 182.
 # Payment splits (20270125000000): create_payment_split_plan,
 # attach_intent_to_split_plan, stop_payment_split_plan (member-checked). 182 + 3 = 185.
-# Save On savings (20270127000000): save_on_report (security invoker, runs under RLS). 185 + 1 = 186.
+# Save On savings (20270129000000): save_on_report (security invoker, runs under RLS). 185 + 1 = 186.
 if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "186" ]; then
   pass "authenticated holds EXECUTE on exactly the 186 functions expected, no more"
 else
@@ -10205,7 +10205,7 @@ psql -d pfe_rls -v ON_ERROR_STOP=1 -c "delete from public.provider_tariffs where
 
 echo ""
 # ===========================================================================
-# Published tariffs for Save On (20270126000000_save_on_published_tariffs). Loaded from
+# Published tariffs for Save On (20270128000000_save_on_published_tariffs). Loaded from
 # MTN's and Airtel's own fee pages: five verified tariffs with the published number of
 # bands; MTN's eKash route is a flat 20; Airtel has NO person-to-person tariff.
 # ===========================================================================
@@ -10320,7 +10320,7 @@ ps_refused "attaching a part to a stopped plan" "plan_stopped" "$USER_A" "select
 
 echo ""
 # ===========================================================================
-# Save On savings (20270127000000_save_on_savings). A fee-saving plan's saving (fee as one
+# Save On savings (20270129000000_save_on_savings). A fee-saving plan's saving (fee as one
 # transfer minus fee as parts, from a verified tariff) counts ONLY once every part is
 # settled; a plan still being sent is "expected"; a stopped plan and a capacity plan count
 # for nothing; the windows go by when the last part settled; workspaces are isolated.

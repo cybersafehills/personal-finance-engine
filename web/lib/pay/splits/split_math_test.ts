@@ -12,7 +12,7 @@ import {
 
 // A TEST FIXTURE. These are MTN Rwanda's published MTN-to-MTN person-to-person fees
 // (https://www.mtn.co.rw/momo-tarrif/, "P2P On-net", retrieved 2026-11-24), the same
-// bands as the verified tariff in migration 20270126000000. Production reads the
+// bands as the verified tariff in migration 20270128000000. Production reads the
 // verified provider_tariffs rows, not this constant.
 const FIXTURE_BANDS: FeeBand[] = [
   { fromMinor: 1n, toMinor: 1_000n, feeMinor: 20n },

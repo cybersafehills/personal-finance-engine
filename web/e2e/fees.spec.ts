@@ -318,7 +318,7 @@ test.describe("provider tariffs", () => {
   });
 
   // Last on purpose: it removes the tariffs the tests above rely on.
-  // The real MTN and Airtel tariffs (migration 20270126000000) are always on record now, so the
+  // The real MTN and Airtel tariffs (migration 20270128000000) are always on record now, so the
   // provider choice legitimately exists; what must hold is that a removed tariff leaves no trace.
   test("a removed tariff leaves no trace of its provider, and no section without a chosen provider", async ({ page }) => {
     await cleanupTariffs();

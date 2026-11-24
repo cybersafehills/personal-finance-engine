@@ -38,7 +38,7 @@ Product decisions, 2026-11-23 (OneLedger's product owner):
 Save On keeps a running total of what it has saved in transfer fees (web: Save On page, Insights, Reports, and a Home tile; mobile: Save On screen, Insights, Reports, Home), over 24 hours / 7 days / 2 weeks / a month / 3 months / 12 months / all time.
 
 - **What counts:** for a fee-saving plan, `single_fee_minor - planned_fee_minor` (both from a verified tariff), and only once **every part is settled**. The window is by when the last part settled. A plan still being sent is shown as "expected"; a stopped plan counts for nothing; an over-the-eKash-limit plan saves no fee, so it never appears.
-- **How:** computed live, never stored: `save_on_plan_outcomes_v` (security invoker) and `save_on_report(workspace)` (migration `20270127000000`), read through `lib/pay/splits/savings.ts` and `GET /api/mobile/pay/splits/savings`. The numbers are always current and can't drift from the plans.
+- **How:** computed live, never stored: `save_on_plan_outcomes_v` (security invoker) and `save_on_report(workspace)` (migration `20270129000000`), read through `lib/pay/splits/savings.ts` and `GET /api/mobile/pay/splits/savings`. The numbers are always current and can't drift from the plans.
 - **Honesty:** estimates from the provider's published fee table; the provider shows the final fee. If the report can't be read the section is hidden, not shown as zero.
 
 ## Where things are
@@ -69,7 +69,7 @@ Save On keeps a running total of what it has saved in transfer fees (web: Save O
 
 ## Updating the numbers when sources arrive
 
-1. Fees: load a verified tariff through `docs/oneledger-3/fee-tariff-intake.md` (for Airtel person-to-person: provider `airtel-rwanda`, type `send_money`, scope `same_network`). No code change: the offer picks it up. Percentage tiers are refused (not constant across a band). The MTN and Airtel tables loaded on 2026-11-24 are in `supabase/migrations/20270126000000_save_on_published_tariffs.sql`; `published_tariffs_test.ts` and the migration harness check them.
+1. Fees: load a verified tariff through `docs/oneledger-3/fee-tariff-intake.md` (for Airtel person-to-person: provider `airtel-rwanda`, type `send_money`, scope `same_network`). No code change: the offer picks it up. Percentage tiers are refused (not constant across a band). The MTN and Airtel tables loaded on 2026-11-24 are in `supabase/migrations/20270128000000_save_on_published_tariffs.sql`; `published_tariffs_test.ts` and the migration harness check them.
 2. If the provider publishes a minimum transfer, raise `minPartMinor` (`DEFAULT_SAVING_OPTIONS` in `split-math.ts`) or expose it from the tariff, and add the per-transaction and daily limits to `route_limits`.
 3. eKash: correct `route_limits` / `route_fees` for the `ekash` network. They override the fallback in `rules.ts`.
 

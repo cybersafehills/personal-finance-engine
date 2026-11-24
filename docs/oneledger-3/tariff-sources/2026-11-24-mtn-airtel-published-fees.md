@@ -1,7 +1,7 @@
 # Published fee tables used by Save On (captured 2026-11-24)
 
 Text captured from the providers' own public pages, kept as the evidence for migration
-`20270126000000_save_on_published_tariffs.sql` (which was generated from these pages, not
+`20270128000000_save_on_published_tariffs.sql` (which was generated from these pages, not
 typed by hand). All amounts are whole RWF, fixed fee per band. Neither page states an
 effective date. Re-capture and compare before changing a figure.
 
