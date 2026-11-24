@@ -4,7 +4,7 @@ import { StyleSheet, View, type ViewInstance } from "react-native";
 
 import { Text } from "@/components/ds";
 import { makeStyles, useTheme } from "@/theme/ThemeProvider";
-import type { Palette } from "@/theme/colors";
+import type { Palette } from "@/theme/tokens";
 import { space } from "@/theme/tokens";
 
 import { TONE_STATUS, type SectionTone } from "./story";
