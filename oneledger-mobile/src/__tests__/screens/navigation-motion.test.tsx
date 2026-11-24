@@ -31,7 +31,7 @@ it("compacts on downward travel, restores on upward travel and resets on pushed 
  mockPath="/";await tree.rerender(<NavigationChromeProvider><Probe/></NavigationChromeProvider>);
  expect(screen.getByText("true:true:false")).toBeTruthy();
 });
-it("keeps Pay centred on every tab and docks it at the right without a caption on detail pages",async()=>{
+it("keeps Pay centred on every tab and shows its caption only while centred in the tab dock",async()=>{
  const tree=await render(<NavigationChromeProvider><Probe/></NavigationChromeProvider>);
  await screen.findByRole("button",{name:"Pay"});
  const left=()=>StyleSheet.flatten(screen.getByTestId("global-pay-position").props.style).left;
@@ -67,4 +67,27 @@ it("emits preventable tab events and navigates with the SDK tab key",async()=>{
 it("uses direction thresholds and identifies only the actual home and tab paths",()=>{
  expect(scrollChromeMode(0,10)).toBe(false);expect(scrollChromeMode(50,60)).toBeNull();expect(scrollChromeMode(50,90)).toBe(true);expect(scrollChromeMode(90,70)).toBe(false);
  expect(isHomePath("/")).toBe(true);expect(isHomePath("/settings")).toBe(false);expect(isTabPath("/more")).toBe(true);expect(isTabPath("/wallet/a")).toBe(false);
+});
+
+it("shows only Pay on detail pages and restores the full centred dock on return", async () => {
+ const tree = await render(<NavigationChromeProvider><Probe/></NavigationChromeProvider>);
+ await screen.findByRole("button", {name:"Pay"});
+ const width = Dimensions.get("window").width;
+ const left = () => StyleSheet.flatten(screen.getByTestId("global-pay-position").props.style).left;
+ expect(screen.getAllByRole("tab")).toHaveLength(4);
+ expect(left()).toBe((width - 48) / 2);
+ for (const path of ["/insights", "/profile", "/wallet/a"]) {
+   mockPath = path;
+   await tree.rerender(<NavigationChromeProvider><Probe/></NavigationChromeProvider>);
+   expect(screen.queryAllByRole("tab")).toHaveLength(0);
+   expect(screen.getByTestId("navigation-dock", {includeHiddenElements:true})).toHaveStyle({display:"none", opacity:0});
+   expect(screen.getByRole("button", {name:"Pay"})).toBeTruthy();
+   expect(left()).toBe(width - 16 - 48);
+ }
+ mockPath = "/more";
+ await tree.rerender(<NavigationChromeProvider><Probe/></NavigationChromeProvider>);
+ expect(screen.getAllByRole("tab")).toHaveLength(4);
+ expect(left()).toBe((width - 48) / 2);
+ const dockWidth = width - 24;
+ expect(StyleSheet.flatten(screen.getByTestId("nav-position-plan").props.style).left).toBeCloseTo(dockWidth * 3 / 5);
 });

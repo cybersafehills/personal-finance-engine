@@ -1,9 +1,10 @@
-import { Pressable, StyleSheet } from "react-native";
+import { StyleSheet } from "react-native";
 
 import { CONTROL_HEIGHT, hitSlopFor, radii, space } from "@/theme/tokens";
 import { fonts } from "@/theme/typography";
 
 import { Text } from "./Text";
+import { PressableScale } from "./PressableScale";
 import { makeStyles } from "@/theme/ThemeProvider";
 
 const CHIP_COMPACT_HEIGHT = 28;
@@ -27,13 +28,13 @@ export function Chip({
 }) {
   const styles = useStyles();
   return (
-    <Pressable
+    <PressableScale
       accessibilityRole="button"
       accessibilityState={{ selected }}
       accessibilityLabel={selected ? `${label}, selected` : label}
       hitSlop={hitSlopFor(compact ? CHIP_COMPACT_HEIGHT : CONTROL_HEIGHT.sm)}
       onPress={onPress}
-      style={({ pressed }) => [
+      style={(pressed) => [
         styles.chip,
         compact && styles.compact,
         selected && styles.selected,
@@ -47,7 +48,7 @@ export function Chip({
       >
         {label}
       </Text>
-    </Pressable>
+    </PressableScale>
   );
 }
 

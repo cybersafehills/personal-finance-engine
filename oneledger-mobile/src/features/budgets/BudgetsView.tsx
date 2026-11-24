@@ -1,3 +1,4 @@
+import { PartnerPlacement } from "@/features/partners/PartnerOfferCard";
 import { GuideSuggestion } from "@/features/guides/GuideSuggestion";
 import { GuideAnchor } from "@/features/guides/GuideAnchor";
 import * as Linking from "expo-linking";
@@ -60,6 +61,8 @@ export function BudgetsView({ embedded = false }: { embedded?: boolean }) {
         <BudgetDrafts key={`${session.user.id}:${activeId}`} scope={{ userId: session.user.id, workspaceId: activeId }} onActivated={refresh} />
       ) : null}
 
+      {/* A slim sponsored bar right under the header, where it is seen without scrolling. */}
+      {embedded ? <PartnerPlacement id="plan" ready={data?.ok === true && data.budgets.length > 0}/> : null}
       <GuideSuggestion id="plan" enabled={data?.ok === true && data.budgets.length > 0} />
       {loading && !data ? (
         <Text variant="label" color="textMuted">

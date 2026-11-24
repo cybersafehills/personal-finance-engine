@@ -25,25 +25,42 @@ export function useQuery<T>(rawLoad: () => Promise<T>, optionsOrKey: { refreshIn
   const [refreshing, setRefreshing] = useState(false);
   const [failure, setFailure] = useState<{ space: string | null; message: string } | null>(null);
   const requestId = useRef(0);
-  const run = useCallback(async (userInitiated: boolean) => {
-    const id = ++requestId.current;
+  const inFlight = useRef<{ load: typeof load; space: string | null; id: number; promise: Promise<void>; rerun: boolean } | null>(null);
+  const run = useCallback(function execute(userInitiated: boolean, changed = false): Promise<void> {
     if (userInitiated) setRefreshing(true);
-    try {
-      const next = await load();
-      if (id !== requestId.current) return;
-      setSnapshot({ space: activeId, value: next });
-      setFailure(null);
-    } catch {
-      if (id !== requestId.current) return;
-      setFailure({ space: activeId, message: "Couldn't load this. Check your connection and try again." });
-    } finally {
-      if (id === requestId.current) { setLoading(false); setRefreshing(false); }
+    const previous = inFlight.current;
+    if (previous && previous.id === requestId.current && previous.load === load && previous.space === activeId) {
+      // One trailing read catches writes committed during an ongoing read.
+      previous.rerun ||= changed || userInitiated;
+      return previous.promise;
     }
+    const id = ++requestId.current;
+    const job = { load, space: activeId, id, promise: Promise.resolve(), rerun: false };
+    inFlight.current = job;
+    job.promise = (async () => {
+      try {
+        const next = await load();
+        if (id !== requestId.current) return;
+        setSnapshot({ space: activeId, value: next });
+        setFailure(null);
+      } catch {
+        if (id !== requestId.current) return;
+        setFailure({ space: activeId, message: "Couldn't load this. Check your connection and try again." });
+      } finally {
+        if (inFlight.current === job) inFlight.current = null;
+        if (id === requestId.current) {
+          setLoading(false);
+          setRefreshing(false);
+          if (job.rerun) void execute(false);
+        }
+      }
+    })();
+    return job.promise;
   }, [load, activeId]);
   const interval = options.refreshIntervalMs;
   useFocusEffect(useCallback(() => {
     void run(false);
-    const unsubscribe = subscribeRuntime(() => void run(false));
+    const unsubscribe = subscribeRuntime(() => void run(false, true));
     const app = AppState.addEventListener("change", (state) => { if (state === "active") void run(false); });
     const timer = interval ? setInterval(() => void run(false), interval) : undefined;
     return () => { requestId.current++; unsubscribe(); app.remove(); if (timer) clearInterval(timer); };

@@ -1,4 +1,5 @@
 import { GuidesProvider } from "@/features/guides/GuidesProvider";
+import { PartnerPreviewProvider } from "@/features/partners/PartnerPreviewProvider";
 import { ProfileProvider } from "@/features/profile/ProfileProvider";
 import { Stack } from "expo-router";
 import { NavigationChromeProvider } from "@/components/shell/NavigationChrome";
@@ -12,7 +13,7 @@ import { useTheme } from "@/theme/ThemeProvider";
 export default function AppLayout() {
   const { colors } = useTheme();
   return (
-    <ProfileProvider><GuidesProvider><NavigationChromeProvider><View style={{flex:1}}>
+    <ProfileProvider><PartnerPreviewProvider><GuidesProvider><NavigationChromeProvider><View style={{flex:1}}>
       <PushBridge />
       <Stack
         screenOptions={{
@@ -49,6 +50,6 @@ export default function AppLayout() {
           }}
         />
       </Stack>
-    </View></NavigationChromeProvider></GuidesProvider></ProfileProvider>
+    </View></NavigationChromeProvider></GuidesProvider></PartnerPreviewProvider></ProfileProvider>
   );
 }

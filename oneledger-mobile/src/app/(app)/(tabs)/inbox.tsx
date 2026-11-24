@@ -10,7 +10,7 @@ import {
   Card,
   EmptyState,
   ListScreen,
-  listContentStyle,
+  useListContentStyle,
   ScreenHeader,
   StatTile,
   Text,
@@ -59,6 +59,7 @@ function runAction(action: InboxInlineAction): Promise<void> {
 // If the server endpoint is off, failing or unreachable the tab falls back to the
 // direct category-review queue, so a category check is never out of reach.
 export default function Inbox() {
+  const listContent = useListContentStyle();
   const { colors } = useTheme();
   const load = useCallback(() => fetchInbox(), []);
   const { data, loading, refreshing, refresh } = useQuery(load);
@@ -105,7 +106,7 @@ export default function Inbox() {
         sections={groupInbox(items)}
         keyExtractor={(entry) => (entry.type === "group" ? entry.id : entry.item.id)}
         stickySectionHeadersEnabled={false}
-        contentContainerStyle={listContentStyle}
+        contentContainerStyle={listContent}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.accent} />
         }

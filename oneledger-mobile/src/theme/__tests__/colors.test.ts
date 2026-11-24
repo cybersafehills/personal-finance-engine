@@ -55,3 +55,20 @@ describe.each(Object.entries(palettes))("%s palette: contrast", (_name, p) => {
     expect(contrastRatio(p.moneyRequest, p.moneyRequestBg)).toBeGreaterThanOrEqual(3);
   });
 });
+
+describe.each(Object.entries(palettes))("%s palette: creative, nav and icon contrast", (_name, p) => {
+  it("keeps selected navigation strokes and labels visible", () => {
+    for (const endpoint of [p.navIconStart, p.navIconEnd]) expect(contrastRatio(endpoint, p.navSelectedBg)).toBeGreaterThanOrEqual(3);
+    // Unselected tabs sit on the dock surface in the primary text colour.
+    expect(contrastRatio(p.navSelectedBg, p.surface)).toBeGreaterThanOrEqual(1.1);
+    expect(contrastRatio(p.navSelectedInk, p.surface)).toBeGreaterThanOrEqual(4.5);
+  });
+  it("keeps sponsored copy readable across every creative gradient", () => {
+    for (const endpoint of [p.partnerConnectivityStart, p.partnerConnectivityEnd, p.partnerLearningStart, p.partnerLearningEnd, p.partnerBankingStart, p.partnerBankingEnd]) {
+      expect(contrastRatio(p.partnerOnMuted, endpoint)).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+  it("keeps white menu icons visible across semantic gradients", () => {
+    for (const endpoint of [p.iconMoneyStart, p.iconMoneyEnd, p.iconLearningStart, p.iconLearningEnd, p.iconCommunicationStart, p.iconCommunicationEnd, p.iconNeutralStart, p.iconNeutralEnd]) expect(contrastRatio(p.onSolid, endpoint)).toBeGreaterThanOrEqual(3);
+  });
+});

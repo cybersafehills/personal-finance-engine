@@ -11,6 +11,7 @@ import { SafeAreaView, type Edge } from "react-native-safe-area-context";
 
 import { useChromeScroll } from "@/components/shell/useChromeScroll";
 import { useNavigationChrome } from "@/components/shell/NavigationChromeContext";
+import { useDockClearance } from "@/components/shell/dockClearance";
 import { space } from "@/theme/tokens";
 import { makeStyles } from "@/theme/ThemeProvider";
 
@@ -37,9 +38,10 @@ export function Screen({
 }) {
   const styles = useStyles();
   const onScroll=useChromeScroll();
-  const {payOn,onTabs}=useNavigationChrome();
+  const {onTabs}=useNavigationChrome();
+  const dock=useDockClearance();
   return (
-    <SafeAreaView style={styles.safe} edges={edges}>
+    <SafeAreaView style={styles.safe} edges={onTabs ? edges.filter(edge => edge !== "bottom") : edges}>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -50,7 +52,7 @@ export function Screen({
           keyboardShouldPersistTaps="handled"
           // Drag the form down to put the keyboard away (a number pad has no Return key).
           keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
-          contentContainerStyle={[styles.content, centered && styles.centered, contentStyle,payOn&&!onTabs&&{paddingBottom:88}]}
+          contentContainerStyle={[styles.content, centered && styles.centered, contentStyle,onTabs ? { paddingBottom: dock + space[3] } : { paddingBottom: 96 }]}
         >
           {children}
         </GuideScrollView>

@@ -63,29 +63,37 @@ export function ActiveSpaceProvider({ children }: { children: ReactNode }) {
     }
     let cancelled = false;
     (async () => {
+      // Begin validation immediately; restore only this user's saved scope while
+      // it runs. RLS remains the online authorization boundary.
+      const remote = getSpaces().then(list => ({ list })).catch(() => null);
+      const [saved, selected] = await Promise.all([
+        deviceStore.get(`ol.spaces.v1.${userId}`),
+        deviceStore.get(storageKey(userId)),
+      ]).catch(() => [null, null]);
+      if (cancelled) return;
+      let cached: Space[] = [];
       try {
-        const [list, stored] = await Promise.all([
-          getSpaces(),
-          deviceStore.get(storageKey(userId)),
-        ]);
-        if (cancelled) return;
-        void deviceStore.set(`ol.spaces.v1.${userId}`, JSON.stringify(list)).catch(() => {});
-        const next = resolveActiveSpace(list, stored);
-        setRequestedWorkspace(requestedWorkspaceId(next));
-        setLoaded({ userId, spaces: list, active: next });
-      } catch {
-        // Restore the last known scope for offline reads; online RLS still applies.
-        if (cancelled) return;
-        const [saved, selected] = await Promise.all([deviceStore.get(`ol.spaces.v1.${userId}`), deviceStore.get(storageKey(userId))]).catch(() => [null, null]);
-        if (cancelled) return;
-        let cached: Space[] = [];
-        try {
-          const parsed: unknown = saved ? JSON.parse(saved) : [];
-          if (Array.isArray(parsed)) cached = parsed.filter((s): s is Space => !!s && typeof s.id === "string" && typeof s.name === "string" && isSpaceKind(s.kind) && typeof s.role === "string");
-        } catch { /* A missing cache cannot authorize any online read. */ }
+        const parsed: unknown = saved ? JSON.parse(saved) : [];
+        if (Array.isArray(parsed)) cached = parsed.filter((s): s is Space => !!s && typeof s.id === "string" && typeof s.name === "string" && isSpaceKind(s.kind) && typeof s.role === "string");
+      } catch { /* Ignore corrupt local metadata. */ }
+      if (cached.length) {
         const next = resolveActiveSpace(cached, selected);
         setRequestedWorkspace(requestedWorkspaceId(next));
         setLoaded({ userId, spaces: cached, active: next });
+      }
+      const result = await remote;
+      if (cancelled) return;
+      if (result) {
+        void deviceStore.set(`ol.spaces.v1.${userId}`, JSON.stringify(result.list)).catch(() => {});
+        // Re-read in case the user switched Spaces while validation was in flight.
+        const latestSelected = await deviceStore.get(storageKey(userId)).catch(() => selected);
+        if (cancelled) return;
+        const next = resolveActiveSpace(result.list, latestSelected);
+        setRequestedWorkspace(requestedWorkspaceId(next));
+        setLoaded({ userId, spaces: result.list, active: next });
+      } else if (!cached.length) {
+        setRequestedWorkspace(null);
+        setLoaded({ userId, spaces: [], active: null });
       }
     })();
     return () => {

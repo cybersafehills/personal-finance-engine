@@ -11,6 +11,7 @@ import { Pressable, StyleSheet, Switch, View } from "react-native";
 import { radii, space } from "@/theme/tokens";
 
 import { Text } from "./Text";
+import { IconTile } from "./BrandIcon";
 import { makeStyles, useTheme } from "@/theme/ThemeProvider";
 
 type FeatherName = React.ComponentProps<typeof Feather>["name"];
@@ -73,6 +74,7 @@ export function ListRow({
   divider = false,
   variant = "default",
   selected,
+  valueBelow = false,
 }: {
   icon?: FeatherName;
   label: string;
@@ -95,6 +97,8 @@ export function ListRow({
   variant?: "default" | "menu";
   /** A selection row: renders a check instead of a navigation chevron. */
   selected?: boolean;
+  /** Long account values belong under the label, rather than a narrow trailing column. */
+  valueBelow?: boolean;
 }) {
   const styles = useStyles();
   const { colors } = useTheme();
@@ -103,9 +107,7 @@ export function ListRow({
   const body = (
     <>
       {icon ? menu ? (
-        <View style={[styles.iconTile, destructive && { backgroundColor: colors.needsMapBg }]}>
-          <Feather name={icon} size={21} color={tone} />
-        </View>
+        destructive ? <View style={[styles.iconTile, { backgroundColor: colors.needsMapBg }]}><Feather name={icon} size={21} color={tone}/></View> : <IconTile name={icon}/>
       ) : <Feather name={icon} size={16} color={tone} /> : null}
       <View style={styles.text}>
         <Text variant="bodyStrong" numberOfLines={menu ? undefined : 1} style={[menu && styles.menuLabel, destructive ? { color: colors.danger } : selected ? { color: colors.accent } : undefined]}>
@@ -116,9 +118,10 @@ export function ListRow({
             {hint}
           </Text>
         ) : null}
+        {valueBelow && typeof value === "string" ? <Text selectable variant="label" color="textSecondary" style={{ flexShrink: 1 }}>{value}</Text> : null}
       </View>
-      {typeof value === "string" ? (
-        <Text variant="label" color="textMuted" style={menu ? styles.value : undefined}>
+      {typeof value === "string" ? valueBelow ? null : (
+        <Text variant="label" color="textMuted" numberOfLines={1} ellipsizeMode="middle" style={menu ? styles.value : undefined}>
           {value}
         </Text>
       ) : (
@@ -182,15 +185,15 @@ const useStyles = makeStyles((colors) => StyleSheet.create({
     paddingVertical: space[2],
   },
   divider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.borderSubtle },
-  pressed: { backgroundColor: colors.background },
+  pressed: { backgroundColor: colors.accentBg },
   text: { flex: 1, gap: 1 },
   menuGroup: { gap: space[2] },
   menuTitle: { textTransform: "none", letterSpacing: 0, paddingHorizontal: space[2], fontSize: 13, lineHeight: 18 },
-  menuSurface: { borderRadius: radii.card, borderWidth: 0 },
+  menuSurface: { borderRadius: radii.card, borderWidth: StyleSheet.hairlineWidth, boxShadow: "none" },
   menuRow: { minHeight: 56, paddingHorizontal: space[4], paddingVertical: space[3] },
   menuLabel: { fontSize: 16, lineHeight: 22 },
   menuHint: { fontSize: 13, lineHeight: 18 },
-  iconTile: { width: 30, height: 30, borderRadius: 8, backgroundColor: colors.accentBg, alignItems: "center", justifyContent: "center" },
+  iconTile: { width: 30, height: 30, borderRadius: 9, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.borderSubtle, backgroundColor: colors.accentBg, alignItems: "center", justifyContent: "center" },
   insetDivider: { position: "absolute", right: 16, bottom: 0, height: StyleSheet.hairlineWidth, backgroundColor: colors.borderSubtle },
   value: { flexShrink: 1, maxWidth: 110 },
   web: { backgroundColor: colors.background, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 5, fontSize: 11 },

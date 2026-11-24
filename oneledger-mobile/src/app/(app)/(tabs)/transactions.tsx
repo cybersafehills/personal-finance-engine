@@ -9,13 +9,14 @@ import {
   Button,
   EmptyState,
   ListScreen,
-  listContentStyle,
+  useListContentStyle,
   ScreenHeader,
   Text,
   TextField,
 } from "@/components/ds";
 import { useChromeScroll } from "@/components/shell/useChromeScroll";
 import { groupByDay } from "@/features/transactions/display";
+import { PartnerPlacement } from "@/features/partners/PartnerOfferCard";
 import { LifetimeChips } from "@/features/transactions/LifetimeChips";
 import {
   getLifetimeFlowTotals,
@@ -56,6 +57,7 @@ export default function Transactions() {
 }
 
 function TransactionsList({ category, initialPeriod, accountId, walletName, focusSearch }: { category?: string; initialPeriod?: string; accountId?: string; walletName?: string; focusSearch?:string }) {
+  const listContent = useListContentStyle();
   const { colors } = useTheme();
   const onScroll=useChromeScroll();
   const { activeId } = useActiveSpace();
@@ -81,6 +83,7 @@ function TransactionsList({ category, initialPeriod, accountId, walletName, focu
   const [loadedAt, setLoadedAt] = useState(() => new Date().toISOString());
   const requestId = useRef(0);
   const moreInFlight = useRef(false);
+  const firstInFlight = useRef<{ key: string; id: number; rerun: boolean } | null>(null);
   const viewKey = JSON.stringify([activeId, query, filters, category, accountId]);
   const [pageKey, setPageKey] = useState(viewKey);
   const displayedRows = pageKey === viewKey ? rows : [];
@@ -94,12 +97,19 @@ function TransactionsList({ category, initialPeriod, accountId, walletName, focu
   }, [input]);
 
   const loadFirstPage = useCallback(
-    async (userInitiated: boolean) => {
+    async function readFirst(userInitiated: boolean) {
+      if (!activeId) return;
+      if (userInitiated) { setRefreshing(true); void syncNow().catch(() => {}); }
+      const previous = firstInFlight.current;
+      if (previous?.key === viewKey && previous.id === requestId.current) {
+        previous.rerun = true;
+        return;
+      }
       const id = ++requestId.current;
-      if (userInitiated) setRefreshing(true);
+      const job = { key: viewKey, id, rerun: false };
+      firstInFlight.current = job;
       setError(null);
       try {
-        if (userInitiated) await syncNow().catch(() => {});
         const page = await getTransactions({ q: query, filters, category, accountId, workspaceId: activeId });
         if (id !== requestId.current) return;
         setRows(page);
@@ -115,9 +125,11 @@ function TransactionsList({ category, initialPeriod, accountId, walletName, focu
         pageKeyRef.current = viewKey;
         setPageKey(viewKey);
       } finally {
+        if (firstInFlight.current === job) firstInFlight.current = null;
         if (id === requestId.current) {
           setLoading(false);
           setRefreshing(false);
+          if (job.rerun) void readFirst(false);
         }
       }
     },
@@ -186,12 +198,13 @@ function TransactionsList({ category, initialPeriod, accountId, walletName, focu
         <GuideAnchor id="transactions-filters"><FilterChips value={filters} onChange={setFilters} /></GuideAnchor>
       </View>
       <SectionList
+        testID="transactions-list"
         ref={listRef}
         onScroll={onScroll}
         scrollEventThrottle={32}
         sections={groupByDay(displayedRows, loadedAt)}
         keyExtractor={(row) => row.id}
-        contentContainerStyle={listContentStyle}
+        contentContainerStyle={listContent}
         stickySectionHeadersEnabled={false}
         keyboardShouldPersistTaps="handled"
         refreshControl={
@@ -229,6 +242,7 @@ function TransactionsList({ category, initialPeriod, accountId, walletName, focu
                 /></GuideAnchor>
               </View>
             ) : null}
+            <PartnerPlacement id="transactions" ready={!loading && !error && displayedRows.length > 0} />
           </View>
         }
         renderSectionHeader={({ section }) => (
@@ -248,9 +262,13 @@ function TransactionsList({ category, initialPeriod, accountId, walletName, focu
         )}
         ListEmptyComponent={
           loading || (pageKey !== viewKey && !error) ? (
-            <Text variant="label" color="textMuted" style={{ marginTop: space[4] }}>
-              Loading…
-            </Text>
+            <View accessibilityRole="progressbar" accessibilityLabel="Loading transactions" accessibilityState={{ busy: true }} style={{ marginTop: space[4], gap: 10 }}>
+              <Text variant="label" color="textMuted">Loading transactions…</Text>
+              {[0, 1, 2].map(key => <View key={key} accessible={false} style={{ minHeight: 64, padding: 14, borderRadius: 12, backgroundColor: colors.surface, gap: 10 }}>
+                <View style={{ width: "55%", height: 12, borderRadius: 4, backgroundColor: colors.borderSubtle }} />
+                <View style={{ width: "30%", height: 10, borderRadius: 4, backgroundColor: colors.borderSubtle }} />
+              </View>)}
+            </View>
           ) : error ? (
             <EmptyState
               title={error}

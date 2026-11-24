@@ -1,3 +1,5 @@
+import { iconInk } from "@/components/ds/BrandIcon";
+import { PressableScale } from "@/components/ds/PressableScale";
 import Feather from "@expo/vector-icons/Feather";
 import { router } from "expo-router";
 import { useCallback, useState } from "react";
@@ -109,14 +111,14 @@ function IconButton({
   const styles = useStyles();
   const { colors } = useTheme();
   return (
-    <Pressable
+    <PressableScale
       accessibilityRole="button"
       accessibilityLabel={label}
       onPress={onPress}
       hitSlop={hitSlopFor(CONTROL_HEIGHT.md)}
-      style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
+      style={(pressed) => [styles.iconButton, pressed && styles.pressed]}
     >
-      <Feather name={icon} size={20} color={colors.textSecondary} />
+      <Feather name={icon} size={20} color={iconInk(icon, colors)} />
       {badge ? (
         <View style={styles.badge}>
           <Text variant="caption" color="onSolid" style={styles.badgeText}>
@@ -124,7 +126,7 @@ function IconButton({
           </Text>
         </View>
       ) : null}
-    </Pressable>
+    </PressableScale>
   );
 }
 

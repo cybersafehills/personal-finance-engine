@@ -256,3 +256,11 @@ it("omits balance status and empty comparison messages from the Home hero",async
  expect(hero.queryByText("Confirmed")).toBeNull();
  expect(hero.queryByText(/No comparable balance|Loading balance trend|Balance comparison unavailable|Balance trend unavailable/)).toBeNull();
 });
+
+it("shows recent activity and loaded wallets while fallback balance is still pending", async () => {
+  mockBalance.mockReturnValue(new Promise(() => {}));
+  await renderHome();
+  expect(await screen.findByText("Live merchant 1")).toBeTruthy();
+  expect((await screen.findAllByText("Real MoMo wallet")).length).toBeGreaterThan(0);
+  expect(screen.getAllByText("RWF 14,416").length).toBeGreaterThan(0);
+});

@@ -20,5 +20,5 @@ export { TextField, type TextFieldProps } from "./TextField";
 export { PressableScale } from "./PressableScale";
 export { Screen } from "./Screen";
 export { StepWizard } from "./StepWizard";
-export { ListScreen, listContentStyle } from "./ListScreen";
+export { ListScreen, listContentStyle, useListContentStyle } from "./ListScreen";
 export { ListGroup, ListRow } from "./ListGroup";

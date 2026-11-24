@@ -1,21 +1,19 @@
 import { GuideAnchor } from "@/features/guides/GuideAnchor";
 import * as Linking from "expo-linking";
 import { router } from "expo-router";
-import { useCallback, useState } from "react";
-import { fetchMoreFlags } from "@/api/mobile-api";
+import { useState } from "react";
+import { useMoreFlags } from "@/features/more/flags-cache";
 import { Text } from "@/components/ds";
 import { useLock } from "@/features/lock/LockProvider";
 import { MenuGroup, MenuRow, MenuScreen, ProfileSummary, SignOutRow } from "@/features/settings/MenuUI";
 import { visibleSettingsGroups, type SettingsRow } from "@/features/settings/groups";
-import { useQuery } from "@/hooks/useQuery";
 import { config } from "@/lib/config";
 import { useTheme } from "@/theme/ThemeProvider";
 
 export default function Settings() {
   const { preference } = useTheme();
   const { enabled, available, loading } = useLock();
-  const load = useCallback(() => fetchMoreFlags(), []);
-  const { data: flags } = useQuery(load);
+  const flags = useMoreFlags();
   const [message, setMessage] = useState<string | null>(null);
   async function open(row: Pick<SettingsRow, "route" | "webPath">) {
     setMessage(null);

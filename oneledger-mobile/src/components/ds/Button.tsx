@@ -1,6 +1,5 @@
 import {
   ActivityIndicator,
-  Pressable,
   StyleSheet,
   type PressableProps,
 } from "react-native";
@@ -8,6 +7,7 @@ import {
 import { CONTROL_HEIGHT, hitSlopFor, radii, space } from "@/theme/tokens";
 
 import { Text } from "./Text";
+import { PressableScale } from "./PressableScale";
 import { makeStyles, useTheme } from "@/theme/ThemeProvider";
 
 /** `positive` (green) is for the one action that moves money forward, such as paying someone. */
@@ -38,13 +38,13 @@ export function Button({
   const foreground = variant === "primary" || variant === "positive" ? "onSolid" : "accent";
 
   return (
-    <Pressable
+    <PressableScale
       accessibilityRole="button"
       accessibilityState={{ disabled: !!inactive, busy: loading }}
       disabled={inactive}
       hitSlop={hitSlopFor(CONTROL_HEIGHT[size])}
       {...rest}
-      style={({ pressed }) => [
+      style={(pressed) => [
         styles.base,
         size === "sm" && styles.small,
         fullWidth && styles.fullWidth,
@@ -69,7 +69,7 @@ export function Button({
           {label}
         </Text>
       )}
-    </Pressable>
+    </PressableScale>
   );
 }
 
