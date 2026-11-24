@@ -10133,6 +10133,13 @@ check_console "the owner can approve a Banking offer" "$(console_call "$CON_OWNE
 PARTNER_AUDIT="$(psql -d pfe_rls -t -A -c "select count(*) from public.console_audit_events where action like 'partners.%';")"
 if [ "$PARTNER_AUDIT" -ge 6 ]; then pass "Console: partner changes are audited"; else fail "Console: too few partner audit rows ($PARTNER_AUDIT)"; fi
 
+# Transactions placement (20270127000000)
+check_console_ok "owner can configure the Transactions placement" "$(console_call "$CON_OWNER" aal2 "select public.console_partner_placement_set('transactions', true, 'bar', 'carousel', 5, true);")"
+PLACEMENT_COUNT="$(psql -d pfe_rls -t -A -c "select count(*) from public.partner_placements;")"
+if [ "$PLACEMENT_COUNT" = "5" ]; then pass "Console: five placements are seeded"; else fail "Console: expected 5 placements, got $PLACEMENT_COUNT"; fi
+check_console "an unknown placement id is still rejected" "$(console_call "$CON_OWNER" aal2 "select public.console_partner_placement_set('nowhere', true, 'bar', 'carousel', 5, true);")" "not_found"
+check_console "the feed lists the Transactions placement" "$(console_call "$USER_A" aal1 "select public.partner_feed();")" '"id": "transactions"'
+
 echo ""
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="
 if [ "$FAIL_COUNT" -ne 0 ]; then
