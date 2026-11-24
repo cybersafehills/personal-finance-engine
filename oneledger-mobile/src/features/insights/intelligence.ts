@@ -53,7 +53,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 const isText = (value: unknown): value is string => typeof value === "string" && value.length > 0;
 const isInstant = (value: unknown): value is string => typeof value === "string" && Number.isFinite(Date.parse(value));
 const isCount = (value: unknown): value is number => typeof value === "number" && Number.isInteger(value) && value >= 0;
-const isTextOrNull = (value: unknown): value is string | null => value === null || isText(value);
+const isTextOrNull = (value: unknown): value is string | null => value === null || typeof value === "string";
 
 function parseBaseline(raw: unknown): Baseline | null | undefined {
   if (raw === null) return null;
@@ -101,33 +101,37 @@ function parseRecurring(raw: unknown): RecurringPayment | null {
   };
 }
 
-const UNVERIFIED: IntelligenceResult = { ok: false, reason: "error", message: "Couldn’t verify your insights for this Space." };
+const unverified = (field: string): IntelligenceResult => ({
+  ok: false, reason: "error",
+  // The field name is for developers; release builds keep the plain sentence.
+  message: `Couldn’t verify your insights for this Space.${__DEV__ ? ` (${field})` : ""}`,
+});
 
 export function parseIntelligence(status: number, body: unknown, workspaceId?: string | null): IntelligenceResult {
   if (status === 422) {
     return { ok: false, reason: "error", message: "There’s too much activity to summarise your insights right now." };
   }
   if (status !== 200) return { ok: false, ...failureForStatus(status, "Your insights") };
-  if (
-    !isRecord(body) || body.ok !== true || !isInstant(body.computed_at) ||
-    (workspaceId && body.workspace_id !== workspaceId) ||
-    !(body.default_wallet_id === null || isText(body.default_wallet_id)) ||
-    !isCount(body.anomalies_total) || !isCount(body.recurring_total) ||
-    !Array.isArray(body.anomalies) || !Array.isArray(body.recurring)
-  ) return UNVERIFIED;
+  if (!isRecord(body) || body.ok !== true) return unverified("envelope");
+  if (!isInstant(body.computed_at)) return unverified("computed_at");
+  if (workspaceId && body.workspace_id !== workspaceId) return unverified("workspace_id");
+  if (!(body.default_wallet_id === null || isText(body.default_wallet_id))) return unverified("default_wallet_id");
+  if (!isCount(body.anomalies_total) || !isCount(body.recurring_total)) return unverified("totals");
+  if (!Array.isArray(body.anomalies) || !Array.isArray(body.recurring)) return unverified("lists");
 
   let summary: Intelligence["summary"] = null;
   if (body.summary !== null) {
-    if (!isRecord(body.summary) || !isText(body.summary.headline) || !isText(body.summary.body)) return UNVERIFIED;
+    if (!isRecord(body.summary) || !isText(body.summary.headline) || !isText(body.summary.body)) return unverified("summary");
     summary = { headline: body.summary.headline, body: body.summary.body };
   }
   const baseline = parseBaseline(body.baseline);
-  if (baseline === undefined) return UNVERIFIED;
+  if (baseline === undefined) return unverified("baseline");
 
   const anomalies = body.anomalies.map(parseAnomaly);
   const recurring = body.recurring.map(parseRecurring);
-  if (anomalies.some((a) => a === null) || recurring.some((r) => r === null)) return UNVERIFIED;
-  if (body.anomalies_total < anomalies.length || body.recurring_total < recurring.length) return UNVERIFIED;
+  if (anomalies.some((a) => a === null)) return unverified("anomalies");
+  if (recurring.some((r) => r === null)) return unverified("recurring");
+  if (body.anomalies_total < anomalies.length || body.recurring_total < recurring.length) return unverified("totals");
 
   return {
     ok: true,
