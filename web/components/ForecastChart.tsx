@@ -52,8 +52,8 @@ export function ForecastChart({ forecast }: { forecast: CashFlowForecast }) {
   const ariaLabel =
     `Projected balance over ${forecast.horizonDays} days. Scheduled items only ends near ` +
     `${formatRwf(forecast.projectedEnd.knownBalanceMinor)}; with everyday spending, ` +
-    `${formatRwf(forecast.projectedEnd.estimatedBalanceMinor)}. Lowest estimated point ` +
-    `${formatRwf(forecast.projectedLow.estimatedBalanceMinor)} around day ${forecast.projectedLow.dayOffset}.`;
+    `${formatRwf(forecast.projectedEnd.estimatedBalanceMinor)}. Lowest estimated balance ` +
+    `${formatRwf(forecast.projectedLow.estimatedBalanceMinor)}, reached on day ${forecast.projectedLow.dayOffset}.`;
 
   return (
     <figure className="flex flex-col gap-2">

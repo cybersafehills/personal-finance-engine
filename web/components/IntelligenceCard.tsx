@@ -2,6 +2,7 @@ import Link from "next/link";
 import { formatSignedRwf } from "../lib/format";
 import { WhyThisInsight } from "./ds/WhyThisInsight";
 import type { IntelligenceInsights } from "../lib/intelligence/insights";
+import { aboutDays, runOutInDays } from "../lib/intelligence/run-out";
 
 // Release 6 (Intelligence) surface, dark unless INTELLIGENCE_ENABLED.
 // Deterministic facts only (ADR 0014): a conservative cash-flow forecast
@@ -85,9 +86,7 @@ export function IntelligenceCard({
             )}
           {forecast.mayGoNegative && (
             <p className="rounded-control bg-attention-bg p-2 text-xs text-attention">
-              Your balance could dip below zero around day{" "}
-              {forecast.projectedLow.dayOffset} if spending continues at your
-              recent pace.
+              {runOutSentence(forecast)}
             </p>
           )}
           <p className="text-xs text-text-muted">{forecast.disclaimer}</p>
@@ -182,3 +181,15 @@ export function IntelligenceCard({
 }
 
 const DEFAULT_TOLERANCE = 15;
+
+/**
+ * "At your recent pace, your money could run out in about 2 days." The day the money is used up -
+ * not the day of the lowest point, which is nearly always the last day of the forecast.
+ */
+function runOutSentence(forecast: Parameters<typeof runOutInDays>[0]): string {
+  const days = runOutInDays(forecast);
+  if (days === null) return "At your recent pace, your balance could go below zero within this forecast.";
+  return days <= 0
+    ? "Your balance is already below zero at your recent pace."
+    : `At your recent pace, your money could run out ${aboutDays(days)}.`;
+}
