@@ -96,6 +96,11 @@ export default defineConfig({
       // Fee calculator (/pay/fees, GET /api/mobile/fees/estimate) for fees.spec.ts.
       // Adds only a link on the eKash network page.
       FEE_CALCULATOR_ENABLED: "true",
+      // Payment splits (a payment sent as several transfers) for
+      // pay-splits.spec.ts and the split routes in mobile-api.spec.ts. Opt-in
+      // (off unless exactly "true"). Adds an eKash checkbox and a link to the
+      // person / merchant payment form, nothing else.
+      PAY_SPLITS_ENABLED: "true",
       // Integrations: the base area + Import Studio + Export Center for
       // integrations-nav.spec.ts / integrations-import.spec.ts. These
       // default on ("on unless exactly false"); set explicitly so the

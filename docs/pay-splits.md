@@ -33,7 +33,9 @@ Product decisions, 2026-11-23 (OneLedger's product owner):
 | Next part / panel data (pure) | `lib/pay/splits/plan-state.ts` (+ `plan_state_test.ts`) |
 | Offer (server, authoritative) | `lib/pay/splits/offer.ts` |
 | Read plans | `lib/pay/splits/plans.ts` |
-| Actions | `app/pay/splits/actions.ts` (start, next part, stop, send remaining as one, preferences) |
+| Logic (shared web + mobile) | `lib/pay/splits/service.ts` (offer, start, next part, stop) |
+| Web actions | `app/pay/splits/actions.ts` (MFA step-up, revalidation; plus send remaining as one, preferences) |
+| Mobile API | `app/api/mobile/pay/splits/{offer,start,[id]/next,[id]/stop}`, `lib/pay/splits/mobile.ts`, `lib/mobile-splits.ts` (contract in `docs/oneledger-3/contracts.md`) |
 | UI | `components/pay/SplitOfferCard.tsx`, `SplitPlanPanel.tsx`, `SplitSettingsForm.tsx`; wired in `PaymentDraftForm.tsx` and `app/pay/[id]/page.tsx`; settings at `/pay/splits` |
 | Strings | `lib/ussd/messages.ts` (`pay.splits`) |
 | Schema + RPCs | `supabase/migrations/20270125000000_payment_split_plans.sql` |
@@ -59,4 +61,4 @@ Product decisions, 2026-11-23 (OneLedger's product owner):
 - Institutions may enforce lower per-transaction or daily limits than the network's. The offer says so; it cannot know.
 - Only `pay_person` and `pay_merchant` over eKash, and `pay_person` MTN to MTN for fee-saving. Bills, airtime, electricity, government and Airtel are not offered.
 - A failed or expired part blocks the plan; the user stops it (no automatic retry of a part).
-- Not run end to end in a browser: no local Supabase stack was available. Unit tests, typecheck, lint and the full migration suite (including a "Payment splits" block) pass.
+- Browser/e2e coverage is written (`web/e2e/pay-splits.spec.ts`, plus a split test in `web/e2e/mobile-api.spec.ts`) but had not been run when this was written: it needs a local Supabase stack. Unit tests, typecheck, lint and the full migration suite (including a "Payment splits" block) pass.
