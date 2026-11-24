@@ -23,6 +23,7 @@ import {
   netTone,
 } from "@/features/insights/display";
 import { insightPeriods, type PeriodId } from "@/features/insights/period";
+import { useForecastEnabled } from "@/features/insights/useForecastEnabled";
 import { personIdFromKey } from "@/features/people/display";
 import type { CurrencyOverview, Drilldown } from "@/features/insights/types";
 import { useQuery } from "@/hooks/useQuery";
@@ -59,6 +60,7 @@ export default function Insights() {
   const loadWallets = useCallback(() => fetchWallets(), []);
   const { data: wallets } = useQuery(loadWallets);
   const walletList = wallets && wallets.ok ? wallets.wallets : [];
+  const forecastEnabled = useForecastEnabled();
 
   const key = `${period.from}|${period.to}|${walletId ?? "all"}`;
   const load = useCallback(
@@ -81,6 +83,11 @@ export default function Insights() {
   return (
     <Screen>
       <ScreenHeader title="Insights" subtitle="Where your money went" />
+
+      {forecastEnabled ? (
+        <Button label="Your money outlook" variant="secondary" accessibilityHint="Will your money last over the next 7 to 30 days, and what stands out"
+          onPress={() => router.push("/forecast")} />
+      ) : null}
 
       <View accessibilityRole="tablist" style={{ flexDirection: "row", flexWrap: "wrap", gap: space[2] }}>
         {periods.map((p) => (
