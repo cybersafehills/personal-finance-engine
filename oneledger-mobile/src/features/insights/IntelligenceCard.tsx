@@ -33,19 +33,23 @@ export function IntelligenceCard() {
   const load = useCallback(async () => {
     if (!workspaceId) return null;
     const facts = await fetchIntelligence(workspaceId);
-    if (!facts.ok) return null;
+    if (!facts.ok) return { facts: null, failure: `${facts.reason}: ${facts.message}`, wallets: [] as WalletForecast[] };
     const forecast = await fetchForecast({ workspaceId, accountId: null, days: HORIZON });
     // Fire and forget: a new "forecast updated" notification shows up in the Inbox on its next load.
     void notifyInsightChange(workspaceId);
-    return { facts, wallets: forecast.ok ? forecast.wallets : [] };
+    return { facts, failure: null, wallets: forecast.ok ? forecast.wallets : [] };
   }, [workspaceId]);
-  const { data: loaded } = useQuery(load, workspaceId ?? "none");
+  const { data: loaded, error } = useQuery(load, workspaceId ?? "none");
 
   const data = loaded?.facts ?? null;
   const wallets = loaded?.wallets ?? [];
   const wallet: WalletForecast | null =
     wallets.find((w) => w.id === data?.defaultWalletId) ?? wallets[0] ?? null;
 
+  // Preview builds only: say why the card is missing instead of vanishing silently. Never shown in release builds.
+  if (__DEV__ && !data && !wallet && (loaded?.failure || error)) {
+    return <Text variant="caption" color="textMuted">{`Insights hidden (dev note): ${loaded?.failure ?? error}`}</Text>;
+  }
   if (!data && !wallet) return null;
   const empty = !wallet && !data?.baseline && (data?.anomalies.length ?? 0) === 0 && (data?.recurring.length ?? 0) === 0;
   if (empty) return null;
