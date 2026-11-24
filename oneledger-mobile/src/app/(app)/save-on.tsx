@@ -4,16 +4,22 @@ import { View } from "react-native";
 import { fetchSaveOnPrefs, saveSaveOnPrefs } from "@/api/mobile-api";
 import { Button, Card, Chip, EmptyState, Screen, ScreenHeader, Text } from "@/components/ds";
 import { SAVE_ON } from "@/features/save-on/messages";
-import type { SaveOnPrefs, SaveOnThreshold } from "@/features/save-on/types";
+import { rwf } from "@/features/save-on/format";
+import type { SaveOnLevels, SaveOnPrefs, SaveOnThreshold } from "@/features/save-on/types";
 import { useQuery } from "@/hooks/useQuery";
 import { space } from "@/theme/tokens";
 
 const S = SAVE_ON.settings;
-const CHOICES: { value: SaveOnThreshold; title: string; hint: string }[] = [
-  { value: "any", title: S.any, hint: S.anyHint },
-  { value: "balanced", title: S.balanced, hint: S.balancedHint },
-  { value: "bigger", title: S.bigger, hint: S.biggerHint },
-];
+const ORDER: SaveOnThreshold[] = ["any", "balanced", "bigger"];
+
+/** The name of a level, and the line under it (its figure is the server's, never typed here). */
+function describe(value: SaveOnThreshold, levels: SaveOnLevels): { title: string; hint: string } {
+  const l = S.levels[value];
+  const title = "tag" in l ? `${l.name} (${l.tag})` : l.name;
+  if ("hint" in l) return { title, hint: l.hint };
+  const min = levels[value];
+  return { title, hint: min ? S.atLeast(rwf(min), value === "bigger") : S.noFigure };
+}
 
 // Save On: how it works, and the one choice a person has (suggest cheaper MTN-to-MTN
 // splits, off until they turn it on). Over-the-eKash-limit amounts do not depend on it.
@@ -24,6 +30,7 @@ export default function SaveOn() {
   const [status, setStatus] = useState<string | null>(null);
 
   const prefs = local ?? (data?.ok ? data.preferences : null);
+  const levels: SaveOnLevels = data?.ok ? data.levels : {};
 
   async function save(next: SaveOnPrefs) {
     const before = prefs;
@@ -59,6 +66,10 @@ export default function SaveOn() {
         ))}
       </Card>
 
+      <Text variant="label" color="textMuted">
+        {S.example}
+      </Text>
+
       {!prefs ? (
         loading ? (
           <Text variant="label" color="textMuted">
@@ -82,14 +93,17 @@ export default function SaveOn() {
               <Text variant="label" color="textSecondary">
                 {S.question}
               </Text>
-              {CHOICES.map((c) => (
-                <View key={c.value} style={{ gap: space[1] }}>
-                  <Chip label={c.title} selected={prefs.threshold === c.value} onPress={() => save({ ...prefs, threshold: c.value })} />
-                  <Text variant="caption" color="textMuted">
-                    {c.hint}
-                  </Text>
-                </View>
-              ))}
+              {ORDER.map((value) => {
+                const c = describe(value, levels);
+                return (
+                  <View key={value} style={{ gap: space[1] }}>
+                    <Chip label={c.title} selected={prefs.threshold === value} onPress={() => save({ ...prefs, threshold: value })} />
+                    <Text variant="caption" color="textMuted">
+                      {c.hint}
+                    </Text>
+                  </View>
+                );
+              })}
             </View>
           ) : null}
           {status ? (

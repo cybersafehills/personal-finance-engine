@@ -27,7 +27,7 @@ Product decisions, 2026-11-23 (OneLedger's product owner):
 | | `capacity` (eKash) | `fee_saving` (MTN to MTN person transfer) |
 |---|---|---|
 | When | amount **>** the network's per-transaction capacity | a verified tariff shows parts cost less |
-| Opt-in | none (the amount cannot go as one transfer) | per user, off by default, threshold Any / Balanced (50) / Bigger (250 RWF per extra part) |
+| Opt-in | none (the amount cannot go as one transfer) | per user, off by default, level Every Franc (any saving) / Worth It (at least 100 RWF per extra part, our pick) / Big Wins (at least 500 RWF); stored as `any` / `balanced` / `bigger` |
 | Data | `route_limits` + `route_fees` for `ekash`; owner-confirmed fallback 10,000,000 / 20 (`lib/pay/splits/rules.ts`) | verified `provider_tariffs` (provider `mtn-rwanda`, `send_money`); fixed or no-fee tiers only |
 | Parts | fewest parts that each fit, as even as possible, largest first | exact search over band combinations, max 5 parts |
 | Fee shown | "up to RWF 20 per part", a ceiling not a prediction | exact, with the tariff's source and verified date |

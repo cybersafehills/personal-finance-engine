@@ -30,7 +30,7 @@ create table public.pay_split_preferences (
 );
 
 comment on table public.pay_split_preferences is
-  'Per-user Splits settings. fee_saving_enabled defaults to false; threshold is how much each extra part must save (any=0, balanced=50, bigger=250 RWF).';
+  'Per-user Save On settings. fee_saving_enabled defaults to false; threshold is how much each extra part must save (any=0, balanced=100, bigger=500 RWF; shown as Every Franc / Worth It / Big Wins).';
 
 create trigger set_pay_split_preferences_updated_at
   before update on public.pay_split_preferences

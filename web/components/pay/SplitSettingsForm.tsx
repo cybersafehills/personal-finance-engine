@@ -55,6 +55,7 @@ export function SplitSettingsForm({
         />
       </label>
       <p className="text-sm text-text-secondary">{t.explain}</p>
+      <p className="text-sm text-text-muted">{t.example}</p>
       <section aria-labelledby="save-on-how" className="rounded-control bg-background px-3 py-3">
         <h2 id="save-on-how" className="text-sm font-semibold text-text-primary">{t.howTitle}</h2>
         <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-text-secondary">

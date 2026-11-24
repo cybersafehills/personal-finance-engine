@@ -89,7 +89,21 @@ describe("parsePrefsResponse / parseStopResponse", () => {
     expect(parsePrefsResponse(200, { ok: true, preferences: { feeSavingEnabled: false, threshold: "balanced" } })).toEqual({
       ok: true,
       preferences: { feeSavingEnabled: false, threshold: "balanced" },
+      levels: {},
     });
+    // The figure behind each level is the server's; anything unreadable is dropped, never guessed.
+    const withLevels = parsePrefsResponse(200, {
+      ok: true,
+      preferences: { feeSavingEnabled: true, threshold: "bigger" },
+      thresholds: [
+        { value: "any", minSavingPerExtraPartMinor: "0" },
+        { value: "balanced", minSavingPerExtraPartMinor: "100" },
+        { value: "bigger", minSavingPerExtraPartMinor: "500" },
+        { value: "huge", minSavingPerExtraPartMinor: "9" },
+        { value: "any", minSavingPerExtraPartMinor: "-1" },
+      ],
+    });
+    expect(withLevels.ok && withLevels.levels).toEqual({ any: "0", balanced: "100", bigger: "500" });
     expect(parsePrefsResponse(200, { ok: true, preferences: { feeSavingEnabled: true, threshold: "huge" } }).ok).toBe(false);
   });
   it("only a confirmed stop is a stop", () => {

@@ -23,7 +23,7 @@ import {
   type SaveOnFailure,
   type SaveOnResult,
 } from "@/features/save-on/parse";
-import type { SaveOnOffer, SaveOnPlan, SaveOnPrefs } from "@/features/save-on/types";
+import type { SaveOnLevels, SaveOnOffer, SaveOnPlan, SaveOnPrefs } from "@/features/save-on/types";
 import { parseCategoriesResponse, type CategoriesResult } from "@/features/categories/parse";
 import {
   parseRulesResponse,
@@ -537,13 +537,13 @@ export async function stopSaveOn(planId: string): Promise<SaveOnResult<Record<ne
   return parseStopResponse(result.status, result.body);
 }
 
-export async function fetchSaveOnPrefs(): Promise<SaveOnResult<{ preferences: SaveOnPrefs }>> {
+export async function fetchSaveOnPrefs(): Promise<SaveOnResult<{ preferences: SaveOnPrefs; levels: SaveOnLevels }>> {
   const result = await bearerGet("/api/mobile/pay/splits/preferences");
   if (result.kind !== "response") return saveOnFailure(result);
   return parsePrefsResponse(result.status, result.body);
 }
 
-export async function saveSaveOnPrefs(prefs: SaveOnPrefs): Promise<SaveOnResult<{ preferences: SaveOnPrefs }>> {
+export async function saveSaveOnPrefs(prefs: SaveOnPrefs): Promise<SaveOnResult<{ preferences: SaveOnPrefs; levels: SaveOnLevels }>> {
   const result = await bearerPost("/api/mobile/pay/splits/preferences", prefs);
   if (result.kind !== "response") return saveOnFailure(result);
   return parsePrefsResponse(result.status, result.body);

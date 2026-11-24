@@ -10,9 +10,10 @@ import {
   THRESHOLD_MIN_SAVING_PER_EXTRA_PART,
 } from "./split-math.ts";
 
-// A TEST FIXTURE ONLY. These bands were read out of Dial It's binary and match
-// its own on-screen example (151,000 -> 1,500 as one, 270 as 150,000 + 1,000).
-// They are NOT OneLedger data: production reads verified provider_tariffs rows.
+// A TEST FIXTURE. These are MTN Rwanda's published MTN-to-MTN person-to-person fees
+// (https://www.mtn.co.rw/momo-tarrif/, "P2P On-net", retrieved 2026-11-24), the same
+// bands as the verified tariff in migration 20270126000000. Production reads the
+// verified provider_tariffs rows, not this constant.
 const FIXTURE_BANDS: FeeBand[] = [
   { fromMinor: 1n, toMinor: 1_000n, feeMinor: 20n },
   { fromMinor: 1_001n, toMinor: 10_000n, feeMinor: 100n },
@@ -86,13 +87,13 @@ Deno.test("capacity: every plan's parts add back up and each fits", () => {
 
 // ------------------------------ fee-saving split --------------------------
 
-Deno.test("fee-saving: Dial It's own example, 151,000 = 150,000 + 1,000", () => {
-  const r = planFeeSavingSplit(FIXTURE_BANDS, 151_000n, DEFAULT_SAVING_OPTIONS);
+Deno.test("fee-saving: the Save On example, 180,000 = 150,000 + 30,000", () => {
+  const r = planFeeSavingSplit(FIXTURE_BANDS, 180_000n, DEFAULT_SAVING_OPTIONS);
   if (r.status !== "plan") throw new Error("expected a plan");
   assertEquals(r.singleFeeMinor, 1_500n);
-  assertEquals(r.plannedFeeMinor, 270n);
-  assertEquals(r.savingsMinor, 1_230n);
-  assertEquals(r.parts.map((p) => p.amountMinor), [150_000n, 1_000n]);
+  assertEquals(r.plannedFeeMinor, 500n);
+  assertEquals(r.savingsMinor, 1_000n);
+  assertEquals(r.parts.map((p) => p.amountMinor), [150_000n, 30_000n]);
 });
 
 Deno.test("fee-saving: nothing in the cheapest band or beyond the bands", () => {
@@ -103,7 +104,8 @@ Deno.test("fee-saving: nothing in the cheapest band or beyond the bands", () => 
 });
 
 Deno.test("fee-saving: thresholds gate the offer", () => {
-  // 10,500 costs 250 as one; 10,000 + 500 costs 120: saves 130.
+  // 10,500 costs 250 as one; 10,000 + 500 costs 120: saves 130 (enough for Worth It's 100,
+  // not for Big Wins' 500).
   const balanced = planFeeSavingSplit(FIXTURE_BANDS, 10_500n, DEFAULT_SAVING_OPTIONS);
   if (balanced.status !== "plan") throw new Error("expected a plan");
   assertEquals(balanced.savingsMinor, 130n);
@@ -115,11 +117,11 @@ Deno.test("fee-saving: thresholds gate the offer", () => {
 });
 
 Deno.test("fee-saving: a larger minimum part changes or removes the offer", () => {
-  const r = planFeeSavingSplit(FIXTURE_BANDS, 151_000n, { ...ANY, minPartMinor: 1_001n });
+  const r = planFeeSavingSplit(FIXTURE_BANDS, 180_000n, { ...ANY, minPartMinor: 1_001n });
   if (r.status !== "plan") throw new Error("expected a plan");
   for (const p of r.parts) if (p.amountMinor < 1_001n) throw new Error("part below minimum");
-  assertEquals(partsSumTo(r.parts, 151_000n), true);
-  const none = planFeeSavingSplit(FIXTURE_BANDS, 151_000n, { ...ANY, minPartMinor: 100_000n });
+  assertEquals(partsSumTo(r.parts, 180_000n), true);
+  const none = planFeeSavingSplit(FIXTURE_BANDS, 180_000n, { ...ANY, minPartMinor: 100_000n });
   assertEquals(none.status, "none");
 });
 

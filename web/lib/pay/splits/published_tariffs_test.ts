@@ -68,10 +68,34 @@ Deno.test("an amount already in a cheap band is not split", () => {
   }
 });
 
-Deno.test("the user's threshold decides whether a small saving is worth a split", () => {
-  // 1,500 as one transfer is 100; as 1,000 + 500 it is 40: a saving of 60.
-  assertEquals(planFeeSavingSplit(mtnP2p, 1_500n, OPTS("balanced")).status, "plan"); // needs 50
-  assertEquals(planFeeSavingSplit(mtnP2p, 1_500n, OPTS("bigger")).status, "none"); // needs 250
+Deno.test("the Save On level decides whether a saving is worth a split", () => {
+  // 1,500 as one transfer is 100; as 1,000 + 500 it is 40: a saving of 60. Only
+  // "Every Franc" suggests it; "Worth It" (needs 100) and "Big Wins" (500) do not.
+  assertEquals(planFeeSavingSplit(mtnP2p, 1_500n, OPTS("any")).status, "plan");
+  assertEquals(planFeeSavingSplit(mtnP2p, 1_500n, OPTS("balanced")).status, "none");
+  assertEquals(planFeeSavingSplit(mtnP2p, 1_500n, OPTS("bigger")).status, "none");
+  // 10,500 saves 130: enough for "Worth It", not for "Big Wins".
+  assertEquals(planFeeSavingSplit(mtnP2p, 10_500n, OPTS("balanced")).status, "plan");
+  assertEquals(planFeeSavingSplit(mtnP2p, 10_500n, OPTS("bigger")).status, "none");
+  // 180,000 saves 1,000: every level suggests it.
+  for (const level of ["any", "balanced", "bigger"] as const) {
+    assertEquals(planFeeSavingSplit(mtnP2p, 180_000n, OPTS(level)).status, "plan");
+  }
+});
+
+import { messages } from "../../ussd/messages.ts";
+import { THRESHOLD_MIN_SAVING_PER_EXTRA_PART as MINS } from "./split-math.ts";
+
+Deno.test("the figures and the example in the Save On copy match what the code uses", () => {
+  const s = messages().pay.splits.settings;
+  assert(s.balancedHint.includes(`${MINS.balanced} RWF`));
+  assert(s.biggerHint.includes(`${MINS.bigger} RWF`));
+  // The example paragraph is true to MTN's table: 180,000 costs 1,500 as one, 500 as 150,000 + 30,000.
+  const r = planFeeSavingSplit(mtnP2p, 180_000n, OPTS("any"));
+  assertEquals(r.status, "plan");
+  if (r.status !== "plan") return;
+  assert(s.example.includes("180,000") && s.example.includes("1,500") && s.example.includes("500 RWF"));
+  assertEquals([r.singleFeeMinor, r.plannedFeeMinor], [1500n, 500n]);
 });
 
 Deno.test("an eKash amount above RWF 10,000,000 splits into parts that each cost RWF 20", () => {

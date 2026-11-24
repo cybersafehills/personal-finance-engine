@@ -71,3 +71,22 @@ describe("Pay & Services rows", () => {
   });
 });
 
+
+describe("Save On in More", () => {
+  it("is dark until the server says it is on, so nobody sees a screen that won't work", () => {
+    expect(labels(null)).not.toContain("Save On");
+    expect(labels({})).not.toContain("Save On");
+    expect(labels({ paySplits: false })).not.toContain("Save On");
+    expect(labels({ paySplits: true })).toContain("Save On");
+  });
+
+  it("sits under Pay & Services and opens the Save On screen", () => {
+    const group = MORE_GROUPS.find((g) => g.links.some((l) => l.route === "/save-on"));
+    expect(group?.title).toBe("Pay & Services");
+  });
+
+  it("reads the flag from the server's config", () => {
+    expect(parseMoreFlags(200, { ok: true, config: { paySplits: true } })).toMatchObject({ paySplits: true });
+    expect(parseMoreFlags(200, { ok: true, config: { paySplits: "yes" } })).toEqual({});
+  });
+});

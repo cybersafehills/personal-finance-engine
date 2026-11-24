@@ -20,6 +20,7 @@ import { isCounterpartiesEnabledFor } from "../lib/counterparties/directory";
 import {
   isAssistedPayEnabled,
   isPayServicesEnabled,
+  isPaySplitsEnabled,
   isScanToPayEnabled,
 } from "../lib/pay/gate";
 import { isIntegrationsEnabled } from "../lib/integrations/gate";
@@ -173,6 +174,8 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   // the mobile endpoint re-check both on the server.
   const feeCalculatorEnabled = payEnabled &&
     isOneLedger3FlagEnabled(process.env, "FEE_CALCULATOR", activeWorkspaceId);
+  // Save On (a payment in parts): opt-in PAY_SPLITS_ENABLED; the page re-checks it.
+  const paySplitsEnabled = Boolean(user) && isPaySplitsEnabled(activeWorkspaceId);
   const businessSurfacesEnabled = Boolean(user) &&
     isBusinessSurfacesEnabled(activeWorkspaceId);
 
@@ -223,6 +226,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           insightsEnabled={insightsEnabled}
           forecastEnabled={forecastEnabled}
           feeCalculatorEnabled={feeCalculatorEnabled}
+          paySplitsEnabled={paySplitsEnabled}
           inboxBadgeCount={uiPreferences.showInboxBadge ? inboxBadgeCount : 0}
           insightGlimpse={insightGlimpse}
         >

@@ -2,7 +2,7 @@ import { failureForStatus } from "@/api/bearer";
 import { parseIntent } from "@/features/pay/parse";
 import type { PayIntent } from "@/features/pay/types";
 
-import type { SaveOnNext, SaveOnOffer, SaveOnPlan, SaveOnPrefs, SaveOnThreshold } from "./types";
+import type { SaveOnLevels, SaveOnNext, SaveOnOffer, SaveOnPlan, SaveOnPrefs, SaveOnThreshold } from "./types";
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
 const digits = (v: unknown): v is string => typeof v === "string" && /^\d{1,15}$/.test(v);
@@ -122,12 +122,22 @@ export function parseStopResponse(status: number, body: unknown): SaveOnResult<R
   return failureOf(status, body, "That split");
 }
 
-export function parsePrefsResponse(status: number, body: unknown): SaveOnResult<{ preferences: SaveOnPrefs }> {
+export function parsePrefsResponse(status: number, body: unknown): SaveOnResult<{ preferences: SaveOnPrefs; levels: SaveOnLevels }> {
   if (status === 200 && isRecord(body) && body.ok === true && isRecord(body.preferences)) {
     const p = body.preferences;
     const threshold = THRESHOLDS.find((t) => t === p.threshold);
     if (typeof p.feeSavingEnabled === "boolean" && threshold) {
-      return { ok: true, preferences: { feeSavingEnabled: p.feeSavingEnabled, threshold } };
+      // The numbers behind each level come from the server, so the app never states a figure the server doesn't use.
+      const levels: SaveOnLevels = {};
+      if (Array.isArray(body.thresholds)) {
+        for (const t of body.thresholds) {
+          if (isRecord(t) && digits(t.minSavingPerExtraPartMinor)) {
+            const v = THRESHOLDS.find((x) => x === t.value);
+            if (v) levels[v] = t.minSavingPerExtraPartMinor;
+          }
+        }
+      }
+      return { ok: true, preferences: { feeSavingEnabled: p.feeSavingEnabled, threshold }, levels };
     }
   }
   return failureOf(status, body);

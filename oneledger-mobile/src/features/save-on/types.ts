@@ -35,3 +35,5 @@ export type SaveOnPlan = {
 
 export type SaveOnThreshold = "any" | "balanced" | "bigger";
 export type SaveOnPrefs = { feeSavingEnabled: boolean; threshold: SaveOnThreshold };
+/** RWF each extra transfer must save, per level, as the server defines it (digit strings). */
+export type SaveOnLevels = Partial<Record<SaveOnThreshold, string>>;

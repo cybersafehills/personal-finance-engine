@@ -61,7 +61,7 @@ export function bandsAreValid(bands: readonly FeeBand[]): boolean {
 // --------------------------- fee-saving split -----------------------------
 
 export type SavingOptions = {
-  /** Most parts to consider. Dial It uses 5. */
+  /** Most parts to consider: more is more to send by hand, so OneLedger stops at 5. */
   maxParts: number;
   /** The plan must save at least this much in total. */
   minTotalSavingsMinor: bigint;
@@ -74,11 +74,15 @@ export type SavingOptions = {
 export const DEFAULT_SAVING_OPTIONS: SavingOptions = {
   maxParts: 5,
   minTotalSavingsMinor: 0n,
-  minSavingsPerExtraPartMinor: 50n,
+  minSavingsPerExtraPartMinor: 100n, // = THRESHOLD_MIN_SAVING_PER_EXTRA_PART.balanced
   minPartMinor: 1n,
 };
 
-/** The user's "when should we suggest splitting?" choice. */
+/**
+ * The user's Save On level: how big a saving must be before a split is suggested.
+ * The ids are stored (any / balanced / bigger); the names people see are
+ * "Every Franc", "Worth It" and "Big Wins" (lib/ussd/messages.ts, pay.splits.settings).
+ */
 export const SPLIT_THRESHOLDS = ["any", "balanced", "bigger"] as const;
 export type SplitThreshold = (typeof SPLIT_THRESHOLDS)[number];
 export const DEFAULT_SPLIT_THRESHOLD: SplitThreshold = "balanced";
@@ -86,8 +90,8 @@ export const DEFAULT_SPLIT_THRESHOLD: SplitThreshold = "balanced";
 /** RWF saved per extra part that each choice requires. */
 export const THRESHOLD_MIN_SAVING_PER_EXTRA_PART: Record<SplitThreshold, bigint> = {
   any: 0n,
-  balanced: 50n,
-  bigger: 250n,
+  balanced: 100n,
+  bigger: 500n,
 };
 
 export function isSplitThreshold(v: unknown): v is SplitThreshold {
