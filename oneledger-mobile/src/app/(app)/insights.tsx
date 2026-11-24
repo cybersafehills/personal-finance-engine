@@ -85,7 +85,7 @@ export default function Insights() {
       <ScreenHeader title="Insights" subtitle="Where your money went" />
 
       {forecastEnabled ? (
-        <Button label="Cash-flow forecast" variant="secondary" accessibilityHint="Where your balance is heading over the next 7 to 30 days"
+        <Button label="Your money outlook" variant="secondary" accessibilityHint="Will your money last over the next 7 to 30 days, and what stands out"
           onPress={() => router.push("/forecast")} />
       ) : null}
 

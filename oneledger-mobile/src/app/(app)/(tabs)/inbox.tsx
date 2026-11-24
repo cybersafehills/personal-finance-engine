@@ -117,9 +117,9 @@ export default function Inbox() {
             <ScreenHeader title="Inbox" subtitle="Everything that needs a decision" inline />
             {forecastEnabled ? (
               <Card style={{ gap: space[1] }}>
-                <Text variant="bodyStrong">Cash-flow forecast</Text>
-                <Text variant="caption" color="textMuted">Your 30-day outlook, recurring payments and spending pace.</Text>
-                <Button label="Open the forecast" variant="ghost" size="sm" onPress={() => router.push("/forecast")} />
+                <Text variant="bodyStrong">Your money outlook</Text>
+                <Text variant="caption" color="textMuted">Will your money last, and what stands out this month.</Text>
+                <Button label="Open my outlook" variant="ghost" size="sm" onPress={() => router.push("/forecast")} />
               </Card>
             ) : null}
             <InboxNotifications />
