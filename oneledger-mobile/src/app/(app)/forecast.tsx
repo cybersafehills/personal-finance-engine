@@ -1,16 +1,16 @@
 import Feather from "@expo/vector-icons/Feather";
 import { useLocalSearchParams } from "expo-router";
-import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, StyleSheet, View, type ViewInstance } from "react-native";
+import { useCallback, useMemo, useState } from "react";
+import { Pressable, StyleSheet, View } from "react-native";
 
 import { Button, Card, Chip, EmptyState, ProgressBar, Screen, ScreenHeader, Text } from "@/components/ds";
-import { GuideScrollContext } from "@/features/guides/context";
 import { fetchForecast, FORECAST_DAYS, type ForecastDays, type WalletForecast } from "@/features/insights/forecast";
 import { fetchIntelligence, type Intelligence } from "@/features/insights/intelligence";
 import { OutlookAdSlot } from "@/features/insights/OutlookAdSlot";
 import { OutlookCard } from "@/features/insights/OutlookCard";
 import { OutlookChart } from "@/features/insights/OutlookChart";
 import { OwnAccountPrompt } from "@/features/insights/OwnAccountPrompt";
+import { isSection, ScrollToSection, useJumpToSection, useSectionAnchors, type SectionAnchors } from "@/features/insights/ScrollToSection";
 import { SectionShell, toneColors } from "@/features/insights/SectionShell";
 import {
   commitmentLine, datedPayments, formatPlain, largePaymentLine, largePaymentsTitle, outlookFor, paceStory,
@@ -32,9 +32,6 @@ import { space } from "@/theme/tokens";
 // rows open this page at the matching section. Every number is an estimate from your own ledger and is
 // labelled as one; nothing here is advice. Written to be read by anyone from a teenager to a grandparent.
 
-const SECTIONS = ["outlook", "pace", "large", "repeat"] as const;
-const isSection = (value: unknown): value is SectionId => typeof value === "string" && (SECTIONS as readonly string[]).includes(value);
-
 export default function Forecast() {
   const { activeId } = useActiveSpace();
   // Keyed by Space so a switch never shows the previous Space's figures.
@@ -45,7 +42,6 @@ export default function Forecast() {
 
 function ForecastForSpace({ workspaceId }: { workspaceId: string }) {
   const { section } = useLocalSearchParams<{ section?: string }>();
-  const reveal = useContext(GuideScrollContext);
   const [days, setDays] = useState<ForecastDays>(30);
   const [walletId, setWalletId] = useState<string | null>(null);
   const { amountsHidden, fullPrivacy } = usePrivacy();
@@ -72,18 +68,9 @@ function ForecastForSpace({ workspaceId }: { workspaceId: string }) {
   );
 
   // One anchor per section, so a row on Home (or a "jump to" chip) can scroll straight to it.
-  const anchors = { outlook: useRef<ViewInstance>(null), pace: useRef<ViewInstance>(null), large: useRef<ViewInstance>(null), repeat: useRef<ViewInstance>(null) };
-  const jump = useCallback((id: SectionId) => reveal?.(anchors[id]), [reveal]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Deep link: wait until both answers are in (sections shift as they arrive), then scroll once.
+  const anchors = useSectionAnchors();
+  // Sections appear and reorder as the two answers arrive, so a deep link waits for both.
   const settled = !forecast.loading && !facts.loading;
-  const scrolled = useRef(false);
-  useEffect(() => {
-    if (scrolled.current || !settled || !isSection(section) || !plan.some((p) => p.id === section)) return;
-    scrolled.current = true;
-    const timer = setTimeout(() => jump(section), 80);
-    return () => clearTimeout(timer);
-  }, [settled, section, plan, jump]);
 
   const body: Record<SectionId, React.ReactNode> = {
     outlook: <OutlookSection wallets={wallets} outlooks={outlooks} days={days} hidden={hidden} showNames={allWallets.length > 1} />,
@@ -101,7 +88,8 @@ function ForecastForSpace({ workspaceId }: { workspaceId: string }) {
   return (
     <Screen>
       <ScreenHeader title="Your money outlook" subtitle="Will your money last, and what stands out" />
-      <Intro />
+      <ScrollToSection section={section} ready={settled} available={plan.map((p) => p.id)} anchors={anchors} />
+      <Intro deepLinked={isSection(section)} />
 
       {allWallets.length > 1 ? (
         <View style={{ gap: space[1] }}>
@@ -131,7 +119,7 @@ function ForecastForSpace({ workspaceId }: { workspaceId: string }) {
         <EmptyState title="Not enough to look ahead yet" description="To look ahead we need a recorded balance for a wallet and a few weeks of activity to learn your usual pace from." />
       ) : null}
 
-      {plan.length > 0 ? <AtAGlance plan={plan} titles={META} onJump={jump} /> : null}
+      {plan.length > 0 ? <AtAGlance plan={plan} titles={META} anchors={anchors} /> : null}
       {result && result.ok ? <Text variant="caption" color="textMuted">{`Worked out ${formatDateTime(result.computedAt)}.`}</Text> : null}
 
       {plan.map((item, index) => (
@@ -153,11 +141,13 @@ function ForecastForSpace({ workspaceId }: { workspaceId: string }) {
 }
 
 /** "What is this page?" - open the first time someone visits, one tap away afterwards. */
-function Intro() {
+function Intro({ deepLinked }: { deepLinked: boolean }) {
   const { first, dismiss } = useFirstVisit("oneledger.outlook.intro.v1");
   const { colors } = useTheme();
   const [open, setOpen] = useState(false);
-  if (!(first || open)) {
+  // Someone who came for one section (a Home row) stays collapsed: an intro that loads late would push
+  // the section they are scrolling to out of view.
+  if (!((first && !deepLinked) || open)) {
     return (
       <Pressable accessibilityRole="button" accessibilityLabel="What is this page?" hitSlop={12} onPress={() => setOpen(true)}>
         <Text variant="caption" color="accent">What is this page?</Text>
@@ -186,7 +176,8 @@ function Intro() {
 }
 
 /** A one-line summary and a tap-to-jump strip, most important first. */
-function AtAGlance({ plan, titles, onJump }: { plan: SectionPlan[]; titles: Record<SectionId, { title: string }>; onJump: (id: SectionId) => void }) {
+function AtAGlance({ plan, titles, anchors }: { plan: SectionPlan[]; titles: Record<SectionId, { title: string }>; anchors: SectionAnchors }) {
+  const onJump = useJumpToSection(anchors); // read inside <Screen>: that is where the scroll view provides it
   const { colors } = useTheme();
   const styles = useStyles();
   const counts = plan.reduce<Record<string, number>>((acc, p) => ({ ...acc, [p.tone]: (acc[p.tone] ?? 0) + 1 }), {});
