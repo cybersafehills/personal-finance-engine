@@ -11,6 +11,8 @@ Brings the web's Intelligence surfaces (Home "Insights" card, `/inbox/forecast`)
 - Push/notification tap for `insight.forecast_update` (`resource_type='forecast'`) opens `/forecast`.
 - Strict parsers: bigint amounts, a malformed or contradictory payload is refused whole. Privacy mode hides amounts and the chart.
 
-**Finding:** #310 (preview/live sync) overwrote #294's mobile forecast wiring and the `wallets/people/insightsCenter` More gates. Forecast is restored here via the new screen; the More gates were not restored.
+**Follow-up (same day):** More gates for Wallets, People, Payment requests and Insights restored (dark unless the server says on); `POST /api/mobile/insights/intelligence/notify` lets the app raise the forecast notification (shared 12h de-dupe with web); wallet picker and the "where your usual income comes from" prompt (`This is me` / Undo, via the People RPC) on `/forecast`.
 
-**Not done / not verified:** no run on a device or simulator; notifications are still only enqueued by web page loads (mobile GET stays side-effect free); no per-wallet picker or income-source prompt.
+**Finding (resolved above):** #310 (preview/live sync) overwrote #294's mobile forecast wiring and the `wallets/people/insightsCenter` More gates. Forecast is restored here via the new screen; the More gates were not restored.
+
+**Not done / not verified:** no run on a device or simulator; the notify POST and the own-account prompt write to the database and were not exercised against a real account.

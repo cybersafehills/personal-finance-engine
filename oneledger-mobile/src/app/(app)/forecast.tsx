@@ -7,6 +7,7 @@ import { fetchForecast, FORECAST_DAYS, type ForecastDays, type WalletForecast } 
 import { fetchIntelligence } from "@/features/insights/intelligence";
 import { scheduledItems } from "@/features/insights/intelligence-display";
 import { BaselineBlock, RecurringBlock, UnusualPaymentsBlock } from "@/features/insights/InsightBlocks";
+import { OwnAccountPrompt } from "@/features/insights/OwnAccountPrompt";
 import { WhyThisInsight } from "@/features/insights/WhyThisInsight";
 import { usePrivacy } from "@/features/privacy/PrivacyProvider";
 import { useActiveSpace } from "@/features/spaces/ActiveSpaceProvider";
@@ -31,6 +32,7 @@ export default function Forecast() {
 
 function ForecastForSpace({ workspaceId }: { workspaceId: string }) {
   const [days, setDays] = useState<ForecastDays>(30);
+  const [walletId, setWalletId] = useState<string | null>(null);
   const loadForecast = useCallback(() => fetchForecast({ workspaceId, accountId: null, days }), [workspaceId, days]);
   const forecast = useQuery(loadForecast, `${workspaceId}|${days}`);
   const loadFacts = useCallback(() => fetchIntelligence(workspaceId), [workspaceId]);
@@ -38,6 +40,10 @@ function ForecastForSpace({ workspaceId }: { workspaceId: string }) {
 
   const result = forecast.data;
   const factsData = facts.data?.ok ? facts.data : null;
+  const allWallets = result && result.ok ? result.wallets : [];
+  // A wallet picker only when there is a choice; filtering is local (one request covers every wallet).
+  const wallets = walletId ? allWallets.filter((w) => w.id === walletId) : allWallets;
+  const estimatesIncome = allWallets.some((w) => w.estimatesIncome);
   const unavailable = result && !result.ok && result.reason === "unavailable";
 
   return (
@@ -47,6 +53,13 @@ function ForecastForSpace({ workspaceId }: { workspaceId: string }) {
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space[2] }}>
         {FORECAST_DAYS.map((d) => <Chip key={d} label={`Next ${d} days`} selected={d === days} onPress={() => setDays(d)} />)}
       </View>
+
+      {allWallets.length > 1 ? (
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space[2] }} accessibilityLabel="Wallet">
+          <Chip label="All wallets" selected={walletId === null} onPress={() => setWalletId(null)} />
+          {allWallets.map((w) => <Chip key={w.id} label={w.name} selected={walletId === w.id} onPress={() => setWalletId(w.id)} />)}
+        </View>
+      ) : null}
 
       {!result && forecast.loading ? (
         <Text variant="label" color="textMuted" accessibilityLiveRegion="polite">Loading forecast…</Text>
@@ -61,10 +74,12 @@ function ForecastForSpace({ workspaceId }: { workspaceId: string }) {
         ) : (
           <>
             <Text variant="caption" color="textMuted">{`Calculated ${formatDateTime(result.computedAt)}.`}</Text>
-            {result.wallets.map((wallet) => <WalletOutlook key={wallet.id} wallet={wallet} days={days} showName={result.wallets.length > 1} />)}
+            {wallets.map((wallet) => <WalletOutlook key={wallet.id} wallet={wallet} days={days} showName={allWallets.length > 1} />)}
           </>
         )
       ) : null}
+
+      {estimatesIncome ? <OwnAccountPrompt onChanged={() => { forecast.refresh(); facts.refresh(); }} /> : null}
 
       {factsData ? (
         <>
