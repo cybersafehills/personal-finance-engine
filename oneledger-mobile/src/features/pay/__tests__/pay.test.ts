@@ -93,7 +93,11 @@ describe("parseConfigResponse", () => {
       scanToPay: false,
       trustedRecipients: false,
       paymentRequests: false,
+      paySplits: false,
     });
+    expect(parseConfigResponse(200, { ok: true, config: { pay: true, paySplits: true } })).toMatchObject({ paySplits: true });
+    // Save On is opt-in: anything but an explicit true hides it.
+    expect(parseConfigResponse(200, { ok: true, config: { pay: true, paySplits: "true" } })).toMatchObject({ paySplits: false });
     expect(parseConfigResponse(200, { ok: true, config: { pay: true } })).toMatchObject({ ok: true, assistedPay: false });
   });
   it("is a failure on any error, so the caller hides the button", () => {

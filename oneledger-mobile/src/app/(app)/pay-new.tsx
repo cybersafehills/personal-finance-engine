@@ -1,9 +1,13 @@
 import { router, useLocalSearchParams } from "expo-router";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ScrollView, View } from "react-native";
 
-import { createPayIntent } from "@/api/mobile-api";
+import { createPayIntent, fetchSaveOnOffer, startSaveOn } from "@/api/mobile-api";
 import { getPaymentTemplate } from "@/features/pay/activity";
+import { getPayConfigCache } from "@/features/pay/config-cache";
+import { SAVE_ON } from "@/features/save-on/messages";
+import { SaveOnOfferCard } from "@/features/save-on/SaveOnOfferCard";
+import type { SaveOnOffer } from "@/features/save-on/types";
 import { Button, Chip, EmptyState, Screen, ScreenHeader, Text, TextField } from "@/components/ds";
 import { ContactPickButton, SaveContactToggle } from "@/features/pay/ContactControls";
 import { posterPrefill } from "@/features/scan/poster";
@@ -111,6 +115,39 @@ export default function PayNew() {
   // The first account that can do the job is preselected (like the web form).
   const chosenId = accounts?.find((a) => a.id === accountId)?.id ?? accounts?.[0]?.id ?? null;
 
+  // Save On: whether the person chose to send over eKash, and the server's offer for this
+  // amount. The server decides the parts; nothing is computed here. Hidden unless the
+  // server says Save On is on for this user.
+  const splitsOn = getPayConfigCache()?.paySplits === true;
+  const [overEkash, setOverEkash] = useState(false);
+  const [offerFor, setOfferFor] = useState<{ key: string; offer: SaveOnOffer | null } | null>(null);
+  const [saveOnBusy, setSaveOnBusy] = useState(false);
+  const typedAmount = parseAmountRwf(amountText);
+  const offerKey =
+    splitsOn && kind && typedAmount !== null ? JSON.stringify([kind, overEkash, chosenId, recipientText, typedAmount]) : null;
+  const offer = offerKey !== null && offerFor?.key === offerKey ? offerFor.offer : null;
+  useEffect(() => {
+    if (offerKey === null || !kind || typedAmount === null) return;
+    let cancelled = false;
+    const handle = setTimeout(async () => {
+      const r = parseRecipient(kind, recipientText);
+      const res = await fetchSaveOnOffer({
+        paymentType: kind,
+        amountMinor: typedAmount,
+        networkSlug: overEkash ? "ekash" : undefined,
+        sourceAccountId: chosenId ?? undefined,
+        recipientMsisdn: r.ok ? r.msisdn : undefined,
+      });
+      // A suggestion is never worth failing the form for: any failure is simply "no offer".
+      if (!cancelled) setOfferFor({ key: offerKey, offer: res.ok ? res.offer : null });
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [offerKey]);
+
 
   if (!kind) {
     return (
@@ -156,6 +193,34 @@ export default function PayNew() {
         trusted: false,
       });
     }
+    router.replace({ pathname: "/pay/[id]", params: { id: result.intent.id } });
+  }
+
+  // Start the split: the plan and part 1 (an ordinary draft). Nothing is charged or sent.
+  async function onSaveOn() {
+    if (inFlight.current || !kind) return;
+    setMessage(null);
+    const recipient = parseRecipient(kind, recipientText);
+    if (!recipient.ok) return setMessage(recipient.message);
+    const amount = parseAmountRwf(amountText);
+    if (amount === null) return setMessage("Enter an amount greater than zero, in whole RWF.");
+    if (!chosenId) return setMessage("Choose the account to pay from.");
+    inFlight.current = true;
+    setSaveOnBusy(true);
+    const key = tracker.keyFor(["save-on", kind, recipient.msisdn ?? recipient.merchantCode, chosenId, amount, overEkash].join("|"));
+    const result = await startSaveOn({
+      paymentType: kind,
+      amountMinor: amount,
+      idempotencyKey: key,
+      recipientName: name.trim() || undefined,
+      recipientMsisdn: recipient.msisdn,
+      merchantCode: recipient.merchantCode,
+      sourceAccountId: chosenId,
+      networkSlug: overEkash ? "ekash" : undefined,
+    });
+    inFlight.current = false;
+    setSaveOnBusy(false);
+    if (!result.ok) return setMessage(result.message);
     router.replace({ pathname: "/pay/[id]", params: { id: result.intent.id } });
   }
 
@@ -280,6 +345,22 @@ export default function PayNew() {
           </ScrollView>
         </View>
       )}
+
+      {splitsOn ? (
+        <View style={{ gap: space[1] }}>
+          <View style={{ flexDirection: "row" }}>
+            <Chip label={SAVE_ON.ekashChoice} selected={overEkash} onPress={() => setOverEkash((v) => !v)} />
+          </View>
+          <Text variant="caption" color="textMuted">
+            {SAVE_ON.ekashHint}
+          </Text>
+        </View>
+      ) : null}
+
+      {offer ? <SaveOnOfferCard offer={offer} busy={saveOnBusy} onAccept={onSaveOn} onLearnMore={() => router.push("/save-on")} /> : null}
+      {splitsOn && !offer ? (
+        <Button label={SAVE_ON.learnMore} variant="ghost" fullWidth onPress={() => router.push("/save-on")} />
+      ) : null}
 
       <Text variant="caption" color="textMuted">
         {PAY_COPY.handoffNotice}
