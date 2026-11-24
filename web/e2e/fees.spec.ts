@@ -318,11 +318,13 @@ test.describe("provider tariffs", () => {
   });
 
   // Last on purpose: it removes the tariffs the tests above rely on.
-  test("no provider tariffs on record means no provider choice and no section", async ({ page }) => {
+  // The real MTN and Airtel tariffs (migration 20270126000000) are always on record now, so the
+  // provider choice legitimately exists; what must hold is that a removed tariff leaves no trace.
+  test("a removed tariff leaves no trace of its provider, and no section without a chosen provider", async ({ page }) => {
     await cleanupTariffs();
     await page.goto("/pay/fees?amount=5000&type=send_money");
     await expect(page.getByRole("heading", { name: "Estimate a transfer fee", level: 1 })).toBeVisible();
-    await expect(page.getByLabel("Provider’s own tariff")).toHaveCount(0);
+    await expect(page.locator("option", { hasText: TARIFF_NAME })).toHaveCount(0);
     await expect(page.getByRole("region", { name: /Tariff published by/ })).toHaveCount(0);
   });
 });

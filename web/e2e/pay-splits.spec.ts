@@ -73,8 +73,9 @@ test.describe("Pay: splits (eKash over capacity)", () => {
     await expect(card.getByText("Part 3 · 8,333,333 RWF")).toBeVisible();
     // Honest copy: fees are a ceiling, the institution's own limits may be lower,
     // and OneLedger says it never moves the money.
-    // The test user has no MTN account, so this is the network's published ceiling.
-    await expect(card.getByText(/up to 60 RWF in total/)).toBeVisible();
+    // The e2e user pays from an MTN account, and MTN publishes its own charge for the eKash
+    // route (a flat RWF 20, loaded as a verified tariff), so the fee is exact, not a ceiling.
+    await expect(card.getByText(/60 RWF in total \(20 RWF per transfer\), from your provider's published tariff/)).toBeVisible();
     await expect(card.getByText(/lower limits of its own/)).toBeVisible();
     await expect(card.getByText(/OneLedger never moves money/)).toBeVisible();
   });
@@ -100,8 +101,9 @@ test.describe("Pay: splits (eKash over capacity)", () => {
     // The plan panel lists every part and marks this one.
     const plan = page.getByRole("region", { name: "Sending in 2 parts" });
     await expect(plan).toBeVisible();
+    // The panel lists the parts already prepared, and what is not yet prepared.
     await expect(plan.getByText(/Part 1 · 5,000,001 RWF/)).toBeVisible();
-    await expect(plan.getByText(/Part 2 · 5,000,000 RWF/)).toBeVisible();
+    await expect(plan.getByText("Not yet prepared: 5,000,000 RWF")).toBeVisible();
     await expect(plan.getByText(/This payment/)).toBeVisible();
 
     // Part 2 cannot be prepared before part 1 is settled.
@@ -177,7 +179,7 @@ test("Reports carries the savings as its own section", async ({ page }) => {
 
 test("the Save On settings page opens and keeps fee-saving off by default", async ({ page }) => {
   await page.goto("/pay/splits");
-  await expect(page.getByRole("heading", { name: "Save On" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Save On", exact: true })).toBeVisible();
   await expect(page.getByRole("switch", { name: /Turn on Save On/ })).not.toBeChecked();
   await expect(page.getByText(/does not depend on this setting/)).toBeVisible();
   await expect(page.getByRole("heading", { name: "How Save On works" })).toBeVisible();
