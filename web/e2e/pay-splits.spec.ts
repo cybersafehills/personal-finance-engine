@@ -152,6 +152,29 @@ test.describe("Pay: splits (eKash over capacity)", () => {
   });
 });
 
+test("the Save On page shows what has been saved, over the periods asked for, honestly", async ({ page }) => {
+  await page.goto("/pay/splits");
+  const section = page.getByRole("region", { name: "Saved with Save On" });
+  await expect(section).toBeVisible();
+  // Every window is offered, and switching is instant.
+  for (const label of ["Last 24 hours", "Last 7 days", "Last 2 weeks", "Last month", "Last 3 months", "Last 12 months", "All time"]) {
+    await expect(section.getByRole("button", { name: label })).toBeVisible();
+  }
+  await section.getByRole("button", { name: "Last 7 days" }).click();
+  await expect(section.getByRole("button", { name: "Last 7 days" })).toHaveAttribute("aria-pressed", "true");
+  // A fresh e2e user has saved nothing: it says so rather than showing a made-up figure,
+  // and it is clear the numbers are estimates that count only once every part went through.
+  await expect(section.getByText("Nothing saved yet")).toBeVisible();
+  await expect(section.getByText(/only once every part has gone through/)).toBeVisible();
+  const results = await new AxeBuilder({ page }).analyze();
+  expect(results.violations.filter((v) => v.impact === "serious" || v.impact === "critical")).toEqual([]);
+});
+
+test("Reports carries the savings as its own section", async ({ page }) => {
+  await page.goto("/reports");
+  await expect(page.getByRole("region", { name: "Saved with Save On" })).toBeVisible();
+});
+
 test("the Save On settings page opens and keeps fee-saving off by default", async ({ page }) => {
   await page.goto("/pay/splits");
   await expect(page.getByRole("heading", { name: "Save On" })).toBeVisible();

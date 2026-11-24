@@ -39,6 +39,24 @@ export const SAVE_ON = {
     remaining: (amount: string) => `Not yet prepared: ${amount}`,
     feesNote: "Fees shown are estimates, not guarantees.",
   },
+  savings: {
+    title: "Saved with Save On",
+    intro: "Fees you did not pay because Save On sent a payment in parts instead of one transfer.",
+    none: "Nothing saved yet",
+    emptyBody:
+      "When you send a payment in parts with Save On and every part goes through, the fees you saved show up here.",
+    plans: (n: number, transfers: number) => `${n} payment${n === 1 ? "" : "s"} in parts · ${transfers} transfers`,
+    asOne: (amount: string) => `As one transfer: ${amount} in fees`,
+    asParts: (amount: string) => `As parts: ${amount} in fees`,
+    saved: (amount: string, pct: number | null) => (pct === null ? `Saved ${amount}` : `Saved ${amount} (${pct}% of the fees)`),
+    inProgress: (n: number, amount: string) => `${n} in progress: about ${amount} more once every part is sent.`,
+    recentTitle: "Latest savings",
+    recentRow: (date: string, total: string, n: number, amount: string) => `${date} · ${total} in ${n} parts · saved ${amount}`,
+    estimate:
+      "Estimates from your provider's published fees; your provider shows the final fee. A saving counts only once every part has gone through.",
+    seeAll: "See all savings",
+    unavailable: "Couldn't load your savings.",
+  },
   settings: {
     title: "Save On",
     subtitle: "A cheaper way to send, when there is one.",

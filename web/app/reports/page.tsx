@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getReportRuns } from "../../lib/queries";
 import { PageHeader } from "../../components/PageHeader";
 import { EmptyState } from "../../components/EmptyState";
+import { SaveOnSavings } from "../../components/pay/SaveOnSavings";
 import { ReportStatusBadge } from "../../components/ReportStatusBadge";
 import { StatementsTabs } from "../../components/StatementsTabs";
 import { isFinancialStatementsEnabled } from "../../lib/financial-statements";
@@ -42,6 +43,11 @@ export default async function ReportsPage() {
           </div>
         }
       />
+
+      {/* Save On: fees saved by sending in parts, as its own section. Absent when Save On is off. */}
+      <div className="mb-4 empty:hidden">
+        <SaveOnSavings />
+      </div>
 
       {reports.length === 0 ? (
         <EmptyState

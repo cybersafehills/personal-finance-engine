@@ -23,6 +23,7 @@ import {
   type SaveOnFailure,
   type SaveOnResult,
 } from "@/features/save-on/parse";
+import { parseSavingsResponse, type SaveOnSavings } from "@/features/save-on/savings";
 import type { SaveOnLevels, SaveOnOffer, SaveOnPlan, SaveOnPrefs } from "@/features/save-on/types";
 import { parseCategoriesResponse, type CategoriesResult } from "@/features/categories/parse";
 import {
@@ -547,4 +548,11 @@ export async function saveSaveOnPrefs(prefs: SaveOnPrefs): Promise<SaveOnResult<
   const result = await bearerPost("/api/mobile/pay/splits/preferences", prefs);
   if (result.kind !== "response") return saveOnFailure(result);
   return parsePrefsResponse(result.status, result.body);
+}
+
+/** How much Save On has saved in transfer fees, over 24 hours to all time. Read-only. */
+export async function fetchSaveOnSavings(): Promise<SaveOnResult<{ savings: SaveOnSavings }>> {
+  const result = await bearerGet("/api/mobile/pay/splits/savings");
+  if (result.kind !== "response") return saveOnFailure(result);
+  return parseSavingsResponse(result.status, result.body);
 }

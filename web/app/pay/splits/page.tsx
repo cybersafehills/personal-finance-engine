@@ -1,5 +1,6 @@
 import { PageHeader } from "../../../components/PageHeader";
 import { EmptyState } from "../../../components/EmptyState";
+import { SaveOnSavings } from "../../../components/pay/SaveOnSavings";
 import { SplitSettingsForm } from "../../../components/pay/SplitSettingsForm";
 import { getActiveWorkspaceId } from "../../../lib/queries";
 import { isPaySplitsEnabled } from "../../../lib/pay/gate";
@@ -32,8 +33,9 @@ export default async function SplitSettingsPage() {
     : { feeSavingEnabled: false, threshold: "balanced" as const };
 
   return (
-    <div>
+    <div className="flex flex-col gap-4">
       <PageHeader title={t.title} backHref="/" backLabel="Home" />
+      <SaveOnSavings />
       <SplitSettingsForm initial={prefs} />
     </div>
   );

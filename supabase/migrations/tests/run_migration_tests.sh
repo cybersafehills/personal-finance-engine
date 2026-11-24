@@ -875,10 +875,11 @@ AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from inform
 # Provider tariffs (20270124000000): SELECT on provider_tariffs and provider_tariff_tiers. 177 + 2 = 179.
 # Payment splits (20270125000000): SELECT on payment_split_plans; SELECT, INSERT, UPDATE on
 # pay_split_preferences (own row only, by RLS). 179 + 4 = 183.
-if [ "$AUTHENTICATED_GRANT_COUNT" = "183" ]; then
-  pass "authenticated holds exactly the 183 table grants expected, no more"
+# Save On savings (20270127000000): SELECT on save_on_plan_outcomes_v (security_invoker). 183 + 1 = 184.
+if [ "$AUTHENTICATED_GRANT_COUNT" = "184" ]; then
+  pass "authenticated holds exactly the 184 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 183 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 184 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -1100,10 +1101,11 @@ AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_p
 # approvals x4, integrations/communications x2). 164 + 18 = 182.
 # Payment splits (20270125000000): create_payment_split_plan,
 # attach_intent_to_split_plan, stop_payment_split_plan (member-checked). 182 + 3 = 185.
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "185" ]; then
-  pass "authenticated holds EXECUTE on exactly the 185 functions expected, no more"
+# Save On savings (20270127000000): save_on_report (security invoker, runs under RLS). 185 + 1 = 186.
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "186" ]; then
+  pass "authenticated holds EXECUTE on exactly the 186 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 185 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 186 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -10314,6 +10316,78 @@ else
 fi
 PS_I3="$(PS_MK_INTENT ps-i3 5000000)"
 ps_refused "attaching a part to a stopped plan" "plan_stopped" "$USER_A" "select public.attach_intent_to_split_plan('$PS_ID', '$PS_I3', 3);"
+
+
+echo ""
+# ===========================================================================
+# Save On savings (20270127000000_save_on_savings). A fee-saving plan's saving (fee as one
+# transfer minus fee as parts, from a verified tariff) counts ONLY once every part is
+# settled; a plan still being sent is "expected"; a stopped plan and a capacity plan count
+# for nothing; the windows go by when the last part settled; workspaces are isolated.
+# ===========================================================================
+echo "=== Save On savings ==="
+
+SO_PLAN() { # $1 key
+  echo "{\"workspace_id\":\"$WORKSPACE_A\",\"idempotency_key\":\"$1\",\"kind\":\"fee_saving\",\"payment_type\":\"pay_person\",\"currency\":\"RWF\",\"total_amount_minor\":180000,\"planned_parts\":[\"150000\",\"30000\"],\"single_fee_minor\":1500,\"planned_fee_minor\":500,\"fee_basis\":\"verified_tariff\",\"threshold\":\"balanced\"}"
+}
+SO_REPORT() { # $1 user, $2 json path like {periods,6,saved_minor}
+  as_user "$1" "select public.save_on_report('$WORKSPACE_A') #>> '$2';"
+}
+SO_SETTLE() { # $1 intent
+  as_user "$USER_A" "select public.transition_payment_intent('$1', 'initiated', null, '{}'::jsonb);" >/dev/null
+  as_user "$USER_A" "select public.transition_payment_intent('$1', 'awaiting_verification', null, '{}'::jsonb);" >/dev/null
+  as_user "$USER_A" "select public.manually_confirm_payment('$1', 'done');" >/dev/null
+}
+so_check() { # label expected actual
+  if [ "$3" = "$2" ]; then pass "save on savings: $1"; else fail "save on savings: $1 (expected $2, got $3)"; fi
+}
+
+SO_BASE="$(SO_REPORT "$USER_A" '{periods,6,saved_minor}')"
+so_check "nothing is saved before any fee-saving plan completes" "0" "$SO_BASE"
+
+as_user "$USER_A" "select public.create_payment_split_plan('$(SO_PLAN so-1)'::jsonb);" >/dev/null
+SO_ID="$(psql -d pfe_rls -t -A -c "select id from public.payment_split_plans where workspace_id = '$WORKSPACE_A' and idempotency_key = 'so-1';")"
+SO_I1="$(PS_MK_INTENT so-i1 150000)"
+SO_I2="$(PS_MK_INTENT so-i2 30000)"
+as_user "$USER_A" "select public.attach_intent_to_split_plan('$SO_ID', '$SO_I1', 1);" >/dev/null
+SO_SETTLE "$SO_I1"
+so_check "a plan with only part 1 settled saves nothing yet" "0" "$(SO_REPORT "$USER_A" '{periods,6,saved_minor}')"
+so_check "...and is reported as in progress" "1" "$(SO_REPORT "$USER_A" '{in_progress,plans}')"
+so_check "...with the saving it is expected to make" "1000" "$(SO_REPORT "$USER_A" '{in_progress,expected_saving_minor}')"
+
+as_user "$USER_A" "select public.attach_intent_to_split_plan('$SO_ID', '$SO_I2', 2);" >/dev/null
+SO_SETTLE "$SO_I2"
+so_check "once every part is settled the saving counts (1,500 as one, 500 as parts: 1,000)" "1000" "$(SO_REPORT "$USER_A" '{periods,6,saved_minor}')"
+so_check "...in the last 24 hours too" "1000" "$(SO_REPORT "$USER_A" '{periods,0,saved_minor}')"
+so_check "...with the fee it would have been as one transfer" "1500" "$(SO_REPORT "$USER_A" '{periods,6,would_have_paid_minor}')"
+so_check "...and the fee it was as parts" "500" "$(SO_REPORT "$USER_A" '{periods,6,paid_minor}')"
+so_check "...counting the plan and its two transfers" "1/2" "$(SO_REPORT "$USER_A" '{periods,6,plans}')/$(SO_REPORT "$USER_A" '{periods,6,transfers}')"
+so_check "...which is no longer in progress" "0" "$(SO_REPORT "$USER_A" '{in_progress,plans}')"
+so_check "...and is the latest completed plan" "1000" "$(SO_REPORT "$USER_A" '{recent,0,saved_minor}')"
+
+# The windows go by when the last part settled: ten days ago is outside 7 days, inside 2 weeks.
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "update public.payment_intents set manually_confirmed_at = now() - interval '10 days', verified_at = null where id in ('$SO_I1', '$SO_I2');" >/dev/null
+so_check "a plan finished 10 days ago is not in the last 24 hours" "0" "$(SO_REPORT "$USER_A" '{periods,0,saved_minor}')"
+so_check "...nor in the last 7 days" "0" "$(SO_REPORT "$USER_A" '{periods,1,saved_minor}')"
+so_check "...but is in the last 2 weeks" "1000" "$(SO_REPORT "$USER_A" '{periods,2,saved_minor}')"
+so_check "...and in the last month and all time" "1000/1000" "$(SO_REPORT "$USER_A" '{periods,3,saved_minor}')/$(SO_REPORT "$USER_A" '{periods,6,saved_minor}')"
+
+# A plan that is stopped before every part is settled claims nothing.
+as_user "$USER_A" "select public.create_payment_split_plan('$(SO_PLAN so-2)'::jsonb);" >/dev/null
+SO_ID2="$(psql -d pfe_rls -t -A -c "select id from public.payment_split_plans where workspace_id = '$WORKSPACE_A' and idempotency_key = 'so-2';")"
+SO_I3="$(PS_MK_INTENT so-i3 150000)"
+as_user "$USER_A" "select public.attach_intent_to_split_plan('$SO_ID2', '$SO_I3', 1);" >/dev/null
+SO_SETTLE "$SO_I3"
+as_user "$USER_A" "select public.stop_payment_split_plan('$SO_ID2');" >/dev/null
+so_check "a stopped plan adds nothing to the savings" "1000" "$(SO_REPORT "$USER_A" '{periods,6,saved_minor}')"
+so_check "...and is not counted as in progress" "0" "$(SO_REPORT "$USER_A" '{in_progress,plans}')"
+
+# The eKash over-capacity plan (ps-1, earlier) saves no fee, so it never appears.
+so_check "a capacity plan is never counted as a saving" "1" "$(SO_REPORT "$USER_A" '{periods,6,plans}')"
+
+# Another workspace's member sees none of it (RLS).
+so_check "another workspace's member sees no savings" "0" "$(SO_REPORT "$USER_B" '{periods,6,saved_minor}')"
+so_check "...and no recent plans" "0" "$(as_user "$USER_B" "select jsonb_array_length(public.save_on_report('$WORKSPACE_A') -> 'recent');")"
 
 
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="

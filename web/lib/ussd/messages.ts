@@ -208,6 +208,26 @@ const en = {
         remaining: "Not yet prepared: {amount} RWF",
         feesNote: "Fees shown are estimates, not guarantees.",
       },
+      savings: {
+        title: "Saved with Save On",
+        intro:
+          "Fees you did not pay because Save On sent a payment in parts instead of one transfer.",
+        none: "Nothing saved yet",
+        emptyBody:
+          "When you send a payment in parts with Save On and every part goes through, the fees you saved show up here.",
+        plans: "{n} payment{s} in parts · {transfers} transfers",
+        asOne: "As one transfer: {amount} RWF in fees",
+        asParts: "As parts: {amount} RWF in fees",
+        saved: "Saved {amount} RWF ({pct}% of the fees)",
+        savedNoShare: "Saved {amount} RWF",
+        inProgress: "{n} in progress: about {amount} RWF more once every part is sent.",
+        recentTitle: "Latest savings",
+        recentRow: "{date} · {total} RWF in {n} parts · saved {amount} RWF",
+        estimate:
+          "Estimates from your provider's published fees; your provider shows the final fee. A saving counts only once every part has gone through.",
+        seeAll: "See all savings",
+        periodGroup: "Period",
+      },
       settings: {
         title: "Save On",
         enable: "Turn on Save On",

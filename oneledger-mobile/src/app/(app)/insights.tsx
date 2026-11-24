@@ -30,6 +30,7 @@ import { personIdFromKey } from "@/features/people/display";
 import type { CurrencyOverview, Drilldown } from "@/features/insights/types";
 import { useQuery } from "@/hooks/useQuery";
 import { formatDateTime } from "@/lib/kigali-time";
+import { SaveOnSavingsCard } from "@/features/save-on/SaveOnSavingsCard";
 import { formatMoney } from "@/lib/money";
 import { space } from "@/theme/tokens";
 
@@ -147,6 +148,9 @@ function InsightsForSpace({ workspaceId }: { workspaceId: string | null }) {
           </>
         )
       ) : null}
+
+      {/* Save On: fees saved by sending in parts, as its own section. Absent when Save On is off. */}
+      <SaveOnSavingsCard />
     </Screen>
   );
 }

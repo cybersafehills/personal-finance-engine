@@ -33,6 +33,14 @@ Product decisions, 2026-11-23 (OneLedger's product owner):
 | Fee shown | "up to RWF 20 per part", a ceiling not a prediction | exact, with the tariff's source and verified date |
 | Send the rest as one | never (it cannot go as one) | yes, once every prepared part is settled |
 
+## Savings report
+
+Save On keeps a running total of what it has saved in transfer fees (web: Save On page, Insights, Reports, and a Home tile; mobile: Save On screen, Insights, Reports, Home), over 24 hours / 7 days / 2 weeks / a month / 3 months / 12 months / all time.
+
+- **What counts:** for a fee-saving plan, `single_fee_minor - planned_fee_minor` (both from a verified tariff), and only once **every part is settled**. The window is by when the last part settled. A plan still being sent is shown as "expected"; a stopped plan counts for nothing; an over-the-eKash-limit plan saves no fee, so it never appears.
+- **How:** computed live, never stored: `save_on_plan_outcomes_v` (security invoker) and `save_on_report(workspace)` (migration `20270127000000`), read through `lib/pay/splits/savings.ts` and `GET /api/mobile/pay/splits/savings`. The numbers are always current and can't drift from the plans.
+- **Honesty:** estimates from the provider's published fee table; the provider shows the final fee. If the report can't be read the section is hidden, not shown as zero.
+
 ## Where things are
 
 | Concern | Path (under `web/`) |

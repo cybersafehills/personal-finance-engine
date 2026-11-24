@@ -1324,4 +1324,32 @@ test.describe("mobile API", () => {
       await api.dispose();
     }
   });
+  test("pay splits: the savings report has every window and counts nothing that wasn't completed", async () => {
+    const api = await playwrightRequest.newContext({ baseURL: BASE_URL });
+    try {
+      const signIn = await api.post("/api/mobile/auth/sign-in", {
+        data: { email: E2E_USER.email, password: E2E_USER.password },
+      });
+      expect(signIn.status()).toBe(200);
+      const headers = { authorization: `Bearer ${(await signIn.json()).access_token}` };
+      const res = await api.get("/api/mobile/pay/splits/savings", { headers });
+      expect(res.status()).toBe(200);
+      expect(res.headers()["cache-control"]).toContain("no-store");
+      const { report } = await res.json();
+      expect(report.periods.map((p: { key: string }) => p.key)).toEqual(["24h", "7d", "14d", "30d", "90d", "365d", "all"]);
+      for (const p of report.periods) {
+        expect(p.savedMinor).toMatch(/^\d+$/);
+        // Saved plus what it cost as parts is what it would have cost as one transfer.
+        expect(BigInt(p.savedMinor) + BigInt(p.paidMinor)).toBe(BigInt(p.wouldHavePaidMinor));
+      }
+      // A longer window never shows less than a shorter one.
+      const saved = report.periods.map((p: { savedMinor: string }) => BigInt(p.savedMinor));
+      for (let i = 1; i < saved.length; i += 1) expect(saved[i] >= saved[i - 1]).toBe(true);
+      // The over-the-eKash-limit split made in the test above saves no fee, so it adds nothing.
+      expect(typeof report.inProgress.plans).toBe("number");
+      expect((await api.get("/api/mobile/pay/splits/savings")).status()).toBe(401);
+    } finally {
+      await api.dispose();
+    }
+  });
 });

@@ -1,3 +1,4 @@
+import { SaveOnSavings } from "../../components/pay/SaveOnSavings";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PageHeader } from "../../components/PageHeader";
@@ -679,6 +680,9 @@ export default async function InsightsPage({
             sourceLabels={sourceLabels}
           />
         ))}
+
+      {/* Save On: fees saved by sending in parts. A separate section; absent when Save On is off. */}
+      <SaveOnSavings />
 
       {blocks.length > 1 && (
         <p className="text-xs text-text-muted">

@@ -4,6 +4,7 @@ import { View } from "react-native";
 import { fetchSaveOnPrefs, saveSaveOnPrefs } from "@/api/mobile-api";
 import { Button, Card, Chip, EmptyState, Screen, ScreenHeader, Text } from "@/components/ds";
 import { SAVE_ON } from "@/features/save-on/messages";
+import { SaveOnSavingsCard } from "@/features/save-on/SaveOnSavingsCard";
 import { rwf } from "@/features/save-on/format";
 import type { SaveOnLevels, SaveOnPrefs, SaveOnThreshold } from "@/features/save-on/types";
 import { useQuery } from "@/hooks/useQuery";
@@ -49,6 +50,8 @@ export default function SaveOn() {
   return (
     <Screen>
       <ScreenHeader title={S.title} subtitle={S.subtitle} />
+
+      <SaveOnSavingsCard />
 
       <Card style={{ gap: space[2] }}>
         <Text variant="bodyStrong">{S.howTitle}</Text>
