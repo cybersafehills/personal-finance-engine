@@ -91,9 +91,9 @@ describe("Save On in More", () => {
     expect(labels({ paySplits: true })).toContain("Save On");
   });
 
-  it("sits under Pay & Services and opens the Save On screen", () => {
+  it("sits under Payments and opens the Save On screen", () => {
     const group = MORE_GROUPS.find((g) => g.links.some((l) => l.route === "/save-on"));
-    expect(group?.title).toBe("Pay & Services");
+    expect(group?.title).toBe("Payments");
   });
 
   it("reads the flag from the server's config", () => {
