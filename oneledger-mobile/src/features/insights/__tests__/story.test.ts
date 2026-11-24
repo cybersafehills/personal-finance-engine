@@ -1,6 +1,6 @@
 import { buildOutlookChart } from "../chart";
 import type { WalletForecast } from "../forecast";
-import { commitmentLine, dayLabel, endLine, firstDayBelowZero, largePaymentLine, outlookFor, outlookSeries, paceStory, repeatingLine, shapeOf, summaryRows, walkRows } from "../story";
+import { commitmentLine, datedPayments, dayLabel, endLine, firstDayBelowZero, largePaymentLine, outlookFor, outlookSeries, paceStory, repeatingLine, sectionPlan, shapeOf, summaryRows, walkRows, worstOutlook, type Outlook } from "../story";
 
 const NOW = "2026-11-24T08:00:00Z";
 const wallet = (over: Partial<WalletForecast> = {}): WalletForecast => ({
@@ -140,5 +140,44 @@ describe("Home summary rows", () => {
   it("leaves out what it has nothing to say about, and hides amounts when asked", () => {
     expect(summaryRows(null, null, 30, false)).toEqual([]);
     expect(summaryRows(base, wallet(), 30, true).map((r) => r.detail).join(" ")).not.toMatch(/RWF/);
+  });
+});
+
+
+const verdict = (tone: Outlook["tone"]): Outlook => ({ tone, title: "t", message: "m", runsOutInDays: null, cautiousRunsOutInDays: null });
+const pace = (tone: "good" | "watch" | "neutral") => ({ tone, title: "t", sentence: "s", spent: 1n, usual: 1n, fraction: 1 });
+
+describe("section plan: what needs attention comes first", () => {
+  it("puts an urgent outlook first, then things worth a look, then information, then what is fine", () => {
+    const plan = sectionPlan({ outlook: verdict("alert"), pace: pace("good"), largeCount: 2, repeatCount: 4 });
+    expect(plan.map((s) => `${s.id}:${s.tone}`)).toEqual(["outlook:urgent", "large:check", "repeat:info", "pace:good"]);
+    expect(plan[0].status).toBe("Needs attention");
+  });
+  it("lets a healthy outlook sit below something that needs a look", () => {
+    const plan = sectionPlan({ outlook: verdict("good"), pace: pace("watch"), largeCount: 1, repeatCount: 0 });
+    expect(plan.map((s) => s.id)).toEqual(["pace", "large", "outlook"]);
+  });
+  it("keeps the usual order for equal importance and omits what has nothing to say", () => {
+    const plan = sectionPlan({ outlook: null, pace: pace("watch"), largeCount: 3, repeatCount: 0 });
+    expect(plan.map((s) => s.id)).toEqual(["pace", "large"]);
+    expect(sectionPlan({ outlook: null, pace: null, largeCount: 0, repeatCount: 0 })).toEqual([]);
+  });
+  it("an in-line month is simply fine", () => {
+    expect(sectionPlan({ outlook: null, pace: pace("neutral"), largeCount: 0, repeatCount: 0 })[0].tone).toBe("good");
+  });
+  it("shows the most serious verdict when several wallets are listed", () => {
+    expect(worstOutlook([verdict("good"), verdict("alert"), verdict("watch")])!.tone).toBe("alert");
+    expect(worstOutlook([])).toBeNull();
+  });
+});
+
+describe("dated payments", () => {
+  it("does not treat the closing checkpoint as a payment", () => {
+    const w = wallet({ opening: 14_416n, scheduledEnd: 14_416n, points: [{ day: 0, label: "Today", scheduled: 14_416n, estimated: 14_416n }, { day: 14, label: "Day 14", scheduled: 14_416n, estimated: 0n }] });
+    expect(datedPayments(w)).toEqual([]);
+  });
+  it("keeps a real payment", () => {
+    const w = wallet({ opening: 50_000n, scheduledEnd: 49_400n, points: [{ day: 0, label: "Today", scheduled: 50_000n, estimated: 50_000n }, { day: 5, label: "Rent", scheduled: 49_400n, estimated: 49_400n }, { day: 30, label: "Day 30", scheduled: 49_400n, estimated: 49_400n }] });
+    expect(datedPayments(w).map((i) => [i.label, i.delta])).toEqual([["Rent", -600n]]);
   });
 });

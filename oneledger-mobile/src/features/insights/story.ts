@@ -224,3 +224,49 @@ export function scheduledItems(f: WalletForecast): ScheduledItem[] {
   }
   return items;
 }
+
+// ---------------------------------------------------------------------------
+// Which section matters most? (order and colour of the outlook page)
+// ---------------------------------------------------------------------------
+
+export type SectionId = "outlook" | "pace" | "large" | "repeat";
+/** urgent = act now (red) · check = worth a look (amber) · info = good to know (blue) · good = all fine (green). */
+export type SectionTone = "urgent" | "check" | "info" | "good";
+export type SectionPlan = { id: SectionId; tone: SectionTone; status: string };
+
+export const TONE_STATUS: Record<SectionTone, string> = {
+  urgent: "Needs attention",
+  check: "Worth a look",
+  info: "Good to know",
+  good: "All good",
+};
+const RANK: Record<SectionTone, number> = { urgent: 0, check: 1, info: 2, good: 3 };
+const DEFAULT_ORDER: SectionId[] = ["outlook", "pace", "large", "repeat"];
+
+/**
+ * The sections that have something to say, most important first: what needs attention now, then what is
+ * worth a look, then what is good to know, then what is fine. Equal importance keeps the usual order
+ * (outlook, spending, large payments, repeating payments), so the page never reshuffles for no reason.
+ */
+export function sectionPlan(input: { outlook: Outlook | null; pace: PaceStory | null; largeCount: number; repeatCount: number }): SectionPlan[] {
+  const tones: Partial<Record<SectionId, SectionTone>> = {};
+  if (input.outlook) tones.outlook = input.outlook.tone === "alert" ? "urgent" : input.outlook.tone === "watch" ? "check" : "good";
+  if (input.pace) tones.pace = input.pace.tone === "watch" ? "check" : "good";
+  if (input.largeCount > 0) tones.large = "check";
+  if (input.repeatCount > 0) tones.repeat = "info";
+  return DEFAULT_ORDER
+    .filter((id) => tones[id] !== undefined)
+    .map((id) => ({ id, tone: tones[id]!, status: TONE_STATUS[tones[id]!] }))
+    .sort((a, b) => RANK[a.tone] - RANK[b.tone] || DEFAULT_ORDER.indexOf(a.id) - DEFAULT_ORDER.indexOf(b.id));
+}
+
+/** The most serious verdict across wallets (several wallets share one "next days" section). */
+export function worstOutlook(outlooks: readonly Outlook[]): Outlook | null {
+  const rank = { alert: 0, watch: 1, good: 2 } as const;
+  return [...outlooks].sort((a, b) => rank[a.tone] - rank[b.tone])[0] ?? null;
+}
+
+/** Real dated payments only: the forecast's closing checkpoint is not a payment. */
+export function datedPayments(f: WalletForecast): ScheduledItem[] {
+  return scheduledItems(f).filter((item) => item.delta !== 0n);
+}

@@ -7,13 +7,15 @@ import { router } from "expo-router";
 import { useState, type ReactNode } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { Card, Text } from "@/components/ds";
+import type { Baseline } from "@/features/insights/intelligence";
+import { paceStory } from "@/features/insights/story";
 import type { CurrencyOverview } from "@/features/insights/types";
 import type { Wallet } from "@/features/wallets/types";
 import { STATUS_LABEL, PROVIDER_LABEL } from "@/features/wallets/display";
 import { usePrivacy } from "@/features/privacy/PrivacyProvider";
 import { formatMoney, type SupportedCurrency } from "@/lib/money";
 import { makeStyles, useTheme } from "@/theme/ThemeProvider";
-import { compactMoney, changeBps, percentText, retainedPercent } from "./live-data";
+import { compactMoney, retainedPercent } from "./live-data";
 import { usePinnedSection } from "./usePinnedSection";
 import { HomeSpaceSwitcher } from "./HomeSpaceSwitcher";
 import { Donut } from "./Charts";
@@ -55,7 +57,7 @@ export function HomeLink({ label, onPress }: { label: string; onPress(): void })
 
 export { WalletCarousel as HeroBalance } from "./WalletCarousel";
 
-export function CashFlow({ currency, current, previous, previousAvailable = false, today, todayAvailable, todayPending = false, available, message }: { previous?: CurrencyOverview | null; previousAvailable?: boolean; today: CurrencyOverview | null; todayAvailable: boolean; todayPending?: boolean; currency: SupportedCurrency; current: CurrencyOverview | null; available: boolean; message: string }) {
+export function CashFlow({ currency, current, today, todayAvailable, todayPending = false, available, message, pace = null }: { today: CurrencyOverview | null; todayAvailable: boolean; todayPending?: boolean; currency: SupportedCurrency; current: CurrencyOverview | null; available: boolean; message: string; pace?: Baseline | null }) {
   const { amountsHidden } = usePrivacy();
   const styles = useStyles();
   const money = (amount: bigint, ready: boolean) => amountsHidden ? "••••••" : ready ? compactMoney(amount,currency) : "—";
@@ -64,16 +66,13 @@ export function CashFlow({ currency, current, previous, previousAvailable = fals
   return <HomeSection guideId="home-cash-flow" title="Cash flow" dense action={<Text variant="caption" color="textMuted">{currency}</Text>}>
     <View style={styles.dailyPrimary}>{[{label:"Received today",amount:today?.moneyInMinor ?? 0n,positive:true},{label:"Spent today",amount:today?.moneyOutMinor ?? 0n,positive:false}].map(item => <View key={item.label} style={{flex:1,gap:5}}><Text variant="caption" color="textMuted">{item.label}</Text><Text variant="title" style={styles.dailyAmount} color={item.positive ? "moneyPositive" : "moneyRequest"} tabular adjustsFontSizeToFit numberOfLines={1}>{money(item.amount,todayAvailable)}</Text></View>)}</View>
     {!todayAvailable ? <Text variant="caption" color="textMuted">{todayPending ? "Updating today’s activity…" : "Today’s activity is unavailable."}</Text> : null}
-    <View style={styles.monthlyFooter}><Text variant="caption" color="textMuted" style={styles.small}>This month · Settled activity</Text>
+    <View style={styles.monthlyFooter}><Text variant="caption" color="textMuted" style={styles.small}>This month so far</Text>
       {available ? <>
-        <View style={styles.cashColumns}>{[{label:"Income",amount:income,prior:previous?.moneyInMinor ?? 0n,income:true},{label:"Expenses",amount:expense,prior:previous?.moneyOutMinor ?? 0n,income:false}].map(item => {
-          const delta=previousAvailable ? changeBps(item.amount,item.prior) : null;
-          const favorable=delta !== null && (item.income ? delta>0 : delta<0);
-          return <View key={item.label} style={{flex:1,gap:3}}><View style={{flexDirection:"row",flexWrap:"wrap",alignItems:"baseline",gap:5}}><Text variant="caption" color="textMuted" style={styles.small}>{item.label}</Text><Text variant="bodyStrong" style={styles.monthlyAmount} tabular>{money(item.amount,true)}</Text></View><Text variant="caption" style={styles.small} color={delta === null || delta===0 ? "textMuted" : favorable ? "moneyPositive" : "danger"}>{amountsHidden ? "Comparison hidden" : delta===null ? "No comparison yet" : `${percentText(delta)} vs last month`}</Text></View>;
-        })}</View>
-        <View style={styles.retentionTrack} accessibilityRole="progressbar" accessibilityLabel="Income retained this month" accessibilityValue={!amountsHidden && retained !== null ? {min:0,max:100,now:Math.round(Math.max(0,Math.min(100,retained)))} : undefined}><View style={[styles.retentionFill,{width:`${amountsHidden || retained===null ? 0 : Math.max(0,Math.min(100,retained))}%`}]}/></View>
-        <Text variant="caption" color="textMuted" style={styles.small}>{amountsHidden ? "Amounts hidden" : retained===null ? "No income to calculate retention" : retained<0 ? `Expenses exceed income by ${compactMoney(expense-income,currency)}` : `${Math.round(retained)}% of income retained this month`}</Text>
-        <Text variant="caption" color="textMuted" style={styles.comparisonNote}>Same point in the previous month · Internal transfers excluded</Text>
+        <View style={styles.cashColumns}>{[{label:"Income",amount:income},{label:"Spent",amount:expense}].map(item => <View key={item.label} style={{flex:1,gap:3}}><View style={{flexDirection:"row",flexWrap:"wrap",alignItems:"baseline",gap:5}}><Text variant="caption" color="textMuted" style={styles.small}>{item.label}</Text><Text variant="bodyStrong" style={styles.monthlyAmount} tabular>{money(item.amount,true)}</Text></View></View>)}</View>
+        <View style={styles.retentionTrack} accessibilityRole="progressbar" accessibilityLabel="Share of what you received that you kept this month" accessibilityValue={!amountsHidden && retained !== null ? {min:0,max:100,now:Math.round(Math.max(0,Math.min(100,retained)))} : undefined}><View style={[styles.retentionFill,{width:`${amountsHidden || retained===null ? 0 : Math.max(0,Math.min(100,retained))}%`}]}/></View>
+        <Text variant="caption" color="textMuted" style={styles.small}>{amountsHidden ? "Amounts hidden" : retained===null ? "No money received yet this month" : retained<0 ? `You spent ${compactMoney(expense-income,currency)} more than you received this month` : `You kept ${Math.round(retained)}% of what you received this month`}</Text>
+        {pace ? <Pressable accessibilityRole="button" accessibilityLabel={`${paceStory(pace, amountsHidden).title}. See your spending this month.`} onPress={() => router.push({ pathname: "/forecast", params: { section: "pace" } })} style={styles.paceLink}><Text variant="caption" color="accent" style={styles.small}>{`Spending is ${paceStory(pace, amountsHidden).title.toLowerCase()} · See details →`}</Text></Pressable> : null}
+        <Text variant="caption" color="textMuted" style={styles.comparisonNote}>Moves between your own accounts are not counted.</Text>
       </> : <Text variant="caption" color="textMuted">{message}</Text>}
     </View>
   </HomeSection>;
@@ -115,6 +114,7 @@ export function WalletPanel({ wallets, message, manage = true }: { wallets: Wall
 const useStyles = makeStyles((c) => StyleSheet.create({
   retentionTrack:{height:4,borderRadius:2,backgroundColor:c.borderSubtle,overflow:"hidden",marginTop:4},
   retentionFill:{height:4,borderRadius:2,backgroundColor:c.chartIncome},
+  paceLink: { minHeight: 32, justifyContent: "center" },
   comparisonNote:{fontSize:10,lineHeight:14},
   denseSection: { padding:14,gap:6 },
   dailyPrimary: { flexDirection:"row",gap:12,paddingVertical:4 },
