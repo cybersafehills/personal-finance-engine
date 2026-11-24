@@ -1,5 +1,7 @@
 import { bearerGet, bearerPost, failureForOutcome, failureForStatus, type BearerFailure } from "@/api/bearer";
 
+import { config } from "@/lib/config";
+
 import { minor } from "./parse";
 
 // GET /api/mobile/insights/intelligence (docs/mobile-api.md): the non-forecast
@@ -148,9 +150,15 @@ export function parseIntelligence(status: number, body: unknown, workspaceId?: s
 
 export async function fetchIntelligence(workspaceId?: string | null): Promise<IntelligenceResult> {
   const result = await bearerGet("/api/mobile/insights/intelligence");
-  return result.kind === "response"
-    ? parseIntelligence(result.status, result.body, workspaceId)
-    : { ok: false, ...failureForOutcome(result, "Your insights") };
+  if (result.kind !== "response") return { ok: false, ...failureForOutcome(result, "Your insights") };
+  const parsed = parseIntelligence(result.status, result.body, workspaceId);
+  if (__DEV__ && !parsed.ok && parsed.reason === "error") {
+    // Preview builds only: show what actually came back (never the token).
+    let preview = "";
+    try { preview = JSON.stringify(result.body).slice(0, 90); } catch { preview = "unreadable"; }
+    return { ...parsed, message: `${parsed.message} [${result.status} from ${config.apiBaseUrl} ${preview}]` };
+  }
+  return parsed;
 }
 
 /**
