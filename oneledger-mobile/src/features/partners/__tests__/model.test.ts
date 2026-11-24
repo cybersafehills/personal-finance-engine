@@ -12,7 +12,7 @@ it("suppresses Home for the first sessions and capped delivery states", () => {
   }
 });
 it("a dismissed Home banner stays out of the offers hub's way and only hides Home", () => {
-  const state = { ...active(), homeDismissed: true };
+  const state = { ...active(), dismissed: ["home" as const] };
   expect(previewHomeOffer(state, today)).toBeNull();
   expect(previewHomeReason(state, today)).toMatch(/dismissed for this session/);
   expect(eligiblePreviewOffers(state, today)).toHaveLength(3);
@@ -84,4 +84,13 @@ it("the Transactions placement shows every eligible offer and honours the owner'
   expect(placementOffers(state, "transactions", today)).toHaveLength(3);
   const off = { ...state, placements: { ...initialPlacements(), transactions: { ...initialPlacements().transactions, enabled: false } } };
   expect(placementOffers(off, "transactions", today)).toEqual([]);
+});
+
+it("a dismissed placement is empty for this session while the others are unaffected", () => {
+  const state = { ...active(), dismissed: ["plan" as const, "pay-person" as const] };
+  expect(placementOffers(state, "plan", today)).toEqual([]);
+  expect(placementOffers(state, "pay-person", today)).toEqual([]);
+  expect(placementReason(state, "plan", today)).toMatch(/Dismissed for this session/);
+  expect(placementOffers(state, "transactions", today).length).toBeGreaterThan(0);
+  expect(placementOffers(state, "home", today).length).toBeGreaterThan(0);
 });

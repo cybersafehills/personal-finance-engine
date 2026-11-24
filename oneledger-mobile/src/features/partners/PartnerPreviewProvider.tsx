@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { useSession } from "@/features/auth/SessionProvider";
 import { useActiveSpace } from "@/features/spaces/ActiveSpaceProvider";
 import { kigaliDateKey } from "@/lib/kigali-time";
-import { EMPTY_FEED, PREVIEW_OFFERS, initialPartnerPreview, type PartnerFeed, type PartnerPreviewState } from "./model";
+import { EMPTY_FEED, PREVIEW_OFFERS, initialPartnerPreview, type PartnerFeed, type PartnerPreviewState, type PlacementId } from "./model";
 import { fetchPartnerFeed } from "./feed";
 import { DEFAULT_PREVIEW, PartnerPreviewContext } from "./context";
 
@@ -35,7 +35,7 @@ export function PartnerPreviewProvider({ children }: { children: ReactNode }) {
   const live = !previewOn && feed.enabled && feed.offers.length > 0;
   const mode: "preview" | "live" | "off" = previewOn ? "preview" : live ? "live" : "off";
   const base = useMemo(() => previewOn ? current : live ? { ...current, enabled: true, placements: feed.placements, scenario: "returning" as const } : DEFAULT_PREVIEW, [previewOn, live, current, feed.placements]);
-  const state = useMemo(() => (base.homeDismissed && !canDismiss ? { ...base, homeDismissed: false } : base), [base, canDismiss]);
+  const state = useMemo(() => (base.dismissed.length && !canDismiss ? { ...base, dismissed: [] } : base), [base, canDismiss]);
   const catalog = previewOn ? PREVIEW_OFFERS : live ? feed.offers : [];
   const today = kigaliDateKey(new Date().toISOString());
   const change = useCallback((apply: (previous: PartnerPreviewState) => PartnerPreviewState) => {
@@ -45,7 +45,7 @@ export function PartnerPreviewProvider({ children }: { children: ReactNode }) {
   const stop = useCallback(() => change(() => initialPartnerPreview()), [change]);
   const reset = useCallback(() => change(() => ({ ...initialPartnerPreview(), enabled: true })), [change]);
   const update = useCallback((patch: Partial<Omit<PartnerPreviewState, "enabled">>) => change(previous => ({ ...previous, ...patch })), [change]);
-  const dismissHome = useCallback(() => { if (canDismiss) change(previous => ({ ...previous, homeDismissed: true })); }, [canDismiss, change]);
-  const value = useMemo(() => ({ state, today, mode, catalog, start, stop, reset, update, canDismiss, dismissHome }), [state, today, mode, catalog, start, stop, reset, update, canDismiss, dismissHome]);
+  const dismissPlacement = useCallback((id: PlacementId) => { if (canDismiss) change(previous => ({ ...previous, dismissed: [...new Set([...previous.dismissed, id])] })); }, [canDismiss, change]);
+  const value = useMemo(() => ({ state, today, mode, catalog, start, stop, reset, update, canDismiss, dismissPlacement }), [state, today, mode, catalog, start, stop, reset, update, canDismiss, dismissPlacement]);
   return <PartnerPreviewContext.Provider value={value}>{children}</PartnerPreviewContext.Provider>;
 }

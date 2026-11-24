@@ -45,13 +45,13 @@ export function initialPlacements(): Record<PlacementId, PlacementConfig> {
 export type PartnerPreviewState = {
   placements: Record<PlacementId, PlacementConfig>;
   enabled: boolean; scenario: PreviewScenario;
-  /** Business accounts may dismiss the Home banner for the rest of the session; it comes back next session. */
-  homeDismissed: boolean;
+  /** Placements a Business account dismissed this session. In memory only: they all come back next session. */
+  dismissed: PlacementId[];
   interests: PartnerCategory[];
   language: "English" | "Kinyarwanda";
 };
 export function initialPartnerPreview(): PartnerPreviewState {
-  return { enabled: false, placements: initialPlacements(), scenario: "returning", homeDismissed: false, interests: [], language: "English" };
+  return { enabled: false, placements: initialPlacements(), scenario: "returning", dismissed: [], interests: [], language: "English" };
 }
 export function eligiblePreviewOffers(state: PartnerPreviewState, today: string, catalog: readonly PartnerOffer[] = PREVIEW_OFFERS) {
   return catalog.filter(offer => offer.endsOn >= today && offer.language === state.language);
@@ -61,7 +61,7 @@ export function previewHomeReason(state: PartnerPreviewState, today: string): st
   if (state.scenario === "first-visit") return "No Home promotion during the first three sessions.";
   if (state.scenario === "daily-cap") return "Daily limit reached: no additional Home promotion today.";
   if (state.scenario === "weekly-cap") return "Weekly limit reached: three Home exposures this week.";
-  if (state.homeDismissed) return "Home banner dismissed for this session.";
+  if (state.dismissed.includes("home")) return "Home banner dismissed for this session.";
   return null;
 }
 export function previewHomeOffer(state: PartnerPreviewState, today: string, catalog: readonly PartnerOffer[] = PREVIEW_OFFERS) {
@@ -73,6 +73,7 @@ export function previewHomeOffer(state: PartnerPreviewState, today: string, cata
 export function placementReason(state: PartnerPreviewState, id: PlacementId, today: string): string | null {
   if (!state.enabled) return "Sponsored content is off.";
   if (!state.placements[id].enabled) return `${PLACEMENT_LABELS[id].label} placement is switched off by the platform.`;
+  if (state.dismissed.includes(id)) return "Dismissed for this session.";
   if (id === "home") return previewHomeReason(state, today);
   if (state.scenario === "first-visit") return "No promotions during the first three sessions.";
   if (state.scenario === "daily-cap") return "Daily limit reached: no additional promotion today.";

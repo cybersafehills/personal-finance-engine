@@ -33,20 +33,20 @@ it("gives a personal account no way to dismiss the Home banner", async () => {
   await render(<PartnerPreviewProvider><Toggle/><PartnerHomePlacement ready/></PartnerPreviewProvider>);
   await fireEvent.press(screen.getByRole("button", {name:"Enable preview"}));
   expect(screen.getByTestId("partner-home-placement")).toBeTruthy();
-  expect(screen.queryByRole("button", {name:/Dismiss Home promotion/})).toBeNull();
+  expect(screen.queryByRole("button", {name:/Dismiss sponsored content/})).toBeNull();
 });
 it("lets a Business account dismiss the Home banner, and keeps the choice in memory only", async () => {
   mockSpace.active = { kind: "organization" };
   await render(<PartnerPreviewProvider><Toggle/><PartnerHomePlacement ready/></PartnerPreviewProvider>);
   await fireEvent.press(screen.getByRole("button", {name:"Enable preview"}));
-  await fireEvent.press(screen.getByRole("button", {name:"Dismiss Home promotion for this session"}));
+  await fireEvent.press(screen.getByRole("button", {name:"Dismiss sponsored content for this session"}));
   expect(screen.queryByTestId("partner-home-placement")).toBeNull();
 });
 it("a dismissal made in a Business Space does not hide the banner in a personal Space", async () => {
   mockSpace.active = { kind: "organization" };
   const tree = await render(<PartnerPreviewProvider><Toggle/><PartnerHomePlacement ready/></PartnerPreviewProvider>);
   await fireEvent.press(screen.getByRole("button", {name:"Enable preview"}));
-  await fireEvent.press(screen.getByRole("button", {name:"Dismiss Home promotion for this session"}));
+  await fireEvent.press(screen.getByRole("button", {name:"Dismiss sponsored content for this session"}));
   mockSpace.active = { kind: "personal" };
   await tree.rerender(<PartnerPreviewProvider><Toggle/><PartnerHomePlacement ready/></PartnerPreviewProvider>);
   expect(screen.getByTestId("partner-home-placement")).toBeTruthy();
@@ -143,4 +143,21 @@ it("offers no way to turn adverts off or hide a brand in preferences", async () 
   expect(screen.queryByText("Home promotions")).toBeNull();
   expect(screen.queryByText("Hidden brands")).toBeNull();
   expect(screen.getByText("Your chosen interests")).toBeTruthy();
+});
+
+it("lets a Business account dismiss the bar and the square pair, and a personal account neither", async () => {
+  mockSpace.active = { kind: "personal" };
+  await render(<PartnerPreviewProvider><Toggle/><PartnerPlacement id="plan"/><PartnerPlacement id="pay-person"/></PartnerPreviewProvider>);
+  await fireEvent.press(screen.getByRole("button", {name:"Enable preview"}));
+  expect(screen.getByTestId("partner-bar")).toBeTruthy();
+  expect(screen.queryByRole("button", {name:/Dismiss sponsored content/})).toBeNull();
+});
+it("dismisses each Business placement independently", async () => {
+  mockSpace.active = { kind: "organization" };
+  await render(<PartnerPreviewProvider><Toggle/><PartnerPlacement id="plan"/><PartnerPlacement id="pay-person"/></PartnerPreviewProvider>);
+  await fireEvent.press(screen.getByRole("button", {name:"Enable preview"}));
+  expect(screen.getAllByRole("button", {name:"Dismiss sponsored content for this session"})).toHaveLength(2);
+  await fireEvent.press(screen.getAllByRole("button", {name:"Dismiss sponsored content for this session"})[0]);
+  expect(screen.queryByTestId("partner-bar")).toBeNull();
+  expect(screen.getAllByTestId("partner-square").length).toBeGreaterThan(0);
 });
