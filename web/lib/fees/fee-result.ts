@@ -4,6 +4,7 @@
 
 import {
   estimateFromHistory,
+  estimateFromTariff,
   estimatePublishedFee,
   type FeeSchedule,
   type HistoryEstimate,
@@ -12,11 +13,14 @@ import {
   type LimitRow,
   type LimitWarning,
   pickSchedule,
+  type ProviderTariff,
   type PublishedEstimate,
+  RECIPIENT_SCOPES,
+  type RecipientScope,
 } from "./fee-estimate.ts";
 
 export const FEE_DISCLAIMER =
-  "These are estimates, not guarantees. Fees are set by your provider and can change; check with them before you pay. OneLedger does not charge this fee, does not move money, and will not suggest splitting a payment to get around a limit.";
+  "These are estimates, not guarantees. Fees are set by your provider and can change; check with them before you pay. OneLedger does not charge this fee and does not move money.";
 
 export type PublishedSection = {
   network: { slug: string; name: string };
@@ -28,6 +32,21 @@ export type PublishedSection = {
   warnings: LimitWarning[];
 };
 
+/** One recipient scope's tariff for the chosen provider and payment type. */
+export type ProviderRow = {
+  recipientScope: RecipientScope;
+  tariff: ProviderTariff;
+  state: "yes" | "not_yet" | "expired";
+  estimate: PublishedEstimate;
+};
+
+export type ProviderSection = {
+  provider: { slug: string; name: string };
+  /** False when the provider has no VERIFIED tariff on record for this payment type. */
+  hasTariff: boolean;
+  rows: ProviderRow[];
+};
+
 export type FeeResult = {
   amountMinor: bigint;
   currency: string;
@@ -36,6 +55,7 @@ export type FeeResult = {
   /** True when more matching payments exist than were read. */
   historyCapped: boolean;
   published: PublishedSection | null;
+  provider: ProviderSection | null;
 };
 
 export function buildFeeResult(input: {
@@ -48,6 +68,12 @@ export function buildFeeResult(input: {
     name: string;
     fees: readonly FeeSchedule[];
     limits: readonly LimitRow[];
+  } | null;
+  /** The chosen provider's verified tariffs (already filtered to the payment type). */
+  provider?: {
+    slug: string;
+    name: string;
+    tariffs: readonly ProviderTariff[];
   } | null;
   now: Date;
 }): FeeResult {
@@ -66,6 +92,30 @@ export function buildFeeResult(input: {
       warnings: limitWarnings(input.network.limits, amountMinor, currency, now),
     };
   }
+
+  let provider: ProviderSection | null = null;
+  if (input.provider) {
+    const rows: ProviderRow[] = [];
+    for (const scope of RECIPIENT_SCOPES) {
+      // only this payment type, only this scope; of those, the one in effect now
+      const candidates = input.provider.tariffs.filter((t) =>
+        t.recipient_scope === scope && t.transaction_type === input.type
+      );
+      const picked = pickSchedule(candidates, now);
+      if (!picked) continue;
+      rows.push({
+        recipientScope: scope,
+        tariff: picked.schedule,
+        state: picked.state,
+        estimate: estimateFromTariff(picked.schedule, amountMinor, currency, now),
+      });
+    }
+    provider = {
+      provider: { slug: input.provider.slug, name: input.provider.name },
+      hasTariff: rows.length > 0,
+      rows,
+    };
+  }
   return {
     amountMinor,
     currency,
@@ -73,6 +123,7 @@ export function buildFeeResult(input: {
     history: estimateFromHistory(input.history.samples, amountMinor),
     historyCapped: input.history.capped,
     published,
+    provider,
   };
 }
 
@@ -145,6 +196,23 @@ export function serializeFeeResult(r: FeeResult) {
           kind: w.kind,
           limit_minor: s(w.limitMinor),
           published_maximum: w.publishedMaximum,
+        })),
+      }
+      : null,
+    provider_tariff: r.provider
+      ? {
+        provider: r.provider.provider,
+        has_tariff: r.provider.hasTariff,
+        rows: r.provider.rows.map((row) => ({
+          recipient_scope: row.recipientScope,
+          schedule_state: row.state,
+          estimate: publishedJson(row.estimate),
+          source_label: row.tariff.source_label,
+          source_url: row.tariff.source_url,
+          effective_from: row.tariff.effective_from,
+          effective_to: row.tariff.effective_to,
+          verified_at: row.tariff.verified_at,
+          note: row.tariff.note_en,
         })),
       }
       : null,

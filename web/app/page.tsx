@@ -36,6 +36,7 @@ import { monthPeriodFor } from "../lib/budget-period";
 import { kigaliDateKey } from "../lib/kigali-time";
 import { DashboardTransactionItem } from "../components/DashboardTransactionItem";
 import { HouseholdSpendingCard } from "../components/HouseholdSpendingCard";
+import { SaveOnSavings } from "../components/pay/SaveOnSavings";
 import { EmptyState } from "../components/EmptyState";
 
 // Always read live from the database - this is a live balance/transaction
@@ -232,6 +233,11 @@ export default async function HomePage() {
           <IntelligenceCard insights={insights} />
         </div>
       )}
+
+      {/* Save On summary: only once it has saved (or is saving) something. */}
+      <div className={`empty:hidden lg:col-start-1 ${mainColumnSpan}`}>
+        <SaveOnSavings compact />
+      </div>
 
       <section className={`rounded-card border border-border-subtle bg-surface p-1.5 lg:col-start-1 ${mainColumnSpan}`}>
         <div className="flex items-center justify-between px-3 pb-1 pt-2">

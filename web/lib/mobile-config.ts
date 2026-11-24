@@ -9,6 +9,7 @@ import { isDeveloperApiEnabled, isIntegrationsEnabled } from "./integrations/gat
 import {
   isAssistedPayEnabled,
   isPayServicesEnabled,
+  isPaySplitsEnabled,
   isScanToPayEnabled,
   isTrustedRecipientsEnabled,
   isUssdDirectoryEnabled,
@@ -30,6 +31,8 @@ export type MobileConfig = {
   assistedPay: boolean;
   ussdDirectory: boolean;
   scanToPay: boolean;
+  /** "Save On": a payment sent as several transfers. */
+  paySplits: boolean;
   trustedRecipients: boolean;
   paymentRequests: boolean;
   statements: boolean;
@@ -50,6 +53,7 @@ export function mobileConfig(workspaceId: string | null): MobileConfig {
     assistedPay: isAssistedPayEnabled(workspaceId),
     ussdDirectory: isUssdDirectoryEnabled(workspaceId),
     scanToPay: isScanToPayEnabled(workspaceId),
+    paySplits: isPaySplitsEnabled(workspaceId),
     trustedRecipients: isTrustedRecipientsEnabled(workspaceId),
     paymentRequests: isPaymentRequestsEnabledForWorkspace(
       {

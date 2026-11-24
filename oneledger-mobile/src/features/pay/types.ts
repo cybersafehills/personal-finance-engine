@@ -19,8 +19,11 @@ export type PayIntent = {
   updatedAt: string;
   /** True only when the provider's own message confirmed it; a payment you confirmed yourself is not. */
   verified: boolean;
+  /** The Save On plan this payment is a part of, and which part. null = an ordinary payment (or an older server). */
+  splitPlanId: string | null;
+  splitIndex: number | null;
   /** null = no verified USSD route for this payment: the app offers no action. */
   instruction: PayInstruction | null;
 };
 
-export type PayConfig = { pay: boolean; assistedPay: boolean; ussdDirectory: boolean; scanToPay: boolean; trustedRecipients: boolean; paymentRequests: boolean };
+export type PayConfig = { pay: boolean; assistedPay: boolean; ussdDirectory: boolean; scanToPay: boolean; trustedRecipients: boolean; paymentRequests: boolean; paySplits: boolean };

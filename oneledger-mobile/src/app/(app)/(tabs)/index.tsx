@@ -12,6 +12,7 @@ import { fetchWallets, fetchBudgets } from "@/api/mobile-api";
 import { useSession } from "@/features/auth/SessionProvider";
 import { HomeHeader, HeroBalance, CashFlow, Spending, WalletPanel, HomeSection, HomeLink } from "@/features/home/HomeCards";
 import { BudgetOutlook } from "@/features/home/BudgetOutlook";
+import { SaveOnSavingsCard } from "@/features/save-on/SaveOnSavingsCard";
 import { IntelligenceCard } from "@/features/insights/IntelligenceCard";
 import { useOutlookData } from "@/features/insights/useOutlookData";
 import { useChromeScroll } from "@/components/shell/useChromeScroll";
@@ -114,6 +115,8 @@ export default function Home() {
       <BudgetOutlook result={budget.data} currency={currency} now={now} error={budget.error} />
       {/* Forecast and spending pace are RWF-only on the server, so other currencies don't show them. */}
       {currency === "RWF" ? <IntelligenceCard key={`insights.${activeId}`} outlook={outlook.data} error={outlook.error} /> : null}
+      {/* Save On summary: only once it has saved (or is saving) something. */}
+      <SaveOnSavingsCard compact />
       <Spending key={`spending.${session?.user.id}.${activeId}`} scope={`${session?.user.id}.${activeId}`} current={current} available={currentResult?.ok === true} message={analyticsMessage} />
       <HomeTrends key={`trends.${session?.user.id}.${activeId}`} scope={`${session?.user.id}.${activeId}`} currency={currency} nowIso={now.toISOString()} day={day}/>
       <WalletPanel wallets={wallets} message={walletsMessage} />

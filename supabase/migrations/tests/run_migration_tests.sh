@@ -721,8 +721,10 @@ TABLES_WITHOUT_RLS="$(psql -d pfe_h -t -A -c "select string_agg(relname, ',' ord
 # console_audit_events. 140 + 3 = 143; 20270123000000 adds 5 more (tickets, ticket events,
 # incidents, incident events, approval requests) = 148. Platform partners
 # (20270126000000) adds 5 RPC-only tables (advertisers, offers, offer events,
-# placements, delivery switch) = 153.
-if [ "$TABLE_COUNT" = "153" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
+# placements, delivery switch) = 153. Provider tariffs (20270124000000) add provider_tariffs and
+# provider_tariff_tiers (+2 = 155); payment splits (20270125000000) add payment_split_plans and
+# pay_split_preferences (+2 = 157).
+if [ "$TABLE_COUNT" = "157" ] && [ "$TABLES_WITHOUT_RLS" = "auth_login_attempts" ]; then
   pass "RLS enabled on all tables except the one documented, intentional exception (auth_login_attempts)"
 else
   fail "RLS gap regression: $RLS_COUNT of $TABLE_COUNT public tables have RLS enabled; tables without RLS: '$TABLES_WITHOUT_RLS' (expected only 'auth_login_attempts')"
@@ -872,10 +874,14 @@ AUTHENTICATED_GRANT_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from inform
 # OneLedger 3.0 S5 (20261226000000): SELECT on payment_requests,
 # payment_request_events and payment_requests_v (security_invoker). 172 + 3 = 175.
 # OneLedger 3.0 E4 (20261228000000): SELECT on counterparty_split_events. 175 + 1 = 176.
-if [ "$AUTHENTICATED_GRANT_COUNT" = "177" ]; then
-  pass "authenticated holds exactly the 177 table grants expected, no more"
+# Provider tariffs (20270124000000): SELECT on provider_tariffs and provider_tariff_tiers. 177 + 2 = 179.
+# Payment splits (20270125000000): SELECT on payment_split_plans; SELECT, INSERT, UPDATE on
+# pay_split_preferences (own row only, by RLS). 179 + 4 = 183.
+# Save On savings (20270129000000): SELECT on save_on_plan_outcomes_v (security_invoker). 183 + 1 = 184.
+if [ "$AUTHENTICATED_GRANT_COUNT" = "184" ]; then
+  pass "authenticated holds exactly the 184 table grants expected, no more"
 else
-  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 177 - review for unintended privilege expansion"
+  fail "authenticated holds $AUTHENTICATED_GRANT_COUNT table grant(s), expected exactly 184 - review for unintended privilege expansion"
 fi
 
 # Future-table default-privilege check, mirroring Phase 3.5's proof.
@@ -1096,10 +1102,12 @@ AUTHENTICATED_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_p
 # Platform Console workflows (20270123000000) add 18 (support x7, incidents x5,
 # approvals x4, integrations/communications x2). 164 + 18 = 182.
 # Platform partners (20270126000000) add 9 (8 console_partner* RPCs + partner_feed). 182 + 9 = 191.
-if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "191" ]; then
-  pass "authenticated holds EXECUTE on exactly the 191 functions expected, no more"
+# Payment splits (20270125000000): create_payment_split_plan, attach_intent_to_split_plan,
+# stop_payment_split_plan = +3 (194). Save On savings (20270129000000): save_on_report = +1 (195).
+if [ "$AUTHENTICATED_FN_EXEC_COUNT" = "195" ]; then
+  pass "authenticated holds EXECUTE on exactly the 195 functions expected, no more"
 else
-  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 191 - review for unintended privilege expansion"
+  fail "authenticated holds EXECUTE on $AUTHENTICATED_FN_EXEC_COUNT function(s), expected exactly 195 - review for unintended privilege expansion"
 fi
 
 SERVICE_ROLE_FN_EXEC_COUNT="$(psql -d pfe_h -t -A -c "select count(*) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname='set_updated_at' and has_function_privilege('service_role', p.oid, 'EXECUTE');")"
@@ -9877,7 +9885,7 @@ if [ "$TT_SEEN" -lt 100 ]; then
 fi
 rm -f "$ARTIFACT_DIR/pfe_tt_stderr.log"
 
-# ===========================================================================
+# ====================================================================
 # Platform Console foundation (20270120000000): staff gate, MFA, permission
 # matrix, append-only audit, no direct table access. Reuses pfe_rls.
 # ===========================================================================
@@ -10139,8 +10147,296 @@ PLACEMENT_COUNT="$(psql -d pfe_rls -t -A -c "select count(*) from public.partner
 if [ "$PLACEMENT_COUNT" = "5" ]; then pass "Console: five placements are seeded"; else fail "Console: expected 5 placements, got $PLACEMENT_COUNT"; fi
 check_console "an unknown placement id is still rejected" "$(console_call "$CON_OWNER" aal2 "select public.console_partner_placement_set('nowhere', true, 'bar', 'carousel', 5, true);")" "not_found"
 check_console "the feed lists the Transactions placement" "$(console_call "$USER_A" aal1 "select public.partner_feed();")" '"id": "transactions"'
+# ===========================================================================
+# Provider tariffs (20270107000000_provider_tariffs). Clients see verified
+# tariffs only; verification needs tiers; verified tariffs are frozen; tiers
+# cannot overlap; no client can write. Uses USER_A / USER_B.
+# ===========================================================================
+echo "=== Provider tariffs ==="
+
+PT_PROV="$(psql -d pfe_rls -t -A -c "insert into public.service_providers (slug, display_name, kind, networks) values ('pt-test-provider', 'PT Test Provider', 'mno', array['mtn']) returning id;" | head -1)"
+PT_T="$(psql -d pfe_rls -t -A -c "insert into public.provider_tariffs (service_provider_id, transaction_type, recipient_scope, effective_from, source_label, source_url) values ('$PT_PROV', 'send_money', 'any', '2026-01-01', 'PT fictional tariff (test data)', 'https://example.invalid/tariff') returning id;" | head -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "
+  insert into public.provider_tariff_tiers (tariff_id, min_amount_minor, max_amount_minor, fee_type, fixed_fee_minor) values ('$PT_T', 0, 1000, 'fixed', 100);
+  insert into public.provider_tariff_tiers (tariff_id, min_amount_minor, max_amount_minor, fee_type, percentage_bps, min_fee_minor, max_fee_minor) values ('$PT_T', 1001, null, 'percentage', 100, 150, 5000);
+" >/dev/null && pass "provider tariffs: adjacent, non-overlapping tiers (a closed band then an open one) are accepted" || fail "provider tariffs: valid tiers were refused"
+
+pt_sql_fails() { # label regex sql
+  if psql -d pfe_rls -v ON_ERROR_STOP=1 -c "$3" >/dev/null 2>$ARTIFACT_DIR/pfe_pt.log; then
+    fail "provider tariffs: $1 was accepted"
+  elif grep -qE "$2" $ARTIFACT_DIR/pfe_pt.log; then
+    pass "provider tariffs: $1 is refused"
+  else
+    fail "provider tariffs: $1 refused with an unexpected error: $(cat $ARTIFACT_DIR/pfe_pt.log)"
+  fi
+  rm -f $ARTIFACT_DIR/pfe_pt.log
+}
+
+# --- drafts are invisible to every client ---
+PT_DRAFT_A="$(as_user "$USER_A" "select (select count(*) from public.provider_tariffs where id = '$PT_T') || '|' || (select count(*) from public.provider_tariff_tiers where tariff_id = '$PT_T');" | tail -1)"
+if [ "$PT_DRAFT_A" = "0|0" ]; then
+  pass "provider tariffs: a draft (unverified) tariff and its tiers are invisible to clients"
+else
+  fail "provider tariffs: a client sees a draft ('$PT_DRAFT_A', want 0|0)"
+fi
+
+# --- verification needs evidence ---
+PT_EMPTY="$(psql -d pfe_rls -t -A -c "insert into public.provider_tariffs (service_provider_id, transaction_type, recipient_scope, effective_from, source_label) values ('$PT_PROV', 'cash_withdrawal', 'any', '2026-01-01', 'PT empty tariff') returning id;" | head -1)"
+pt_sql_fails "verifying a tariff that has no tiers" "tariff_needs_tiers" "update public.provider_tariffs set verified_at = now() where id = '$PT_EMPTY';"
+pt_sql_fails "a tariff with no source label" "violates check constraint" "insert into public.provider_tariffs (service_provider_id, transaction_type, effective_from, source_label) values ('$PT_PROV', 'airtime', '2026-01-01', '   ');"
+pt_sql_fails "a plain-http source link" "violates check constraint" "insert into public.provider_tariffs (service_provider_id, transaction_type, effective_from, source_label, source_url) values ('$PT_PROV', 'airtime', '2026-01-01', 'x', 'http://example.invalid');"
+pt_sql_fails "a window that ends before it starts" "violates check constraint" "insert into public.provider_tariffs (service_provider_id, transaction_type, effective_from, effective_to, source_label) values ('$PT_PROV', 'airtime', '2026-06-01', '2026-01-01', 'x');"
+
+# --- tier shape and overlap ---
+pt_sql_fails "an overlapping band" "tier_overlap" "insert into public.provider_tariff_tiers (tariff_id, min_amount_minor, max_amount_minor, fee_type, fixed_fee_minor) values ('$PT_T', 500, 2000, 'fixed', 1);"
+pt_sql_fails "a band that overlaps the open-ended one" "tier_overlap" "insert into public.provider_tariff_tiers (tariff_id, min_amount_minor, max_amount_minor, fee_type, fixed_fee_minor) values ('$PT_T', 999999, 9999999, 'fixed', 1);"
+pt_sql_fails "a fixed tier with no fixed fee" "violates check constraint" "insert into public.provider_tariff_tiers (tariff_id, min_amount_minor, max_amount_minor, fee_type) values ('$PT_EMPTY', 0, 10, 'fixed');"
+pt_sql_fails "a percentage tier that also carries a fixed fee" "violates check constraint" "insert into public.provider_tariff_tiers (tariff_id, min_amount_minor, max_amount_minor, fee_type, fixed_fee_minor, percentage_bps) values ('$PT_EMPTY', 0, 10, 'percentage', 5, 100);"
+pt_sql_fails "a band whose maximum is below its minimum" "violates check constraint" "insert into public.provider_tariff_tiers (tariff_id, min_amount_minor, max_amount_minor, fee_type, fixed_fee_minor) values ('$PT_EMPTY', 100, 10, 'fixed', 1);"
+
+# --- verify, then clients see exactly the verified tariff and its tiers ---
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "update public.provider_tariffs set verified_at = now() where id = '$PT_T';" >/dev/null && pass "provider tariffs: a tariff with tiers can be verified" || fail "provider tariffs: verification of a complete tariff failed"
+PT_VIS_A="$(as_user "$USER_A" "select (select count(*) from public.provider_tariffs where id = '$PT_T') || '|' || (select count(*) from public.provider_tariff_tiers where tariff_id = '$PT_T');" | tail -1)"
+PT_VIS_B="$(as_user "$USER_B" "select (select count(*) from public.provider_tariffs where id = '$PT_T') || '|' || (select count(*) from public.provider_tariff_tiers where tariff_id = '$PT_T');" | tail -1)"
+PT_EMPTY_VIS="$(as_user "$USER_A" "select count(*) from public.provider_tariffs where id = '$PT_EMPTY';" | tail -1)"
+if [ "$PT_VIS_A" = "1|2" ] && [ "$PT_VIS_B" = "1|2" ] && [ "$PT_EMPTY_VIS" = "0" ]; then
+  pass "provider tariffs: once verified, every signed-in user reads the tariff and its two tiers; an unverified one stays hidden"
+else
+  fail "provider tariffs: visibility wrong (A='$PT_VIS_A' B='$PT_VIS_B' unverified='$PT_EMPTY_VIS')"
+fi
+
+# --- verified means frozen ---
+pt_sql_fails "changing a tier of a verified tariff" "tariff_verified_immutable" "update public.provider_tariff_tiers set fixed_fee_minor = 1 where tariff_id = '$PT_T' and min_amount_minor = 0;"
+pt_sql_fails "adding a tier to a verified tariff" "tariff_verified_immutable" "insert into public.provider_tariff_tiers (tariff_id, min_amount_minor, fee_type) values ('$PT_T', 5000000000, 'none');"
+pt_sql_fails "deleting a tier of a verified tariff" "tariff_verified_immutable" "delete from public.provider_tariff_tiers where tariff_id = '$PT_T' and min_amount_minor = 0;"
+pt_sql_fails "re-pointing a verified tariff at another source" "tariff_verified_immutable" "update public.provider_tariffs set source_label = 'something else' where id = '$PT_T';"
+pt_sql_fails "changing the window of a verified tariff" "tariff_verified_immutable" "update public.provider_tariffs set effective_to = '2030-01-01' where id = '$PT_T';"
+
+# --- the correction path: unverify (it disappears), fix, verify again ---
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "update public.provider_tariffs set verified_at = null where id = '$PT_T';" >/dev/null
+PT_GONE="$(as_user "$USER_A" "select count(*) from public.provider_tariffs where id = '$PT_T';" | tail -1)"
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "update public.provider_tariff_tiers set fixed_fee_minor = 110 where tariff_id = '$PT_T' and min_amount_minor = 0; update public.provider_tariffs set verified_at = now() where id = '$PT_T';" >/dev/null && PT_FIXED=ok || PT_FIXED=failed
+PT_FEE="$(as_user "$USER_A" "select fixed_fee_minor from public.provider_tariff_tiers where tariff_id = '$PT_T' and min_amount_minor = 0;" | tail -1)"
+if [ "$PT_GONE" = "0" ] && [ "$PT_FIXED" = "ok" ] && [ "$PT_FEE" = "110" ]; then
+  pass "provider tariffs: clearing verified_at hides the tariff, allows a correction, and re-verifying publishes the corrected figure"
+else
+  fail "provider tariffs: correction path wrong (hidden='$PT_GONE' fixed='$PT_FIXED' fee='$PT_FEE')"
+fi
+
+# --- no client can write; anon has nothing ---
+for op in "insert into public.provider_tariffs (service_provider_id, transaction_type, effective_from, source_label) values ('$PT_PROV', 'airtime', '2026-01-01', 'forged')" \
+          "update public.provider_tariffs set verified_at = now() where id = '$PT_EMPTY'" \
+          "delete from public.provider_tariffs where id = '$PT_T'" \
+          "insert into public.provider_tariff_tiers (tariff_id, min_amount_minor, fee_type) values ('$PT_EMPTY', 0, 'none')" \
+          "update public.provider_tariff_tiers set fixed_fee_minor = 0 where tariff_id = '$PT_T'" \
+          "delete from public.provider_tariff_tiers where tariff_id = '$PT_T'"; do
+  if as_user "$USER_A" "$op;" >/dev/null 2>&1; then
+    PT_WROTE="${PT_WROTE:-}yes "
+  fi
+done
+PT_STILL="$(psql -d pfe_rls -t -A -c "select (select count(*) from public.provider_tariffs where source_label = 'forged') || '|' || (select verified_at is null from public.provider_tariffs where id = '$PT_EMPTY') || '|' || (select count(*) from public.provider_tariff_tiers where tariff_id = '$PT_T');")"
+if [ -z "${PT_WROTE:-}" ] && [ "$PT_STILL" = "0|true|2" ]; then
+  pass "provider tariffs: a signed-in user cannot insert, update or delete a tariff or a tier"
+else
+  fail "provider tariffs: a client write got through (flags='${PT_WROTE:-none}', state='$PT_STILL')"
+fi
+PT_PRIV="$(psql -d pfe_rls -t -A -c "select has_table_privilege('anon','public.provider_tariffs','SELECT')::text || has_table_privilege('anon','public.provider_tariff_tiers','SELECT')::text || has_table_privilege('authenticated','public.provider_tariffs','INSERT')::text || has_table_privilege('authenticated','public.provider_tariff_tiers','DELETE')::text;")"
+if [ "$PT_PRIV" = "falsefalsefalsefalse" ]; then
+  pass "provider tariffs: anon has no access and authenticated has no write privilege (SELECT only)"
+else
+  fail "provider tariffs: privileges wrong ('$PT_PRIV')"
+fi
+
+# cleanup (deleting a verified tariff cascades its tiers)
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "delete from public.provider_tariffs where service_provider_id = '$PT_PROV'; delete from public.service_providers where id = '$PT_PROV';" >/dev/null && pass "provider tariffs: deleting a verified tariff cascades its tiers" || fail "provider tariffs: cleanup failed"
 
 echo ""
+# ===========================================================================
+# Published tariffs for Save On (20270128000000_save_on_published_tariffs). Loaded from
+# MTN's and Airtel's own fee pages: five verified tariffs with the published number of
+# bands; MTN's eKash route is a flat 20; Airtel has NO person-to-person tariff.
+# ===========================================================================
+echo "=== Published tariffs (Save On) ==="
+
+pt_count() { psql -d pfe_rls -t -A -c "$1" | head -1; }
+PT_Q="from public.provider_tariffs t join public.service_providers p on p.id = t.service_provider_id"
+[ "$(pt_count "select count(*) $PT_Q where t.verified_at is not null and t.source_url in ('https://www.mtn.co.rw/momo-tarrif/', 'https://airtelmoney.rw/transaction_fees');")" = "5" ] \
+  && pass "published tariffs: five MTN/Airtel tariffs are loaded and verified with an https source" \
+  || fail "published tariffs: expected five verified MTN/Airtel tariffs"
+PT_TIERS() { pt_count "select count(*) from public.provider_tariff_tiers i join public.provider_tariffs t on t.id = i.tariff_id join public.service_providers p on p.id = t.service_provider_id where p.slug = '$1' and t.transaction_type = '$2' and t.recipient_scope = '$3';"; }
+[ "$(PT_TIERS mtn-rwanda send_money same_network)" = "6" ] \
+  && pass "published tariffs: MTN person-to-person (same network) has the six published bands" \
+  || fail "published tariffs: MTN person-to-person band count is wrong"
+[ "$(PT_TIERS mtn-rwanda bank_transfer any)" = "6" ] \
+  && [ "$(pt_count "select count(distinct i.fixed_fee_minor) from public.provider_tariff_tiers i join public.provider_tariffs t on t.id = i.tariff_id join public.service_providers p on p.id = t.service_provider_id where p.slug = 'mtn-rwanda' and t.transaction_type = 'bank_transfer';")" = "1" ] \
+  && [ "$(pt_count "select max(i.fixed_fee_minor) from public.provider_tariff_tiers i join public.provider_tariffs t on t.id = i.tariff_id join public.service_providers p on p.id = t.service_provider_id where p.slug = 'mtn-rwanda' and t.transaction_type = 'bank_transfer';")" = "20" ] \
+  && pass "published tariffs: MTN's eKash route is a flat RWF 20 in all six bands" \
+  || fail "published tariffs: MTN's eKash route is not a flat RWF 20"
+[ "$(pt_count "select max(i.max_amount_minor) from public.provider_tariff_tiers i join public.provider_tariffs t on t.id = i.tariff_id join public.service_providers p on p.id = t.service_provider_id where p.slug = 'mtn-rwanda' and t.transaction_type = 'send_money';")" = "10000000" ] \
+  && pass "published tariffs: MTN person-to-person bands end at RWF 10,000,000" \
+  || fail "published tariffs: MTN person-to-person top band is wrong"
+[ "$(PT_TIERS airtel-rwanda cash_withdrawal any)" = "14" ] && [ "$(PT_TIERS airtel-rwanda bank_transfer any)" = "13" ] \
+  && pass "published tariffs: Airtel Cash-Out (14 bands) and Wallet to Bank (13 bands) are loaded" \
+  || fail "published tariffs: Airtel band counts are wrong"
+[ "$(pt_count "select count(*) $PT_Q where p.slug = 'airtel-rwanda' and t.transaction_type = 'send_money';")" = "0" ] \
+  && pass "published tariffs: Airtel has no person-to-person tariff (none is published)" \
+  || fail "published tariffs: an Airtel person-to-person tariff exists without a published source"
+
+echo ""
+# ===========================================================================
+# Payment splits (20270125000000_payment_split_plans). A capacity plan is only
+# accepted for an amount OVER the network's published capacity (eKash RWF
+# 10,000,000) with every part within it; parts must add up; parts are attached
+# one at a time, the next only after the previous is settled; a stopped plan
+# accepts nothing; workspaces are isolated. Uses USER_A / USER_B / WORKSPACE_A.
+# ===========================================================================
+echo "=== Payment splits ==="
+
+PS_PLAN() { # $1 key, $2 total, $3 parts json
+  echo "{\"workspace_id\":\"$WORKSPACE_A\",\"idempotency_key\":\"$1\",\"kind\":\"capacity\",\"network_slug\":\"ekash\",\"payment_type\":\"pay_person\",\"total_amount_minor\":$2,\"planned_parts\":$3,\"planned_fee_minor\":60,\"fee_basis\":\"published_maximum\"}"
+}
+ps_refused() { # label regex user sql
+  if as_user "$3" "$4" >/dev/null 2>$ARTIFACT_DIR/pfe_ps.log; then
+    fail "payment splits: $1 was accepted"
+  elif grep -qE "$2" $ARTIFACT_DIR/pfe_ps.log; then
+    pass "payment splits: $1 is refused"
+  else
+    fail "payment splits: $1 refused with an unexpected error: $(cat $ARTIFACT_DIR/pfe_ps.log)"
+  fi
+  rm -f $ARTIFACT_DIR/pfe_ps.log
+}
+
+PS_R1="$(as_user "$USER_A" "select public.create_payment_split_plan('$(PS_PLAN ps-1 25000000 '["10000000","10000000","5000000"]')'::jsonb);")"
+PS_ID="$(psql -d pfe_rls -t -A -c "select id from public.payment_split_plans where workspace_id = '$WORKSPACE_A' and idempotency_key = 'ps-1';")"
+if [ -n "$PS_ID" ]; then
+  pass "payment splits: a capacity plan for 25,000,000 in three parts within capacity is accepted"
+else
+  fail "payment splits: valid capacity plan was not created ($PS_R1)"
+fi
+PS_R2="$(as_user "$USER_A" "select public.create_payment_split_plan('$(PS_PLAN ps-1 25000000 '["10000000","10000000","5000000"]')'::jsonb);")"
+PS_N="$(psql -d pfe_rls -t -A -c "select count(*) from public.payment_split_plans where workspace_id = '$WORKSPACE_A' and idempotency_key = 'ps-1';")"
+if [ "$PS_N" = "1" ] && echo "$PS_R2" | grep -q '"existed": true'; then
+  pass "payment splits: create_payment_split_plan is idempotent on the key"
+else
+  fail "payment splits: idempotency failed (rows=$PS_N r2=$PS_R2)"
+fi
+
+ps_refused "an amount that does NOT exceed capacity (10,000,000 exactly)" "not_over_capacity" "$USER_A" "select public.create_payment_split_plan('$(PS_PLAN ps-2 10000000 '["5000000","5000000"]')'::jsonb);"
+ps_refused "a part above capacity" "part_over_capacity" "$USER_A" "select public.create_payment_split_plan('$(PS_PLAN ps-3 25000000 '["12000000","8000000","5000000"]')'::jsonb);"
+ps_refused "parts that do not add up to the total" "parts_do_not_sum" "$USER_A" "select public.create_payment_split_plan('$(PS_PLAN ps-4 25000000 '["10000000","10000000","4000000"]')'::jsonb);"
+ps_refused "a single part" "invalid_parts" "$USER_A" "select public.create_payment_split_plan('$(PS_PLAN ps-5 25000000 '["25000000"]')'::jsonb);"
+ps_refused "a plan in another user's workspace" "not_authorized" "$USER_B" "select public.create_payment_split_plan('$(PS_PLAN ps-6 25000000 '["10000000","10000000","5000000"]')'::jsonb);"
+ps_refused "a fee-saving plan without a verified tariff" "fee_saving_needs_verified_tariff" "$USER_A" "select public.create_payment_split_plan('{\"workspace_id\":\"$WORKSPACE_A\",\"kind\":\"fee_saving\",\"payment_type\":\"pay_person\",\"total_amount_minor\":151000,\"planned_parts\":[\"150000\",\"1000\"],\"fee_basis\":\"none\"}'::jsonb);"
+
+PS_B_SEES="$(as_user "$USER_B" "select count(*) from public.payment_split_plans where id = '$PS_ID';")"
+if [ "$PS_B_SEES" = "0" ]; then
+  pass "payment splits: another workspace's member cannot read the plan (RLS)"
+else
+  fail "payment splits: plan visible across workspaces ($PS_B_SEES)"
+fi
+
+PS_MK_INTENT() { # $1 key, $2 amount
+  as_user "$USER_A" "select public.create_payment_intent('{\"workspace_id\":\"$WORKSPACE_A\",\"idempotency_key\":\"$1\",\"payment_type\":\"pay_person\",\"amount_minor\":$2,\"recipient_kind\":\"phone\",\"recipient_msisdn_normalized\":\"250781234567\"}'::jsonb);" >/dev/null
+  psql -d pfe_rls -t -A -c "select id from public.payment_intents where workspace_id = '$WORKSPACE_A' and idempotency_key = '$1';"
+}
+PS_I1="$(PS_MK_INTENT ps-i1 10000000)"
+PS_I2="$(PS_MK_INTENT ps-i2 10000000)"
+PS_IBAD="$(PS_MK_INTENT ps-ibad 9999999)"
+
+ps_refused "attaching a part whose amount is not the planned amount" "amount_mismatch" "$USER_A" "select public.attach_intent_to_split_plan('$PS_ID', '$PS_IBAD', 1);"
+as_user "$USER_A" "select public.attach_intent_to_split_plan('$PS_ID', '$PS_I1', 1);" >/dev/null && pass "payment splits: part 1 attaches" || fail "payment splits: part 1 did not attach"
+ps_refused "attaching part 2 before part 1 is settled" "previous_part_not_settled" "$USER_A" "select public.attach_intent_to_split_plan('$PS_ID', '$PS_I2', 2);"
+
+as_user "$USER_A" "select public.transition_payment_intent('$PS_I1', 'initiated', null, '{}'::jsonb);" >/dev/null
+as_user "$USER_A" "select public.transition_payment_intent('$PS_I1', 'awaiting_verification', null, '{}'::jsonb);" >/dev/null
+as_user "$USER_A" "select public.manually_confirm_payment('$PS_I1', 'done');" >/dev/null
+as_user "$USER_A" "select public.attach_intent_to_split_plan('$PS_ID', '$PS_I2', 2);" >/dev/null && pass "payment splits: part 2 attaches once part 1 is successful" || fail "payment splits: part 2 did not attach after part 1 settled"
+
+PS_STOP="$(as_user "$USER_A" "select public.stop_payment_split_plan('$PS_ID');")"
+PS_STOPPED="$(psql -d pfe_rls -t -A -c "select (stopped_at is not null)::text from public.payment_split_plans where id = '$PS_ID';")"
+PS_I2_STATE="$(psql -d pfe_rls -t -A -c "select state from public.payment_intents where id = '$PS_I2';")"
+PS_I1_STATE="$(psql -d pfe_rls -t -A -c "select state from public.payment_intents where id = '$PS_I1';")"
+if [ "$PS_STOPPED" = "true" ] && [ "$PS_I2_STATE" = "cancelled" ] && [ "$PS_I1_STATE" = "successful" ]; then
+  pass "payment splits: stopping cancels unsent draft parts and leaves a settled part alone"
+else
+  fail "payment splits: stop misbehaved (stopped=$PS_STOPPED part1=$PS_I1_STATE part2=$PS_I2_STATE out=$PS_STOP)"
+fi
+PS_I3="$(PS_MK_INTENT ps-i3 5000000)"
+ps_refused "attaching a part to a stopped plan" "plan_stopped" "$USER_A" "select public.attach_intent_to_split_plan('$PS_ID', '$PS_I3', 3);"
+
+
+echo ""
+# ===========================================================================
+# Save On savings (20270129000000_save_on_savings). A fee-saving plan's saving (fee as one
+# transfer minus fee as parts, from a verified tariff) counts ONLY once every part is
+# settled; a plan still being sent is "expected"; a stopped plan and a capacity plan count
+# for nothing; the windows go by when the last part settled; workspaces are isolated.
+# ===========================================================================
+echo "=== Save On savings ==="
+
+SO_PLAN() { # $1 key
+  echo "{\"workspace_id\":\"$WORKSPACE_A\",\"idempotency_key\":\"$1\",\"kind\":\"fee_saving\",\"payment_type\":\"pay_person\",\"currency\":\"RWF\",\"total_amount_minor\":180000,\"planned_parts\":[\"150000\",\"30000\"],\"single_fee_minor\":1500,\"planned_fee_minor\":500,\"fee_basis\":\"verified_tariff\",\"threshold\":\"balanced\"}"
+}
+SO_REPORT() { # $1 user, $2 json path like {periods,6,saved_minor}
+  as_user "$1" "select public.save_on_report('$WORKSPACE_A') #>> '$2';"
+}
+SO_SETTLE() { # $1 intent
+  as_user "$USER_A" "select public.transition_payment_intent('$1', 'initiated', null, '{}'::jsonb);" >/dev/null
+  as_user "$USER_A" "select public.transition_payment_intent('$1', 'awaiting_verification', null, '{}'::jsonb);" >/dev/null
+  as_user "$USER_A" "select public.manually_confirm_payment('$1', 'done');" >/dev/null
+}
+so_check() { # label expected actual
+  if [ "$3" = "$2" ]; then pass "save on savings: $1"; else fail "save on savings: $1 (expected $2, got $3)"; fi
+}
+
+SO_BASE="$(SO_REPORT "$USER_A" '{periods,6,saved_minor}')"
+so_check "nothing is saved before any fee-saving plan completes" "0" "$SO_BASE"
+
+as_user "$USER_A" "select public.create_payment_split_plan('$(SO_PLAN so-1)'::jsonb);" >/dev/null
+SO_ID="$(psql -d pfe_rls -t -A -c "select id from public.payment_split_plans where workspace_id = '$WORKSPACE_A' and idempotency_key = 'so-1';")"
+SO_I1="$(PS_MK_INTENT so-i1 150000)"
+SO_I2="$(PS_MK_INTENT so-i2 30000)"
+as_user "$USER_A" "select public.attach_intent_to_split_plan('$SO_ID', '$SO_I1', 1);" >/dev/null
+SO_SETTLE "$SO_I1"
+so_check "a plan with only part 1 settled saves nothing yet" "0" "$(SO_REPORT "$USER_A" '{periods,6,saved_minor}')"
+so_check "...and is reported as in progress" "1" "$(SO_REPORT "$USER_A" '{in_progress,plans}')"
+so_check "...with the saving it is expected to make" "1000" "$(SO_REPORT "$USER_A" '{in_progress,expected_saving_minor}')"
+
+as_user "$USER_A" "select public.attach_intent_to_split_plan('$SO_ID', '$SO_I2', 2);" >/dev/null
+SO_SETTLE "$SO_I2"
+so_check "once every part is settled the saving counts (1,500 as one, 500 as parts: 1,000)" "1000" "$(SO_REPORT "$USER_A" '{periods,6,saved_minor}')"
+so_check "...in the last 24 hours too" "1000" "$(SO_REPORT "$USER_A" '{periods,0,saved_minor}')"
+so_check "...with the fee it would have been as one transfer" "1500" "$(SO_REPORT "$USER_A" '{periods,6,would_have_paid_minor}')"
+so_check "...and the fee it was as parts" "500" "$(SO_REPORT "$USER_A" '{periods,6,paid_minor}')"
+so_check "...counting the plan and its two transfers" "1/2" "$(SO_REPORT "$USER_A" '{periods,6,plans}')/$(SO_REPORT "$USER_A" '{periods,6,transfers}')"
+so_check "...which is no longer in progress" "0" "$(SO_REPORT "$USER_A" '{in_progress,plans}')"
+so_check "...and is the latest completed plan" "1000" "$(SO_REPORT "$USER_A" '{recent,0,saved_minor}')"
+
+# The windows go by when the last part settled: ten days ago is outside 7 days, inside 2 weeks.
+psql -d pfe_rls -v ON_ERROR_STOP=1 -c "update public.payment_intents set manually_confirmed_at = now() - interval '10 days', verified_at = null where id in ('$SO_I1', '$SO_I2');" >/dev/null
+so_check "a plan finished 10 days ago is not in the last 24 hours" "0" "$(SO_REPORT "$USER_A" '{periods,0,saved_minor}')"
+so_check "...nor in the last 7 days" "0" "$(SO_REPORT "$USER_A" '{periods,1,saved_minor}')"
+so_check "...but is in the last 2 weeks" "1000" "$(SO_REPORT "$USER_A" '{periods,2,saved_minor}')"
+so_check "...and in the last month and all time" "1000/1000" "$(SO_REPORT "$USER_A" '{periods,3,saved_minor}')/$(SO_REPORT "$USER_A" '{periods,6,saved_minor}')"
+
+# A plan that is stopped before every part is settled claims nothing.
+as_user "$USER_A" "select public.create_payment_split_plan('$(SO_PLAN so-2)'::jsonb);" >/dev/null
+SO_ID2="$(psql -d pfe_rls -t -A -c "select id from public.payment_split_plans where workspace_id = '$WORKSPACE_A' and idempotency_key = 'so-2';")"
+SO_I3="$(PS_MK_INTENT so-i3 150000)"
+as_user "$USER_A" "select public.attach_intent_to_split_plan('$SO_ID2', '$SO_I3', 1);" >/dev/null
+SO_SETTLE "$SO_I3"
+as_user "$USER_A" "select public.stop_payment_split_plan('$SO_ID2');" >/dev/null
+so_check "a stopped plan adds nothing to the savings" "1000" "$(SO_REPORT "$USER_A" '{periods,6,saved_minor}')"
+so_check "...and is not counted as in progress" "0" "$(SO_REPORT "$USER_A" '{in_progress,plans}')"
+
+# The eKash over-capacity plan (ps-1, earlier) saves no fee, so it never appears.
+so_check "a capacity plan is never counted as a saving" "1" "$(SO_REPORT "$USER_A" '{periods,6,plans}')"
+
+# Another workspace's member sees none of it (RLS).
+so_check "another workspace's member sees no savings" "0" "$(SO_REPORT "$USER_B" '{periods,6,saved_minor}')"
+so_check "...and no recent plans" "0" "$(as_user "$USER_B" "select jsonb_array_length(public.save_on_report('$WORKSPACE_A') -> 'recent');")"
+
+
 echo "=== summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="
 if [ "$FAIL_COUNT" -ne 0 ]; then
   exit 1

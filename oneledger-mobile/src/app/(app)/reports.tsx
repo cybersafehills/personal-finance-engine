@@ -6,6 +6,7 @@ import { fetchReports } from "@/api/mobile-api";
 import { Badge, Button, Card, EmptyState, Screen, Text } from "@/components/ds";
 import { useQuery } from "@/hooks/useQuery";
 import {DocumentsHeader,DocumentHero} from "@/features/documents/DocumentUI";
+import { SaveOnSavingsCard } from "@/features/save-on/SaveOnSavingsCard";
 import { space } from "@/theme/tokens";
 
 // Your daily financial reports, newest first. Each is an immutable snapshot the
@@ -18,6 +19,8 @@ export default function Reports() {
     <Screen>
       <DocumentsHeader tab="reports" />
       <DocumentHero title="Your money, reviewed daily" detail="Read a saved report or manage the next scheduled summary." action={data?.ok&&data.reports.length ? "Open latest report" : "Manage daily reports"} onPress={()=>data?.ok&&data.reports.length?router.push({pathname:"/report/[id]",params:{id:data.reports[0].id}}):router.push("/report-settings")} />
+      {/* Save On: fees saved by sending in parts, as its own section. Absent when Save On is off. */}
+      <SaveOnSavingsCard />
       <Text variant="bodyStrong">Recent reports</Text>
 
       {loading && !data ? (
