@@ -1,4 +1,4 @@
-import { bearerGet, failureForOutcome, failureForStatus, type BearerFailure } from "@/api/bearer";
+import { bearerGet, bearerPost, failureForOutcome, failureForStatus, type BearerFailure } from "@/api/bearer";
 
 import { minor } from "./parse";
 
@@ -147,4 +147,19 @@ export async function fetchIntelligence(workspaceId?: string | null): Promise<In
   return result.kind === "response"
     ? parseIntelligence(result.status, result.body, workspaceId)
     : { ok: false, ...failureForOutcome(result, "Your insights") };
+}
+
+/**
+ * Lets the server raise the "forecast updated" notification when the insight
+ * really changed (shared 12h de-dupe with the web). Best-effort: never throws,
+ * never blocks the screen, and any doubt means "nothing was sent".
+ */
+export async function notifyInsightChange(workspaceId: string): Promise<boolean> {
+  try {
+    const result = await bearerPost("/api/mobile/insights/intelligence/notify", {});
+    return result.kind === "response" && result.status === 200 && isRecord(result.body) &&
+      result.body.workspace_id === workspaceId && result.body.notified === true;
+  } catch {
+    return false;
+  }
 }

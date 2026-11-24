@@ -10,7 +10,7 @@ import { useQuery } from "@/hooks/useQuery";
 import { space } from "@/theme/tokens";
 
 import { fetchForecast, type WalletForecast } from "./forecast";
-import { fetchIntelligence } from "./intelligence";
+import { fetchIntelligence, notifyInsightChange } from "./intelligence";
 import { projectionLines } from "./intelligence-display";
 import { BaselineBlock, RecurringBlock, UnusualPaymentsBlock } from "./InsightBlocks";
 import { WhyThisInsight } from "./WhyThisInsight";
@@ -35,6 +35,8 @@ export function IntelligenceCard() {
     const facts = await fetchIntelligence(workspaceId);
     if (!facts.ok) return null;
     const forecast = await fetchForecast({ workspaceId, accountId: null, days: HORIZON });
+    // Fire and forget: a new "forecast updated" notification shows up in the Inbox on its next load.
+    void notifyInsightChange(workspaceId);
     return { facts, wallets: forecast.ok ? forecast.wallets : [] };
   }, [workspaceId]);
   const { data: loaded } = useQuery(load, workspaceId ?? "none");
