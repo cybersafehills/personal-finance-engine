@@ -6,12 +6,11 @@ const labels = (flags: Parameters<typeof visibleGroups>[0]) =>
 describe("visibleGroups", () => {
   it("shows everything when the server's answer is unknown", () => {
     expect(labels(null)).toContain("Statements");
-    expect(labels(null)).toContain("Insights");
   });
 
   it("hides only features the server says are off", () => {
-    expect(labels({ statements: false, insights: true })).not.toContain("Statements");
-    expect(labels({ statements: false, insights: true })).toContain("Insights");
+    expect(labels({ statements: false, insightsCenter: true })).not.toContain("Statements");
+    expect(labels({ statements: false, insightsCenter: true })).toContain("Insights");
     expect(labels({})).toContain("Statements");
   });
 
@@ -25,6 +24,20 @@ describe("visibleGroups", () => {
   it("lists each destination once", () => {
     const routes = MORE_GROUPS.flatMap((g) => g.links.map((l) => l.route));
     expect(new Set(routes).size).toBe(routes.length);
+  });
+});
+
+describe("OneLedger 3 tools (dark by default)", () => {
+  it.each([
+    ["Wallets", "wallets"],
+    ["People & merchants", "people"],
+    ["Payment requests", "paymentRequests"],
+    ["Insights", "insightsCenter"],
+  ] as const)("%s shows only on an explicit true", (label, flag) => {
+    expect(labels(null)).not.toContain(label);
+    expect(labels({})).not.toContain(label);
+    expect(labels({ [flag]: false })).not.toContain(label);
+    expect(labels({ [flag]: true })).toContain(label);
   });
 });
 
@@ -69,3 +82,22 @@ describe("Pay & Services rows", () => {
   });
 });
 
+
+describe("Save On in More", () => {
+  it("is dark until the server says it is on, so nobody sees a screen that won't work", () => {
+    expect(labels(null)).not.toContain("Save On");
+    expect(labels({})).not.toContain("Save On");
+    expect(labels({ paySplits: false })).not.toContain("Save On");
+    expect(labels({ paySplits: true })).toContain("Save On");
+  });
+
+  it("sits under Payments and opens the Save On screen", () => {
+    const group = MORE_GROUPS.find((g) => g.links.some((l) => l.route === "/save-on"));
+    expect(group?.title).toBe("Payments");
+  });
+
+  it("reads the flag from the server's config", () => {
+    expect(parseMoreFlags(200, { ok: true, config: { paySplits: true } })).toMatchObject({ paySplits: true });
+    expect(parseMoreFlags(200, { ok: true, config: { paySplits: "yes" } })).toEqual({});
+  });
+});

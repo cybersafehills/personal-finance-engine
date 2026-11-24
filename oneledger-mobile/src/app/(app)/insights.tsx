@@ -23,10 +23,12 @@ import {
   netTone,
 } from "@/features/insights/display";
 import { insightPeriods, type PeriodId } from "@/features/insights/period";
+import { useForecastEnabled } from "@/features/insights/useForecastEnabled";
 import { personIdFromKey } from "@/features/people/display";
 import type { CurrencyOverview, Drilldown } from "@/features/insights/types";
 import { useQuery } from "@/hooks/useQuery";
 import { formatDateTime } from "@/lib/kigali-time";
+import { SaveOnSavingsCard } from "@/features/save-on/SaveOnSavingsCard";
 import { formatMoney } from "@/lib/money";
 import { space } from "@/theme/tokens";
 
@@ -59,6 +61,7 @@ export default function Insights() {
   const loadWallets = useCallback(() => fetchWallets(), []);
   const { data: wallets } = useQuery(loadWallets);
   const walletList = wallets && wallets.ok ? wallets.wallets : [];
+  const forecastEnabled = useForecastEnabled();
 
   const key = `${period.from}|${period.to}|${walletId ?? "all"}`;
   const load = useCallback(
@@ -81,6 +84,11 @@ export default function Insights() {
   return (
     <Screen>
       <ScreenHeader title="Insights" subtitle="Where your money went" />
+
+      {forecastEnabled ? (
+        <Button label="Your money outlook" variant="secondary" accessibilityHint="Will your money last over the next 7 to 30 days, and what stands out"
+          onPress={() => router.push("/forecast")} />
+      ) : null}
 
       <View accessibilityRole="tablist" style={{ flexDirection: "row", flexWrap: "wrap", gap: space[2] }}>
         {periods.map((p) => (
@@ -135,6 +143,9 @@ export default function Insights() {
           </>
         )
       ) : null}
+
+      {/* Save On: fees saved by sending in parts, as its own section. Absent when Save On is off. */}
+      <SaveOnSavingsCard />
     </Screen>
   );
 }

@@ -44,7 +44,7 @@ describe("live Home", () => {
     expect(screen.queryByText(/2,485,750/)).toBeNull();
     expect(screen.getAllByText("RWF 120K").length).toBeGreaterThan(0);
     expect(screen.getByText("Income")).toBeTruthy();
-    expect(screen.getByText("Expenses")).toBeTruthy();
+    expect(screen.getByText("Spent")).toBeTruthy();
   });
   it("shows only three recent entries and scopes the read to the active Space",async()=>{
     await renderHome(); await screen.findByText("Live merchant 1");
@@ -68,7 +68,7 @@ describe("live Home", () => {
     expect(screen.queryByText("RWF 120K")).toBeNull();
     expect(screen.queryByText("−RWF 1,000")).toBeNull();
     expect(screen.getByRole("button",{name:"Show balances"})).toBeTruthy();
-    expect(screen.queryByText(/of income retained/)).toBeNull();
+    expect(screen.queryByText(/of what you received/)).toBeNull();
   });
   it("keeps recent transactions working when the fallback snapshot fails",async()=>{
     mockBalance.mockRejectedValue(new Error("balance unavailable"));
@@ -204,29 +204,29 @@ it("removes the banner and opens a fresh focused search",async()=>{
  expect(router.navigate).toHaveBeenLastCalledWith(expect.objectContaining({pathname:"/transactions",params:expect.objectContaining({focusSearch:expect.any(String),reset:expect.any(String),accountId:"",category:"",period:"all"})}));
 });
 
-it("restores real month-to-date comparisons and retention without sample percentages",async()=>{
+it("shows this month's income, spending and how much was kept, with no last-month percentages",async()=>{
  await renderHome();
- expect(await screen.findByText("+20.0% vs last month")).toBeTruthy();
- expect(screen.getByText("75% of income retained this month")).toBeTruthy();
+ expect(await screen.findByText("You kept 75% of what you received this month")).toBeTruthy();
+ expect(screen.queryByText(/vs last month/)).toBeNull();
  expect(screen.queryByText(/8.4%/)).toBeNull();
 });
-it("does not invent trends when the previous period is unavailable or zero",async()=>{
+it("never shows a comparison that the outlook already answers, or invents one when the previous period is zero",async()=>{
  mockInsights.mockImplementation((p:{from:string,to:string})=>({ok:true,workspaceId:"w1",overview:{from:p.from,to:p.to,latestTxnAt:null,skippedCurrencies:0,currencies:[block(p.from===homePeriods(new Date()).previousFrom?0n:120000n,p.from===homePeriods(new Date()).previousFrom?0n:30000n)]}}));
  await renderHome();
- expect((await screen.findAllByText("No comparison yet")).length).toBe(2);
+ expect(await screen.findByText("You kept 75% of what you received this month")).toBeTruthy();
+ expect(screen.queryByText(/No comparison yet|vs last month/)).toBeNull();
  expect(screen.queryByText(/Infinity|NaN/)).toBeNull();
- expect(screen.getByText("75% of income retained this month")).toBeTruthy();
 });
 
 it("keeps current trends visible when the prior-period API fails",async()=>{
  mockInsights.mockImplementation((p:{from:string,to:string})=>p.from===homePeriods(new Date()).previousFrom ? {ok:false,reason:"error",message:"Prior period unavailable"} : {ok:true,workspaceId:"w1",overview:{currencies:[block(120000n,30000n)]}});
- await renderHome();expect(await screen.findByText("75% of income retained this month")).toBeTruthy();
- expect(screen.getAllByText("No comparison yet")).toHaveLength(2);
+ await renderHome();expect(await screen.findByText("You kept 75% of what you received this month")).toBeTruthy();
+ expect(screen.queryByText("No comparison yet")).toBeNull();
 });
 it("does not report positive retention when spending exceeds income",async()=>{
  mockInsights.mockResolvedValue({ok:true,workspaceId:"w1",overview:{currencies:[block(100n,125n)]}});
- await renderHome();expect(await screen.findByText("Expenses exceed income by RWF 25")).toBeTruthy();
- expect(screen.queryByText(/% of income retained/)).toBeNull();
+ await renderHome();expect(await screen.findByText("You spent RWF 25 more than you received this month")).toBeTruthy();
+ expect(screen.queryByText(/You kept/)).toBeNull();
 });
 
 it("applies an inclusive custom trend range to the API instead of slicing six months",async()=>{

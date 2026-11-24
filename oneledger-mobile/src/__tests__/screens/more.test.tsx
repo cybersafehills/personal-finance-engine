@@ -37,6 +37,7 @@ describe("Option B More", () => {
     expect(screen.queryByText("Sign out")).toBeNull();
   });
   it("keeps tools directly accessible without a category hub", async () => {
+    mockFlags.mockResolvedValue({ wallets: true, paymentRequests: true });
     await render(<More />);
     await screen.findByText("Working");
     for (const [label, path] of [["Wallets", "/wallets"], ["Categories", "/categories"], ["Automatic recording", "/capture"], ["Statements", "/statements"], ["Goals", "/goals"], ["Payment requests", "/requests"], ["Settings", "/settings"]] as const) {
@@ -46,6 +47,7 @@ describe("Option B More", () => {
     expect(screen.queryByText("Money tools")).toBeNull();
   });
   it("uses mobile group names", async () => {
+    mockFlags.mockResolvedValue({ paymentRequests: true });
     await render(<More />);
     for (const label of ["Money", "Documents", "Payments", "Account"]) expect(screen.getByRole("header", { name: label })).toBeTruthy();
   });
@@ -75,7 +77,13 @@ describe("Option B More", () => {
     expect(router.push).toHaveBeenCalledWith("/bills");
     for (const label of ["Payment activity", "Payment templates", "USSD directory"]) expect(screen.getByRole("link", { name: label })).toBeTruthy();
   });
+  it("hides Wallets, People, Payment requests and Insights until the server turns them on", async () => {
+    await render(<More />);
+    await screen.findByText("Working");
+    for (const label of ["Wallets", "People & merchants", "Payment requests", "Insights"]) expect(screen.queryByRole("link", { name: label })).toBeNull();
+  });
   it("searches existing tools and restores the list when cleared", async () => {
+    mockFlags.mockResolvedValue({ wallets: true });
     await render(<More />);
     await fireEvent.changeText(screen.getByLabelText("Search tools"), "  wAlLeT  ");
     expect(screen.getByRole("link", { name: "Wallets" })).toBeTruthy();

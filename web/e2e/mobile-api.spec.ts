@@ -95,6 +95,7 @@ test.describe("mobile API", () => {
   let transactionId: string;
   let createdBudget = false;
   const createdIntentIds: string[] = [];
+  const createdSplitPlanIds: string[] = [];
 
   test.beforeAll(async () => {
     const admin = adminClient();
@@ -119,6 +120,9 @@ test.describe("mobile API", () => {
       const admin = adminClient();
       await admin.from("payment_events").delete().in("payment_intent_id", createdIntentIds);
       await admin.from("payment_intents").delete().in("id", createdIntentIds);
+    }
+    if (createdSplitPlanIds.length > 0) {
+      await adminClient().from("payment_split_plans").delete().in("id", createdSplitPlanIds);
     }
     await cleanupSeededTransactions(TAG);
     if (createdBudget) {
@@ -364,6 +368,7 @@ test.describe("mobile API", () => {
         "insightsCenter",
         "integrations",
         "pay",
+        "paySplits",
         "paymentRequests",
         "people",
         "scanToPay",
@@ -381,6 +386,7 @@ test.describe("mobile API", () => {
         expect(body.config.pay).toBe(true);
       }
       if (body.config.trustedRecipients) expect(body.config.assistedPay).toBe(true);
+      if (body.config.paySplits) expect(body.config.assistedPay).toBe(true);
     } finally {
       await api.dispose();
     }
@@ -1206,6 +1212,142 @@ test.describe("mobile API", () => {
         (await api.get("/api/mobile/inbox", { headers: { authorization: "Bearer not-a-real-token" } }))
           .status(),
       ).toBe(401);
+    } finally {
+      await api.dispose();
+    }
+  });
+  test("pay splits: offer, start, wait for the previous part, next, stop", async () => {
+    const api = await playwrightRequest.newContext({ baseURL: BASE_URL });
+    try {
+      const signIn = await api.post("/api/mobile/auth/sign-in", {
+        data: { email: E2E_USER.email, password: E2E_USER.password },
+      });
+      expect(signIn.status()).toBe(200);
+      const headers = { authorization: `Bearer ${(await signIn.json()).access_token}` };
+      const offerOf = async (amountMinor: number) => {
+        const res = await api.post("/api/mobile/pay/splits/offer", {
+          headers,
+          data: { paymentType: "pay_person", amountMinor, networkSlug: "ekash" },
+        });
+        expect(res.status()).toBe(200);
+        expect(res.headers()["cache-control"]).toContain("no-store");
+        return (await res.json()).offer;
+      };
+
+      // eKash takes up to RWF 10,000,000 as ONE transfer: no offer at or below it.
+      expect(await offerOf(10_000_000)).toBeNull();
+      const over = await offerOf(25_000_000);
+      expect(over.kind).toBe("capacity");
+      expect(over.parts.map((p: { amountMinor: string }) => p.amountMinor)).toEqual([
+        "8333334",
+        "8333333",
+        "8333333",
+      ]);
+
+      // Bad input is refused, and a plan id that isn't one is "not found".
+      const bad = await api.post("/api/mobile/pay/splits/offer", {
+        headers,
+        data: { paymentType: "buy_airtime", amountMinor: 5 },
+      });
+      expect(bad.status()).toBe(422);
+      const ghost = await api.post("/api/mobile/pay/splits/not-a-uuid/next", { headers, data: {} });
+      expect(ghost.status()).toBe(404);
+
+      // Start: the server recomputes the parts; the app only sends the payment.
+      const payload = {
+        paymentType: "pay_person",
+        amountMinor: 25_000_000,
+        recipientMsisdn: "0788123456",
+        networkSlug: "ekash",
+        idempotencyKey: crypto.randomUUID(),
+      };
+      const started = await api.post("/api/mobile/pay/splits/start", { headers, data: payload });
+      expect(started.status()).toBe(200);
+      const first = await started.json();
+      createdSplitPlanIds.push(first.planId);
+      createdIntentIds.push(first.intent.id);
+      expect(first.intent.state).toBe("draft");
+      expect(first.intent.amountMinor).toBe(8_333_334);
+
+      // The same request id is the same plan and the same first part.
+      const retry = await api.post("/api/mobile/pay/splits/start", { headers, data: payload });
+      expect(retry.status()).toBe(200);
+      const again = await retry.json();
+      expect(again.planId).toBe(first.planId);
+      expect(again.intent.id).toBe(first.intent.id);
+
+      // An amount that fits in one transfer is never split.
+      const fits = await api.post("/api/mobile/pay/splits/start", {
+        headers,
+        data: { ...payload, amountMinor: 10_000_000, idempotencyKey: crypto.randomUUID() },
+      });
+      expect(fits.status()).toBe(422);
+
+      // Part 2 waits until part 1 is settled.
+      const early = await api.post(`/api/mobile/pay/splits/${first.planId}/next`, { headers, data: {} });
+      expect(early.status()).toBe(409);
+      expect((await early.json()).error).toBe("waiting");
+
+      const handoff = await api.post(`/api/mobile/pay/intents/${first.intent.id}/handoff`, {
+        headers,
+        data: { method: "copy", outcome: "copied" },
+      });
+      expect(handoff.status()).toBe(200);
+      const settle = await api.post(`/api/mobile/pay/intents/${first.intent.id}/settle`, {
+        headers,
+        data: { outcome: "sent" },
+      });
+      expect(settle.status()).toBe(200);
+      // Confirmed by the person, never presented as verified.
+      expect((await settle.json()).intent.verified).toBe(false);
+
+      const second = await api.post(`/api/mobile/pay/splits/${first.planId}/next`, { headers, data: {} });
+      expect(second.status()).toBe(200);
+      const part2 = await second.json();
+      createdIntentIds.push(part2.intent.id);
+      expect(part2.index).toBe(2);
+      expect(part2.intent.amountMinor).toBe(8_333_333);
+
+      // Stop is final and repeatable; nothing further can be prepared.
+      for (let i = 0; i < 2; i += 1) {
+        const stop = await api.post(`/api/mobile/pay/splits/${first.planId}/stop`, { headers, data: {} });
+        expect(stop.status()).toBe(200);
+        expect((await stop.json()).stopped).toBe(true);
+      }
+      const after = await api.post(`/api/mobile/pay/splits/${first.planId}/next`, { headers, data: {} });
+      expect(after.status()).toBe(409);
+      expect((await after.json()).error).toBe("stopped");
+
+      // No token, no split.
+      expect((await api.post("/api/mobile/pay/splits/offer", { data: {} })).status()).toBe(401);
+    } finally {
+      await api.dispose();
+    }
+  });
+  test("pay splits: the savings report has every window and counts nothing that wasn't completed", async () => {
+    const api = await playwrightRequest.newContext({ baseURL: BASE_URL });
+    try {
+      const signIn = await api.post("/api/mobile/auth/sign-in", {
+        data: { email: E2E_USER.email, password: E2E_USER.password },
+      });
+      expect(signIn.status()).toBe(200);
+      const headers = { authorization: `Bearer ${(await signIn.json()).access_token}` };
+      const res = await api.get("/api/mobile/pay/splits/savings", { headers });
+      expect(res.status()).toBe(200);
+      expect(res.headers()["cache-control"]).toContain("no-store");
+      const { report } = await res.json();
+      expect(report.periods.map((p: { key: string }) => p.key)).toEqual(["24h", "7d", "14d", "30d", "90d", "365d", "all"]);
+      for (const p of report.periods) {
+        expect(p.savedMinor).toMatch(/^\d+$/);
+        // Saved plus what it cost as parts is what it would have cost as one transfer.
+        expect(BigInt(p.savedMinor) + BigInt(p.paidMinor)).toBe(BigInt(p.wouldHavePaidMinor));
+      }
+      // A longer window never shows less than a shorter one.
+      const saved = report.periods.map((p: { savedMinor: string }) => BigInt(p.savedMinor));
+      for (let i = 1; i < saved.length; i += 1) expect(saved[i] >= saved[i - 1]).toBe(true);
+      // The over-the-eKash-limit split made in the test above saves no fee, so it adds nothing.
+      expect(typeof report.inProgress.plans).toBe("number");
+      expect((await api.get("/api/mobile/pay/splits/savings")).status()).toBe(401);
     } finally {
       await api.dispose();
     }

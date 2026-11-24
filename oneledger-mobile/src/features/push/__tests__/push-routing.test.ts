@@ -10,6 +10,11 @@ describe("pushTarget", () => {
     });
   });
 
+  it("opens the forecast for an insight update, which carries no id", () => {
+    expect(pushTarget({ resourceType: "forecast", resourceId: null })).toEqual({ pathname: "/forecast" });
+    expect(pushTarget({ resourceType: "forecast" })).toEqual({ pathname: "/forecast" });
+  });
+
   it("opens the notifications list for everything else", () => {
     expect(pushTarget({ resourceType: "budget", resourceId: id })).toEqual({ pathname: "/notifications" });
     expect(pushTarget({ eventKey: "member.joined" })).toEqual({ pathname: "/notifications" });

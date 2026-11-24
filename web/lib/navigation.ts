@@ -69,7 +69,9 @@ export type MoreIconKey =
   | "wallets"
   | "insights"
   | "goals"
-  | "forecast";
+  | "forecast"
+  | "fees"
+  | "saveOn";
 
 export type MoreItem = {
   href: string;
@@ -85,7 +87,9 @@ export type MoreItem = {
     | "counterparties"
     | "wallets"
     | "insights"
-    | "forecast";
+    | "forecast"
+    | "feeCalculator"
+    | "paySplits";
 };
 
 export type MoreGroup = { title: string; items: readonly MoreItem[] };
@@ -184,6 +188,24 @@ export const MORE_GROUPS: readonly MoreGroup[] = [
         icon: "requests",
         surface: "pay",
         requires: "paymentRequests",
+      },
+      // Transfer fee estimate (OneLedger 3.0). Gated by FEE_CALCULATOR_ENABLED
+      // (+ allowlist) and the Pay & Services gate.
+      {
+        href: "/pay/fees",
+        label: "Estimate a fee",
+        icon: "fees",
+        surface: "pay",
+        requires: "feeCalculator",
+      },
+      // Save On: cheaper ways to send (a payment in parts). Gated by PAY_SPLITS_ENABLED
+      // (+ the assisted-pay gate); absent, not disabled, when off.
+      {
+        href: "/pay/splits",
+        label: "Save On",
+        icon: "saveOn",
+        surface: "pay",
+        requires: "paySplits",
       },
     ],
   },

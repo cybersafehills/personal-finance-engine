@@ -18,7 +18,7 @@ function parseInstruction(raw: unknown): PayInstruction | null {
   return null;
 }
 
-function parseIntent(raw: unknown): PayIntent | null {
+export function parseIntent(raw: unknown): PayIntent | null {
   if (!isRecord(raw)) return null;
   if (!str(raw.id) || !str(raw.state) || !str(raw.paymentType)) return null;
   if (typeof raw.amountMinor !== "number" || !Number.isFinite(raw.amountMinor)) return null;
@@ -36,6 +36,8 @@ function parseIntent(raw: unknown): PayIntent | null {
     expiresAt: strOrNull(raw.expiresAt),
     updatedAt: str(raw.updatedAt) ? raw.updatedAt : new Date().toISOString(),
     verified: raw.verified === true,
+    splitPlanId: strOrNull(raw.splitPlanId),
+    splitIndex: typeof raw.splitIndex === "number" && Number.isInteger(raw.splitIndex) ? raw.splitIndex : null,
     instruction: parseInstruction(raw.instruction),
   };
 }
@@ -54,6 +56,8 @@ export function parseConfigResponse(status: number, body: unknown): PayConfigRes
       scanToPay: body.config.scanToPay === true,
       trustedRecipients: body.config.trustedRecipients === true,
       paymentRequests: body.config.paymentRequests === true,
+      // Save On is opt-in on the server: anything but an explicit true hides it.
+      paySplits: body.config.paySplits === true,
     };
   }
   return { ok: false, ...failureForStatus(status, "Payments") };

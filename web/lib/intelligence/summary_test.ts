@@ -103,3 +103,41 @@ Deno.test("summariseInsights: baseline-above headline last", () => {
   }))!;
   assertEquals(g.headline.includes("33% above"), true);
 });
+
+Deno.test("summariseInsights: says when the money runs out, not the day of the lowest point", () => {
+  const g = summariseInsights(input({
+    forecast: {
+      horizonDays: 30,
+      projectedEnd: {
+        knownBalanceMinor: 14_416,
+        estimatedBalanceMinor: -354_464,
+      },
+      projectedLow: { dayOffset: 30, estimatedBalanceMinor: -354_464 },
+      mayGoNegative: true,
+      points: [
+        { dayOffset: 0, knownBalanceMinor: 14_416 },
+        { dayOffset: 30, knownBalanceMinor: 14_416 },
+      ],
+    },
+  }))!;
+  assertEquals(
+    g.headline,
+    "Heads up — at your recent pace, your money could run out in about 2 days.",
+  );
+  assertEquals(g.body.includes("day 30"), false);
+});
+
+Deno.test("summariseInsights: without checkpoints the warning stays general", () => {
+  const g = summariseInsights(input({
+    forecast: {
+      horizonDays: 30,
+      projectedEnd: { knownBalanceMinor: 0, estimatedBalanceMinor: -100 },
+      projectedLow: { dayOffset: 30, estimatedBalanceMinor: -100 },
+      mayGoNegative: true,
+    },
+  }))!;
+  assertEquals(
+    g.headline,
+    "Heads up — your balance could go below zero within 30 days at your recent pace.",
+  );
+});

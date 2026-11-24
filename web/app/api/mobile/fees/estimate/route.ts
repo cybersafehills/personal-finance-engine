@@ -3,11 +3,11 @@ import { mobileGet, mobileOptions, MobileApiError } from "../../../../../lib/mob
 import { requireFlag, resolveMobileWorkspace } from "../../../../../lib/mobile-workspace";
 import { supabaseSession } from "../../../../../lib/supabase-session-server";
 import { parseFeeQuery } from "../../../../../lib/fees/fee-estimate";
-import { loadFeeHistory, loadNetworkFees } from "../../../../../lib/fees/fee-data";
+import { loadFeeHistory, loadNetworkFees, loadProviderTariffs } from "../../../../../lib/fees/fee-data";
 import { buildFeeResult, serializeFeeResult } from "../../../../../lib/fees/fee-result";
 import { isPaymentNetworksEnabled, isPayServicesEnabled } from "../../../../../lib/pay/gate";
 
-// GET /api/mobile/fees/estimate?amount&currency&type[&network][&workspace_id]
+// GET /api/mobile/fees/estimate?amount&currency&type[&network][&provider][&workspace_id]
 // - what a payment like this has cost the caller before (from their own ledger)
 // and, when a network is named, what that network publishes. Estimates, never
 // guarantees; a fee with no published number yields no number. Read-only; the
@@ -30,11 +30,13 @@ export function GET(request: NextRequest) {
 
     const supabase = await supabaseSession();
     const wantNetwork = Boolean(q.network) && isPaymentNetworksEnabled(workspaceId);
-    const [history, network] = await Promise.all([
+    const [history, network, provider] = await Promise.all([
       loadFeeHistory(supabase, workspaceId, q.type, q.currency),
       wantNetwork ? loadNetworkFees(supabase, q.network as string) : Promise.resolve(null),
+      q.provider ? loadProviderTariffs(supabase, q.provider, q.type) : Promise.resolve(null),
     ]);
     if (wantNetwork && !network) throw new MobileApiError(404, "network_not_found");
+    if (q.provider && !provider) throw new MobileApiError(404, "provider_not_found");
 
     return {
       workspace_id: workspaceId,
@@ -46,6 +48,7 @@ export function GET(request: NextRequest) {
           type: q.type,
           history,
           network,
+          provider,
           now: new Date(),
         }),
       ),

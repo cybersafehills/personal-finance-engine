@@ -13,6 +13,9 @@ import {
   isSessionFresh,
 } from "../../../lib/pay/intents";
 import { getServiceCodeById } from "../../../lib/ussd/queries";
+import { getSplitPlan } from "../../../lib/pay/splits/plans";
+import { buildPanelData } from "../../../lib/pay/splits/plan-state";
+import { SplitPlanPanel } from "../../../components/pay/SplitPlanPanel";
 import { messages } from "../../../lib/ussd/messages";
 
 export const dynamic = "force-dynamic";
@@ -63,6 +66,11 @@ export default async function PaymentIntentPage({
       needsLinkPicker ? soft(getUnlinkedRecentTransactions(id), []) : Promise.resolve([]),
     ]);
 
+  // A payment that is one part of a split also shows the whole plan.
+  const split = intent.split_plan_id
+    ? await soft(getSplitPlan(intent.split_plan_id), null)
+    : null;
+
   const sourceAccountName =
     accounts.find((a) => a.id === intent.source_account_id)?.name ?? null;
   const budgetName = budgets.find((b) => b.id === intent.budget_id)?.name ?? null;
@@ -86,6 +94,33 @@ export default async function PaymentIntentPage({
           recipient={intent.recipient_name}
         />
       </div>
+
+      {split && (
+        <div className="mb-5">
+          <SplitPlanPanel
+            planId={split.plan.id}
+            kind={split.plan.kind}
+            totalParts={split.plan.planned_parts.length}
+            currentIntentId={intent.id}
+            parts={split.parts.map((p) => ({
+              id: p.id,
+              index: p.split_index,
+              amountMinor: String(p.amount_minor),
+              state: p.state,
+              verifiedAt: p.verified_at,
+              manuallyConfirmedAt: p.manually_confirmed_at,
+            }))}
+            {...(({ next, remainingMinor, canSendRemaining }) => ({
+              next:
+                next.status === "ready" || next.status === "waiting" || next.status === "blocked"
+                  ? { status: next.status, index: next.index }
+                  : { status: next.status },
+              remainingMinor,
+              canSendRemaining,
+            }))(buildPanelData(split.plan, split.parts))}
+          />
+        </div>
+      )}
 
       <PaymentIntentPanel
         intent={intent}

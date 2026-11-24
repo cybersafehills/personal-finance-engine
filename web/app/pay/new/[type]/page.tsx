@@ -4,7 +4,7 @@ import { PageHeader } from "../../../../components/PageHeader";
 import { EmptyState } from "../../../../components/EmptyState";
 import { PaymentDraftForm } from "../../../../components/pay/PaymentDraftForm";
 import { getAccounts, getActiveWorkspaceId, getBudgets } from "../../../../lib/queries";
-import { isAssistedPayEnabled } from "../../../../lib/pay/gate";
+import { isAssistedPayEnabled, isPaySplitsEnabled } from "../../../../lib/pay/gate";
 import { getRecentRecipients, getTrustedRecipients } from "../../../../lib/pay/intents";
 import { messages } from "../../../../lib/ussd/messages";
 
@@ -95,6 +95,7 @@ export default async function NewPaymentPage({
           trust_status: r.trust_status,
         }))}
         recentRecipients={recentRecipients}
+        splitsEnabled={isPaySplitsEnabled(workspaceId)}
         defaults={{
           accountId: typeof sp.account === "string" ? sp.account : undefined,
           budgetId: typeof sp.budget === "string" ? sp.budget : undefined,

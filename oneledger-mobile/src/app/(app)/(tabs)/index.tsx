@@ -12,6 +12,9 @@ import { fetchWallets, fetchBudgets } from "@/api/mobile-api";
 import { useSession } from "@/features/auth/SessionProvider";
 import { HomeHeader, HeroBalance, CashFlow, Spending, WalletPanel, HomeSection, HomeLink } from "@/features/home/HomeCards";
 import { BudgetOutlook } from "@/features/home/BudgetOutlook";
+import { SaveOnSavingsCard } from "@/features/save-on/SaveOnSavingsCard";
+import { IntelligenceCard } from "@/features/insights/IntelligenceCard";
+import { useOutlookData } from "@/features/insights/useOutlookData";
 import { useChromeScroll } from "@/components/shell/useChromeScroll";
 import { HomeTrends } from "@/features/home/HomeTrends";
 import { currencyBlock, loadHomeInsights, profileName } from "@/features/home/live-data";
@@ -76,6 +79,8 @@ export default function Home() {
   const name = profile.data ?? fallbackName;
   const wallets = walletsQuery.data?.ok ? walletsQuery.data.wallets : null;
   const currency = choice?.space === activeId ? choice.currency : wallets?.find((w) => w.isPrimary)?.currency ?? "RWF";
+  // Loaded once for both the outlook card and the Cash flow block; RWF only (the server forecasts RWF).
+  const outlook = useOutlookData(currency === "RWF");
   const currencyOptions = [...new Set<SupportedCurrency>([...(wallets ?? []).map((w) => w.currency), ...(insights?.current.ok ? insights.current.overview.currencies.map((c) => c.currency) : []), currency])];
   const currentResult = insights?.current;
   const current = currencyBlock(currentResult, currency);
@@ -101,13 +106,17 @@ export default function Home() {
       {currencyOptions.length > 1 ? <View style={styles.currencies}>{currencyOptions.map((c) => <Chip key={c} label={c} selected={currency === c} onPress={() => setChoice({ space: activeId, currency: c })} />)}</View> : null}
       <HeroBalance key={`${session?.user.id}:${activeId}`} preferenceScope={`${session?.user.id ?? "unknown"}.${activeId}`} wallets={wallets} currency={currency} fallback={balanceQuery.data ?? null} loading={!wallets && balanceQuery.loading} />
       <GuidesHomeCard loaded={!walletsQuery.loading && !recentQuery.loading && !walletsQuery.error && !recentQuery.error} />
-      <CashFlow currency={currency} current={current} previous={currencyBlock(insights?.previous,currency)} previousAvailable={insights?.previous.ok===true} today={currencyBlock(insights?.today,currency)} todayAvailable={insights?.today.ok === true} todayPending={merged.todayPending && !analytics.error} available={currentResult?.ok === true} message={analyticsMessage} />
+      <CashFlow pace={outlook.data?.facts?.baseline ?? null} currency={currency} current={current} today={currencyBlock(insights?.today,currency)} todayAvailable={insights?.today.ok === true} todayPending={merged.todayPending && !analytics.error} available={currentResult?.ok === true} message={analyticsMessage} />
       <PartnerHomePlacement ready={!homeBlock} blockedBy={homeBlock}/>
       <HomeSection guideId="home-recent" title="Recent transactions" dense action={<HomeLink label="View all" onPress={() => router.navigate({ pathname: "/transactions", params: { focusSearch:"", category: "", accountId:"", walletName:"", period: "all", reset: String(Date.now()) } })} />}>
         {recentQuery.error ? <View style={{ gap: 8 }}><Text color="attention">Couldn&apos;t refresh transactions.</Text><Button label="Try again" variant="secondary" onPress={recentQuery.refresh} /></View> : null}
         {recentQuery.loading ? <Text color="textMuted">Loading transactions…</Text> : !recentQuery.data?.recent.length && !recentQuery.error ? <EmptyState title="No transactions yet" description="New transactions will appear here as they are recorded." /> : <View>{recentQuery.data?.recent.slice(0, 3).map((t) => <TransactionItem key={t.id} transaction={t} showDate compact />)}</View>}
       </HomeSection>
       <BudgetOutlook result={budget.data} currency={currency} now={now} error={budget.error} />
+      {/* Forecast and spending pace are RWF-only on the server, so other currencies don't show them. */}
+      {currency === "RWF" ? <IntelligenceCard key={`insights.${activeId}`} outlook={outlook.data} error={outlook.error} /> : null}
+      {/* Save On summary: only once it has saved (or is saving) something. */}
+      <SaveOnSavingsCard compact />
       <Spending key={`spending.${session?.user.id}.${activeId}`} scope={`${session?.user.id}.${activeId}`} current={current} available={currentResult?.ok === true} message={analyticsMessage} />
       <HomeTrends key={`trends.${session?.user.id}.${activeId}`} scope={`${session?.user.id}.${activeId}`} currency={currency} nowIso={now.toISOString()} day={day}/>
       <WalletPanel wallets={wallets} message={walletsMessage} />

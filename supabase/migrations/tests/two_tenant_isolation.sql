@@ -58,6 +58,9 @@ insert into tt.allow values
 create table tt.overrides (tbl text not null, col text not null, expr text not null, primary key (tbl, col));
 insert into tt.overrides values
   ('bill_documents',               'checksum_sha256', $$repeat('a', 64)$$),
+  ('payment_split_plans',          'kind',            $$'capacity'$$),
+  ('payment_split_plans',          'network_slug',    $$'ekash'$$),
+  ('payment_split_plans',          'planned_parts',   $$'["1","2"]'::jsonb$$),
   ('provider_statements',          'file_sha256',     $$repeat('b', 64)$$),
   ('report_runs',                  'period_start',    $$date '2026-01-01'$$),
   ('report_runs',                  'period_end',      $$date '2026-01-31'$$),

@@ -4,7 +4,7 @@ import { minor } from "./parse";
 export const FORECAST_DAYS = [7, 14, 30] as const;
 export type ForecastDays = typeof FORECAST_DAYS[number];
 export type ForecastScope = { workspaceId: string; accountId: string | null; days: ForecastDays };
-type ForecastPoint = { day: number; label: string; scheduled: bigint; estimated: bigint };
+export type ForecastPoint = { day: number; label: string; scheduled: bigint; estimated: bigint };
 export type WalletForecast = {
   id: string;
   name: string;

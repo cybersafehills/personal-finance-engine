@@ -20,6 +20,7 @@ import { isCounterpartiesEnabledFor } from "../lib/counterparties/directory";
 import {
   isAssistedPayEnabled,
   isPayServicesEnabled,
+  isPaySplitsEnabled,
   isScanToPayEnabled,
 } from "../lib/pay/gate";
 import { isIntegrationsEnabled } from "../lib/integrations/gate";
@@ -168,6 +169,13 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   const insightsEnabled = Boolean(user) &&
     isOneLedger3FlagEnabled(process.env, "INSIGHTS_CENTER", activeWorkspaceId);
   const forecastEnabled = Boolean(user) && isIntelligenceEnabled(activeWorkspaceId);
+  // Fee calculator (OneLedger 3.0): its own opt-in flag + allowlist, and it lives
+  // under Pay & Services, so that gate must cover the workspace too. The page and
+  // the mobile endpoint re-check both on the server.
+  const feeCalculatorEnabled = payEnabled &&
+    isOneLedger3FlagEnabled(process.env, "FEE_CALCULATOR", activeWorkspaceId);
+  // Save On (a payment in parts): opt-in PAY_SPLITS_ENABLED; the page re-checks it.
+  const paySplitsEnabled = Boolean(user) && isPaySplitsEnabled(activeWorkspaceId);
   const businessSurfacesEnabled = Boolean(user) &&
     isBusinessSurfacesEnabled(activeWorkspaceId);
 
@@ -217,6 +225,8 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           walletsEnabled={walletsEnabled}
           insightsEnabled={insightsEnabled}
           forecastEnabled={forecastEnabled}
+          feeCalculatorEnabled={feeCalculatorEnabled}
+          paySplitsEnabled={paySplitsEnabled}
           inboxBadgeCount={uiPreferences.showInboxBadge ? inboxBadgeCount : 0}
           insightGlimpse={insightGlimpse}
         >

@@ -18,6 +18,7 @@ export const MORE_ICONS: Record<MoreRoute, FeatherName> = {
   "/payment-activity": "activity",
   "/payment-templates": "copy",
   "/ussd": "hash",
+  "/save-on": "percent",
   "/space-members": "users",
   "/notifications": "bell",
   "/security": "lock",
