@@ -153,3 +153,14 @@ export function tariffToBands(
     verifiedAt: chosen.verified_at as string,
   };
 }
+
+/**
+ * The fee a band table charges for one transfer of `amount`, or null when the
+ * amount falls outside every published band (never a guess, never 0).
+ */
+export function feeForAmount(bands: readonly FeeBand[], amount: bigint): bigint | null {
+  for (const b of bands) {
+    if (amount >= b.fromMinor && (b.toMinor === null || amount <= b.toMinor)) return b.feeMinor;
+  }
+  return null;
+}

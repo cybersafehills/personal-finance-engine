@@ -91,3 +91,17 @@ Deno.test("tariff bands: not yet in effect, wrong currency, and scope preference
     { status: "unusable", reason: "no_verified_tariff" },
   );
 });
+
+import { feeForAmount } from "./rules.ts";
+
+Deno.test("feeForAmount prices inside a band and returns null outside every band", () => {
+  const bands = [
+    { fromMinor: 101n, toMinor: 300n, feeMinor: 30n },
+    { fromMinor: 301n, toMinor: null, feeMinor: 50n },
+  ];
+  assertEquals(feeForAmount(bands, 100n), null); // below the first published band: no invented 0
+  assertEquals(feeForAmount(bands, 101n), 30n);
+  assertEquals(feeForAmount(bands, 300n), 30n);
+  assertEquals(feeForAmount(bands, 301n), 50n);
+  assertEquals(feeForAmount(bands, 99_999_999n), 50n);
+});

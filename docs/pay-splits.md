@@ -1,4 +1,6 @@
-# Pay: Splits
+# Pay: Splits (user-facing name: "Save On")
+
+Users see this feature as **Save On** (settings page title, the offer card label, the link under the payment form, and the "How Save On works" steps in `pay.splits.settings` in `lib/ussd/messages.ts`). Code, routes (`/pay/splits`, `/api/mobile/pay/splits/*`), the flag and the database keep the technical name "split".
 
 A payment can be sent as several transfers ("parts"). Each part is an ordinary
 `payment_intent`, handed off by the user, one at a time. OneLedger never moves
@@ -11,7 +13,14 @@ Product decisions, 2026-11-23 (OneLedger's product owner):
   applies to the fee calculator only).
 - **eKash:** an amount up to RWF 10,000,000 goes as ONE transfer, fee RWF 20. A
   split is suggested **only when the amount exceeds** RWF 10,000,000.
-- MTN fee-saving splits wait for verified fee data; until it is loaded they never fire.
+- MTN fee-saving splits use MTN's own published fee table (loaded 2026-11-24, `docs/oneledger-3/tariff-sources/`); they are opt-in per user.
+
+## Two kinds of transfer, two separate data sets
+
+1. **Normal mobile money, MTN to MTN (not eKash).** MTN's "P2P On-net" table is tiered: 1-1,000 = 20; 1,001-10,000 = 100; 10,001-150,000 = 250; 150,001-2,000,000 = 1,500; 2,000,001-5,000,000 = 3,000; 5,000,001-10,000,000 = 5,000 (paid by the sender). Tiers make sending in parts cheaper for some amounts (180,000 RWF: 150,000 + 30,000 costs 500 instead of 1,500). Stored as `mtn-rwanda / send_money / same_network`.
+2. **MoMo to another wallet or a bank via eKash.** MTN charges a flat RWF 20 per transfer in every band up to RWF 10,000,000, so parts never save fees; a split is offered **only above** RWF 10,000,000. Stored as `mtn-rwanda / bank_transfer / any`, plus the network's own RSwitch ceiling and capacity in `route_fees` / `route_limits`.
+
+**Airtel:** Airtel Money's fee page publishes Cash-Out, IMT and Wallet to Bank only (loaded as `cash_withdrawal` and `bank_transfer`). It publishes no Airtel to Airtel person-to-person table, so Airtel gets no fee-saving offer until one is supplied (the offer code already looks up the payer's own network). Do not use unlabelled or hidden tables on that page.
 
 ## Two kinds
 
@@ -52,7 +61,7 @@ Product decisions, 2026-11-23 (OneLedger's product owner):
 
 ## Updating the numbers when sources arrive
 
-1. MTN fees: load a verified tariff through `docs/oneledger-3/fee-tariff-intake.md` (provider `mtn-rwanda`, type `send_money`, scope `same_network` or `any`). No code change: the offer picks it up. Percentage tiers are refused (not constant across a band).
+1. Fees: load a verified tariff through `docs/oneledger-3/fee-tariff-intake.md` (for Airtel person-to-person: provider `airtel-rwanda`, type `send_money`, scope `same_network`). No code change: the offer picks it up. Percentage tiers are refused (not constant across a band). The MTN and Airtel tables loaded on 2026-11-24 are in `supabase/migrations/20270126000000_save_on_published_tariffs.sql`; `published_tariffs_test.ts` and the migration harness check them.
 2. If the provider publishes a minimum transfer, raise `minPartMinor` (`DEFAULT_SAVING_OPTIONS` in `split-math.ts`) or expose it from the tariff, and add the per-transaction and daily limits to `route_limits`.
 3. eKash: correct `route_limits` / `route_fees` for the `ekash` network. They override the fallback in `rules.ts`.
 

@@ -4,7 +4,8 @@ import type { supabaseSession } from "../../supabase-session-server";
 import type { SplitErrorCode } from "../../mobile-splits";
 import { createPaymentIntent, type DraftInput } from "../create-intent";
 import { isPaymentNetworksEnabled, isPaySplitsEnabled } from "../gate";
-import { getSplitOffer, type SplitOffer, type SplitOfferInput } from "./offer";
+import { getSplitOffer, loadSplitPrefs, type SplitOffer, type SplitOfferInput, type SplitPrefs } from "./offer";
+import { isSplitThreshold, type SplitThreshold } from "./split-math";
 import { getSplitPlan, nextPartStatus, type SplitPartRow } from "./plans";
 
 // The split flow's business logic, shared by the web server actions
@@ -274,4 +275,27 @@ export async function stopSplit(ctx: SplitCtx, planId: string): Promise<SplitRes
   const { error } = await ctx.supabase.rpc("stop_payment_split_plan", { p_plan: planId });
   if (error) return fail(rpcCode(error.message), rpcMessage(error.message));
   return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Preferences (fee-saving suggestions: off until the user turns them on)
+// ---------------------------------------------------------------------------
+
+export function readSplitPrefs(ctx: SplitCtx): Promise<SplitPrefs> {
+  return loadSplitPrefs(ctx.supabase, ctx.userId);
+}
+
+export async function saveSplitPrefs(
+  ctx: SplitCtx,
+  args: { feeSavingEnabled: boolean; threshold: string },
+): Promise<SplitResult<{ prefs: SplitPrefs }>> {
+  if (!isSplitThreshold(args.threshold)) return fail("failed", "Pick one of the options.");
+  const threshold: SplitThreshold = args.threshold;
+  const feeSavingEnabled = args.feeSavingEnabled === true;
+  const { error } = await ctx.supabase.from("pay_split_preferences").upsert(
+    { user_id: ctx.userId, fee_saving_enabled: feeSavingEnabled, threshold },
+    { onConflict: "user_id" },
+  );
+  if (error) return fail("failed", "Could not save your choice.");
+  return { ok: true, prefs: { feeSavingEnabled, threshold } };
 }

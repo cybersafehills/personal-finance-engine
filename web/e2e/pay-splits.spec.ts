@@ -73,6 +73,7 @@ test.describe("Pay: splits (eKash over capacity)", () => {
     await expect(card.getByText("Part 3 · 8,333,333 RWF")).toBeVisible();
     // Honest copy: fees are a ceiling, the institution's own limits may be lower,
     // and OneLedger says it never moves the money.
+    // The test user has no MTN account, so this is the network's published ceiling.
     await expect(card.getByText(/up to 60 RWF in total/)).toBeVisible();
     await expect(card.getByText(/lower limits of its own/)).toBeVisible();
     await expect(card.getByText(/OneLedger never moves money/)).toBeVisible();
@@ -151,11 +152,12 @@ test.describe("Pay: splits (eKash over capacity)", () => {
   });
 });
 
-test("the Splits settings page opens and keeps fee-saving off by default", async ({ page }) => {
+test("the Save On settings page opens and keeps fee-saving off by default", async ({ page }) => {
   await page.goto("/pay/splits");
-  await expect(page.getByRole("heading", { name: "Splits" })).toBeVisible();
-  await expect(page.getByRole("switch", { name: /Suggest cheaper splits/ })).not.toBeChecked();
+  await expect(page.getByRole("heading", { name: "Save On" })).toBeVisible();
+  await expect(page.getByRole("switch", { name: /Turn on Save On/ })).not.toBeChecked();
   await expect(page.getByText(/does not depend on this setting/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "How Save On works" })).toBeVisible();
   const results = await new AxeBuilder({ page }).analyze();
   expect(results.violations.filter((v) => v.impact === "serious" || v.impact === "critical")).toEqual([]);
 });

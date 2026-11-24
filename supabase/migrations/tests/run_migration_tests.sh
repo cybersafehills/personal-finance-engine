@@ -10203,6 +10203,38 @@ psql -d pfe_rls -v ON_ERROR_STOP=1 -c "delete from public.provider_tariffs where
 
 echo ""
 # ===========================================================================
+# Published tariffs for Save On (20270126000000_save_on_published_tariffs). Loaded from
+# MTN's and Airtel's own fee pages: five verified tariffs with the published number of
+# bands; MTN's eKash route is a flat 20; Airtel has NO person-to-person tariff.
+# ===========================================================================
+echo "=== Published tariffs (Save On) ==="
+
+pt_count() { psql -d pfe_rls -t -A -c "$1" | head -1; }
+PT_Q="from public.provider_tariffs t join public.service_providers p on p.id = t.service_provider_id"
+[ "$(pt_count "select count(*) $PT_Q where t.verified_at is not null and t.source_url in ('https://www.mtn.co.rw/momo-tarrif/', 'https://airtelmoney.rw/transaction_fees');")" = "5" ] \
+  && pass "published tariffs: five MTN/Airtel tariffs are loaded and verified with an https source" \
+  || fail "published tariffs: expected five verified MTN/Airtel tariffs"
+PT_TIERS() { pt_count "select count(*) from public.provider_tariff_tiers i join public.provider_tariffs t on t.id = i.tariff_id join public.service_providers p on p.id = t.service_provider_id where p.slug = '$1' and t.transaction_type = '$2' and t.recipient_scope = '$3';"; }
+[ "$(PT_TIERS mtn-rwanda send_money same_network)" = "6" ] \
+  && pass "published tariffs: MTN person-to-person (same network) has the six published bands" \
+  || fail "published tariffs: MTN person-to-person band count is wrong"
+[ "$(PT_TIERS mtn-rwanda bank_transfer any)" = "6" ] \
+  && [ "$(pt_count "select count(distinct i.fixed_fee_minor) from public.provider_tariff_tiers i join public.provider_tariffs t on t.id = i.tariff_id join public.service_providers p on p.id = t.service_provider_id where p.slug = 'mtn-rwanda' and t.transaction_type = 'bank_transfer';")" = "1" ] \
+  && [ "$(pt_count "select max(i.fixed_fee_minor) from public.provider_tariff_tiers i join public.provider_tariffs t on t.id = i.tariff_id join public.service_providers p on p.id = t.service_provider_id where p.slug = 'mtn-rwanda' and t.transaction_type = 'bank_transfer';")" = "20" ] \
+  && pass "published tariffs: MTN's eKash route is a flat RWF 20 in all six bands" \
+  || fail "published tariffs: MTN's eKash route is not a flat RWF 20"
+[ "$(pt_count "select max(i.max_amount_minor) from public.provider_tariff_tiers i join public.provider_tariffs t on t.id = i.tariff_id join public.service_providers p on p.id = t.service_provider_id where p.slug = 'mtn-rwanda' and t.transaction_type = 'send_money';")" = "10000000" ] \
+  && pass "published tariffs: MTN person-to-person bands end at RWF 10,000,000" \
+  || fail "published tariffs: MTN person-to-person top band is wrong"
+[ "$(PT_TIERS airtel-rwanda cash_withdrawal any)" = "14" ] && [ "$(PT_TIERS airtel-rwanda bank_transfer any)" = "13" ] \
+  && pass "published tariffs: Airtel Cash-Out (14 bands) and Wallet to Bank (13 bands) are loaded" \
+  || fail "published tariffs: Airtel band counts are wrong"
+[ "$(pt_count "select count(*) $PT_Q where p.slug = 'airtel-rwanda' and t.transaction_type = 'send_money';")" = "0" ] \
+  && pass "published tariffs: Airtel has no person-to-person tariff (none is published)" \
+  || fail "published tariffs: an Airtel person-to-person tariff exists without a published source"
+
+echo ""
+# ===========================================================================
 # Payment splits (20270125000000_payment_split_plans). A capacity plan is only
 # accepted for an amount OVER the network's published capacity (eKash RWF
 # 10,000,000) with every part within it; parts must add up; parts are attached

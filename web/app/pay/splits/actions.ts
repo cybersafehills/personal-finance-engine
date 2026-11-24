@@ -16,6 +16,7 @@ import {
   draftFromPart,
   offerForPayment,
   rpcMessage,
+  saveSplitPrefs,
   startNextPart,
   startSplit,
   stopSplit,
@@ -24,10 +25,7 @@ import {
   type SplitResult,
   type StartSplitInput,
 } from "../../../lib/pay/splits/service";
-import {
-  isSplitThreshold,
-  type SplitThreshold,
-} from "../../../lib/pay/splits/split-math";
+import { isSplitThreshold } from "../../../lib/pay/splits/split-math";
 
 // The web entry points. The logic lives in lib/pay/splits/service.ts, shared with
 // the mobile API; this file adds what only the web has: the cookie session, the
@@ -197,16 +195,8 @@ export async function setSplitPreferencesAction(args: {
     if (!isSplitThreshold(args.threshold)) {
       return { ok: false, error: "Pick one of the options.", code: "failed" };
     }
-    const threshold: SplitThreshold = args.threshold;
-    const { error } = await sc.supabase.from("pay_split_preferences").upsert(
-      {
-        user_id: sc.userId,
-        fee_saving_enabled: args.feeSavingEnabled === true,
-        threshold,
-      },
-      { onConflict: "user_id" },
-    );
-    if (error) return { ok: false, error: "Could not save your choice.", code: "failed" };
+    const res = await saveSplitPrefs(sc, args);
+    if (!res.ok) return res;
     revalidatePath("/pay/splits");
     return { ok: true };
   } catch (err) {

@@ -368,6 +368,7 @@ test.describe("mobile API", () => {
         "insightsCenter",
         "integrations",
         "pay",
+        "paySplits",
         "paymentRequests",
         "people",
         "scanToPay",
@@ -385,6 +386,7 @@ test.describe("mobile API", () => {
         expect(body.config.pay).toBe(true);
       }
       if (body.config.trustedRecipients) expect(body.config.assistedPay).toBe(true);
+      if (body.config.paySplits) expect(body.config.assistedPay).toBe(true);
     } finally {
       await api.dispose();
     }

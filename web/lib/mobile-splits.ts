@@ -6,6 +6,8 @@
 
 import { isUuid, parseCreateIntent } from "./mobile-pay.ts";
 import type { CreateIntentRequest } from "./mobile-pay.ts";
+import { buildPanelData } from "./pay/splits/plan-state.ts";
+import { isSplitThreshold, type SplitThreshold } from "./pay/splits/split-math.ts";
 
 /** Only eKash has a capacity rule today; anything else is "no network chosen". */
 export const SPLIT_NETWORK_SLUGS = ["ekash"] as const;
@@ -118,4 +120,83 @@ export function splitErrorStatus(code: SplitErrorCode): 404 | 409 | 422 | null {
     default:
       return null;
   }
+}
+
+export type SplitPrefsRequest = { feeSavingEnabled: boolean; threshold: SplitThreshold };
+
+/** Fee-saving is opt-in: a missing flag is a refusal, never "on". */
+export function parseSplitPrefs(body: unknown): Parsed<SplitPrefsRequest> {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, message: "Send your choice as JSON." };
+  }
+  const b = body as Record<string, unknown>;
+  if (typeof b.feeSavingEnabled !== "boolean") {
+    return { ok: false, message: "Choose whether to turn Save On suggestions on." };
+  }
+  if (!isSplitThreshold(b.threshold)) return { ok: false, message: "Pick one of the options." };
+  return { ok: true, value: { feeSavingEnabled: b.feeSavingEnabled, threshold: b.threshold } };
+}
+
+type PlanIn = {
+  id: string;
+  kind: "capacity" | "fee_saving";
+  network_slug: string | null;
+  currency: string;
+  total_amount_minor: number | string;
+  planned_parts: readonly (string | number)[];
+  single_fee_minor: number | string | null;
+  planned_fee_minor: number | string | null;
+  fee_basis: "none" | "published_maximum" | "verified_tariff";
+  stopped_at: string | null;
+};
+type PartIn = { id: string; split_index: number; amount_minor: number | string; state: string };
+
+export type MobilePlan = {
+  id: string;
+  kind: "capacity" | "fee_saving";
+  networkSlug: string | null;
+  currency: string;
+  /** Money as digit strings (bigint-safe). */
+  totalMinor: string;
+  plannedPartsMinor: string[];
+  singleFeeMinor: string | null;
+  plannedFeeMinor: string | null;
+  feeBasis: "none" | "published_maximum" | "verified_tariff";
+  stopped: boolean;
+  /** Parts already prepared, each a payment the person hands off; cancelled drafts are left out. */
+  parts: { index: number; intentId: string; amountMinor: string; state: string }[];
+  /** What the app may offer next. "ready" is the only state with a button. */
+  next:
+    | { status: "ready" | "waiting" | "blocked"; index: number; amountMinor: string }
+    | { status: "complete" | "stopped" };
+  remainingMinor: string;
+  /** Fee-saving only: stop and send what is left as one transfer (web only for now). */
+  canSendRemaining: boolean;
+};
+
+export function toMobilePlan(plan: PlanIn, parts: readonly PartIn[]): MobilePlan {
+  const panel = buildPanelData(plan, parts);
+  return {
+    id: plan.id,
+    kind: plan.kind,
+    networkSlug: plan.network_slug,
+    currency: plan.currency,
+    totalMinor: String(plan.total_amount_minor),
+    plannedPartsMinor: plan.planned_parts.map(String),
+    singleFeeMinor: plan.single_fee_minor === null ? null : String(plan.single_fee_minor),
+    plannedFeeMinor: plan.planned_fee_minor === null ? null : String(plan.planned_fee_minor),
+    feeBasis: plan.fee_basis,
+    stopped: plan.stopped_at !== null,
+    parts: parts
+      .filter((p) => p.state !== "cancelled")
+      .map((p) => ({
+        index: p.split_index,
+        intentId: p.id,
+        amountMinor: String(p.amount_minor),
+        state: p.state,
+      })),
+    next: panel.next,
+    remainingMinor: panel.remainingMinor,
+    canSendRemaining: panel.canSendRemaining,
+  };
 }

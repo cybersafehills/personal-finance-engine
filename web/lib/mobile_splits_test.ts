@@ -55,3 +55,47 @@ Deno.test("service codes map to honest statuses", () => {
   }
   assertEquals(splitErrorStatus("failed"), null);
 });
+
+import { parseSplitPrefs, toMobilePlan } from "./mobile-splits.ts";
+
+Deno.test("preferences: fee-saving is opt-in, so a missing flag is refused, never turned on", () => {
+  assertEquals(parseSplitPrefs({ threshold: "balanced" }).ok, false);
+  assertEquals(parseSplitPrefs({ feeSavingEnabled: "yes", threshold: "balanced" }).ok, false);
+  assertEquals(parseSplitPrefs({ feeSavingEnabled: true, threshold: "huge" }).ok, false);
+  const r = parseSplitPrefs({ feeSavingEnabled: false, threshold: "bigger" });
+  assertEquals(r.ok && r.value, { feeSavingEnabled: false, threshold: "bigger" });
+});
+
+const plan = {
+  id: KEY,
+  kind: "capacity" as const,
+  network_slug: "ekash",
+  currency: "RWF",
+  total_amount_minor: "25000000",
+  planned_parts: ["8333334", "8333333", "8333333"],
+  single_fee_minor: null,
+  planned_fee_minor: "60",
+  fee_basis: "verified_tariff" as const,
+  stopped_at: null,
+};
+
+Deno.test("a plan waits for the previous part before the next can be prepared", () => {
+  const waiting = toMobilePlan(plan, [{ id: "a", split_index: 1, amount_minor: "8333334", state: "awaiting_verification" }]);
+  assertEquals(waiting.next, { status: "waiting", index: 2, amountMinor: "8333333" });
+  const ready = toMobilePlan(plan, [{ id: "a", split_index: 1, amount_minor: "8333334", state: "successful" }]);
+  assertEquals(ready.next, { status: "ready", index: 2, amountMinor: "8333333" });
+  assertEquals(ready.remainingMinor, "16666666");
+  assertEquals(ready.parts, [{ index: 1, intentId: "a", amountMinor: "8333334", state: "successful" }]);
+});
+
+Deno.test("a stopped plan offers nothing, and cancelled drafts are not listed", () => {
+  const stopped = toMobilePlan({ ...plan, stopped_at: "2026-11-24T10:00:00Z" }, [
+    { id: "a", split_index: 1, amount_minor: "8333334", state: "successful" },
+    { id: "b", split_index: 2, amount_minor: "8333333", state: "cancelled" },
+  ]);
+  assertEquals(stopped.next, { status: "stopped" });
+  assertEquals(stopped.stopped, true);
+  assertEquals(stopped.parts.length, 1);
+  // A capacity plan can never be sent as one transfer.
+  assertEquals(stopped.canSendRemaining, false);
+});

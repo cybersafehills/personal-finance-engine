@@ -31,6 +31,7 @@ export function SplitOfferCard({
       className="flex flex-col gap-3 rounded-control border border-border-subtle bg-surface px-4 py-3"
     >
       <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-accent">{t.brand}</p>
         <h2 className="text-sm font-semibold text-text-primary">
           {isCapacity ? t.capacityTitle : t.savingTitle}
         </h2>
@@ -57,7 +58,7 @@ export function SplitOfferCard({
             {fill(t.partRow, { i: p.index, amount: formatRwf(p.amountMinor) })}
             {p.feeMinor !== null && (
               <span className="text-text-muted">
-                {isCapacity ? " · up to " : " · fee "}
+                {isCapacity && offer.feeBasis !== "verified_tariff" ? " · up to " : " · fee "}
                 {formatRwf(p.feeMinor)} RWF
               </span>
             )}
@@ -67,7 +68,7 @@ export function SplitOfferCard({
 
       {isCapacity && offer.plannedFeeMinor !== null && offer.parts[0]?.feeMinor && (
         <p className="text-xs text-text-secondary">
-          {fill(t.capacityFee, {
+          {fill(offer.feeBasis === "verified_tariff" ? t.capacityFeeExact : t.capacityFee, {
             fee: formatRwf(offer.plannedFeeMinor),
             perPart: formatRwf(offer.parts[0].feeMinor),
           })}

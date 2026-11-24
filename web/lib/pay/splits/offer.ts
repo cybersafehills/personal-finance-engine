@@ -12,7 +12,7 @@ import {
   type SplitThreshold,
   THRESHOLD_MIN_SAVING_PER_EXTRA_PART,
 } from "./split-math";
-import { EKASH_SLUG, resolveEkashRule, tariffToBands } from "./rules";
+import { EKASH_SLUG, feeForAmount, resolveEkashRule, tariffToBands } from "./rules";
 
 // The server-authoritative decision "should this payment be offered as a split,
 // and as which parts?". The browser only ASKS (to render the card) and later
@@ -26,8 +26,12 @@ import { EKASH_SLUG, resolveEkashRule, tariffToBands } from "./rules";
 
 type Session = Awaited<ReturnType<typeof supabaseSession>>;
 
-/** Provider whose verified tariff drives fee-saving splits (service_providers.slug). */
-const MTN_PROVIDER_SLUG = "mtn-rwanda";
+/**
+ * service_providers.slug per mobile-money network. A verified tariff for the payer's
+ * own network drives fee-saving splits, so a network with no published person-to-person
+ * tariff (today: Airtel) simply never gets an offer, with no code change when one is loaded.
+ */
+const PROVIDER_SLUG = { mtn: "mtn-rwanda", airtel: "airtel-rwanda" } as const;
 
 export type SplitOffer = {
   kind: "capacity" | "fee_saving";
@@ -108,6 +112,39 @@ export async function getSplitOffer(args: {
       feePerPartMinor: rule.feePerPartMinor,
     });
     if (plan.status !== "plan") return null;
+
+    // MTN publishes its own charge for "To another wallet or bank via eKash": a fixed
+    // fee in every band. When that tariff is verified and prices every part, show the
+    // exact fee instead of the network's published ceiling. Only MTN's page says it
+    // is the eKash route, so other payers keep the ceiling.
+    const payer = providerNetworkForAccount(input.accountProvider);
+    if (payer === "mtn") {
+      const loaded = await loadProviderTariffs(supabase, PROVIDER_SLUG.mtn, "bank_transfer");
+      const bands = loaded ? tariffToBands(loaded.tariffs, "RWF", now) : null;
+      if (bands && bands.status === "ok") {
+        const fees = plan.parts.map((p) => feeForAmount(bands.bands, p.amountMinor));
+        if (fees.every((f): f is bigint => f !== null)) {
+          return {
+            kind: "capacity",
+            networkSlug: EKASH_SLUG,
+            currency: "RWF",
+            totalMinor: s(total),
+            parts: plan.parts.map((p, i) => ({
+              index: p.index,
+              amountMinor: s(p.amountMinor),
+              feeMinor: s(fees[i] as bigint),
+            })),
+            singleFeeMinor: null,
+            plannedFeeMinor: s((fees as bigint[]).reduce((a, b) => a + b, 0n)),
+            savingsMinor: null,
+            feeBasis: "verified_tariff",
+            capacityMinor: s(plan.capacityMinor),
+            source: { label: bands.sourceLabel, url: bands.sourceUrl, asOf: bands.verifiedAt },
+            threshold: null,
+          };
+        }
+      }
+    }
     return {
       kind: "capacity",
       networkSlug: EKASH_SLUG,
@@ -128,18 +165,18 @@ export async function getSplitOffer(args: {
     };
   }
 
-  // ---- fee-saving: MTN person transfer to an MTN number -------------------
+  // ---- fee-saving: person transfer to a number on the payer's own network --
   if (input.networkSlug) return null; // some other network: nothing to optimise
   if (input.paymentType !== "pay_person") return null;
   const norm = input.recipientMsisdn ? normalizeRwandaMsisdn(input.recipientMsisdn) : null;
   const recipientProvider = norm?.normalized ? guessProvider(norm.normalized) : null;
   const payerProvider = providerNetworkForAccount(input.accountProvider);
-  if (payerProvider !== "mtn" || recipientProvider !== "mtn") return null;
+  if (!payerProvider || payerProvider !== recipientProvider) return null;
 
   const prefs = await loadSplitPrefs(supabase, userId);
   if (!prefs.feeSavingEnabled) return null;
 
-  const loaded = await loadProviderTariffs(supabase, MTN_PROVIDER_SLUG, "send_money");
+  const loaded = await loadProviderTariffs(supabase, PROVIDER_SLUG[payerProvider], "send_money");
   if (!loaded) return null;
   const bands = tariffToBands(loaded.tariffs, "RWF", now);
   if (bands.status !== "ok") return null;
