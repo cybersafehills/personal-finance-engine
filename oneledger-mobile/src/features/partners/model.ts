@@ -44,33 +44,29 @@ export function initialPlacements(): Record<PlacementId, PlacementConfig> {
 }
 export type PartnerPreviewState = {
   placements: Record<PlacementId, PlacementConfig>;
-  enabled: boolean; scenario: PreviewScenario; homeEnabled: boolean;
-  hiddenBrands: string[]; interests: PartnerCategory[]; dismissedUntil: string | null;
+  enabled: boolean; scenario: PreviewScenario;
+  /** Business accounts may dismiss the Home banner for the rest of the session; it comes back next session. */
+  homeDismissed: boolean;
+  interests: PartnerCategory[];
   language: "English" | "Kinyarwanda";
 };
 export function initialPartnerPreview(): PartnerPreviewState {
-  return { enabled: false, placements: initialPlacements(), scenario: "returning", homeEnabled: true, hiddenBrands: [], interests: [], dismissedUntil: null, language: "English" };
+  return { enabled: false, placements: initialPlacements(), scenario: "returning", homeDismissed: false, interests: [], language: "English" };
 }
 export function eligiblePreviewOffers(state: PartnerPreviewState, today: string, catalog: readonly PartnerOffer[] = PREVIEW_OFFERS) {
-  return catalog.filter(offer => offer.endsOn >= today && offer.language === state.language && !state.hiddenBrands.includes(offer.brandId));
+  return catalog.filter(offer => offer.endsOn >= today && offer.language === state.language);
 }
 export function previewHomeReason(state: PartnerPreviewState, today: string): string | null {
   if (!state.enabled) return "Sponsored content is off.";
-  if (!state.homeEnabled) return "Home promotions are off. Offers & partners remains available.";
   if (state.scenario === "first-visit") return "No Home promotion during the first three sessions.";
   if (state.scenario === "daily-cap") return "Daily limit reached: no additional Home promotion today.";
   if (state.scenario === "weekly-cap") return "Weekly limit reached: three Home exposures this week.";
-  if (state.dismissedUntil && state.dismissedUntil > today) return `Home promotions paused until ${state.dismissedUntil}.`;
+  if (state.homeDismissed) return "Home banner dismissed for this session.";
   return null;
 }
 export function previewHomeOffer(state: PartnerPreviewState, today: string, catalog: readonly PartnerOffer[] = PREVIEW_OFFERS) {
   if (previewHomeReason(state, today)) return null;
   return eligiblePreviewOffers(state, today, catalog).find(offer => offer.homeFeatured && (!state.interests.length || state.interests.includes(offer.category))) ?? null;
-}
-export function sevenDaysAfter(day: string): string {
-  const date = new Date(`${day}T12:00:00Z`);
-  date.setUTCDate(date.getUTCDate() + 7);
-  return date.toISOString().slice(0, 10);
 }
 
 /** Why a placement shows nothing right now, or null when it may show. Delivery states apply to every placement. */

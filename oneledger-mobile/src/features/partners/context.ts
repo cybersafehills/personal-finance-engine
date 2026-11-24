@@ -11,9 +11,11 @@ export type PreviewContext = {
   catalog: readonly PartnerOffer[];
   start(): void; stop(): void; reset(): void;
   update(patch: Partial<Omit<PartnerPreviewState, "enabled">>): void;
-  dismissHome(): void; hideBrand(id: string): void; unhideBrand(id: string): void;
+  /** Only Business accounts may dismiss a banner, and only for the current session. */
+  canDismiss: boolean;
+  dismissHome(): void;
 };
 export const DEFAULT_PREVIEW = initialPartnerPreview();
 const noop = () => {};
-export const PartnerPreviewContext = createContext<PreviewContext>({ state: DEFAULT_PREVIEW, today: "", mode: "off", catalog: [], start: noop, stop: noop, reset: noop, update: noop, dismissHome: noop, hideBrand: noop, unhideBrand: noop });
+export const PartnerPreviewContext = createContext<PreviewContext>({ state: DEFAULT_PREVIEW, today: "", mode: "off", catalog: [], start: noop, stop: noop, reset: noop, update: noop, canDismiss: false, dismissHome: noop });
 export const usePartnerPreview = () => useContext(PartnerPreviewContext);

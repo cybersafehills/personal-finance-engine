@@ -37,7 +37,7 @@ export function PartnerOfferCard({ offer, compact = false, variant = "banner", o
     </Svg>
     <View style={styles.header}>
       <View style={styles.brand}><Text variant="caption" style={styles.disclosure}>{sponsorLabel(offer)}</Text><Text variant="label" style={styles.white}>{offer.brand}</Text></View>
-      {onDismiss ? <Pressable accessibilityRole="button" accessibilityLabel="Dismiss Home promotion for seven days" onPress={onDismiss} style={({ pressed }) => [styles.close, { opacity: pressed ? 0.6 : 1 }]}><Feather name="x" size={18} color={colors.onSolid}/></Pressable> : null}
+      {onDismiss ? <Pressable accessibilityRole="button" accessibilityLabel="Dismiss Home promotion for this session" onPress={onDismiss} style={({ pressed }) => [styles.close, { opacity: pressed ? 0.6 : 1 }]}><Feather name="x" size={18} color={colors.onSolid}/></Pressable> : null}
     </View>
     <View pointerEvents="none" style={tile ? styles.tileArt : stacked ? styles.stackedArt : styles.art}><PartnerArtwork category={offer.category} size={tile ? 92 : 118}/></View>
     <View style={[tile ? styles.tileCopy : styles.copy, stacked && { paddingRight: 0 }]}>
@@ -78,7 +78,7 @@ export function PartnerWideCard({ offer, onDismiss }: { offer: PartnerOffer; onD
       <Text variant="heading" numberOfLines={3} style={styles.wideHeadline}>{offer.title}</Text>
       <View style={styles.wideCta}><Text variant="label" style={{ color: colors.homeGradientStart, fontWeight: "600", fontSize: 13 }}>View offer</Text><Feather name="arrow-up-right" size={14} color={colors.homeGradientStart}/></View>
     </View>
-    {onDismiss ? <Pressable accessibilityRole="button" accessibilityLabel="Dismiss Home promotion for seven days" onPress={onDismiss} hitSlop={6} style={({ pressed }) => [styles.wideClose, { opacity: pressed ? 0.6 : 1 }]}><Feather name="x" size={16} color={colors.onSolid}/></Pressable> : null}
+    {onDismiss ? <Pressable accessibilityRole="button" accessibilityLabel="Dismiss Home promotion for this session" onPress={onDismiss} hitSlop={6} style={({ pressed }) => [styles.wideClose, { opacity: pressed ? 0.6 : 1 }]}><Feather name="x" size={16} color={colors.onSolid}/></Pressable> : null}
   </Pressable>;
 }
 /** Small-widget proportions (1 : 1). Shown as a pair, each half the width. The whole card opens the offer. */
@@ -115,7 +115,7 @@ export function PartnerOfferBar({ offer }: { offer: PartnerOffer }) {
  * Rotation pauses while `paused` (typing/submitting), when the user prefers reduced motion, and on the last creative if not looping.
  */
 export function PartnerPlacement({ id, ready = true, paused = false, blockedBy = null, slot }: { id: PlacementId; ready?: boolean; paused?: boolean; blockedBy?: string | null; slot?: PlacementPosition }) {
-  const { state, today, dismissHome, mode, catalog } = usePartnerPreview();
+  const { state, today, dismissHome, canDismiss, mode, catalog } = usePartnerPreview();
   const guides = useGuides();
   const { colors } = useTheme();
   const styles = useStyles();
@@ -156,10 +156,10 @@ export function PartnerPlacement({ id, ready = true, paused = false, blockedBy =
     {format === "bar" ? null : <PartnerPreviewNotice/>}
     <Animated.View style={{ opacity: fade }}>
       {format === "bar" ? <PartnerOfferBar offer={first}/>
-        : format === "tall" ? <PartnerOfferCard offer={first} compact onDismiss={id === "home" ? dismissHome : undefined}/>
+        : format === "tall" ? <PartnerOfferCard offer={first} compact onDismiss={id === "home" && canDismiss ? dismissHome : undefined}/>
         : single ? <View style={{ flexDirection: "row" }}><View style={{ width: "50%", paddingRight: 5 }}><PartnerSquareCard offer={first}/></View></View>
         : pair ? <View style={{ flexDirection: "row", gap: 10 }}><View style={{ flex: 1 }}><PartnerSquareCard offer={first}/></View><View style={{ flex: 1 }}><PartnerSquareCard offer={second}/></View></View>
-        : <PartnerWideCard offer={first} onDismiss={id === "home" ? dismissHome : undefined}/>}
+        : <PartnerWideCard offer={first} onDismiss={id === "home" && canDismiss ? dismissHome : undefined}/>}
     </Animated.View>
     {dots}
   </View>;

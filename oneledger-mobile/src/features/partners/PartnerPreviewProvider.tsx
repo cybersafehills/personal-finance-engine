@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useSession } from "@/features/auth/SessionProvider";
+import { useActiveSpace } from "@/features/spaces/ActiveSpaceProvider";
 import { kigaliDateKey } from "@/lib/kigali-time";
-import { EMPTY_FEED, PREVIEW_OFFERS, initialPartnerPreview, sevenDaysAfter, type PartnerFeed, type PartnerPreviewState } from "./model";
+import { EMPTY_FEED, PREVIEW_OFFERS, initialPartnerPreview, type PartnerFeed, type PartnerPreviewState } from "./model";
 import { fetchPartnerFeed } from "./feed";
 import { DEFAULT_PREVIEW, PartnerPreviewContext } from "./context";
 
@@ -11,10 +12,12 @@ export { usePartnerPreview } from "./context";
  * Two sources of sponsored content, never mixed:
  *  - preview: fictional offers, development builds only, started explicitly from the design preview
  *  - live: offers the platform owner approved, delivered only while the owner's delivery switch is on
- * Nothing about the user is sent; the user's own choices (hide a brand, turn off Home, interests) stay on the device.
+ * Nothing about the user is sent; interests and language stay on the device. Adverts cannot be switched off; only Business accounts can dismiss the Home banner, and only for the current session.
  */
 export function PartnerPreviewProvider({ children }: { children: ReactNode }) {
   const { session } = useSession();
+  const { active } = useActiveSpace();
+  const canDismiss = active?.kind === "organization";
   const owner = session?.user.id ?? null;
   const [snapshot, setSnapshot] = useState(() => ({ owner, state: initialPartnerPreview() }));
   const current = snapshot.owner === owner ? snapshot.state : DEFAULT_PREVIEW;
@@ -31,7 +34,8 @@ export function PartnerPreviewProvider({ children }: { children: ReactNode }) {
   const previewOn = __DEV__ && current.enabled;
   const live = !previewOn && feed.enabled && feed.offers.length > 0;
   const mode: "preview" | "live" | "off" = previewOn ? "preview" : live ? "live" : "off";
-  const state = useMemo(() => previewOn ? current : live ? { ...current, enabled: true, placements: feed.placements, scenario: "returning" as const } : DEFAULT_PREVIEW, [previewOn, live, current, feed.placements]);
+  const base = useMemo(() => previewOn ? current : live ? { ...current, enabled: true, placements: feed.placements, scenario: "returning" as const } : DEFAULT_PREVIEW, [previewOn, live, current, feed.placements]);
+  const state = useMemo(() => (base.homeDismissed && !canDismiss ? { ...base, homeDismissed: false } : base), [base, canDismiss]);
   const catalog = previewOn ? PREVIEW_OFFERS : live ? feed.offers : [];
   const today = kigaliDateKey(new Date().toISOString());
   const change = useCallback((apply: (previous: PartnerPreviewState) => PartnerPreviewState) => {
@@ -41,9 +45,7 @@ export function PartnerPreviewProvider({ children }: { children: ReactNode }) {
   const stop = useCallback(() => change(() => initialPartnerPreview()), [change]);
   const reset = useCallback(() => change(() => ({ ...initialPartnerPreview(), enabled: true })), [change]);
   const update = useCallback((patch: Partial<Omit<PartnerPreviewState, "enabled">>) => change(previous => ({ ...previous, ...patch })), [change]);
-  const dismissHome = useCallback(() => change(previous => ({ ...previous, dismissedUntil: sevenDaysAfter(today) })), [change, today]);
-  const hideBrand = useCallback((id: string) => change(previous => ({ ...previous, hiddenBrands: [...new Set([...previous.hiddenBrands, id])] })), [change]);
-  const unhideBrand = useCallback((id: string) => change(previous => ({ ...previous, hiddenBrands: previous.hiddenBrands.filter(brand => brand !== id) })), [change]);
-  const value = useMemo(() => ({ state, today, mode, catalog, start, stop, reset, update, dismissHome, hideBrand, unhideBrand }), [state, today, mode, catalog, start, stop, reset, update, dismissHome, hideBrand, unhideBrand]);
+  const dismissHome = useCallback(() => { if (canDismiss) change(previous => ({ ...previous, homeDismissed: true })); }, [canDismiss, change]);
+  const value = useMemo(() => ({ state, today, mode, catalog, start, stop, reset, update, canDismiss, dismissHome }), [state, today, mode, catalog, start, stop, reset, update, canDismiss, dismissHome]);
   return <PartnerPreviewContext.Provider value={value}>{children}</PartnerPreviewContext.Provider>;
 }
