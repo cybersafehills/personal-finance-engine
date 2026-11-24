@@ -1,3 +1,4 @@
+import { SaveOnSavingsCard } from "@/features/save-on/SaveOnSavingsCard";
 import { router } from "expo-router";
 import { useCallback, useState } from "react";
 import { SelectedWallet } from "@/features/wallets/SelectedWallet";
@@ -120,6 +121,9 @@ export default function Home() {
                 ) : null}
               </ListGroup>
             ) : null}
+
+            {/* Save On summary: only once it has saved (or is saving) something. */}
+            <SaveOnSavingsCard compact />
 
             <Card style={{ paddingHorizontal: space[1], paddingVertical: space[2] }}>
               <View style={styles.cardHeader}>

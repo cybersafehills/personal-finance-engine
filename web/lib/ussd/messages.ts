@@ -166,6 +166,95 @@ const en = {
     disabledTitle: "Pay & Services isn't available",
     disabledBody:
       "This feature is turned off for your account right now. Check back later.",
+    splits: {
+      // {placeholders} are filled by lib/pay/splits/format.ts
+      capacityTitle: "Above the eKash limit for one transfer",
+      capacityBody:
+        "eKash sends up to {capacity} RWF at a time. {total} RWF can go as {n} transfers, one after another.",
+      capacityFee:
+        "Fees: up to {fee} RWF in total ({perPart} RWF at most per transfer). Your bank or wallet sets the final charge.",
+      capacityFeeExact:
+        "Fees: {fee} RWF in total ({perPart} RWF per transfer), from your provider's published tariff. Your provider shows the final fee.",
+      limitsNote:
+        "Your bank or wallet may have lower limits of its own. Check before you send.",
+      savingTitle: "Lower fees available",
+      savingBody:
+        "{total} RWF costs {single} RWF in fees as one transfer, and {planned} RWF as {n} parts. That saves {savings} RWF.",
+      source: "Fee source",
+      verifiedOn: "verified {date}",
+      partRow: "Part {i} · {amount} RWF",
+      accept: "Split into {n} parts",
+      working: "Preparing…",
+      keepOne: "Send as one transfer instead",
+      brand: "Save On",
+      howItWorks:
+        "OneLedger never moves money. You send each part yourself, one at a time, and confirm each before the next.",
+      ekashChoice: "Send over eKash",
+      ekashHint:
+        "Up to {capacity} RWF goes as one transfer. Above that, the amount is offered as parts.",
+      plan: {
+        title: "Sending in {n} parts",
+        subtitleCapacity: "This amount is above the network's limit for one transfer.",
+        subtitleSaving: "Sending in parts costs less in fees.",
+        partRow: "Part {i} · {amount} RWF",
+        thisPart: "This payment",
+        prepareNext: "Prepare part {i}",
+        waiting: "Confirm that part {i} went through to continue.",
+        blocked: "The last part didn't go through. Stop here, or check with your provider.",
+        complete: "Every part is prepared.",
+        stopped: "This split was stopped.",
+        stop: "Stop here",
+        sendRemaining: "Send remaining {amount} RWF as one transfer",
+        remaining: "Not yet prepared: {amount} RWF",
+        feesNote: "Fees shown are estimates, not guarantees.",
+      },
+      savings: {
+        title: "Saved with Save On",
+        intro:
+          "Fees you did not pay because Save On sent a payment in parts instead of one transfer.",
+        none: "Nothing saved yet",
+        emptyBody:
+          "When you send a payment in parts with Save On and every part goes through, the fees you saved show up here.",
+        plans: "{n} payment{s} in parts · {transfers} transfers",
+        asOne: "As one transfer: {amount} RWF in fees",
+        asParts: "As parts: {amount} RWF in fees",
+        saved: "Saved {amount} RWF ({pct}% of the fees)",
+        savedNoShare: "Saved {amount} RWF",
+        inProgress: "{n} in progress: about {amount} RWF more once every part is sent.",
+        recentTitle: "Latest savings",
+        recentRow: "{date} · {total} RWF in {n} parts · saved {amount} RWF",
+        estimate:
+          "Estimates from your provider's published fees; your provider shows the final fee. A saving counts only once every part has gone through.",
+        seeAll: "See all savings",
+        periodGroup: "Period",
+      },
+      settings: {
+        title: "Save On",
+        enable: "Turn on Save On",
+        explain:
+          "Save On helps when one transfer is not the best way to send. Between two MTN numbers, some amounts cost less in fees as two or more parts, and only when a published MTN fee table is on file. Over eKash (to another wallet or a bank), an amount above RWF 10,000,000 has to go in parts.",
+        howTitle: "How Save On works",
+        how: [
+          "You enter a payment as usual. If sending it in parts would cost less in fees, Save On shows the parts and the saving.",
+          "You choose: split it, or send it as one transfer. Nothing happens until you tap.",
+          "You send each part yourself, one at a time. Confirm each part before the next one opens.",
+          "OneLedger never moves your money. Fees shown are estimates; your provider shows the final fee.",
+        ],
+        question: "How big should a saving be before Save On suggests it?",
+        example:
+          "For example, sending 180,000 RWF between two MTN numbers costs 1,500 RWF in fees as one transfer, but 500 RWF as 150,000 + 30,000.",
+        any: "Every Franc",
+        anyHint: "Suggest a split whenever it saves anything at all.",
+        balanced: "Worth It",
+        balancedHint: "Suggest it when each extra transfer saves at least 100 RWF.",
+        recommended: "Our pick",
+        bigger: "Big Wins",
+        biggerHint: "Only suggest it when each extra transfer saves at least 500 RWF.",
+        ekashNote:
+          "An amount above the eKash limit for one transfer is always offered as parts. That does not depend on this setting.",
+        saved: "Saved",
+      },
+    },
     assisted: {
       newTitle: {
         pay_person: "Pay a person",

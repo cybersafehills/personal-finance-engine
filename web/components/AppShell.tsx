@@ -95,6 +95,7 @@ export function AppShell({
   insightsEnabled,
   forecastEnabled,
   feeCalculatorEnabled,
+  paySplitsEnabled = false,
   inboxBadgeCount,
   insightGlimpse,
 }: {
@@ -123,6 +124,7 @@ export function AppShell({
   /** INTELLIGENCE for the active Space: shows the cash-flow forecast in More. */
   forecastEnabled: boolean;
   feeCalculatorEnabled: boolean;
+  paySplitsEnabled?: boolean;
   /** Count on the header inbox icon (unread notifications + open attention
    *  rows). Already 0 when the caller has the badge preference off. */
   inboxBadgeCount: number;
@@ -306,6 +308,7 @@ export function AppShell({
             insightsEnabled={insightsEnabled}
             forecastEnabled={forecastEnabled}
             feeCalculatorEnabled={feeCalculatorEnabled}
+            paySplitsEnabled={paySplitsEnabled}
           />
         </>
       )}

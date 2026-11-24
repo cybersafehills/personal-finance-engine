@@ -20,7 +20,7 @@ The calculator turns the band containing the amount into a number with the same 
 "Estimate a fee" is in More > Pay & Services, shown only when `FEE_CALCULATOR_ENABLED` (+ allowlist) and the Pay gate cover the workspace. Still no mobile screen.
 
 ## Deliberately not built
-- **No comparison of one transfer versus several smaller ones.** The spec forbids automating splits to get around provider limits or rules; nothing computes, suggests or hints at one (a unit test and the e2e spec check the output contains no such text outside the disclaimer).
+- **No comparison of one transfer versus several smaller ones, in this calculator.** It reports a fee and warns about limits; it never proposes parts (a unit test and the e2e spec check its output contains no such text). **Superseded for Pay (2026-11-23):** splits are now offered in Pay - see `docs/pay-splits.md` - for an eKash amount above the network capacity, and as an opt-in fee saving once a verified tariff exists.
 - Institution-level (per-bank route) fee overrides: only network scope is read. The existing route pages show route fees.
 - **Any MTN/Airtel figure.** The tariff model exists; the data does not, and it is not invented. It arrives from a verified, source-cited seed migration (`fee-tariff-intake.md`).
 
@@ -41,7 +41,7 @@ The calculator turns the band containing the amount into a number with the same 
 - Read through the caller's session: the network data is public reference data; the history is the active workspace's ledger only, and in a household only the sources the caller may see. No counterparty is read or shown.
 - A failed read shows an error state, never an estimate from a partial read. History reads at most the newest 1,000 matching payments and says so when capped.
 - Privacy mode masks amounts, like the dashboard.
-- Always shown: "These are estimates, not guarantees… OneLedger does not charge this fee, does not move money, and will not suggest splitting a payment to get around a limit."
+- Always shown: "These are estimates, not guarantees… OneLedger does not charge this fee and does not move money."
 
 ## Known limits
 - History assumes the fee scales with amount only roughly: "similar" is ±20%. Fee bands narrower than that can give a range wider than the true fee for one amount; the recent-payments table shows why.

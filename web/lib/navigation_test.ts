@@ -107,3 +107,11 @@ Deno.test("More highlights for Wallets and Insights pages", () => {
   assert((MORE_MENU_PREFIXES as readonly string[]).includes("/wallets"));
   assert((MORE_MENU_PREFIXES as readonly string[]).includes("/insights"));
 });
+
+Deno.test("MORE_GROUPS: Save On is in Pay & Services and only when its flag is on", () => {
+  const group = MORE_GROUPS.find((g) => g.items.some((i) => i.href === "/pay/splits"));
+  assertEquals(group?.title, "Pay & Services");
+  const item = group?.items.find((i) => i.href === "/pay/splits");
+  assertEquals(item?.label, "Save On");
+  assertEquals(item?.requires, "paySplits");
+});

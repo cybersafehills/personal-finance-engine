@@ -7,6 +7,7 @@ import { fetchPayIntent, recordPayHandoff, settlePayIntent } from "@/api/mobile-
 import { Badge, Button, Card, EmptyState, Screen, ScreenHeader, Text } from "@/components/ds";
 import { PAY_COPY, stateLabel } from "@/features/pay/messages";
 import { PaymentStatus } from "@/features/pay/PaymentStatus";
+import { SaveOnPlanPanel } from "@/features/save-on/SaveOnPlanPanel";
 import { formatLocalMsisdn } from "@/features/pay/target";
 import { isStale, payPhase, POLL_MS, STALE_AFTER_MS } from "@/features/pay/status";
 import type { PayIntent } from "@/features/pay/types";
@@ -145,6 +146,11 @@ export default function PayReview() {
     else setSettleError(result.message);
   }
 
+  // A payment that is one part of a Save On plan also shows the whole plan.
+  const panel = intent.splitPlanId ? (
+    <SaveOnPlanPanel planId={intent.splitPlanId} currentIntentId={intent.id} refreshKey={intent.state} />
+  ) : null;
+
   const summary = (
     <Card style={{ gap: space[2] }}>
       <View style={{ flexDirection: "row" }}>
@@ -168,6 +174,7 @@ export default function PayReview() {
       <Screen>
         <ScreenHeader title="Payment status" />
         {summary}
+        {panel}
         <Card>
           <PaymentStatus phase={phase} intent={intent} amountLabel={amountText(intent)} recipient={recipient} />
         </Card>
@@ -219,6 +226,7 @@ export default function PayReview() {
     <Screen>
       <ScreenHeader title={PAY_COPY.reviewTitle} subtitle={PAY_COPY.feeNotice} />
       {summary}
+      {panel}
 
       {instruction === null ? (
         <EmptyState title="No verified route yet" description={PAY_COPY.noRoute} />

@@ -16,9 +16,11 @@
 // Money is bigint minor units with an explicit currency. Percentages are
 // integer basis points. No floating point touches an amount.
 //
-// Out of scope BY DESIGN: comparing "one transfer vs several smaller ones".
-// The spec forbids automating splits to get around provider limits or rules,
-// so nothing here suggests or computes one (see limitWarnings).
+// Out of scope HERE: comparing "one transfer vs several smaller ones". This
+// calculator only reports a fee and warns about limits (see limitWarnings). Split
+// suggestions live in Pay (lib/pay/splits), where an amount above a network's
+// per-transaction capacity, or a verified cheaper split, is offered as parts that
+// the user sends one at a time.
 
 import { isSupportedCurrency, minorUnitsPerMajor } from "../money.ts";
 

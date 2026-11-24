@@ -13,6 +13,18 @@ import {
   type PayConfigResult,
   type PayIntentResult,
 } from "@/features/pay/parse";
+import type { PayIntent } from "@/features/pay/types";
+import {
+  parseOfferResponse,
+  parsePartResponse,
+  parsePlanResponse,
+  parsePrefsResponse,
+  parseStopResponse,
+  type SaveOnFailure,
+  type SaveOnResult,
+} from "@/features/save-on/parse";
+import { parseSavingsResponse, type SaveOnSavings } from "@/features/save-on/savings";
+import type { SaveOnLevels, SaveOnOffer, SaveOnPlan, SaveOnPrefs } from "@/features/save-on/types";
 import { parseCategoriesResponse, type CategoriesResult } from "@/features/categories/parse";
 import {
   parseRulesResponse,
@@ -467,4 +479,80 @@ export async function prepareScan(raw: string, amountMinor?: number): Promise<Pr
   const result = await bearerPost("/api/mobile/pay/scan/prepare", amountMinor === undefined ? { raw } : { raw, amountMinor });
   if (result.kind !== "response") return { ok: false, ...failureForOutcome(result, "That payment") };
   return parsePrepareResponse(result.status, result.body);
+}
+
+// ---------------------------------------------------------------------------
+// Save On: a payment sent as several transfers (see features/save-on).
+// ---------------------------------------------------------------------------
+
+const saveOnFailure = (
+  result: Exclude<Awaited<ReturnType<typeof bearerGet>>, { kind: "response" }>,
+): SaveOnFailure => {
+  const f = failureForOutcome(result, "Save On");
+  return { ok: false, reason: f.reason, code: null, message: f.message };
+};
+
+export type SaveOnOfferBody = {
+  paymentType: "pay_person" | "pay_merchant";
+  amountMinor: number;
+  /** "ekash" when the person chose to send over eKash. */
+  networkSlug?: "ekash";
+  sourceAccountId?: string;
+  recipientMsisdn?: string;
+};
+
+/** Is there a split to suggest for this amount? Read-only; the server decides the parts. */
+export async function fetchSaveOnOffer(body: SaveOnOfferBody): Promise<SaveOnResult<{ offer: SaveOnOffer | null }>> {
+  const result = await bearerPost("/api/mobile/pay/splits/offer", body);
+  if (result.kind !== "response") return saveOnFailure(result);
+  return parseOfferResponse(result.status, result.body);
+}
+
+/** Start the split: creates the plan and part 1 as an ordinary draft payment. Nothing is sent. */
+export async function startSaveOn(
+  body: CreatePayIntentBody & { networkSlug?: "ekash" },
+): Promise<SaveOnResult<{ planId: string; intent: PayIntent; index: number | null }>> {
+  const result = await bearerPost("/api/mobile/pay/splits/start", body);
+  if (result.kind !== "response") return saveOnFailure(result);
+  return parsePartResponse(result.status, result.body);
+}
+
+export async function fetchSaveOnPlan(planId: string): Promise<SaveOnResult<{ plan: SaveOnPlan }>> {
+  const result = await bearerGet(`/api/mobile/pay/splits/${encodeURIComponent(planId)}`);
+  if (result.kind !== "response") return saveOnFailure(result);
+  return parsePlanResponse(result.status, result.body);
+}
+
+/** Prepare the next part: only once the previous one is settled (the server answers 409 `waiting` otherwise). */
+export async function nextSaveOnPart(
+  planId: string,
+): Promise<SaveOnResult<{ planId: string; intent: PayIntent; index: number | null }>> {
+  const result = await bearerPost(`/api/mobile/pay/splits/${encodeURIComponent(planId)}/next`, {});
+  if (result.kind !== "response") return saveOnFailure(result);
+  return parsePartResponse(result.status, result.body);
+}
+
+export async function stopSaveOn(planId: string): Promise<SaveOnResult<Record<never, never>>> {
+  const result = await bearerPost(`/api/mobile/pay/splits/${encodeURIComponent(planId)}/stop`, {});
+  if (result.kind !== "response") return saveOnFailure(result);
+  return parseStopResponse(result.status, result.body);
+}
+
+export async function fetchSaveOnPrefs(): Promise<SaveOnResult<{ preferences: SaveOnPrefs; levels: SaveOnLevels }>> {
+  const result = await bearerGet("/api/mobile/pay/splits/preferences");
+  if (result.kind !== "response") return saveOnFailure(result);
+  return parsePrefsResponse(result.status, result.body);
+}
+
+export async function saveSaveOnPrefs(prefs: SaveOnPrefs): Promise<SaveOnResult<{ preferences: SaveOnPrefs; levels: SaveOnLevels }>> {
+  const result = await bearerPost("/api/mobile/pay/splits/preferences", prefs);
+  if (result.kind !== "response") return saveOnFailure(result);
+  return parsePrefsResponse(result.status, result.body);
+}
+
+/** How much Save On has saved in transfer fees, over 24 hours to all time. Read-only. */
+export async function fetchSaveOnSavings(): Promise<SaveOnResult<{ savings: SaveOnSavings }>> {
+  const result = await bearerGet("/api/mobile/pay/splits/savings");
+  if (result.kind !== "response") return saveOnFailure(result);
+  return parseSavingsResponse(result.status, result.body);
 }

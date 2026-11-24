@@ -142,6 +142,9 @@ export type IntentInput = {
   /** Set when the user confirmed the payment themselves. */
   manually_confirmed_at?: string | null;
   updated_at?: string | null;
+  /** Set when this payment is one part of a Save On plan. */
+  split_plan_id?: string | null;
+  split_index?: number | null;
 };
 
 export type MobileInstruction =
@@ -165,6 +168,9 @@ export type MobileIntent = {
   createdAt: string;
   /** When the payment last changed (hand-off time while it waits). */
   updatedAt: string;
+  /** The Save On plan this payment belongs to (null = an ordinary payment), and which part it is. */
+  splitPlanId: string | null;
+  splitIndex: number | null;
   /** A "successful" payment the provider's message confirmed (true), or one the user confirmed (false). */
   verified: boolean;
   /** null = no verified USSD route for this payment (the app says so). */
@@ -190,6 +196,8 @@ export function toMobileIntent(
     expiresAt: intent.expires_at,
     createdAt: intent.created_at,
     updatedAt: intent.updated_at ?? intent.created_at,
+    splitPlanId: intent.split_plan_id ?? null,
+    splitIndex: intent.split_index ?? null,
     verified: intent.verified_at != null,
     instruction: filled === null ? null : filled.ok
       ? {

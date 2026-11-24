@@ -1,3 +1,4 @@
+import { SaveOnSavingsCard } from "@/features/save-on/SaveOnSavingsCard";
 import * as Linking from "expo-linking";
 import { router } from "expo-router";
 import { useCallback } from "react";
@@ -18,6 +19,9 @@ export default function Reports() {
   return (
     <Screen>
       <ScreenHeader title="Reports" subtitle="Your daily financial reports" />
+
+      {/* Save On: fees saved by sending in parts, as its own section. Absent when Save On is off. */}
+      <SaveOnSavingsCard />
 
       {loading && !data ? (
         <Text variant="label" color="textMuted">

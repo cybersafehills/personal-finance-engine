@@ -70,7 +70,8 @@ export type MoreIconKey =
   | "insights"
   | "goals"
   | "forecast"
-  | "fees";
+  | "fees"
+  | "saveOn";
 
 export type MoreItem = {
   href: string;
@@ -87,7 +88,8 @@ export type MoreItem = {
     | "wallets"
     | "insights"
     | "forecast"
-    | "feeCalculator";
+    | "feeCalculator"
+    | "paySplits";
 };
 
 export type MoreGroup = { title: string; items: readonly MoreItem[] };
@@ -195,6 +197,15 @@ export const MORE_GROUPS: readonly MoreGroup[] = [
         icon: "fees",
         surface: "pay",
         requires: "feeCalculator",
+      },
+      // Save On: cheaper ways to send (a payment in parts). Gated by PAY_SPLITS_ENABLED
+      // (+ the assisted-pay gate); absent, not disabled, when off.
+      {
+        href: "/pay/splits",
+        label: "Save On",
+        icon: "saveOn",
+        surface: "pay",
+        requires: "paySplits",
       },
     ],
   },

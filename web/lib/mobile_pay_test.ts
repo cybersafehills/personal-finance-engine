@@ -217,3 +217,15 @@ Deno.test("toMobileIntent: carries the full recipient number for the payer, not 
   assertEquals(toMobileIntent({ ...base, recipient_msisdn_normalized: undefined }, null).recipientMsisdn, null);
 });
 
+
+Deno.test("an intent that is a Save On part carries its plan; an ordinary one carries none", () => {
+  const base = {
+    id: "i1", state: "draft", payment_type: "pay_person", provider: "mtn", currency: "RWF",
+    amount_minor: 5, recipient_name: null, recipient_msisdn_masked: null, merchant_code: null,
+    billing_reference: null, expires_at: null, created_at: "2026-11-24T00:00:00Z",
+  };
+  const plain = toMobileIntent(base, null);
+  assertEquals([plain.splitPlanId, plain.splitIndex], [null, null]);
+  const part = toMobileIntent({ ...base, split_plan_id: "p1", split_index: 2 }, null);
+  assertEquals([part.splitPlanId, part.splitIndex], ["p1", 2]);
+});
