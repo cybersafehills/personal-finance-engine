@@ -17,6 +17,8 @@ import {
   displayName,
   isFailed,
   needsReview,
+  formatRowAmount,
+  settlementLabel,
   signedAmountRwf,
   transactionTypeLabel,
 } from "@/features/transactions/display";
@@ -40,7 +42,6 @@ import { ReceiptCard } from "@/features/receipts/ReceiptCard";
 import { useQuery } from "@/hooks/useQuery";
 import { config } from "@/lib/config";
 import { formatFullDateTime } from "@/lib/kigali-time";
-import { formatRwf } from "@/lib/money";
 import { space } from "@/theme/tokens";
 import { useTheme } from "@/theme/ThemeProvider";
 
@@ -89,6 +90,10 @@ export default function TransactionDetail() {
   }
 
   const failed = isFailed(transaction);
+  const unsettled = settlementLabel(transaction);
+  // 0 means there is no direction to show; the amount itself is never replaced by 0.
+  const signed = signedAmountRwf(transaction);
+  const money = (value: number) => formatRowAmount(value, transaction.currency);
   const context = extras?.context ?? null;
   const where = context ? whereFromRows(context, extras?.members ?? [], extras?.selfUserId ?? null) : [];
   const attention = attentionMessage(context?.allocationStatus);
@@ -120,12 +125,18 @@ export default function TransactionDetail() {
           {displayName(transaction)}
         </Text>
         {/* The detail view is a deliberate destination: never masked. */}
-        <MoneyAmount amountRwf={signedAmountRwf(transaction)} size="xl" masked={false} />
+        <MoneyAmount
+          amountRwf={signed === 0 ? transaction.amount_rwf : signed}
+          currency={transaction.currency.trim()}
+          unsigned={signed === 0}
+          size="xl"
+          masked={false}
+        />
         <Text variant="label" color="textMuted" style={{ textAlign: "center" }}>
           {formatFullDateTime(transaction.occurred_at)}
         </Text>
         <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: space[2] }}>
-          {failed ? <Badge variant="attention">Failed: no money moved</Badge> : null}
+          {unsettled ? <Badge variant={failed ? "attention" : "neutral"}>{unsettled}</Badge> : null}
           {needsReview(transaction) ? <Badge variant="attention">Needs review</Badge> : null}
         </View>
       </Card>
@@ -181,11 +192,11 @@ export default function TransactionDetail() {
       ) : null}
 
       <Card style={{ gap: space[3] }}>
-        <Row label="Amount" value={formatRwf(transaction.amount_rwf)} />
-        {transaction.fee_rwf > 0 ? <Row label="Fee" value={formatRwf(transaction.fee_rwf)} /> : null}
+        <Row label="Amount" value={money(transaction.amount_rwf)} />
+        {transaction.fee_rwf > 0 ? <Row label="Fee" value={money(transaction.fee_rwf)} /> : null}
         <Row label="Direction" value={directionLabel(transaction.direction)} />
         {transaction.balance_after_rwf !== null ? (
-          <Row label="Balance after" value={formatRwf(transaction.balance_after_rwf)} />
+          <Row label="Balance after" value={money(transaction.balance_after_rwf)} />
         ) : null}
         <Row label="Type" value={transaction.transaction_type.replace(/_/g, " ")} />
         {transaction.counterparty_reference ? (

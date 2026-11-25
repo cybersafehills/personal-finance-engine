@@ -106,6 +106,42 @@ describe("Transaction detail screen", () => {
     expect(screen.getByText("90,000 RWF")).toBeTruthy();
   });
 
+  it("shows every amount in the transaction's own currency, from minor units", async () => {
+    mockGetTransaction.mockResolvedValue(txn({ currency: "USD", amount_rwf: 1234, fee_rwf: 5, balance_after_rwf: 90000 }));
+    await render(<TransactionDetail />);
+
+    expect(await screen.findByText("−USD 12.34")).toBeTruthy();
+    expect(screen.getByText("USD 12.34")).toBeTruthy();
+    expect(screen.getByText("USD 0.05")).toBeTruthy();
+    expect(screen.getByText("USD 900.00")).toBeTruthy();
+    expect(screen.queryByText(/RWF/)).toBeNull();
+  });
+
+  it.each([
+    [{ status: "pending" }, "Pending"],
+    [{ status: "success", settlement_state: "unknown" }, "Unconfirmed"],
+    [{ status: "success", settlement_state: "reversed" }, "Reversed"],
+    [{ status: "cancelled" }, "Cancelled"],
+  ])("shows the real amount, unsigned, and says why for %o", async (over, label) => {
+    mockGetTransaction.mockResolvedValue(txn(over));
+    await render(<TransactionDetail />);
+
+    expect(await screen.findByText(label)).toBeTruthy();
+    // The headline and the Amount row.
+    expect(screen.getAllByText("4,200 RWF")).toHaveLength(2);
+    expect(screen.queryByText("0 RWF")).toBeNull();
+    expect(screen.queryByText("−4,200 RWF")).toBeNull();
+    expect(screen.queryByText("Failed: no money moved")).toBeNull();
+  });
+
+  it("never shows a neutral transaction as zero", async () => {
+    mockGetTransaction.mockResolvedValue(txn({ direction: "neutral" }));
+    await render(<TransactionDetail />);
+    await screen.findByText("Kigali Fresh");
+    expect(screen.getAllByText("4,200 RWF")).toHaveLength(2);
+    expect(screen.queryByText("0 RWF")).toBeNull();
+  });
+
   it("opens the category picker to change the category", async () => {
     mockGetTransaction.mockResolvedValue(txn());
     await render(<TransactionDetail />);
