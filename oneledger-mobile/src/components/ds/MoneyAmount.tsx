@@ -1,6 +1,6 @@
 import { formatAmount, isCurrency } from "../../../../web/shared/financial";
 import { usePrivacy } from "@/features/privacy/PrivacyProvider";
-import { formatSignedRwf } from "@/lib/money";
+import { formatRwf, formatSignedRwf } from "@/lib/money";
 import type { ColorToken } from "@/theme/tokens";
 import type { TextVariant } from "@/theme/typography";
 
@@ -26,11 +26,14 @@ export function MoneyAmount({
   currency,
   size = "md",
   masked,
+  unsigned = false,
 }: {
   amountRwf: number;
   currency?: string;
   size?: keyof typeof SIZES;
   masked?: boolean;
+  /** Show the size of the amount with no direction: pending, failed or neutral rows. */
+  unsigned?: boolean;
 }) {
   const { amountsHidden, fullPrivacy } = usePrivacy();
   const hidden = fullPrivacy || (masked ?? amountsHidden);
@@ -49,8 +52,9 @@ export function MoneyAmount({
 
   if (!Number.isSafeInteger(amountRwf) || (currency && !isCurrency(currency))) return <Text>Amount unavailable</Text>;
 
-  const color: ColorToken =
-    amountRwf > 0
+  const color: ColorToken = unsigned
+    ? "textMuted"
+    : amountRwf > 0
       ? "moneyPositive"
       : amountRwf < 0
         ? "moneyNegative"
@@ -58,7 +62,11 @@ export function MoneyAmount({
 
   return (
     <Text variant={SIZES[size]} color={color} tabular>
-      {currency && currency !== "RWF" ? formatAmount(amountRwf, currency) : formatSignedRwf(amountRwf)}
+      {currency && currency !== "RWF"
+        ? formatAmount(unsigned ? Math.abs(amountRwf) : amountRwf, currency, !unsigned)
+        : unsigned
+          ? formatRwf(amountRwf)
+          : formatSignedRwf(amountRwf)}
     </Text>
   );
 }

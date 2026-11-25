@@ -1,4 +1,7 @@
 import { dateGroupLabel } from "@/lib/kigali-time";
+import { formatRwf } from "@/lib/money";
+
+import { formatAmount, isCurrency } from "../../../../web/shared/financial";
 
 import type { TransactionRow } from "./queries";
 
@@ -83,7 +86,30 @@ export function reviewPrompt(
   return { message: "Needs a category", confirmLabel: null, dismissLabel: "Clear" };
 }
 
-/** Signed amount for display: + in, − out, 0 for neutral or failed. */
+/**
+ * A stored amount in the row's own currency, unsigned for RWF. The legacy
+ * `*_rwf` columns hold minor units of that currency, so never assume RWF.
+ */
+export function formatRowAmount(value: number, currency: string): string {
+  const code = currency.trim();
+  if (!Number.isSafeInteger(value) || !isCurrency(code)) return "Amount unavailable";
+  return code === "RWF" ? formatRwf(value) : formatAmount(value, code, false);
+}
+
+/** What happened to a row that moved no money or hasn't settled; null once settled. */
+export function settlementLabel(
+  transaction: Pick<TransactionRow, "status" | "settlement_state">,
+): string | null {
+  const state = transaction.settlement_state ?? transaction.status;
+  if (isFailed(transaction)) {
+    if (state === "reversed") return "Reversed";
+    return state === "cancelled" ? "Cancelled" : "Failed: no money moved";
+  }
+  if (!isPending(transaction)) return null;
+  return state === "unknown" || transaction.status === "unknown" ? "Unconfirmed" : "Pending";
+}
+
+/** Signed effect (not for showing a row's amount on its own): + in, − out, 0 for neutral or unsettled. */
 export function signedAmountRwf(
   transaction: Pick<TransactionRow, "direction" | "amount_rwf" | "status">,
 ): number {
