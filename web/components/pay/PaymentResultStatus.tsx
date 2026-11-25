@@ -21,10 +21,10 @@ function phaseOf(state: string): Phase | null {
 
 /**
  * Minimal live result for a hand-off payment: a spinning circle while we wait
- * for provider evidence, which resolves into a green tick (sent) or a red X
- * (didn't go through). Honest by construction - a tick is shown only for the
- * `successful` state (SMS-verified or confirmed by the user), never for a mere
- * hand-off (ADR 0002). While waiting it refreshes the server data every few
+ * for provider evidence, which resolves into a green tick (provider verified),
+ * a neutral person (confirmed only by the user) or a red X (didn't go through).
+ * Honest by construction - per ADR 0002 a manual confirmation never gets a
+ * success colour or a tick, and a mere hand-off gets neither. While waiting it refreshes the server data every few
  * seconds, so the mark flips without a manual reload even if Realtime is down.
  */
 export function PaymentResultStatus({
@@ -95,7 +95,7 @@ export function PaymentResultStatus({
       body: verified
         ? `${amountLabel}${recipient ? ` to ${recipient}` : ""} - confirmed by your provider.`
         : `${amountLabel}${recipient ? ` to ${recipient}` : ""} - you confirmed this payment.`,
-      color: "#16a34a",
+      color: verified ? "#16a34a" : "var(--text-muted)",
     },
     failure: {
       title: state === "reversed" ? "Payment reversed" : "Payment didn't go through",
@@ -115,6 +115,7 @@ export function PaymentResultStatus({
       aria-live="polite"
       data-testid="payment-result"
       data-phase={phase}
+      data-verified={verified}
       className="flex flex-col items-center gap-3 rounded-card border border-border-subtle bg-surface px-6 py-8 text-center"
     >
       <svg
@@ -138,8 +139,14 @@ export function PaymentResultStatus({
         ) : (
           <>
             <circle className="pay-mark-ring" cx="36" cy="36" r="30" transform="rotate(-90 36 36)" />
-            {phase === "success" ? (
+            {phase === "success" && verified ? (
               <path className="pay-mark-glyph" d="M22 37l10 10 18-21" />
+            ) : phase === "success" ? (
+              // Two paths: .pay-mark-glyph only draws 60 units of each.
+              <>
+                <path className="pay-mark-glyph" d="M36 35a8 8 0 1 0 0-16 8 8 0 0 0 0 16" />
+                <path className="pay-mark-glyph" d="M23 51a13 12 0 0 1 26 0" />
+              </>
             ) : (
               <path className="pay-mark-glyph" d="M25 25l22 22M47 25L25 47" />
             )}

@@ -169,6 +169,8 @@ describe("Payment status", () => {
     await render(<PayReview />);
     expect(await screen.findByText("Marked as sent")).toBeTruthy();
     expect(screen.getByText(/you confirmed this payment/)).toBeTruthy();
+    expect(screen.getByTestId("status-self-confirmed")).toBeTruthy();
+    expect(screen.queryByTestId("status-tick")).toBeNull();
   });
 
   it.each([

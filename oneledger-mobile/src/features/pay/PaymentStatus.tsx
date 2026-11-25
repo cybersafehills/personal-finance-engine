@@ -12,7 +12,8 @@ const SIZE = 72;
 
 /**
  * The payment's live mark: a ring that spins while we wait, which turns into a
- * blue tick when the money went through, or a red cross when it did not.
+ * blue tick when the provider confirmed it, a neutral person when only you said
+ * you sent it (docs/adr/0002: never a tick), or a red cross when it did not go through.
  * Announced to screen readers as a polite status.
  */
 export function PaymentStatus({
@@ -30,7 +31,7 @@ export function PaymentStatus({
   const copy = phaseCopy(phase, intent, amountLabel, recipient);
   return (
     <View accessibilityRole="summary" accessibilityLiveRegion="polite" style={styles.wrap}>
-      <Mark key={phase} phase={phase} />
+      <Mark key={`${phase}-${intent.verified}`} phase={phase} verified={intent.verified} />
       <Text variant="heading" accessibilityRole="header">
         {copy.title}
       </Text>
@@ -41,7 +42,7 @@ export function PaymentStatus({
   );
 }
 
-function Mark({ phase }: { phase: PayPhase }) {
+function Mark({ phase, verified }: { phase: PayPhase; verified: boolean }) {
   const styles = useStyles();
   const { colors } = useTheme();
   // Created once per mark (the mark is re-keyed per phase), never read from a ref in render.
@@ -62,6 +63,13 @@ function Mark({ phase }: { phase: PayPhase }) {
   if (phase === "waiting") {
     const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
     return <Animated.View testID="status-spinner" style={[styles.ring, { transform: [{ rotate }] }]} />;
+  }
+  if (phase === "success" && !verified) {
+    return (
+      <Animated.View testID="status-self-confirmed" style={[styles.disc, styles.selfConfirmed, { transform: [{ scale: pop }] }]}>
+        <Feather name="user" size={36} color={colors.textMuted} />
+      </Animated.View>
+    );
   }
   const success = phase === "success";
   return (
@@ -85,5 +93,6 @@ const useStyles = makeStyles((colors) => StyleSheet.create({
     borderColor: colors.borderSubtle,
     borderTopColor: colors.accent,
   },
+  selfConfirmed: { borderWidth: 3, borderColor: colors.borderStrong },
   disc: { width: SIZE, height: SIZE, borderRadius: SIZE / 2, alignItems: "center", justifyContent: "center" },
 }));
