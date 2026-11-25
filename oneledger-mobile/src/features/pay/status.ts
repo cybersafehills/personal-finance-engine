@@ -1,9 +1,9 @@
 // The live result of a payment you handed off, mirroring the web's payment page
 // (web/components/pay/PaymentResultStatus.tsx): a spinner while we wait for the
-// provider's own message, then a tick (sent) or a cross (didn't go through).
-// Honest by construction: a tick shows only for the server's `successful` state,
-// which is reached by the provider's message matching it or by you saying so;
-// merely opening the dialer is never a tick (docs/adr/0002).
+// provider's own message, then a result mark. Honest by construction: a mark of
+// success needs the server's `successful` state, and a tick also needs the
+// provider's own evidence. A payment you confirmed yourself gets a neutral mark
+// (docs/adr/0002), and merely opening the dialer is never either.
 
 export type PayPhase = "waiting" | "success" | "failure";
 
