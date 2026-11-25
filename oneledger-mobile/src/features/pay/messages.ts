@@ -21,13 +21,32 @@ const LABELS: Record<string, string> = {
   expired: "Expired",
   cancelled: "Cancelled",
   failed: "Didn't work",
+  processing: "Processing",
+  reversed: "Reversed",
+  requires_reconciliation: "Needs reconciliation",
 };
 
+/** What to say for a payment that has no live result and must not be dialled. */
+export function closedNotice(state: string): string {
+  if (state === "requires_reconciliation") {
+    return "The evidence doesn't match this payment. Don't pay again until you've checked your provider messages. You can resolve it on the web.";
+  }
+  if (state === "cancelled") return "This payment was cancelled. If you still need to send it, start a new one from Pay.";
+  return "Check where this payment stands on the web before paying again.";
+}
+
+/** What stands behind a `successful` payment. Mirrors web/lib/pay/state.ts#statusLabel. */
+export type PaymentEvidence = { verified?: boolean; manuallyConfirmed?: boolean };
+
 /**
- * A state's label. The app never shows a success state: whether a payment went
- * through is only ever established by evidence on the web, so any state it does
- * not recognise reads as neutral progress, never as a tick.
+ * A state's label. "Verified" only with the provider's own evidence; a payment you
+ * confirmed yourself says so (docs/adr/0002). A state the app does not recognise
+ * reads as neutral progress.
  */
-export function stateLabel(state: string): string {
+export function stateLabel(state: string, evidence: PaymentEvidence = {}): string {
+  if (state === "successful") {
+    if (evidence.verified) return "Verified";
+    return evidence.manuallyConfirmed ? "Manually confirmed" : "Completed";
+  }
   return LABELS[state] ?? "In progress";
 }

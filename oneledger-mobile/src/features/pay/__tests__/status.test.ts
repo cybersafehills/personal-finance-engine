@@ -18,6 +18,13 @@ describe("phaseCopy", () => {
     });
     expect(phaseCopy("success", { state: "successful", verified: false }, amount, null).title).toBe("Marked as sent");
   });
+  it("never says no money was sent for a reversal, and warns before a second payment", () => {
+    for (const state of ["reversed", "expired"]) {
+      const { body } = phaseCopy("failure", { state, verified: false }, amount, null);
+      expect(body).not.toMatch(/No money was sent|try again/);
+      expect(body).toMatch(/before paying again|don't pay again/);
+    }
+  });
   it("is honest about a payment that expired or was reversed", () => {
     expect(phaseCopy("failure", { state: "expired", verified: false }, amount, null).body).toMatch(/No money has been recorded as sent/);
     expect(phaseCopy("failure", { state: "reversed", verified: false }, amount, null).title).toBe("Payment reversed");

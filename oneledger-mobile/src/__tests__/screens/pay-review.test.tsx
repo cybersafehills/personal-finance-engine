@@ -172,6 +172,19 @@ describe("Payment status", () => {
   });
 
   it.each([
+    ["requires_reconciliation", "Needs reconciliation", /Don't pay again/],
+    ["cancelled", "Cancelled", /was cancelled/],
+    ["something_new", "In progress", /on the web before paying again/],
+  ])("never offers to dial a payment that is %s", async (state, badge, notice) => {
+    mockFetch.mockResolvedValue(loaded({ state }));
+    await render(<PayReview />);
+    expect(await screen.findByText(badge)).toBeTruthy();
+    expect(screen.getByText(notice)).toBeTruthy();
+    expect(screen.queryByText("Open phone dialer")).toBeNull();
+    expect(screen.queryByText("Share or copy code")).toBeNull();
+  });
+
+  it.each([
     ["failed", "Payment didn't go through"],
     ["expired", "Payment didn't go through"],
     ["reversed", "Payment reversed"],

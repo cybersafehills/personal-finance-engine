@@ -5,7 +5,7 @@ import { AppState, Share, View } from "react-native";
 
 import { fetchPayIntent, recordPayHandoff, settlePayIntent } from "@/api/mobile-api";
 import { Badge, Button, Card, EmptyState, Screen, ScreenHeader, Text } from "@/components/ds";
-import { PAY_COPY, stateLabel } from "@/features/pay/messages";
+import { closedNotice, PAY_COPY, stateLabel } from "@/features/pay/messages";
 import { PaymentStatus } from "@/features/pay/PaymentStatus";
 import { SaveOnPlanPanel } from "@/features/save-on/SaveOnPlanPanel";
 import { formatLocalMsisdn } from "@/features/pay/target";
@@ -154,7 +154,7 @@ export default function PayReview() {
   const summary = (
     <Card style={{ gap: space[2] }}>
       <View style={{ flexDirection: "row" }}>
-        <Badge variant="neutral">{stateLabel(intent.state)}</Badge>
+        <Badge variant="neutral">{stateLabel(intent.state, { verified: intent.verified, manuallyConfirmed: !intent.verified })}</Badge>
       </View>
       <Text variant="title" tabular>
         {amountText(intent)}
@@ -166,6 +166,25 @@ export default function PayReview() {
       </Text>
     </Card>
   );
+
+  // Only a draft may be dialled from here. The server sends the code in every state,
+  // so offering it for a payment that needs reconciliation (or was cancelled) could
+  // get the same money sent twice.
+  if (!phase && intent.state !== "draft") {
+    return (
+      <Screen>
+        <ScreenHeader title="Payment status" />
+        {summary}
+        {panel}
+        <Card style={{ gap: space[2] }}>
+          <Text variant="label" color="textSecondary">
+            {closedNotice(intent.state)}
+          </Text>
+        </Card>
+        <Button label="Done" fullWidth onPress={() => router.back()} />
+      </Screen>
+    );
+  }
 
   // The live result, once the payment has been handed off.
   if (phase) {

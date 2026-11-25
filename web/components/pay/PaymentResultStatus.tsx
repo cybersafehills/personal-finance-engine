@@ -100,9 +100,11 @@ export function PaymentResultStatus({
     failure: {
       title: state === "reversed" ? "Payment reversed" : "Payment didn't go through",
       body:
-        state === "expired"
-          ? "No confirmation arrived in time. No money has been recorded as sent."
-          : "No money was sent. You can try again.",
+        state === "reversed"
+          ? "This payment was reversed. Check your provider balance before paying again."
+          : state === "expired"
+            ? "No confirmation arrived in time. No money has been recorded as sent. If money left your account, don't pay again until you've checked your provider messages."
+            : "No money was sent. You can try again.",
       color: "#dc2626",
     },
   }[phase];

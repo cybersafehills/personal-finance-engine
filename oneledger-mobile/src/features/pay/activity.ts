@@ -16,6 +16,8 @@ export type PaymentRow = {
   currency: string;
   recipient: string;
   createdAt: string;
+  verified: boolean;
+  manuallyConfirmed: boolean;
 };
 
 export const TYPE_LABELS: Record<string, string> = {
@@ -38,6 +40,8 @@ type IntentRow = {
   recipient_msisdn_normalized?: string | null;
   merchant_code: string | null;
   created_at: string;
+  verified_at?: string | null;
+  manually_confirmed_at?: string | null;
 };
 
 export function toPaymentRow(r: IntentRow): PaymentRow {
@@ -49,19 +53,21 @@ export function toPaymentRow(r: IntentRow): PaymentRow {
     currency: r.currency ?? "RWF",
     recipient: r.recipient_name?.trim() || (r.recipient_msisdn_normalized ? formatLocalMsisdn(r.recipient_msisdn_normalized) : null) || r.recipient_msisdn_masked || (r.merchant_code ? `Merchant ${r.merchant_code}` : TYPE_LABELS[r.payment_type] ?? "Payment"),
     createdAt: r.created_at,
+    verified: r.verified_at != null,
+    manuallyConfirmed: r.manually_confirmed_at != null,
   };
 }
 
-/** The status line under a payment: what it was, and where it stands (never "paid"). */
+/** The status line under a payment: what it was, and where it stands. */
 export function paymentHint(row: PaymentRow): string {
-  return `${TYPE_LABELS[row.type] ?? "Payment"} · ${stateLabel(row.state)}`;
+  return `${TYPE_LABELS[row.type] ?? "Payment"} · ${stateLabel(row.state, row)}`;
 }
 
 export async function getPaymentActivity(limit = 50): Promise<PaymentRow[]> {
   if (!supabase) throw new Error("not connected");
   const { data, error } = await supabase
     .from("payment_intents")
-    .select("id, payment_type, state, amount_minor, currency, recipient_name, recipient_msisdn_masked, recipient_msisdn_normalized, merchant_code, created_at")
+    .select("id, payment_type, state, amount_minor, currency, recipient_name, recipient_msisdn_masked, recipient_msisdn_normalized, merchant_code, created_at, verified_at, manually_confirmed_at")
     .order("created_at", { ascending: false })
     .limit(limit);
   if (error) throw new Error(error.message);
