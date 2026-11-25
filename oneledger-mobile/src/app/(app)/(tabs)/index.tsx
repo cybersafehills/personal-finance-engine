@@ -8,7 +8,9 @@ import { useCallback, useEffect, useState } from "react";
 import { AppState, RefreshControl, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Button, Chip, EmptyState, Text } from "@/components/ds";
-import { fetchWallets, fetchBudgets } from "@/api/mobile-api";
+import { fetchWallets, fetchBudgets, fetchInsights } from "@/api/mobile-api";
+import { MonthlyBars } from "@/features/home/MonthlyBars";
+import { fillTrendWindow, trendWindow } from "@/features/home/trend-range";
 import { useSession } from "@/features/auth/SessionProvider";
 import { HomeHeader, HeroBalance, CashFlow, Spending, WalletPanel, HomeSection, HomeLink } from "@/features/home/HomeCards";
 import { BudgetOutlook } from "@/features/home/BudgetOutlook";
@@ -73,6 +75,15 @@ export default function Home() {
   const insights = merged.data;
   const loadBudget = useCallback(() => { if (!activeId) throw new Error("Space is loading"); return fetchBudgets(); }, [activeId]);
   const budget = useQuery(loadBudget, { refreshIntervalMs: 60000 });
+  // The server's own six monthly buckets (the same request the trends section makes).
+  // The key keeps another Space's or day's answer off the screen while the new one loads.
+  const monthsKey = `${activeId}.${day}`;
+  const loadMonths = useCallback(async () => {
+    if (!activeId || !day) throw new Error("Space is loading");
+    const window = trendWindow({ kind: "months", months: 6 }, new Date());
+    return { key: `${activeId}.${day}`, window, result: await fetchInsights(window) };
+  }, [activeId, day]);
+  const months = useQuery(loadMonths, { refreshIntervalMs: 60000 });
   const profile = useQuery(profileName);
   const unread = useQuery(getUnreadNotificationCount);
   const dock = useDockClearance();
@@ -85,6 +96,10 @@ export default function Home() {
   // Loaded once for both the outlook card and the Cash flow block; RWF only (the server forecasts RWF).
   const outlook = useOutlookData(currency === "RWF");
   const currencyOptions = [...new Set<SupportedCurrency>([...(wallets ?? []).map((w) => w.currency), ...(insights?.current.ok ? insights.current.overview.currencies.map((c) => c.currency) : []), currency])];
+  const monthly = months.data?.key === monthsKey ? months.data : null;
+  const monthlyBlock = currencyBlock(monthly?.result, currency);
+  const monthlyPoints = monthly?.result.ok && monthlyBlock?.trend ? fillTrendWindow(monthlyBlock.trend, monthly.window) : null;
+  const monthlyMessage = months.loading ? "Loading the last 6 months…" : "The monthly chart is unavailable.";
   const currentResult = insights?.current;
   const current = currencyBlock(currentResult, currency);
   const analyticsMessage = currentResult && !currentResult.ok ? currentResult.message : analytics.error ?? (analytics.loading || merged.usingRemembered ? "Loading your monthly activity…" : "No summary is available.");
@@ -97,7 +112,7 @@ export default function Home() {
     void offline.syncNow().catch(() => {});
     setNow(new Date());
     walletsQuery.refresh(); recentQuery.refresh(); balanceQuery.refresh();
-    analytics.refresh(); budget.refresh(); profile.refresh(); unread.refresh();
+    analytics.refresh(); budget.refresh(); profile.refresh(); unread.refresh(); months.refresh();
   }
   if (!activeId) return <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}><View style={styles.content}><Text color="textMuted">Loading your workspace. Connect to load your Spaces if this is your first launch.</Text></View></SafeAreaView>;
   return <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
@@ -109,7 +124,7 @@ export default function Home() {
       {currencyOptions.length > 1 ? <View style={styles.currencies}>{currencyOptions.map((c) => <Chip key={c} label={c} selected={currency === c} onPress={() => setChoice({ space: activeId, currency: c })} />)}</View> : null}
       <HeroBalance key={`${session?.user.id}:${activeId}`} preferenceScope={`${session?.user.id ?? "unknown"}.${activeId}`} wallets={wallets} currency={currency} fallback={balanceQuery.data ?? null} loading={!wallets && balanceQuery.loading} />
       <QuickActions config={payConfig} />
-      <CashFlow pace={outlook.data?.facts?.baseline ?? null} currency={currency} current={current} today={currencyBlock(insights?.today,currency)} todayAvailable={insights?.today.ok === true} todayPending={merged.todayPending && !analytics.error} available={currentResult?.ok === true} message={analyticsMessage} />
+      <CashFlow pace={outlook.data?.facts?.baseline ?? null} currency={currency} current={current} today={currencyBlock(insights?.today,currency)} todayAvailable={insights?.today.ok === true} todayPending={merged.todayPending && !analytics.error} available={currentResult?.ok === true} message={analyticsMessage}  chart={<MonthlyBars key={`months.${activeId}.${currency}`} points={monthlyPoints} currency={currency} message={monthlyMessage} />} />
       <HomeSection guideId="home-recent" title="Recent transactions" dense action={<HomeLink label="View all" onPress={() => router.navigate({ pathname: "/transactions", params: { focusSearch:"", category: "", accountId:"", walletName:"", period: "all", reset: String(Date.now()) } })} />}>
         {recentQuery.error ? <View style={{ gap: 8 }}><Text color="attention">Couldn&apos;t refresh transactions.</Text><Button label="Try again" variant="secondary" onPress={recentQuery.refresh} /></View> : null}
         {recentQuery.loading ? <Text color="textMuted">Loading transactions…</Text> : !recentQuery.data?.recent.length && !recentQuery.error ? <EmptyState title="No transactions yet" description="New transactions will appear here as they are recorded." /> : <View>{recentQuery.data?.recent.slice(0, 3).map((t) => <TransactionItem key={t.id} transaction={t} showDate compact />)}</View>}
