@@ -64,7 +64,7 @@ export function CashFlow({ currency, current, today, todayAvailable, todayPendin
   const income=current?.moneyInMinor ?? 0n, expense=current?.moneyOutMinor ?? 0n;
   const retained=retainedPercent(income,expense);
   return <HomeSection guideId="home-cash-flow" title="Cash flow" dense action={<Text variant="caption" color="textMuted">{currency}</Text>}>
-    <View style={styles.dailyPrimary}>{[{label:"Received today",amount:today?.moneyInMinor ?? 0n,positive:true},{label:"Spent today",amount:today?.moneyOutMinor ?? 0n,positive:false}].map(item => <View key={item.label} style={{flex:1,gap:5}}><Text variant="caption" color="textMuted">{item.label}</Text><Text variant="title" style={styles.dailyAmount} color={item.positive ? "moneyPositive" : "moneyRequest"} tabular adjustsFontSizeToFit numberOfLines={1}>{money(item.amount,todayAvailable)}</Text></View>)}</View>
+    <View style={styles.dailyPrimary}>{[{label:"Received today",amount:today?.moneyInMinor ?? 0n,positive:true},{label:"Spent today",amount:today?.moneyOutMinor ?? 0n,positive:false}].map(item => <View key={item.label} style={{flex:1,gap:5}}><Text variant="caption" color="textMuted">{item.label}</Text><Text variant="title" style={styles.dailyAmount} color={item.positive ? "moneyPositive" : "textPrimary"} tabular adjustsFontSizeToFit numberOfLines={1}>{money(item.amount,todayAvailable)}</Text></View>)}</View>
     {!todayAvailable ? <Text variant="caption" color="textMuted">{todayPending ? "Updating today’s activity…" : "Today’s activity is unavailable."}</Text> : null}
     <View style={styles.monthlyFooter}><Text variant="caption" color="textMuted" style={styles.small}>This month so far</Text>
       {available ? <>
@@ -115,14 +115,14 @@ const useStyles = makeStyles((c) => StyleSheet.create({
   retentionTrack:{height:4,borderRadius:2,backgroundColor:c.borderSubtle,overflow:"hidden",marginTop:4},
   retentionFill:{height:4,borderRadius:2,backgroundColor:c.chartIncome},
   paceLink: { minHeight: 32, justifyContent: "center" },
-  comparisonNote:{fontSize:10,lineHeight:14},
+  comparisonNote:{fontSize:12,lineHeight:16},
   denseSection: { padding:14,gap:6 },
   dailyPrimary: { flexDirection:"row",gap:12,paddingVertical:4 },
   dailyAmount: { fontSize:22,lineHeight:28 },
   monthlyFooter: { backgroundColor:c.background,padding:10,borderRadius:10,gap:4 },
-  monthlyAmount: { fontSize:13,lineHeight:18 },
-  sectionTitle: { fontSize: 15, lineHeight: 20 },
-  small: { fontSize: 11, lineHeight: 15 },
+  monthlyAmount: { fontSize:15,lineHeight:20 },
+  sectionTitle: { fontSize: 18, lineHeight: 24 },
+  small: { fontSize: 12, lineHeight: 16 },
   collapseTitle:{flex:1,minWidth:0,minHeight:44,justifyContent:"center"},
   sectionControl:{width:36,minHeight:44,alignItems:"center",justifyContent:"center"},
   walletTop: { flexDirection:"row", flexWrap:"wrap", alignItems:"baseline", gap:6 },

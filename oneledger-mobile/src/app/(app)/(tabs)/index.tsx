@@ -105,13 +105,13 @@ export default function Home() {
       {analytics.error && analytics.data ? <Text variant="caption" color="attention">Couldn&apos;t refresh analytics. Showing the last fetched summary.</Text> : null}
       {currencyOptions.length > 1 ? <View style={styles.currencies}>{currencyOptions.map((c) => <Chip key={c} label={c} selected={currency === c} onPress={() => setChoice({ space: activeId, currency: c })} />)}</View> : null}
       <HeroBalance key={`${session?.user.id}:${activeId}`} preferenceScope={`${session?.user.id ?? "unknown"}.${activeId}`} wallets={wallets} currency={currency} fallback={balanceQuery.data ?? null} loading={!wallets && balanceQuery.loading} />
-      <GuidesHomeCard loaded={!walletsQuery.loading && !recentQuery.loading && !walletsQuery.error && !recentQuery.error} />
       <CashFlow pace={outlook.data?.facts?.baseline ?? null} currency={currency} current={current} today={currencyBlock(insights?.today,currency)} todayAvailable={insights?.today.ok === true} todayPending={merged.todayPending && !analytics.error} available={currentResult?.ok === true} message={analyticsMessage} />
-      <PartnerHomePlacement ready={!homeBlock} blockedBy={homeBlock}/>
       <HomeSection guideId="home-recent" title="Recent transactions" dense action={<HomeLink label="View all" onPress={() => router.navigate({ pathname: "/transactions", params: { focusSearch:"", category: "", accountId:"", walletName:"", period: "all", reset: String(Date.now()) } })} />}>
         {recentQuery.error ? <View style={{ gap: 8 }}><Text color="attention">Couldn&apos;t refresh transactions.</Text><Button label="Try again" variant="secondary" onPress={recentQuery.refresh} /></View> : null}
         {recentQuery.loading ? <Text color="textMuted">Loading transactions…</Text> : !recentQuery.data?.recent.length && !recentQuery.error ? <EmptyState title="No transactions yet" description="New transactions will appear here as they are recorded." /> : <View>{recentQuery.data?.recent.slice(0, 3).map((t) => <TransactionItem key={t.id} transaction={t} showDate compact />)}</View>}
       </HomeSection>
+      <GuidesHomeCard loaded={!walletsQuery.loading && !recentQuery.loading && !walletsQuery.error && !recentQuery.error} />
+      <PartnerHomePlacement ready={!homeBlock} blockedBy={homeBlock}/>
       <BudgetOutlook result={budget.data} currency={currency} now={now} error={budget.error} />
       {/* Forecast and spending pace are RWF-only on the server, so other currencies don't show them. */}
       {currency === "RWF" ? <IntelligenceCard key={`insights.${activeId}`} outlook={outlook.data} error={outlook.error} /> : null}

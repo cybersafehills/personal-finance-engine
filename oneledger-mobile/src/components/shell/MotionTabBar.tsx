@@ -113,7 +113,7 @@ function MotionTab({ item, position, dockWidth, tightWidth, navigation }: {
             <BrandNavIcon name={item.icon} selected={focused} />
           </Animated.View>
           <Animated.View style={labelStyle} accessibilityElementsHidden={compact}>
-            <Text variant="caption" style={{ fontSize: 10, lineHeight: 14 }} color={focused ? "navSelectedInk" : "textPrimary"}>{item.name === "transactions" && width < 70 ? "Activity" : item.label}</Text>
+            <Text variant="caption" style={{ fontSize: 11, lineHeight: 14 }} color={focused ? "navSelectedInk" : "textPrimary"}>{item.name === "transactions" && width < 70 ? "Activity" : item.label}</Text>
           </Animated.View>
         </PressableScale>
       </GuideAnchor>
