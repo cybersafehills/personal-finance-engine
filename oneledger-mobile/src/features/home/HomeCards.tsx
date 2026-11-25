@@ -57,7 +57,7 @@ export function HomeLink({ label, onPress }: { label: string; onPress(): void })
 
 export { WalletCarousel as HeroBalance } from "./WalletCarousel";
 
-export function CashFlow({ currency, current, today, todayAvailable, todayPending = false, available, message, pace = null }: { today: CurrencyOverview | null; todayAvailable: boolean; todayPending?: boolean; currency: SupportedCurrency; current: CurrencyOverview | null; available: boolean; message: string; pace?: Baseline | null }) {
+export function CashFlow({ currency, current, today, todayAvailable, todayPending = false, available, message, pace = null, chart }: { today: CurrencyOverview | null; todayAvailable: boolean; todayPending?: boolean; currency: SupportedCurrency; current: CurrencyOverview | null; available: boolean; message: string; pace?: Baseline | null; chart?: ReactNode }) {
   const { amountsHidden } = usePrivacy();
   const styles = useStyles();
   const money = (amount: bigint, ready: boolean) => amountsHidden ? "••••••" : ready ? compactMoney(amount,currency) : "—";
@@ -75,6 +75,7 @@ export function CashFlow({ currency, current, today, todayAvailable, todayPendin
         <Text variant="caption" color="textMuted" style={styles.comparisonNote}>Moves between your own accounts are not counted.</Text>
       </> : <Text variant="caption" color="textMuted">{message}</Text>}
     </View>
+    {chart}
   </HomeSection>;
 }
 

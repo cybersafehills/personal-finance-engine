@@ -96,6 +96,9 @@ export const lightColors = {
   heroEnd: "#102a6e",
   payStart: "#33509e",
   payEnd: "#263c76",
+  /** Money in / money out bars on Home. */
+  barIn: "#33509e",
+  barOut: "#0b7f7a",
   chartIncome: "#6956ee",
   chartExpense: "#149d99",
   chartFood: "#f7ad66",
@@ -159,6 +162,9 @@ export const darkColors: Palette = {
   heroEnd: "#1a357f",
   payStart: "#3d5fc4",
   payEnd: "#334fa8",
+  /** Money in / money out bars on Home. */
+  barIn: "#8fa5f2",
+  barOut: "#47d0c4",
   chartIncome: "#a395ff",
   chartExpense: "#47d0c4",
   chartFood: "#f7ad66",
