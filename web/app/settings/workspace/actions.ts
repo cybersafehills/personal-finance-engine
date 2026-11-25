@@ -41,6 +41,11 @@ export async function setActiveWorkspace(
     .select("workspace_id")
     .eq("workspace_id", workspaceId)
     .eq("status", "active")
+    // RLS shows every member's row of a shared workspace; a plain maybeSingle()
+    // errored for any workspace with two or more members, so nobody could switch
+    // into a household or organization once it had a second member. A row is only
+    // visible when the caller is an active member, so any one row proves it.
+    .limit(1)
     .maybeSingle();
 
   if (error || !data) {
