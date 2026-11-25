@@ -45,7 +45,7 @@ export function guideDefinitions(ios: boolean): GuideDefinition[] {
     { id: "home-trends", anchor: "home-trends", route: "/", title: "Look beyond today", body: "Expand Trends to compare activity over time. New accounts may not have enough data yet." },
   ]);
   const wallets = section("wallets", "Wallets", [
-    { id: "wallets-entry", anchor: "home-wallets-manage", route: "/", title: "Keep your accounts together", body: "Manage opens the accounts you can see in this Space.", action: "Open Wallets" },
+    { id: "wallets-entry", anchor: "home-wallets-manage", route: "/", title: "Keep your accounts together", body: "All wallets opens the accounts you can see in this Space.", action: "Open Wallets" },
     { id: "wallets-page", anchor: "page-wallets", route: "/wallets", title: "A place for each balance", body: "Open a wallet for its balance and activity. Check the source and last-update time." },
   ]);
   const transaction = section("transaction", "Transactions", [

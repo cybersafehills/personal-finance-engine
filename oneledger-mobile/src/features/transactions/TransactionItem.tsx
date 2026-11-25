@@ -57,7 +57,7 @@ export function TransactionItem({
             <Badge variant="neutral">Saved on this phone</Badge>
           ) : null}
         </View>;
-  const amountText = <Text variant="bodyStrong" tabular color={pending || failed ? "textMuted" : transaction.direction === "in" ? "moneyPositive" : compact && transaction.direction === "out" ? "danger" : "textPrimary"} accessibilityLabel={hidden ? "Amount hidden" : undefined} style={[styles.amount, compact && styles.compactAmount]}>{hidden ? "••••••" : `${sign}${formatted}`}</Text>;
+  const amountText = <Text variant="bodyStrong" tabular color={pending || failed ? "textMuted" : transaction.direction === "in" ? "moneyPositive" : "textPrimary"} accessibilityLabel={hidden ? "Amount hidden" : undefined} style={[styles.amount, compact && styles.compactAmount]}>{hidden ? "••••••" : `${sign}${formatted}`}</Text>;
   return (
     <Pressable
       accessibilityRole="button"

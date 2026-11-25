@@ -63,6 +63,9 @@ describe.each(Object.entries(palettes))("%s palette: creative, nav and icon cont
     expect(contrastRatio(p.navSelectedBg, p.surface)).toBeGreaterThanOrEqual(1.1);
     expect(contrastRatio(p.navSelectedInk, p.surface)).toBeGreaterThanOrEqual(4.5);
   });
+  it("keeps white text readable across the whole balance card and Pay button (4.5:1)", () => {
+    for (const endpoint of [p.heroStart, p.heroEnd, p.payStart, p.payEnd]) expect(contrastRatio(p.onSolid, endpoint)).toBeGreaterThanOrEqual(4.5);
+  });
   it("keeps sponsored copy readable across every creative gradient", () => {
     for (const endpoint of [p.partnerConnectivityStart, p.partnerConnectivityEnd, p.partnerLearningStart, p.partnerLearningEnd, p.partnerBankingStart, p.partnerBankingEnd]) {
       expect(contrastRatio(p.partnerOnMuted, endpoint)).toBeGreaterThanOrEqual(4.5);

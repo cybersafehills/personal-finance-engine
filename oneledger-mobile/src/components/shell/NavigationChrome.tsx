@@ -30,7 +30,8 @@ export function NavigationChromeProvider({children}:{children:ReactNode}){
  const load=useCallback(async()=>{const result=await fetchPayConfig();setPayConfigCache(result.ok?result:null);return result;},[]);
  useWarmMoreFlags();
  const {data}=useQuery(load,{refreshIntervalMs:60000});const payOn=data?showPayButton(data):false;
- const value=useMemo(()=>({compact,home,onTabs,payOn,keyboardHeight,compactProgress,awayProgress,setCompact}),[compact,home,onTabs,payOn,keyboardHeight,compactProgress,awayProgress,setCompact]);
+ const payConfig=payOn&&data?.ok?data:null;
+ const value=useMemo(()=>({compact,home,onTabs,payOn,payConfig,keyboardHeight,compactProgress,awayProgress,setCompact}),[compact,home,onTabs,payOn,payConfig,keyboardHeight,compactProgress,awayProgress,setCompact]);
  return <NavigationChromeContext.Provider value={value}>{children}<GlobalNavigation/><GlobalPayButton config={data}/></NavigationChromeContext.Provider>;
 }
 function GlobalPayButton({config}:{config:Awaited<ReturnType<typeof fetchPayConfig>>|null}){
@@ -44,7 +45,7 @@ function GlobalPayButton({config}:{config:Awaited<ReturnType<typeof fetchPayConf
  const labelStyle=useAnimatedStyle(()=>({opacity:(1-(compactProgress?.get()??0))*(1-(awayProgress?.get()??0))}));
  const hidden=keyboardHeight>0||["/pay-sheet","/scan","/connect"].includes(path)||path.startsWith("/pay-new")||path.startsWith("/pay-again");
  if(!payOn||hidden)return null;
- return <View pointerEvents="box-none" style={StyleSheet.absoluteFill}><Animated.View testID="global-pay-position" style={[styles.floating,animated]}><GuideAnchor persistent id="pay-launcher"><PayTabButton floating onPress={()=>{Keyboard.dismiss();router.push("/pay-sheet");}} onHold={target?()=>{Keyboard.dismiss();router.push(target);}:undefined} holdMs={prefs.durationMs} hint={holdHint(prefs,ready)}/></GuideAnchor>{onTabs?<Animated.View accessibilityElementsHidden style={[{position:"absolute",top:54,width:48,alignItems:"center"},labelStyle]}><Text variant="caption" color="textPrimary" style={{fontSize:10,lineHeight:12}}>Pay</Text></Animated.View>:null}</Animated.View></View>;
+ return <View pointerEvents="box-none" style={StyleSheet.absoluteFill}><Animated.View testID="global-pay-position" style={[styles.floating,animated]}><GuideAnchor persistent id="pay-launcher"><PayTabButton floating onPress={()=>{Keyboard.dismiss();router.push("/pay-sheet");}} onHold={target?()=>{Keyboard.dismiss();router.push(target);}:undefined} holdMs={prefs.durationMs} hint={holdHint(prefs,ready)}/></GuideAnchor>{onTabs?<Animated.View accessibilityElementsHidden style={[{position:"absolute",top:54,width:48,alignItems:"center"},labelStyle]}><Text variant="caption" color="textPrimary" style={{fontSize:11,lineHeight:14}}>Pay</Text></Animated.View>:null}</Animated.View></View>;
 }
 const styles=StyleSheet.create({floating:{position:"absolute",width:48,height:48,zIndex:100,elevation:20}});
 

@@ -39,8 +39,8 @@ export function PayTabButton({
       >
         <Svg width={48} height={48} style={StyleSheet.absoluteFill} pointerEvents="none" accessible={false}>
           <Defs><LinearGradient id={gradientId} x1="0" y1="0" x2="1" y2="1">
-            <Stop offset="0" stopColor={colors.homeGradientStart} />
-            <Stop offset="1" stopColor={colors.homeGradientEnd} />
+            <Stop offset="0" stopColor={colors.payStart} />
+            <Stop offset="1" stopColor={colors.payEnd} />
           </LinearGradient></Defs>
           <Circle cx={24} cy={24} r={24} fill={`url(#${gradientId})`} />
         </Svg>
@@ -62,7 +62,7 @@ const useStyles = makeStyles((colors) => StyleSheet.create({
     height: 48,
     borderRadius: 24,
     marginTop: -14,
-    backgroundColor: colors.homeGradientStart,
+    backgroundColor: colors.payStart,
     alignItems: "center",
     justifyContent: "center",
     boxShadow: "0 3px 8px rgba(0, 0, 0, 0.16)",
