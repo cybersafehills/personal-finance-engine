@@ -80,8 +80,9 @@ describe("live Home", () => {
     await renderHome(); await screen.findByText("Unknown bank");
     expect(screen.queryByText(/Total available balance/)).toBeNull();
     expect(screen.queryByText(/Partial balance/)).toBeNull();
-    await fireEvent.press(screen.getByRole("button",{name:"Next wallet"}));
-    expect(screen.getByText("Not available")).toBeTruthy();
+    await fireEvent.press(screen.getByRole("button",{name:/^Show Unknown bank/}));
+    // On the card and on its wallet tile.
+    expect(screen.getAllByText("Not available")).toHaveLength(2);
   });
   it("does not substitute zeroes or sample charts when analytics are unavailable",async()=>{
     mockInsights.mockResolvedValue({ok:false,reason:"unavailable",message:"Insights is unavailable for this Space."});
@@ -129,7 +130,7 @@ describe("compact Home navigation and sections", () => {
     await renderHome(); await screen.findAllByText("Real MoMo wallet");
     expect(screen.getByText("Received today")).toBeTruthy();
     expect(screen.getByText("Spent today")).toBeTruthy();
-    await fireEvent.press(screen.getByRole("button",{name:"Open Real MoMo wallet"}));
+    await fireEvent.press(screen.getByRole("button",{name:"View Real MoMo wallet"}));
     expect(router.push).toHaveBeenLastCalledWith({pathname:"/wallet/[id]",params:{id:"a"}});
   });
   it("uses the active currency's current budget and its server projection", async () => {
@@ -149,19 +150,20 @@ describe("individual wallet landing cards", () => {
  const bank={...wallet,id:"bank",name:"Equity Bank",provider:"bank",isPrimary:false,balance:{...wallet.balance,amountMinor:32900n}};
  it("swipes between separate wallet amounts and never combines them",async()=>{
   mockWallets.mockResolvedValue({ok:true,workspaceId:"w1",wallets:[wallet,bank]});
-  await renderHome();await screen.findByRole("button",{name:"Next wallet"});
-  expect(screen.getByRole("button",{name:"Next wallet"}).props.accessibilityValue.text).toBe("1 of 2: Real MoMo wallet");
+  await renderHome();await screen.findByRole("button",{name:/^Show Equity Bank/});
+  expect(screen.getByRole("button",{name:/^Show Real MoMo wallet/}).props.accessibilityState.selected).toBe(true);
   expect(screen.queryByText("RWF 47,316")).toBeNull();
   expect(screen.queryByText(/2 wallets/)).toBeNull();
   const pager=screen.getByTestId("wallet-carousel");
   await fireEvent(pager,"momentumScrollEnd",{nativeEvent:{contentOffset:{x:pager.props.contentOffset.x+358,y:0}}});
-  expect(screen.getByRole("button",{name:"Next wallet"}).props.accessibilityValue.text).toBe("2 of 2: Equity Bank");
+  expect(screen.getByRole("button",{name:/^Show Equity Bank/}).props.accessibilityState.selected).toBe(true);
+  expect(screen.getByRole("button",{name:/^Show Real MoMo wallet/}).props.accessibilityState.selected).toBe(false);
   expect(screen.getByRole("button",{name:"View Equity Bank"})).toBeTruthy();
  });
  it("saves a chosen landing wallet and restores it at the front on next launch",async()=>{
   mockWallets.mockResolvedValue({ok:true,workspaceId:"w1",wallets:[wallet,bank]});
-  const view=await renderHome();await screen.findByRole("button",{name:"Next wallet"});
-  await fireEvent.press(screen.getByRole("button",{name:"Next wallet"}));
+  const view=await renderHome();await screen.findByRole("button",{name:/^Show Equity Bank/});
+  await fireEvent.press(screen.getByRole("button",{name:/^Show Equity Bank/}));
   await fireEvent.press(screen.getByRole("button",{name:"Use Equity Bank on launch"}));
   await waitFor(()=>expect(mockStoreSet).toHaveBeenCalledWith("ol.home.wallet.v1.u1.w1","bank"));
   await screen.findByRole("button",{name:"Equity Bank is the default landing wallet"});
@@ -173,8 +175,8 @@ describe("individual wallet landing cards", () => {
  it("keeps the previous default when saving the new preference fails",async()=>{
   mockStoreSet.mockRejectedValue(new Error("storage unavailable"));
   mockWallets.mockResolvedValue({ok:true,workspaceId:"w1",wallets:[wallet,bank]});
-  await renderHome();await screen.findByRole("button",{name:"Next wallet"});
-  await fireEvent.press(screen.getByRole("button",{name:"Next wallet"}));
+  await renderHome();await screen.findByRole("button",{name:/^Show Equity Bank/});
+  await fireEvent.press(screen.getByRole("button",{name:/^Show Equity Bank/}));
   await fireEvent.press(screen.getByRole("button",{name:"Use Equity Bank on launch"}));
   expect(await screen.findByText("Couldn’t save your default wallet. Try again.")).toBeTruthy();
   expect(screen.getByRole("button",{name:"Use Equity Bank on launch"})).toBeTruthy();

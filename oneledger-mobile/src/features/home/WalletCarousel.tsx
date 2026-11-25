@@ -15,10 +15,10 @@ import { formatDateTime } from "@/lib/kigali-time";
 import { makeStyles, useTheme } from "@/theme/ThemeProvider";
 import { BalanceTrend } from "./BalanceTrend";
 import { landingWalletKey, landingWallets } from "./wallet-order";
+import { WalletStrip } from "./WalletStrip";
 
 type Props = { wallets: Wallet[] | null; currency: SupportedCurrency; fallback: CurrentBalance | null; loading: boolean; preferenceScope?: string };
 export function WalletCarousel({ wallets, fallback, loading, preferenceScope }: Props) {
-  const styles = useStyles();
   const window = useWindowDimensions();
   const [width, setWidth] = useState(Math.max(1,Math.min(448,window.width-32)));
   const [preferredId, setPreferredId] = useState<string | null>(null);
@@ -39,9 +39,6 @@ export function WalletCarousel({ wallets, fallback, loading, preferenceScope }: 
   },[preferenceScope]);
   const ordered = landingWallets(wallets ?? [],preferredId);
   const selectedIndex = Math.max(0,ordered.findIndex(w => w.id === selectedId));
-  const selected = ordered[selectedIndex];
-  const dotStart=Math.max(0,Math.min(selectedIndex-2,ordered.length-5));
-  const visibleDots=ordered.slice(dotStart,dotStart+5);
   function choose(index: number) {
     interacted.current=true;
     setSelectedId(ordered[index].id);
@@ -59,10 +56,10 @@ export function WalletCarousel({ wallets, fallback, loading, preferenceScope }: 
     finally { setSaving(false); }
   }
   return <View style={{gap:4}} onLayout={({nativeEvent:{layout}}) => setWidth(Math.max(1,layout.width))}>
-    {ordered.length>1?<View testID="wallet-controls" style={styles.controls}><Pressable accessibilityRole="button" accessibilityLabel="Next wallet" accessibilityHint="Swipe the card or tap to switch wallets" accessibilityValue={{text:`${selectedIndex+1} of ${ordered.length}: ${selected.name}`}} onPress={()=>choose((selectedIndex+1)%ordered.length)} hitSlop={{top:8,bottom:8}} style={styles.dots}>{visibleDots.map((w,i)=><View key={w.id} style={[styles.dot,i+dotStart===selectedIndex&&styles.activeDot]}/>)}</Pressable></View>:null}
     {ordered.length ? <ScrollView testID="wallet-carousel" ref={pager} horizontal pagingEnabled directionalLockEnabled showsHorizontalScrollIndicator={false} onScrollBeginDrag={() => {interacted.current=true;}} contentOffset={{x:selectedIndex*width,y:0}} onMomentumScrollEnd={({nativeEvent}) => {interacted.current=true;const index=Math.max(0,Math.min(ordered.length-1,Math.round(nativeEvent.contentOffset.x/width)));setSelectedId(ordered[index].id);}}>
       {ordered.map((wallet,i) => <View key={wallet.id} style={{width}} accessibilityElementsHidden={i!==selectedIndex} importantForAccessibility={i===selectedIndex ? "auto" : "no-hide-descendants"}><WalletBalanceCard guideEnabled={i === selectedIndex} wallet={wallet} loading={loading} defaultOnLaunch={i===0} saving={saving} onMakeDefault={preferenceScope?()=>void saveDefault(wallet.id):undefined} /></View>)}
     </ScrollView> : <WalletBalanceCard fallback={wallets === null ? fallback : null} loading={loading} />}
+    {ordered.length ? <WalletStrip wallets={ordered} selectedIndex={selectedIndex} onSelect={choose} /> : null}
     {error ? <Text variant="caption" color="attention">{error}</Text> : null}
   </View>;
 }
@@ -90,9 +87,7 @@ function WalletBalanceCard({wallet,fallback,loading,defaultOnLaunch=false,saving
   </View>;
 }
 const useStyles=makeStyles(c=>StyleSheet.create({
-  controls:{alignItems:"center",justifyContent:"center",height:20},
   updatedAt:{paddingHorizontal:16,fontSize:12,lineHeight:16},
-  dots:{flexDirection:"row",alignItems:"center",justifyContent:"center",gap:5,minWidth:44,height:20,paddingHorizontal:4},dot:{width:6,height:6,borderRadius:3,backgroundColor:c.borderStrong},activeDot:{width:18,backgroundColor:c.accent},
   defaultButton:{flexDirection:"row",alignItems:"center",gap:4,minHeight:44,paddingHorizontal:3},
   card:{padding:18,borderRadius:20,overflow:"hidden",gap:7,backgroundColor:c.heroStart},cardTop:{flexDirection:"row",alignItems:"center",gap:8},eye:{width:44,height:36,alignItems:"center",justifyContent:"center",marginRight:-8,marginTop:-4,marginBottom:-4},
   amount:{fontSize:35,lineHeight:42,letterSpacing:-0.8},actions:{flexDirection:"row",gap:8,marginTop:8},add:{flex:1.2,minHeight:44,alignItems:"center",justifyContent:"center",padding:6,borderRadius:12,backgroundColor:c.onSolid},details:{flex:1,minHeight:44,alignItems:"center",justifyContent:"center",padding:6,borderRadius:12,backgroundColor:"rgba(255,255,255,0.16)"}

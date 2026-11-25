@@ -16,6 +16,8 @@ import { SaveOnSavingsCard } from "@/features/save-on/SaveOnSavingsCard";
 import { IntelligenceCard } from "@/features/insights/IntelligenceCard";
 import { useOutlookData } from "@/features/insights/useOutlookData";
 import { useChromeScroll } from "@/components/shell/useChromeScroll";
+import { useNavigationChrome } from "@/components/shell/NavigationChromeContext";
+import { QuickActions } from "@/features/home/QuickActions";
 import { HomeTrends } from "@/features/home/HomeTrends";
 import { currencyBlock, loadHomeInsights, profileName } from "@/features/home/live-data";
 import { getCurrentBalance, getTransactions } from "@/features/transactions/queries";
@@ -74,6 +76,7 @@ export default function Home() {
   const profile = useQuery(profileName);
   const unread = useQuery(getUnreadNotificationCount);
   const dock = useDockClearance();
+  const { payConfig } = useNavigationChrome();
   const meta = session?.user.user_metadata;
   const fallbackName = typeof meta?.full_name === "string" ? meta.full_name : typeof meta?.name === "string" ? meta.name : "there";
   const name = profile.data ?? fallbackName;
@@ -105,6 +108,7 @@ export default function Home() {
       {analytics.error && analytics.data ? <Text variant="caption" color="attention">Couldn&apos;t refresh analytics. Showing the last fetched summary.</Text> : null}
       {currencyOptions.length > 1 ? <View style={styles.currencies}>{currencyOptions.map((c) => <Chip key={c} label={c} selected={currency === c} onPress={() => setChoice({ space: activeId, currency: c })} />)}</View> : null}
       <HeroBalance key={`${session?.user.id}:${activeId}`} preferenceScope={`${session?.user.id ?? "unknown"}.${activeId}`} wallets={wallets} currency={currency} fallback={balanceQuery.data ?? null} loading={!wallets && balanceQuery.loading} />
+      <QuickActions config={payConfig} />
       <CashFlow pace={outlook.data?.facts?.baseline ?? null} currency={currency} current={current} today={currencyBlock(insights?.today,currency)} todayAvailable={insights?.today.ok === true} todayPending={merged.todayPending && !analytics.error} available={currentResult?.ok === true} message={analyticsMessage} />
       <HomeSection guideId="home-recent" title="Recent transactions" dense action={<HomeLink label="View all" onPress={() => router.navigate({ pathname: "/transactions", params: { focusSearch:"", category: "", accountId:"", walletName:"", period: "all", reset: String(Date.now()) } })} />}>
         {recentQuery.error ? <View style={{ gap: 8 }}><Text color="attention">Couldn&apos;t refresh transactions.</Text><Button label="Try again" variant="secondary" onPress={recentQuery.refresh} /></View> : null}
@@ -119,7 +123,8 @@ export default function Home() {
       <SaveOnSavingsCard compact />
       <Spending key={`spending.${session?.user.id}.${activeId}`} scope={`${session?.user.id}.${activeId}`} current={current} available={currentResult?.ok === true} message={analyticsMessage} />
       <HomeTrends key={`trends.${session?.user.id}.${activeId}`} scope={`${session?.user.id}.${activeId}`} currency={currency} nowIso={now.toISOString()} day={day}/>
-      <WalletPanel wallets={wallets} message={walletsMessage} />
+      {/* The wallets sit under the balance card; this keeps the loading, error and no-wallet messages. */}
+      {wallets?.length ? null : <WalletPanel wallets={wallets} message={walletsMessage} />}
     </GuideScrollView>
   </SafeAreaView>;
 }

@@ -30,7 +30,8 @@ export function NavigationChromeProvider({children}:{children:ReactNode}){
  const load=useCallback(async()=>{const result=await fetchPayConfig();setPayConfigCache(result.ok?result:null);return result;},[]);
  useWarmMoreFlags();
  const {data}=useQuery(load,{refreshIntervalMs:60000});const payOn=data?showPayButton(data):false;
- const value=useMemo(()=>({compact,home,onTabs,payOn,keyboardHeight,compactProgress,awayProgress,setCompact}),[compact,home,onTabs,payOn,keyboardHeight,compactProgress,awayProgress,setCompact]);
+ const payConfig=payOn&&data?.ok?data:null;
+ const value=useMemo(()=>({compact,home,onTabs,payOn,payConfig,keyboardHeight,compactProgress,awayProgress,setCompact}),[compact,home,onTabs,payOn,payConfig,keyboardHeight,compactProgress,awayProgress,setCompact]);
  return <NavigationChromeContext.Provider value={value}>{children}<GlobalNavigation/><GlobalPayButton config={data}/></NavigationChromeContext.Provider>;
 }
 function GlobalPayButton({config}:{config:Awaited<ReturnType<typeof fetchPayConfig>>|null}){
