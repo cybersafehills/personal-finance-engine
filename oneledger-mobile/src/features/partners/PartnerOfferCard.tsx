@@ -37,7 +37,7 @@ export function PartnerOfferCard({ offer, compact = false, variant = "banner", o
     </Svg>
     <View style={styles.header}>
       <View style={styles.brand}><Text variant="caption" style={styles.disclosure}>{sponsorLabel(offer)}</Text><Text variant="label" style={styles.white}>{offer.brand}</Text></View>
-      {onDismiss ? <Pressable accessibilityRole="button" accessibilityLabel="Dismiss Home promotion for seven days" onPress={onDismiss} style={({ pressed }) => [styles.close, { opacity: pressed ? 0.6 : 1 }]}><Feather name="x" size={18} color={colors.onSolid}/></Pressable> : null}
+      {onDismiss ? <Pressable accessibilityRole="button" accessibilityLabel="Dismiss sponsored content for this session" onPress={onDismiss} style={({ pressed }) => [styles.close, { opacity: pressed ? 0.6 : 1 }]}><Feather name="x" size={18} color={colors.onSolid}/></Pressable> : null}
     </View>
     <View pointerEvents="none" style={tile ? styles.tileArt : stacked ? styles.stackedArt : styles.art}><PartnerArtwork category={offer.category} size={tile ? 92 : 118}/></View>
     <View style={[tile ? styles.tileCopy : styles.copy, stacked && { paddingRight: 0 }]}>
@@ -78,7 +78,7 @@ export function PartnerWideCard({ offer, onDismiss }: { offer: PartnerOffer; onD
       <Text variant="heading" numberOfLines={3} style={styles.wideHeadline}>{offer.title}</Text>
       <View style={styles.wideCta}><Text variant="label" style={{ color: colors.homeGradientStart, fontWeight: "600", fontSize: 13 }}>View offer</Text><Feather name="arrow-up-right" size={14} color={colors.homeGradientStart}/></View>
     </View>
-    {onDismiss ? <Pressable accessibilityRole="button" accessibilityLabel="Dismiss Home promotion for seven days" onPress={onDismiss} hitSlop={6} style={({ pressed }) => [styles.wideClose, { opacity: pressed ? 0.6 : 1 }]}><Feather name="x" size={16} color={colors.onSolid}/></Pressable> : null}
+    {onDismiss ? <Pressable accessibilityRole="button" accessibilityLabel="Dismiss sponsored content for this session" onPress={onDismiss} hitSlop={6} style={({ pressed }) => [styles.wideClose, { opacity: pressed ? 0.6 : 1 }]}><Feather name="x" size={16} color={colors.onSolid}/></Pressable> : null}
   </Pressable>;
 }
 /** Small-widget proportions (1 : 1). Shown as a pair, each half the width. The whole card opens the offer. */
@@ -95,27 +95,30 @@ export function PartnerSquareCard({ offer }: { offer: PartnerOffer }) {
     <Text variant="caption" numberOfLines={1} style={styles.disclosure}>{offer.brand}</Text>
   </Pressable>;
 }
-export function PartnerOfferBar({ offer }: { offer: PartnerOffer }) {
+export function PartnerOfferBar({ offer, onDismiss }: { offer: PartnerOffer; onDismiss?: () => void }) {
   const id = `bar-${useId().replace(/:/g, "")}`;
   const { colors } = useTheme();
   const palette = { Connectivity: [colors.partnerConnectivityStart, colors.partnerConnectivityEnd], Learning: [colors.partnerLearningStart, colors.partnerLearningEnd], Banking: [colors.partnerBankingStart, colors.partnerBankingEnd] }[offer.category];
   const styles = useStyles();
-  return <Pressable testID="partner-bar" accessibilityRole="button" accessibilityLabel="View offer" accessibilityHint={`Sponsored. View ${offer.brand} eligibility and terms`} onPress={() => router.push({ pathname: "/partner-offer/[id]", params: { id: offer.id } })} style={({ pressed }) => [styles.bar, { backgroundColor: palette[1], opacity: pressed ? 0.85 : 1 }]}>
+  return <View style={{ position: "relative" }}><Pressable testID="partner-bar" accessibilityRole="button" accessibilityLabel="View offer" accessibilityHint={`Sponsored. View ${offer.brand} eligibility and terms`} onPress={() => router.push({ pathname: "/partner-offer/[id]", params: { id: offer.id } })} style={({ pressed }) => [styles.bar, { backgroundColor: palette[1], opacity: pressed ? 0.85 : 1 }]}>
     <Svg width="100%" height="100%" style={StyleSheet.absoluteFill} accessible={false} pointerEvents="none">
       <Defs><LinearGradient id={id} x1="0" y1="0" x2="1" y2="0.4"><Stop stopColor={palette[0]}/><Stop offset="0.6" stopColor={palette[0]}/><Stop offset="1" stopColor={palette[1]}/></LinearGradient></Defs>
       <Rect width="100%" height="100%" fill={`url(#${id})`}/>
     </Svg>
     <View pointerEvents="none" style={{ marginVertical: -6 }}><PartnerArtwork category={offer.category} size={52}/></View>
     <View style={{ flex: 1, gap: 1 }}><Text variant="caption" style={styles.disclosure}>{sponsorLabel(offer)} · {offer.brand}</Text><Text variant="label" numberOfLines={1} style={[styles.white, { fontWeight: "600" }]}>{offer.title}</Text></View>
-    <Feather name="arrow-up-right" size={18} color={colors.onSolid}/>
-  </Pressable>;
+    <Feather name="arrow-up-right" size={18} color={colors.onSolid} style={onDismiss ? { marginRight: 30 } : undefined}/>
+  </Pressable>
+  {onDismiss ? <Pressable accessibilityRole="button" accessibilityLabel="Dismiss sponsored content for this session" onPress={onDismiss} hitSlop={8} style={({ pressed }) => [styles.barClose, { opacity: pressed ? 0.6 : 1 }]}><Feather name="x" size={15} color={colors.onSolid}/></Pressable> : null}
+  </View>;
 }
 /**
  * One placement, driven by Partner Placement Settings: static card or auto-rotating carousel.
  * Rotation pauses while `paused` (typing/submitting), when the user prefers reduced motion, and on the last creative if not looping.
  */
 export function PartnerPlacement({ id, ready = true, paused = false, blockedBy = null, slot }: { id: PlacementId; ready?: boolean; paused?: boolean; blockedBy?: string | null; slot?: PlacementPosition }) {
-  const { state, today, dismissHome, mode, catalog } = usePartnerPreview();
+  const { state, today, dismissPlacement, canDismiss, mode, catalog } = usePartnerPreview();
+  const dismiss = canDismiss ? () => dismissPlacement(id) : undefined;
   const guides = useGuides();
   const { colors } = useTheme();
   const styles = useStyles();
@@ -154,12 +157,13 @@ export function PartnerPlacement({ id, ready = true, paused = false, blockedBy =
   const dots = config.mode === "carousel" && count > 1 ? <View style={styles.dots} accessibilityLabel={`Offer ${current + 1} of ${count}`}>{offers.map((offer, i) => <Pressable key={offer.id} accessibilityRole="button" accessibilityLabel={`Show offer ${i + 1} of ${count}`} hitSlop={10} onPress={() => setIndex(i)} style={[styles.dot, { backgroundColor: i === current ? colors.accent : colors.borderStrong, width: i === current ? 18 : 6 }]}/>)}</View> : null;
   return <View testID={id === "home" ? "partner-home-placement" : `partner-${id}-placement`} style={{ gap: 6 }}>
     {format === "bar" ? null : <PartnerPreviewNotice/>}
+    {dismiss && (single || pair) ? <Pressable accessibilityRole="button" accessibilityLabel="Dismiss sponsored content for this session" onPress={dismiss} hitSlop={8} style={{ alignSelf: "flex-end", minHeight: 28, justifyContent: "center", paddingHorizontal: 6 }}><Text variant="caption" color="textMuted">Dismiss for this session</Text></Pressable> : null}
     <Animated.View style={{ opacity: fade }}>
-      {format === "bar" ? <PartnerOfferBar offer={first}/>
-        : format === "tall" ? <PartnerOfferCard offer={first} compact onDismiss={id === "home" ? dismissHome : undefined}/>
+      {format === "bar" ? <PartnerOfferBar offer={first} onDismiss={dismiss}/>
+        : format === "tall" ? <PartnerOfferCard offer={first} compact onDismiss={dismiss}/>
         : single ? <View style={{ flexDirection: "row" }}><View style={{ width: "50%", paddingRight: 5 }}><PartnerSquareCard offer={first}/></View></View>
         : pair ? <View style={{ flexDirection: "row", gap: 10 }}><View style={{ flex: 1 }}><PartnerSquareCard offer={first}/></View><View style={{ flex: 1 }}><PartnerSquareCard offer={second}/></View></View>
-        : <PartnerWideCard offer={first} onDismiss={id === "home" ? dismissHome : undefined}/>}
+        : <PartnerWideCard offer={first} onDismiss={dismiss}/>}
     </Animated.View>
     {dots}
   </View>;
@@ -188,6 +192,7 @@ const useStyles = makeStyles(colors => StyleSheet.create({
   square: { aspectRatio: 1, borderRadius: 22, borderCurve: "continuous", overflow: "hidden", padding: 14 },
   squareArt: { position: "absolute", right: 2, top: 18 },
   squareHeadline: { color: colors.onSolid, fontSize: 14, lineHeight: 18, fontWeight: "600" },
+  barClose: { position: "absolute", right: 8, top: "50%", marginTop: -14, width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.18)" },
   bar: { borderRadius: 18, borderCurve: "continuous", overflow: "hidden", minHeight: 56, paddingHorizontal: 14, paddingVertical: 8, flexDirection: "row", alignItems: "center", gap: 10 },
   dots: { flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 5, minHeight: 14 },
   dot: { height: 6, borderRadius: 3 },
