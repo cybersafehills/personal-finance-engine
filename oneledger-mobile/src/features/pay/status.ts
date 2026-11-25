@@ -25,6 +25,14 @@ export function payPhase(state: string): PayPhase | null {
 
 export type PhaseCopy = { title: string; body: string };
 
+// A reversal means money moved and came back, and an expiry means nobody knows:
+// neither may say "no money was sent" or invite an unchecked second payment.
+const FAILURE_BODY: Record<string, string> = {
+  reversed: "This payment was reversed. Check your provider balance before paying again.",
+  expired:
+    "No confirmation arrived in time. No money has been recorded as sent. If money left your account, don't pay again until you've checked your provider messages.",
+};
+
 export function phaseCopy(
   phase: PayPhase,
   intent: { state: string; verified: boolean },
@@ -42,10 +50,7 @@ export function phaseCopy(
   }
   return {
     title: intent.state === "reversed" ? "Payment reversed" : "Payment didn't go through",
-    body:
-      intent.state === "expired"
-        ? "No confirmation arrived in time. No money has been recorded as sent."
-        : "No money was sent. You can try again.",
+    body: FAILURE_BODY[intent.state] ?? "No money was sent. You can try again.",
   };
 }
 

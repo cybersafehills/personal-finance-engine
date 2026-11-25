@@ -161,11 +161,23 @@ describe("parseIntentResponse", () => {
 });
 
 describe("stateLabel", () => {
-  it("never reads as a success", () => {
-    expect(stateLabel("draft")).toBe("Draft");
-    expect(stateLabel("awaiting_verification")).toBe("Awaiting verification");
-    for (const state of ["successful", "completed", "verified", "who-knows"]) {
-      expect(stateLabel(state)).toBe("In progress");
+  it("names every state the server can send", () => {
+    // web/lib/pay/state.ts PAYMENT_STATES
+    for (const state of ["draft", "initiated", "awaiting_verification", "processing", "successful", "failed", "expired", "reversed", "requires_reconciliation", "cancelled"]) {
+      expect(stateLabel(state)).not.toBe("In progress");
     }
+    expect(stateLabel("draft")).toBe("Draft");
+    expect(stateLabel("reversed")).toBe("Reversed");
+  });
+
+  it("says Verified only with provider evidence", () => {
+    expect(stateLabel("successful", { verified: true })).toBe("Verified");
+    expect(stateLabel("successful", { manuallyConfirmed: true })).toBe("Manually confirmed");
+    expect(stateLabel("successful")).toBe("Completed");
+    expect(stateLabel("awaiting_verification", { verified: true })).toBe("Awaiting verification");
+  });
+
+  it("reads an unknown state as neutral progress", () => {
+    for (const state of ["completed", "verified", "who-knows"]) expect(stateLabel(state)).toBe("In progress");
   });
 });
