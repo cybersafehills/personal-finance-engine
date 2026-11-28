@@ -1,5 +1,6 @@
-// Design tokens. The light palette mirrors web/app/globals.css `:root` one-to-one;
-// change a value there and here in the same PR. Never hardcode a hex value in a
+// Design tokens. Most of the light palette mirrors web/app/globals.css `:root`.
+// The accent family (deep green) and the larger type, button and card sizes are
+// mobile-only for now: the web still uses its blue accent. Never hardcode a hex value in a
 // component (docs/design-system.md). Colours live in ./colors (light + dark), and
 // components read them through the theme (`useTheme`, `makeStyles`), never directly.
 //
@@ -9,7 +10,7 @@
 export type { ColorToken, Palette } from "./colors";
 
 export const radii = {
-  card: 16,
+  card: 20,
   control: 10,
   pill: 999,
 } as const;
@@ -36,6 +37,9 @@ export const MIN_TOUCH_TARGET = 44;
  * its hit area is not: `hitSlopFor` adds the difference around it.
  */
 export const CONTROL_HEIGHT = { md: 40, sm: 32 } as const;
+
+/** The `Button` primitive: a tall pill by default. Other chrome keeps CONTROL_HEIGHT. */
+export const BUTTON_HEIGHT = { md: 52, sm: 36 } as const;
 
 /** Extra touchable margin that brings a control of `visualHeight` up to the 44pt floor. */
 export function hitSlopFor(visualHeight: number) {

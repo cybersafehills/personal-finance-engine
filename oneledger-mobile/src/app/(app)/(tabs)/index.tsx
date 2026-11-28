@@ -10,7 +10,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Button, Chip, EmptyState, Text } from "@/components/ds";
 import { fetchWallets, fetchBudgets } from "@/api/mobile-api";
 import { useSession } from "@/features/auth/SessionProvider";
-import { HomeHeader, HeroBalance, CashFlow, Spending, WalletPanel, HomeSection, HomeLink } from "@/features/home/HomeCards";
+import { HomeHeader, HeroBalance, TodayStats, CashFlow, Spending, WalletPanel, HomeSection, HomeLink } from "@/features/home/HomeCards";
 import { BudgetOutlook } from "@/features/home/BudgetOutlook";
 import { SaveOnSavingsCard } from "@/features/save-on/SaveOnSavingsCard";
 import { IntelligenceCard } from "@/features/insights/IntelligenceCard";
@@ -105,14 +105,15 @@ export default function Home() {
       {analytics.error && analytics.data ? <Text variant="caption" color="attention">Couldn&apos;t refresh analytics. Showing the last fetched summary.</Text> : null}
       {currencyOptions.length > 1 ? <View style={styles.currencies}>{currencyOptions.map((c) => <Chip key={c} label={c} selected={currency === c} onPress={() => setChoice({ space: activeId, currency: c })} />)}</View> : null}
       <HeroBalance key={`${session?.user.id}:${activeId}`} preferenceScope={`${session?.user.id ?? "unknown"}.${activeId}`} wallets={wallets} currency={currency} fallback={balanceQuery.data ?? null} loading={!wallets && balanceQuery.loading} />
+      <BudgetOutlook result={budget.data} currency={currency} now={now} error={budget.error} />
+      <TodayStats currency={currency} today={currencyBlock(insights?.today,currency)} available={insights?.today.ok === true} pending={merged.todayPending && !analytics.error} />
       <GuidesHomeCard loaded={!walletsQuery.loading && !recentQuery.loading && !walletsQuery.error && !recentQuery.error} />
-      <CashFlow pace={outlook.data?.facts?.baseline ?? null} currency={currency} current={current} today={currencyBlock(insights?.today,currency)} todayAvailable={insights?.today.ok === true} todayPending={merged.todayPending && !analytics.error} available={currentResult?.ok === true} message={analyticsMessage} />
       <PartnerHomePlacement ready={!homeBlock} blockedBy={homeBlock}/>
       <HomeSection guideId="home-recent" title="Recent transactions" dense action={<HomeLink label="View all" onPress={() => router.navigate({ pathname: "/transactions", params: { focusSearch:"", category: "", accountId:"", walletName:"", period: "all", reset: String(Date.now()) } })} />}>
         {recentQuery.error ? <View style={{ gap: 8 }}><Text color="attention">Couldn&apos;t refresh transactions.</Text><Button label="Try again" variant="secondary" onPress={recentQuery.refresh} /></View> : null}
         {recentQuery.loading ? <Text color="textMuted">Loading transactions…</Text> : !recentQuery.data?.recent.length && !recentQuery.error ? <EmptyState title="No transactions yet" description="New transactions will appear here as they are recorded." /> : <View>{recentQuery.data?.recent.slice(0, 3).map((t) => <TransactionItem key={t.id} transaction={t} showDate compact />)}</View>}
       </HomeSection>
-      <BudgetOutlook result={budget.data} currency={currency} now={now} error={budget.error} />
+      <CashFlow pace={outlook.data?.facts?.baseline ?? null} currency={currency} current={current} available={currentResult?.ok === true} message={analyticsMessage} />
       {/* Forecast and spending pace are RWF-only on the server, so other currencies don't show them. */}
       {currency === "RWF" ? <IntelligenceCard key={`insights.${activeId}`} outlook={outlook.data} error={outlook.error} /> : null}
       {/* Save On summary: only once it has saved (or is saving) something. */}
@@ -124,9 +125,9 @@ export default function Home() {
   </SafeAreaView>;
 }
 const useStyles = makeStyles((c) => StyleSheet.create({
-  safe: { flex: 1, backgroundColor: c.background },
-  toolbar: { paddingHorizontal:16,paddingBottom:8,maxWidth:480,width:"100%",alignSelf:"center",backgroundColor:c.background },
-  content: { paddingHorizontal: 16, paddingTop: 0, paddingBottom: 24, gap: 12, maxWidth: 480, width: "100%", alignSelf: "center" },
+  safe: { flex: 1, backgroundColor: c.surface },
+  toolbar: { paddingHorizontal:20,paddingTop:8,paddingBottom:12,maxWidth:480,width:"100%",alignSelf:"center",backgroundColor:c.surface },
+  content: { paddingHorizontal: 20, paddingTop: 0, paddingBottom: 24, gap: 12, maxWidth: 480, width: "100%", alignSelf: "center" },
   currencies: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   period: { minHeight: 44, padding: 8, borderWidth: 1, borderColor: c.borderSubtle, borderRadius: 10, justifyContent: "center" },
 }));

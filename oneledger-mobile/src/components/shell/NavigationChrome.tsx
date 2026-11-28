@@ -29,8 +29,8 @@ export function NavigationChromeProvider({children}:{children:ReactNode}){
  useEffect(()=>{const show=Keyboard.addListener(Platform.OS==="ios"?"keyboardWillShow":"keyboardDidShow",e=>setKeyboardHeight(e.endCoordinates.height));const hide=Keyboard.addListener(Platform.OS==="ios"?"keyboardWillHide":"keyboardDidHide",()=>setKeyboardHeight(0));return()=>{show.remove();hide.remove();};},[]);
  const load=useCallback(async()=>{const result=await fetchPayConfig();setPayConfigCache(result.ok?result:null);return result;},[]);
  useWarmMoreFlags();
- const {data}=useQuery(load,{refreshIntervalMs:60000});const payOn=data?showPayButton(data):false;
- const value=useMemo(()=>({compact,home,onTabs,payOn,keyboardHeight,compactProgress,awayProgress,setCompact}),[compact,home,onTabs,payOn,keyboardHeight,compactProgress,awayProgress,setCompact]);
+ const {data}=useQuery(load,{refreshIntervalMs:60000});const payOn=data?showPayButton(data):false;const requestsOn=Boolean(data?.ok&&data.paymentRequests);
+ const value=useMemo(()=>({compact,home,onTabs,payOn,requestsOn,keyboardHeight,compactProgress,awayProgress,setCompact}),[compact,home,onTabs,payOn,requestsOn,keyboardHeight,compactProgress,awayProgress,setCompact]);
  return <NavigationChromeContext.Provider value={value}>{children}<GlobalNavigation/><GlobalPayButton config={data}/></NavigationChromeContext.Provider>;
 }
 function GlobalPayButton({config}:{config:Awaited<ReturnType<typeof fetchPayConfig>>|null}){
