@@ -10,6 +10,7 @@ export const fonts = {
 } as const;
 
 export type TextVariant =
+  | "hero"
   | "display"
   | "title"
   | "heading"
@@ -18,19 +19,17 @@ export type TextVariant =
   | "label"
   | "caption";
 
-// The scale follows the web app, whose body text is 14px (Tailwind `text-sm`,
-// used ~1,400 times against ~90 for 16px) and whose captions are 12px. Phones are
-// held closer than monitors, so 14 reads comfortably; bigger text made every
-// screen look oversized next to the web. Hierarchy comes from weight and colour,
-// not from size.
+// Body text is 15px and captions 13px: one step up from the web, for a calmer,
+// easier-to-read phone layout. `hero` is for the one headline number on a screen.
 export const textVariants: Record<TextVariant, TextStyle> = {
+  hero: { fontFamily: fonts.semibold, fontSize: 44, lineHeight: 52, letterSpacing: -1.2 },
   display: { fontFamily: fonts.semibold, fontSize: 30, lineHeight: 34 },
   title: { fontFamily: fonts.semibold, fontSize: 22, lineHeight: 28 },
   heading: { fontFamily: fonts.semibold, fontSize: 17, lineHeight: 22 },
-  body: { fontFamily: fonts.regular, fontSize: 14, lineHeight: 20 },
-  bodyStrong: { fontFamily: fonts.medium, fontSize: 14, lineHeight: 20 },
-  label: { fontFamily: fonts.medium, fontSize: 13, lineHeight: 18 },
-  caption: { fontFamily: fonts.medium, fontSize: 12, lineHeight: 16 },
+  body: { fontFamily: fonts.regular, fontSize: 15, lineHeight: 21 },
+  bodyStrong: { fontFamily: fonts.medium, fontSize: 15, lineHeight: 21 },
+  label: { fontFamily: fonts.medium, fontSize: 14, lineHeight: 19 },
+  caption: { fontFamily: fonts.medium, fontSize: 13, lineHeight: 18 },
 };
 
 /**

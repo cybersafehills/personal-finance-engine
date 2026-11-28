@@ -4,6 +4,7 @@ import { PrivacyProvider } from "@/features/privacy/PrivacyProvider";
 import type { CurrencyOverview } from "@/features/insights/types";
 import { homePeriods } from "@/features/home/live-data";
 import { router, resetRouterMock } from "@/test/router-mock";
+import { NavigationChromeContext } from "@/components/shell/NavigationChromeContext";
 
 const mockWallets = jest.fn(), mockInsights = jest.fn(), mockRecent = jest.fn(), mockBalance = jest.fn(), mockBudget = jest.fn();
 const mockStoreGet=jest.fn(),mockStoreSet=jest.fn();
@@ -263,4 +264,20 @@ it("shows recent activity and loaded wallets while fallback balance is still pen
   expect(await screen.findByText("Live merchant 1")).toBeTruthy();
   expect((await screen.findAllByText("Real MoMo wallet")).length).toBeGreaterThan(0);
   expect(screen.getAllByText("RWF 14,416").length).toBeGreaterThan(0);
+});
+
+it.each([true,false])("offers Pay when it is on, and Request only when requests are on (%s)",async(requestsOn)=>{
+ const chrome={compact:false,home:true,onTabs:true,payOn:true,requestsOn,keyboardHeight:0,compactProgress:null,awayProgress:null,setCompact:()=>{}};
+ await render(<NavigationChromeContext.Provider value={chrome}><PrivacyProvider><Home /></PrivacyProvider></NavigationChromeContext.Provider>);
+ await screen.findAllByText("Real MoMo wallet");
+ await fireEvent.press(screen.getByRole("button",{name:"Pay"}));
+ expect(router.push).toHaveBeenLastCalledWith("/pay-sheet");
+ if(requestsOn){await fireEvent.press(screen.getByRole("button",{name:"Request payment"}));expect(router.push).toHaveBeenLastCalledWith("/request-new");}
+ else expect(screen.queryByRole("button",{name:"Request payment"})).toBeNull();
+ await fireEvent.press(screen.getByRole("button",{name:"Add transaction to Real MoMo wallet"}));
+ expect(router.push).toHaveBeenLastCalledWith({pathname:"/add-transaction",params:{accountId:"a"}});
+});
+it("shows no Pay button on the balance card when Pay is off",async()=>{
+ await renderHome();await screen.findAllByText("Real MoMo wallet");
+ expect(screen.queryByRole("button",{name:"Pay"})).toBeNull();
 });

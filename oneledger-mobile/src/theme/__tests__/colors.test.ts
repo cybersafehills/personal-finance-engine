@@ -63,6 +63,11 @@ describe.each(Object.entries(palettes))("%s palette: creative, nav and icon cont
     expect(contrastRatio(p.navSelectedBg, p.surface)).toBeGreaterThanOrEqual(1.1);
     expect(contrastRatio(p.navSelectedInk, p.surface)).toBeGreaterThanOrEqual(4.5);
   });
+  it("keeps bare brand-family icons visible on a surface, with white readable on the same gradient", () => {
+    // iconInk() uses whichever end of the brand gradient reads best on the surface.
+    expect(Math.max(contrastRatio(p.homeGradientStart, p.surface), contrastRatio(p.homeGradientEnd, p.surface))).toBeGreaterThanOrEqual(3);
+    for (const endpoint of [p.homeGradientStart, p.homeGradientEnd]) expect(contrastRatio(p.onSolid, endpoint)).toBeGreaterThanOrEqual(4.5);
+  });
   it("keeps sponsored copy readable across every creative gradient", () => {
     for (const endpoint of [p.partnerConnectivityStart, p.partnerConnectivityEnd, p.partnerLearningStart, p.partnerLearningEnd, p.partnerBankingStart, p.partnerBankingEnd]) {
       expect(contrastRatio(p.partnerOnMuted, endpoint)).toBeGreaterThanOrEqual(4.5);

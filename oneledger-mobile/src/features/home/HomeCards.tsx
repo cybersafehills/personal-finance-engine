@@ -1,7 +1,6 @@
 import { GuideAnchor } from "@/features/guides/GuideAnchor";
 import { AccountAvatar } from "@/features/profile/Avatar";
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
-import { iconInk } from "@/components/ds/BrandIcon";
 import Feather from "@expo/vector-icons/Feather";
 import { router } from "expo-router";
 import { useState, type ReactNode } from "react";
@@ -25,14 +24,12 @@ export function HomeHeader({ name, unread }: { name: string; unread: number }) {
   const styles = useStyles();
   return <View testID="home-header">
     <View style={styles.header}>
-      <View style={{flex:1}}><HomeSpaceSwitcher/></View>
-      <View style={{ flexDirection: "row", gap: 2 }}>
-        <Pressable accessibilityRole="button" accessibilityLabel="Search transactions" onPress={() => { const request=String(Date.now()); router.navigate({pathname:"/transactions",params:{focusSearch:request,reset:request,accountId:"",walletName:"",category:"",period:"all"}}); }} style={styles.iconButton}><Feather name="search" size={17} color={iconInk("search", colors)} /></Pressable>
-        <Pressable accessibilityRole="button" accessibilityLabel={`Notifications, ${unread} unread`} onPress={() => router.push("/notifications")} style={styles.iconButton}><Feather name="bell" size={17} color={iconInk("bell", colors)} />{unread > 0 ? <View style={styles.notificationDot} /> : null}</Pressable>
-        <Pressable accessibilityRole="button" accessibilityLabel="Your profile" onPress={() => router.push("/profile")} style={styles.avatar}><AccountAvatar fallbackName={name} size={44}/></Pressable>
-      </View>
+      <Pressable accessibilityRole="button" accessibilityLabel="Your profile" onPress={() => router.push("/profile")} style={styles.avatar}><AccountAvatar fallbackName={name} size={48}/></Pressable>
+      {/* The person's name under the current Space; tapping either opens the Space picker. */}
+      <View style={styles.identity}><HomeSpaceSwitcher name={name === "there" ? "Welcome" : name.split(" ")[0]}/></View>
+      <Pressable accessibilityRole="button" accessibilityLabel="Search transactions" onPress={() => { const request=String(Date.now()); router.navigate({pathname:"/transactions",params:{focusSearch:request,reset:request,accountId:"",walletName:"",category:"",period:"all"}}); }} style={styles.iconButton}><Feather name="search" size={20} color={colors.textPrimary} /></Pressable>
+      <Pressable accessibilityRole="button" accessibilityLabel={`Notifications, ${unread} unread`} onPress={() => router.push("/notifications")} style={styles.iconButton}><Feather name="bell" size={20} color={colors.textPrimary} />{unread > 0 ? <View style={styles.notificationDot} /> : null}</Pressable>
     </View>
-
   </View>;
 }
 
@@ -57,18 +54,26 @@ export function HomeLink({ label, onPress }: { label: string; onPress(): void })
 
 export { WalletCarousel as HeroBalance } from "./WalletCarousel";
 
-export function CashFlow({ currency, current, today, todayAvailable, todayPending = false, available, message, pace = null }: { today: CurrencyOverview | null; todayAvailable: boolean; todayPending?: boolean; currency: SupportedCurrency; current: CurrencyOverview | null; available: boolean; message: string; pace?: Baseline | null }) {
+export function TodayStats({ currency, today, available, pending = false }: { currency: SupportedCurrency; today: CurrencyOverview | null; available: boolean; pending?: boolean }) {
   const { amountsHidden } = usePrivacy();
   const styles = useStyles();
-  const money = (amount: bigint, ready: boolean) => amountsHidden ? "••••••" : ready ? compactMoney(amount,currency) : "—";
+  const money = (amount: bigint) => amountsHidden ? "••••••" : available ? compactMoney(amount,currency) : "—";
+  return <View style={{gap:6}}>
+    <View style={styles.dailyPrimary}>{[{label:"Received today",amount:today?.moneyInMinor ?? 0n,positive:true},{label:"Spent today",amount:today?.moneyOutMinor ?? 0n,positive:false}].map(item => <View key={item.label} style={styles.dailyCard}><Text variant="caption" color="textMuted">{item.label}</Text><Text variant="title" color={item.positive ? "moneyPositive" : "textPrimary"} tabular adjustsFontSizeToFit numberOfLines={1}>{money(item.amount)}</Text></View>)}</View>
+    {!available ? <Text variant="caption" color="textMuted">{pending ? "Updating today’s activity…" : "Today’s activity is unavailable."}</Text> : null}
+  </View>;
+}
+
+export function CashFlow({ currency, current, available, message, pace = null }: { currency: SupportedCurrency; current: CurrencyOverview | null; available: boolean; message: string; pace?: Baseline | null }) {
+  const { amountsHidden } = usePrivacy();
+  const styles = useStyles();
+  const money = (amount: bigint) => amountsHidden ? "••••••" : compactMoney(amount,currency);
   const income=current?.moneyInMinor ?? 0n, expense=current?.moneyOutMinor ?? 0n;
   const retained=retainedPercent(income,expense);
   return <HomeSection guideId="home-cash-flow" title="Cash flow" dense action={<Text variant="caption" color="textMuted">{currency}</Text>}>
-    <View style={styles.dailyPrimary}>{[{label:"Received today",amount:today?.moneyInMinor ?? 0n,positive:true},{label:"Spent today",amount:today?.moneyOutMinor ?? 0n,positive:false}].map(item => <View key={item.label} style={{flex:1,gap:5}}><Text variant="caption" color="textMuted">{item.label}</Text><Text variant="title" style={styles.dailyAmount} color={item.positive ? "moneyPositive" : "moneyRequest"} tabular adjustsFontSizeToFit numberOfLines={1}>{money(item.amount,todayAvailable)}</Text></View>)}</View>
-    {!todayAvailable ? <Text variant="caption" color="textMuted">{todayPending ? "Updating today’s activity…" : "Today’s activity is unavailable."}</Text> : null}
     <View style={styles.monthlyFooter}><Text variant="caption" color="textMuted" style={styles.small}>This month so far</Text>
       {available ? <>
-        <View style={styles.cashColumns}>{[{label:"Income",amount:income},{label:"Spent",amount:expense}].map(item => <View key={item.label} style={{flex:1,gap:3}}><View style={{flexDirection:"row",flexWrap:"wrap",alignItems:"baseline",gap:5}}><Text variant="caption" color="textMuted" style={styles.small}>{item.label}</Text><Text variant="bodyStrong" style={styles.monthlyAmount} tabular>{money(item.amount,true)}</Text></View></View>)}</View>
+        <View style={styles.cashColumns}>{[{label:"Income",amount:income},{label:"Spent",amount:expense}].map(item => <View key={item.label} style={{flex:1,gap:3}}><View style={{flexDirection:"row",flexWrap:"wrap",alignItems:"baseline",gap:5}}><Text variant="caption" color="textMuted" style={styles.small}>{item.label}</Text><Text variant="bodyStrong" style={styles.monthlyAmount} tabular>{money(item.amount)}</Text></View></View>)}</View>
         <View style={styles.retentionTrack} accessibilityRole="progressbar" accessibilityLabel="Share of what you received that you kept this month" accessibilityValue={!amountsHidden && retained !== null ? {min:0,max:100,now:Math.round(Math.max(0,Math.min(100,retained)))} : undefined}><View style={[styles.retentionFill,{width:`${amountsHidden || retained===null ? 0 : Math.max(0,Math.min(100,retained))}%`}]}/></View>
         <Text variant="caption" color="textMuted" style={styles.small}>{amountsHidden ? "Amounts hidden" : retained===null ? "No money received yet this month" : retained<0 ? `You spent ${compactMoney(expense-income,currency)} more than you received this month` : `You kept ${Math.round(retained)}% of what you received this month`}</Text>
         {pace ? <Pressable accessibilityRole="button" accessibilityLabel={`${paceStory(pace, amountsHidden).title}. See your spending this month.`} onPress={() => router.push({ pathname: "/forecast", params: { section: "pace" } })} style={styles.paceLink}><Text variant="caption" color="accent" style={styles.small}>{`Spending is ${paceStory(pace, amountsHidden).title.toLowerCase()} · See details →`}</Text></Pressable> : null}
@@ -115,25 +120,25 @@ const useStyles = makeStyles((c) => StyleSheet.create({
   retentionTrack:{height:4,borderRadius:2,backgroundColor:c.borderSubtle,overflow:"hidden",marginTop:4},
   retentionFill:{height:4,borderRadius:2,backgroundColor:c.chartIncome},
   paceLink: { minHeight: 32, justifyContent: "center" },
-  comparisonNote:{fontSize:10,lineHeight:14},
+  comparisonNote:{fontSize:12,lineHeight:16},
   denseSection: { padding:14,gap:6 },
-  dailyPrimary: { flexDirection:"row",gap:12,paddingVertical:4 },
-  dailyAmount: { fontSize:22,lineHeight:28 },
-  monthlyFooter: { backgroundColor:c.background,padding:10,borderRadius:10,gap:4 },
-  monthlyAmount: { fontSize:13,lineHeight:18 },
-  sectionTitle: { fontSize: 15, lineHeight: 20 },
-  small: { fontSize: 11, lineHeight: 15 },
+  dailyPrimary: { flexDirection:"row",gap:12 },
+  dailyCard: { flex:1,gap:2,paddingHorizontal:16,paddingVertical:12,borderRadius:20,borderCurve:"continuous",backgroundColor:c.background },
+  monthlyFooter: { backgroundColor:c.background,padding:12,borderRadius:16,gap:6 },
+  monthlyAmount: { fontSize:15,lineHeight:21 },
+  sectionTitle: { fontSize: 17, lineHeight: 22 },
+  small: { fontSize: 13, lineHeight: 18 },
   collapseTitle:{flex:1,minWidth:0,minHeight:44,justifyContent:"center"},
   sectionControl:{width:36,minHeight:44,alignItems:"center",justifyContent:"center"},
   walletTop: { flexDirection:"row", flexWrap:"wrap", alignItems:"baseline", gap:6 },
-  walletName: { flexGrow:1, flexBasis:110, fontSize:13, lineHeight:18 },
-  walletAmount: { fontSize:13, lineHeight:18, flexShrink:1 },
+  walletName: { flexGrow:1, flexBasis:110 },
+  walletAmount: { flexShrink:1 },
   header: { flexDirection: "row", alignItems: "center", gap: 8 },
-  brand: { fontSize:18, lineHeight:23 },
-  iconButton: { minHeight: 44, minWidth: 44, paddingHorizontal: 4, justifyContent: "center", alignItems: "center", borderRadius: 12 },
-  avatar: { minWidth: 44, minHeight: 44, borderRadius: 22, backgroundColor: c.accentBg, alignItems: "center", justifyContent: "center" },
-  notificationDot: { position: "absolute", width: 5, height: 5, right: 8, top: 8, backgroundColor: c.accent, borderRadius: 3 },
-  section: { padding: 16, gap: 12, borderRadius: 18 },
+  identity: { flex: 1, minWidth: 0, marginLeft: 4 },
+  iconButton: { height: 44, width: 44, justifyContent: "center", alignItems: "center", borderRadius: 22, backgroundColor: c.background },
+  avatar: { minWidth: 48, minHeight: 48, borderRadius: 24, alignItems: "center", justifyContent: "center" },
+  notificationDot: { position: "absolute", width: 8, height: 8, right: 12, top: 11, backgroundColor: c.notificationBadge, borderRadius: 4 },
+  section: { padding: 16, gap: 12 },
   sectionHeading: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 2 },
   linkButton: { minHeight: 44, paddingHorizontal: 4, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   pressed: { backgroundColor: c.background },
@@ -142,6 +147,6 @@ const useStyles = makeStyles((c) => StyleSheet.create({
   categoryGrid:{flex:1,flexDirection:"row",flexWrap:"wrap",gap:6},
   category: { minHeight: 52,flexBasis:"46%",flexGrow:1,justifyContent:"center",gap:3,paddingVertical:4 },
   dot: { width: 8, height: 8, borderRadius: 4 },
-  walletRow: { flexDirection: "row", gap: 10, alignItems: "center", justifyContent: "space-between", padding: 12, minHeight: 68, borderRadius: 13, borderWidth: 1, borderColor: c.borderSubtle },
+  walletRow: { flexDirection: "row", gap: 10, alignItems: "center", justifyContent: "space-between", padding: 12, minHeight: 68, borderRadius: 16, borderWidth: 1, borderColor: c.borderSubtle },
   walletIcon: { width: 34, height: 38, borderRadius: 10, backgroundColor: c.accentBg, alignItems: "center", justifyContent: "center" },
 }));

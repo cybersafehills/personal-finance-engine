@@ -4,7 +4,7 @@ import {
   type PressableProps,
 } from "react-native";
 
-import { CONTROL_HEIGHT, hitSlopFor, radii, space } from "@/theme/tokens";
+import { BUTTON_HEIGHT, hitSlopFor, radii, space } from "@/theme/tokens";
 
 import { Text } from "./Text";
 import { PressableScale } from "./PressableScale";
@@ -22,7 +22,7 @@ export type ButtonProps = Omit<PressableProps, "children" | "style"> & {
   size?: "md" | "sm";
 };
 
-/** Primary action control. Looks 40pt (32pt `sm`); the touch area is always 44pt or more. */
+/** Primary action control: a pill, 52pt (36pt `sm`); the touch area is always 44pt or more. */
 export function Button({
   label,
   variant = "primary",
@@ -42,7 +42,7 @@ export function Button({
       accessibilityRole="button"
       accessibilityState={{ disabled: !!inactive, busy: loading }}
       disabled={inactive}
-      hitSlop={hitSlopFor(CONTROL_HEIGHT[size])}
+      hitSlop={hitSlopFor(BUTTON_HEIGHT[size])}
       {...rest}
       style={(pressed) => [
         styles.base,
@@ -75,17 +75,17 @@ export function Button({
 
 const useStyles = makeStyles((colors) => StyleSheet.create({
   base: {
-    minHeight: CONTROL_HEIGHT.md,
+    minHeight: BUTTON_HEIGHT.md,
     alignItems: "center",
     justifyContent: "center",
     alignSelf: "flex-start",
-    borderRadius: radii.control,
+    borderRadius: radii.pill,
     borderCurve: "continuous",
-    paddingHorizontal: space[4],
+    paddingHorizontal: space[5],
     paddingVertical: space[2],
   },
   small: {
-    minHeight: CONTROL_HEIGHT.sm,
+    minHeight: BUTTON_HEIGHT.sm,
     paddingHorizontal: space[3],
     paddingVertical: space[1],
   },

@@ -1,3 +1,4 @@
+import Feather from "@expo/vector-icons/Feather";
 import { router } from "expo-router";
 import { Pressable, StyleSheet, View } from "react-native";
 
@@ -9,7 +10,7 @@ import { displayName, isFailed, isPending, needsReview } from "./display";
 import { usePrivacy } from "@/features/privacy/PrivacyProvider";
 import { formatMoney, type SupportedCurrency } from "@/lib/money";
 import type { TransactionRow } from "./queries";
-import { makeStyles } from "@/theme/ThemeProvider";
+import { makeStyles, useTheme } from "@/theme/ThemeProvider";
 
 /** One transaction row; opens the detail screen. */
 export function TransactionItem({
@@ -27,6 +28,7 @@ export function TransactionItem({
   compact?: boolean;
 }) {
   const styles = useStyles();
+  const { colors } = useTheme();
   const name = displayName(transaction);
   const { amountsHidden } = usePrivacy();
   const hidden = masked ?? amountsHidden;
@@ -57,7 +59,7 @@ export function TransactionItem({
             <Badge variant="neutral">Saved on this phone</Badge>
           ) : null}
         </View>;
-  const amountText = <Text variant="bodyStrong" tabular color={pending || failed ? "textMuted" : transaction.direction === "in" ? "moneyPositive" : compact && transaction.direction === "out" ? "danger" : "textPrimary"} accessibilityLabel={hidden ? "Amount hidden" : undefined} style={[styles.amount, compact && styles.compactAmount]}>{hidden ? "••••••" : `${sign}${formatted}`}</Text>;
+  const amountText = <Text variant="bodyStrong" tabular color={pending || failed ? "textMuted" : transaction.direction === "in" ? "moneyPositive" : "textPrimary"} accessibilityLabel={hidden ? "Amount hidden" : undefined} style={[styles.amount, compact && styles.compactAmount]}>{hidden ? "••••••" : `${sign}${formatted}`}</Text>;
   return (
     <Pressable
       accessibilityRole="button"
@@ -67,8 +69,10 @@ export function TransactionItem({
       }
       style={({ pressed }) => [styles.row, compact && styles.compact, pressed && styles.pressed]}
     >
-      {compact ? <><View style={styles.compactTop}>{heading}{amountText}</View>{metadata}</> : <><View style={styles.text}>{heading}{metadata}</View>{amountText}</>}
-
+      {compact ? <>
+        <View style={styles.icon}><Feather name={transaction.direction === "in" ? "arrow-down-left" : transaction.direction === "out" ? "arrow-up-right" : "repeat"} size={19} color={colors.textPrimary} /></View>
+        <View style={styles.text}><View style={styles.compactTop}>{heading}{amountText}</View>{metadata}</View>
+      </> : <><View style={styles.text}>{heading}{metadata}</View>{amountText}</>}
     </Pressable>
   );
 }
@@ -87,10 +91,11 @@ const useStyles = makeStyles((colors) => StyleSheet.create({
   pressed: { backgroundColor: colors.background },
   text: { flex: 1, gap: 2 },
   meta: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: space[1] },
-  compact: { flexDirection:"column", alignItems:"stretch", paddingHorizontal: 0, paddingVertical: 8, minHeight:48, gap:3, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.borderSubtle },
-  compactName: { flex:1,minWidth:0,fontSize: 13, lineHeight: 18 },
+  compact: { paddingHorizontal: 0, paddingVertical: 8, minHeight: 60, gap: 12 },
+  icon: { width: 44, height: 44, borderRadius: radii.pill, backgroundColor: colors.background, alignItems: "center", justifyContent: "center" },
+  compactName: { flex:1,minWidth:0 },
   compactTop: {flexDirection:"row",alignItems:"center",justifyContent:"space-between",gap:8},
-  compactMeta: { fontSize:11, lineHeight:15 },
-  compactAmount: { fontSize:13, lineHeight:18, maxWidth:"39%" },
+  compactMeta: { fontSize:12, lineHeight:17 },
+  compactAmount: { maxWidth:"45%" },
   amount: { flexShrink: 1, maxWidth: "48%", textAlign: "right" },
 }));

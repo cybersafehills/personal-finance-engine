@@ -76,15 +76,17 @@ respect `prefers-reduced-motion` (global) and privacy mode.
 
 ## Mobile app (oneledger-mobile): density and sizing
 
-The app follows the web's density, not the platform default. The web's body text is
-14px (`text-sm`, ~1,400 uses; `text-xs` 12px ~680; `text-base` 16px ~90), so the app's
-scale is `display 30`, `title 22`, `heading 17`, `body 14`, `label 13`, `caption 12`
-(`src/theme/typography.ts`). Hierarchy comes from weight and colour, not size.
+The app is one step roomier than the web. The scale is `hero 44` (one headline number per
+screen), `display 30`, `title 22`, `heading 17`, `body 15`, `label 14`, `caption 13`
+(`src/theme/typography.ts`). Cards have a 20pt corner (the Home balance card 24).
+
+The accent is a deep green on mobile; the web still uses its blue `--accent`. Outgoing
+money stays primary-coloured text with a minus sign, including in compact rows.
 
 - **System "Larger Text"** still applies but is capped at 1.25x (`MAX_FONT_SCALE`), so
   rows and controls stay inside their frames.
-- **Controls look smaller than their hit area.** Buttons are 40pt (32pt `size="sm"`),
-  chips 32pt, icon buttons 40pt; `hitSlopFor()` adds margin so every tap target is still
+- **Controls look smaller than their hit area.** `Button` is a 52pt pill (36pt `size="sm"`,
+  `BUTTON_HEIGHT`), chips 32pt, header icon buttons 40pt (`CONTROL_HEIGHT`); `hitSlopFor()` adds margin so every tap target is still
   at least 44pt.
 - **Sheets are native.** The Pay launcher is a route presented as a form sheet
   (`(app)/pay-sheet.tsx`: grabber, drag-to-dismiss, detents), not a custom modal.
@@ -129,4 +131,4 @@ The app has a Light and a Dark appearance and an **Automatic** setting that foll
 
 **Guarded by tests** (`src/theme/__tests__/`): both palettes define the same tokens; every value is a hex colour; text tokens reach 4.5:1 on `surface` and `background` in both themes; white content reaches 4.5:1 on every fill that carries text (3:1 on the icon-only brand discs); and no component imports a palette, hard-codes a hex colour, or finds a static `colors` export.
 
-**Known limit:** the light palette keeps the web's brand values, so two icon-only brand fills (`moneyRequestSolid`, `ekashSolid`) sit at 3.6-4.2:1 against white; dark clears 4.5:1 everywhere.
+**Known limit:** the light palette's payment-brand fills match the web's, so two icon-only brand fills (`moneyRequestSolid`, `ekashSolid`) sit at 3.6-4.2:1 against white; dark clears 4.5:1 everywhere.
